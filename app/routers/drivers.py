@@ -19,8 +19,11 @@ async def create_driver(payload: DriverCreate, db: AsyncSession = Depends(get_db
     return driver
 
 @router.get("", response_model=list[DriverOut])
-async def list_drivers(db: AsyncSession = Depends(get_db), limit: int = 50, offset: int = 0, q: str | None = None):
+async def list_drivers(db: AsyncSession = Depends(get_db), limit: int = 50, offset: int = 0, q: str | None = None, include_inactive: bool = False):
     stmt = select(Driver).order_by(Driver.id.desc())
+
+    if not include_inactive:
+        stmt = stmt.where(Driver.is_active == True)
 
     if q:
         qq = f"%{q.strip()}%"
