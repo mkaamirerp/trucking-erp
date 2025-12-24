@@ -1,0 +1,139 @@
+
+TRUCKING ERP - DEEP AUDIT REPORT
+Project: /home/admin/trucking_erp
+Temp:    /tmp/tmp.b2Zg5iVpPE/tmp.9y5yed2InW
+Test API: http://127.0.0.1:18001
+
+------------------------------------------------------------------
+SECTION: 0) Preconditions
+------------------------------------------------------------------
+[0;32mPASS[0m - Project directory exists: /home/admin/trucking_erp
+[0;32mPASS[0m - Command exists: bash (/usr/bin/bash)
+[0;32mPASS[0m - Command exists: grep (/usr/bin/grep)
+[0;32mPASS[0m - Command exists: sed (/usr/bin/sed)
+[0;32mPASS[0m - Command exists: awk (/usr/bin/awk)
+[0;32mPASS[0m - Command exists: find (/usr/bin/find)
+[0;32mPASS[0m - Command exists: curl (/usr/bin/curl)
+[0;32mPASS[0m - Command exists: git (/usr/bin/git)
+[0;32mPASS[0m - Command exists: python3 (/home/admin/trucking_erp/venv/bin/python3)
+[0;32mPASS[0m - docker installed: Docker version 26.1.5+dfsg1, build a72d7cd
+------------------------------------------------------------------
+SECTION: 1) Git + file inventory (checks EVERY tracked file)
+------------------------------------------------------------------
+[0;32mPASS[0m - Git repository detected
+[0;32mPASS[0m - Git tracked files count: 16
+INFO - Scanning every tracked file for basic health: (exists, non-empty where expected, bad endings)
+[0;32mPASS[0m - All tracked files exist on disk
+[0;32mPASS[0m - No CRLF issues detected in tracked files
+[0;32mPASS[0m - No obvious trailing whitespace issues detected
+------------------------------------------------------------------
+SECTION: 2) Python venv integrity + package checks
+------------------------------------------------------------------
+[0;32mPASS[0m - venv directory exists: /home/admin/trucking_erp/venv
+[0;32mPASS[0m - venv python present: Python 3.13.5
+[0;32mPASS[0m - venv pip present: pip 25.3 from /home/admin/trucking_erp/venv/lib/python3.13/site-packages/pip (python 3.13)
+INFO - Checking required imports (fastapi, uvicorn, sqlalchemy, alembic, pydantic)...
+[0;32mPASS[0m - Core imports OK
+------------------------------------------------------------------
+SECTION: 3) Python code quality checks (compile ALL python files)
+------------------------------------------------------------------
+INFO - Running compileall on app/ (catches syntax errors across files)...
+[0;32mPASS[0m - compileall OK (no syntax errors in app/)
+------------------------------------------------------------------
+SECTION: 4) FastAPI app wiring checks (routers registered)
+------------------------------------------------------------------
+[0;32mPASS[0m - Found app/main.py
+[0;32mPASS[0m - main.py includes drivers router registration
+[0;32mPASS[0m - main.py includes health router registration
+INFO - Importing app.main:app and printing registered routes...
+[0;32mPASS[0m - FastAPI app import OK; routes listed below
+  ROUTES_BEGIN
+  / [GET]
+  /api/v1/drivers [GET]
+  /api/v1/drivers [POST]
+  /api/v1/drivers/{driver_id} [DELETE]
+  /api/v1/drivers/{driver_id} [GET]
+  /api/v1/drivers/{driver_id} [PATCH]
+  /api/v1/health [GET]
+  /docs [GET,HEAD]
+  /docs/oauth2-redirect [GET,HEAD]
+  /openapi.json [GET,HEAD]
+  /redoc [GET,HEAD]
+  ROUTES_END
+------------------------------------------------------------------
+SECTION: 5) Docker + Postgres deep checks (container, db, roles, tables)
+------------------------------------------------------------------
+[0;32mPASS[0m - Docker daemon reachable
+[0;32mPASS[0m - Postgres container running: trucking_erp_db
+[0;32mPASS[0m - Postgres port mapping: host:5432 -> container:5432
+INFO - Running inside-container PostgreSQL checks...
+[0;32mPASS[0m - Connected inside container as erp_user to trucking_erp; roles list OK
+                               List of roles
+   Role name |                         Attributes                         
+  -----------+------------------------------------------------------------
+   erp_user  | Superuser, Create role, Create DB, Replication, Bypass RLS
+[0;32mPASS[0m - Table listing succeeded
+                List of relations
+   Schema |      Name       | Type  |  Owner   
+  --------+-----------------+-------+----------
+   public | alembic_version | table | erp_user
+   public | drivers         | table | erp_user
+  (2 rows)
+[0;32mPASS[0m - Checked for alembic_version table
+   alembic_version_table 
+  -----------------------
+   alembic_version
+  (1 row)
+------------------------------------------------------------------
+SECTION: 6) Alembic deep checks (config, env.py, versions, head/current)
+------------------------------------------------------------------
+[0;32mPASS[0m - Alembic executable exists in venv
+[0;32mPASS[0m - Found alembic.ini
+[0;32mPASS[0m - Found alembic/env.py
+[0;32mPASS[0m - Found alembic/versions
+INFO - alembic heads:
+[0;32mPASS[0m - alembic heads OK
+  a59de96e634e (head)
+INFO - alembic current:
+[0;32mPASS[0m - alembic current OK
+  INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+  INFO  [alembic.runtime.migration] Will assume transactional DDL.
+  a59de96e634e (head)
+------------------------------------------------------------------
+SECTION: 7) Runtime API test (start uvicorn inside script, test endpoints, stop)
+------------------------------------------------------------------
+[0;32mPASS[0m - uvicorn exists in venv
+INFO - Starting uvicorn on 127.0.0.1:18001 (temporary) ...
+[0;32mPASS[0m - uvicorn is responding
+------------------------------------------------------------------
+ENDPOINT TESTS (detailed):
+------------------------------------------------------------------
+  Endpoint: http://127.0.0.1:18001/
+  Expected: Root should return {"status":"ok"}
+  HTTP:     200
+  Body:     {"status":"ok"}
+[0;32mPASS[0m - Endpoint OK: / (HTTP 200)
+  Endpoint: http://127.0.0.1:18001/api/v1/health
+  Expected: Health should return healthy JSON
+  HTTP:     200
+  Body:     {"status":"ok"}
+[0;32mPASS[0m - Endpoint OK: /api/v1/health (HTTP 200)
+  Endpoint: http://127.0.0.1:18001/api/v1/drivers
+  Expected: Drivers should NOT be 404; should return [] or list
+  HTTP:     200
+  Body:     []
+[0;32mPASS[0m - Endpoint OK: /api/v1/drivers (HTTP 200)
+------------------------------------------------------------------
+OPENAPI CHECK:
+------------------------------------------------------------------
+[0;32mPASS[0m - OpenAPI served (HTTP 200)
+[0;32mPASS[0m - OpenAPI includes /api/v1/health
+[0;32mPASS[0m - OpenAPI includes /api/v1/drivers
+INFO - Stopping uvicorn after tests...
+------------------------------------------------------------------
+SECTION: 8) Final Summary (everything that failed)
+------------------------------------------------------------------
+[0;32mPASS[0m - ALL CHECKS PASSED ✅
+
+Audit finished.
+
