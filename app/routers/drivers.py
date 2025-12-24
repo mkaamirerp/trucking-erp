@@ -4,7 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.core.database import get_db
 from app.models.driver import Driver
 from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.session import get_db
+from app.core.database import get_db
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.schemas.driver_document import DriverDocumentCreate, DriverDocumentOut

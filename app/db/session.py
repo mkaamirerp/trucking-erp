@@ -1,19 +1,14 @@
-import os
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+"""
+DEPRECATED (Phase 9.5)
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set. Load .env first.")
+Do not use this module.
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+All DB access must go through:
+  app.core.database (engine, AsyncSessionLocal, get_db)
 
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
+This file was kept only to avoid confusion during refactors.
+"""
+
+raise RuntimeError(
+    "app.db.session is deprecated. Import get_db from app.core.database instead."
 )
-
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
