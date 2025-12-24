@@ -1,10 +1,16 @@
-from sqlalchemy import Column, Integer, String
-from app.core.database import Base
+from sqlalchemy import String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.models.base import Base
+
 
 class Truck(Base):
     __tablename__ = "trucks"
 
-    id = Column(Integer, primary_key=True, index=True)
-    plate_number = Column(String, unique=True, index=True, nullable=False)
-    model = Column(String, nullable=False)
-    driver_name = Column(String, nullable=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    plate_number: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # temporary field (we will replace later with driver_id FK)
+    driver_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
