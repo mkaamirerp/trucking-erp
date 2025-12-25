@@ -30,9 +30,9 @@ async def create_driver_document(payload: DriverDocumentCreate, db: AsyncSession
 
 @router.get("/driver-documents", response_model=list[DriverDocumentOut])
 async def list_driver_documents(
-    driver_id: int = Query(...),
-    include_inactive: bool = Query(False),
-    db: AsyncSession = Depends(get_db),
+    driver_id: int = Query(...)
+    ,include_inactive: bool = Query(False)
+    ,db: AsyncSession = Depends(get_db),
 ):
     q = select(DriverDocument).where(DriverDocument.driver_id == driver_id)
     if not include_inactive:
@@ -63,11 +63,12 @@ async def deactivate_driver_document(
     return doc
 
 
+
 @router.post("/driver-documents/{document_id}/files", response_model=DriverDocumentFileOut)
 async def upload_driver_document_file(
     document_id: int,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
+    file: UploadFile = File(...)
+    ,db: AsyncSession = Depends(get_db),
 ):
     res = await db.execute(select(DriverDocument).where(DriverDocument.id == document_id))
     doc = res.scalar_one_or_none()
@@ -93,6 +94,7 @@ async def upload_driver_document_file(
     return doc_file
 
 
+
 @router.get("/driver-documents/{document_id}/files", response_model=list[DriverDocumentFileOut])
 async def list_driver_document_files(
     document_id: int,
@@ -110,8 +112,14 @@ async def list_driver_document_files(
 async def deactivate_driver_document_file(
     document_id: int,
     file_id: int,
+    reason: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    res_doc = await db.execute(select(DriverDocument).where(DriverDocument.id == document_id))
+    doc = res_doc.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Driver document not found")
+
     res = await db.execute(
         select(DriverDocumentFile).where(
             DriverDocumentFile.id == file_id,
@@ -126,7 +134,8 @@ async def deactivate_driver_document_file(
         return doc_file
 
     doc_file.is_active = False
+    doc_file.deactivated_at = datetime.utcnow()
+    doc_file.deactivated_reason = reason
     await db.commit()
     await db.refresh(doc_file)
     return doc_file
-
