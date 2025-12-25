@@ -81,17 +81,10 @@ async def update_driver(driver_id: int, payload: DriverUpdate, db: AsyncSession 
     await db.refresh(driver)
     return driver
 
-@router.delete("/{driver_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_driver(driver_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Driver).where(Driver.id == driver_id))
-    driver = result.scalar_one_or_none()
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+@router.api_route("/{driver_id}", methods=["DELETE"], include_in_schema=False)
+async def delete_driver(driver_id: int):
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Hard delete is not supported. Use PATCH to deactivate/terminate the driver."
+    )
 
-    # Soft delete: keep history
-    driver.is_active = False
-    if driver.termination_date is None:
-        driver.termination_date = date.today()
-
-    await db.commit()
-    return None

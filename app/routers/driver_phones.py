@@ -82,15 +82,10 @@ async def update_driver_phone(
     return phone
 
 
-@router.delete("/{phone_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_driver_phone(
-    driver_id: int,
-    phone_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    phone = await db.get(DriverPhone, phone_id)
-    if not phone or phone.driver_id != driver_id:
-        raise HTTPException(status_code=404, detail="Phone not found")
+@router.api_route("/{phone_id}", methods=["DELETE"], include_in_schema=False)
+async def delete_driver_phone(driver_id: int, phone_id: int):
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Hard delete is not supported. Use PATCH/PUT to deactivate a phone (to be implemented)."
+    )
 
-    await db.delete(phone)
-    await db.commit()
