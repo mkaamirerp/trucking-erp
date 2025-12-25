@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import String, Boolean, DateTime, BigInteger, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,7 +28,7 @@ class DriverDocumentFile(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
 
-    uploaded_at: Mapped[DateTime] = mapped_column(
+    uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),

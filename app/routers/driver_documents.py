@@ -1,85 +1,132 @@
-from datetime import date
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
-from app.models.driver import Driver
+from app.db.session import get_db
+from app.core.storage import save_driver_doc_upload_local
 from app.models.driver_document import DriverDocument
-from app.schemas.driver_document import DriverDocumentCreate, DriverDocumentOut
+from app.models.driver_document_file import DriverDocumentFile
+from app.schemas.driver_documents import (
+    DriverDocumentCreate,
+    DriverDocumentOut,
+    DriverDocumentFileOut,
+)
 
-router = APIRouter(prefix="/driver-documents", tags=["Driver Documents"])
-
-# Doc types where only ONE can be current per driver
-SINGLE_CURRENT_TYPES = {"CDL", "PASSPORT", "FAST", "ABSTRACT", "MEDICAL", "TWIC"}
-
-
-def _is_valid_today(issue_date: date | None, expiry_date: date | None) -> bool:
-    today = date.today()
-    if issue_date is not None and issue_date > today:
-        return False
-    if expiry_date is not None and expiry_date < today:
-        return False
-    return True
+router = APIRouter(tags=["Driver Documents"])
 
 
-@router.get("/{driver_id}", response_model=list[DriverDocumentOut])
-async def list_driver_documents(
-    driver_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(DriverDocument)
-        .where(DriverDocument.driver_id == driver_id)
-        .order_by(DriverDocument.created_at.desc())
-    )
-    return result.scalars().all()
-
-
-@router.post("/{driver_id}", response_model=DriverDocumentOut, status_code=status.HTTP_201_CREATED)
-async def create_driver_document(
-    driver_id: int,
-    payload: DriverDocumentCreate,
-    db: AsyncSession = Depends(get_db),
-):
-    # Ensure driver exists
-    exists = await db.execute(select(Driver.id).where(Driver.id == driver_id))
-    if exists.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Driver not found")
-
-    doc_type = payload.doc_type.upper().strip()
-
-    # Backend decides is_current for single-current doc types
-    should_be_current = (doc_type in SINGLE_CURRENT_TYPES) and _is_valid_today(
-        payload.issue_date, payload.expiry_date
-    )
-
-    # IMPORTANT: do not start a nested transaction here (get_db may already have one)
-    if should_be_current:
-        await db.execute(
-            update(DriverDocument)
-            .where(
-                DriverDocument.driver_id == driver_id,
-                DriverDocument.doc_type == doc_type,
-                DriverDocument.is_current.is_(True),
-            )
-            .values(is_current=False)
-        )
-
-    doc = DriverDocument(
-        driver_id=driver_id,
-        doc_type=doc_type,
-        title=payload.title,
-        issue_date=payload.issue_date,
-        expiry_date=payload.expiry_date,
-        status=payload.status,
-        notes=payload.notes,
-        # do not trust client-sent is_current for single-current types
-        is_current=should_be_current if doc_type in SINGLE_CURRENT_TYPES else (payload.is_current or False),
-    )
-
+@router.post("/driver-documents", response_model=DriverDocumentOut)
+async def create_driver_document(payload: DriverDocumentCreate, db: AsyncSession = Depends(get_db)):
+    doc = DriverDocument(**payload.model_dump())
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
     return doc
+
+
+@router.get("/driver-documents", response_model=list[DriverDocumentOut])
+async def list_driver_documents(
+    driver_id: int = Query(...),
+    include_inactive: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(DriverDocument).where(DriverDocument.driver_id == driver_id)
+    if not include_inactive:
+        q = q.where(DriverDocument.is_active.is_(True))
+    res = await db.execute(q.order_by(DriverDocument.id.desc()))
+    return list(res.scalars().all())
+
+
+@router.post("/driver-documents/{document_id}/deactivate", response_model=DriverDocumentOut)
+async def deactivate_driver_document(
+    document_id: int,
+    reason: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(DriverDocument).where(DriverDocument.id == document_id))
+    doc = res.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Driver document not found")
+
+    if not doc.is_active:
+        return doc
+
+    doc.is_active = False
+    doc.deactivated_at = datetime.utcnow()
+    doc.deactivated_reason = reason
+    await db.commit()
+    await db.refresh(doc)
+    return doc
+
+
+@router.post("/driver-documents/{document_id}/files", response_model=DriverDocumentFileOut)
+async def upload_driver_document_file(
+    document_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(DriverDocument).where(DriverDocument.id == document_id))
+    doc = res.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Driver document not found")
+    if not doc.is_active:
+        raise HTTPException(status_code=400, detail="Driver document is inactive")
+
+    stored = await save_driver_doc_upload_local(file)
+
+    doc_file = DriverDocumentFile(
+        driver_document_id=document_id,
+        storage_key=stored.storage_key,
+        original_filename=stored.original_filename,
+        content_type=stored.content_type,
+        file_size_bytes=stored.file_size_bytes,
+        sha256=stored.sha256,
+        is_active=True,
+    )
+    db.add(doc_file)
+    await db.commit()
+    await db.refresh(doc_file)
+    return doc_file
+
+
+@router.get("/driver-documents/{document_id}/files", response_model=list[DriverDocumentFileOut])
+async def list_driver_document_files(
+    document_id: int,
+    include_inactive: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(DriverDocumentFile).where(DriverDocumentFile.driver_document_id == document_id)
+    if not include_inactive:
+        q = q.where(DriverDocumentFile.is_active.is_(True))
+    res = await db.execute(q.order_by(DriverDocumentFile.id.desc()))
+    return list(res.scalars().all())
+
+
+@router.post("/driver-documents/{document_id}/files/{file_id}/deactivate", response_model=DriverDocumentFileOut)
+async def deactivate_driver_document_file(
+    document_id: int,
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(
+        select(DriverDocumentFile).where(
+            DriverDocumentFile.id == file_id,
+            DriverDocumentFile.driver_document_id == document_id,
+        )
+    )
+    doc_file = res.scalar_one_or_none()
+    if not doc_file:
+        raise HTTPException(status_code=404, detail="Driver document file not found")
+
+    if not doc_file.is_active:
+        return doc_file
+
+    doc_file.is_active = False
+    await db.commit()
+    await db.refresh(doc_file)
+    return doc_file
+

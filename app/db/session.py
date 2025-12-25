@@ -1,14 +1,11 @@
-"""
-DEPRECATED (Phase 9.5)
+"""Compatibility shim.
 
-Do not use this module.
+Old imports used: from app.db.session import get_db
+Canonical location: from app.core.database import get_db
 
-All DB access must go through:
-  app.core.database (engine, AsyncSessionLocal, get_db)
-
-This file was kept only to avoid confusion during refactors.
+We keep this file to avoid service crashes when older modules still import it.
 """
 
-raise RuntimeError(
-    "app.db.session is deprecated. Import get_db from app.core.database instead."
-)
+from app.core.database import get_db  # re-export
+
+__all__ = ["get_db"]

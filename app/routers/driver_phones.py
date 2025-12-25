@@ -1,91 +1,81 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
+from datetime import datetime, timezone
 
-from app.core.database import get_db
-from app.models.driver import Driver
+from app.db.session import get_db
 from app.models.driver_phone import DriverPhone
-from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneUpdate, DriverPhoneRead
+from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
 
-router = APIRouter(
-    prefix="/drivers/{driver_id}/phones",
-    tags=["Driver Phones"],
-)
+router = APIRouter(prefix="/driver-phones", tags=["Driver Phones"])
 
 
 @router.get("", response_model=list[DriverPhoneRead])
 async def list_driver_phones(
-    driver_id: int,
+    driver_id: int | None = None,
+    include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
-    driver = await db.get(Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+    stmt = select(DriverPhone)
 
-    result = await db.execute(
-        select(DriverPhone)
-        .where(DriverPhone.driver_id == driver_id)
-        .order_by(DriverPhone.is_primary.desc(), DriverPhone.id.asc())
-    )
-    return result.scalars().all()
+    if driver_id is not None:
+        stmt = stmt.where(DriverPhone.driver_id == driver_id)
+
+    if not include_inactive:
+        stmt = stmt.where(DriverPhone.is_active.is_(True))
+
+    stmt = stmt.order_by(DriverPhone.id.asc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
 
 
-@router.post("", response_model=DriverPhoneRead, status_code=status.HTTP_201_CREATED)
-async def add_driver_phone(
-    driver_id: int,
+@router.post("", response_model=DriverPhoneRead)
+async def create_driver_phone(
     payload: DriverPhoneCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    driver = await db.get(Driver, driver_id)
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-
-    if payload.is_primary:
-        await db.execute(
-            update(DriverPhone)
-            .where(DriverPhone.driver_id == driver_id)
-            .values(is_primary=False)
-        )
-
-    phone = DriverPhone(driver_id=driver_id, **payload.model_dump())
+    phone = DriverPhone(**payload.model_dump())
     db.add(phone)
     await db.commit()
     await db.refresh(phone)
     return phone
 
 
-@router.patch("/{phone_id}", response_model=DriverPhoneRead)
-async def update_driver_phone(
-    driver_id: int,
+@router.delete("/{phone_id}", response_model=DriverPhoneRead)
+async def deactivate_driver_phone(
     phone_id: int,
-    payload: DriverPhoneUpdate,
+    reason: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     phone = await db.get(DriverPhone, phone_id)
-    if not phone or phone.driver_id != driver_id:
-        raise HTTPException(status_code=404, detail="Phone not found")
+    if not phone:
+        raise HTTPException(status_code=404, detail="Driver phone not found")
 
-    data = payload.model_dump(exclude_unset=True)
+    if not phone.is_active:
+        return phone  # idempotent
 
-    if data.get("is_primary") is True:
-        await db.execute(
-            update(DriverPhone)
-            .where(DriverPhone.driver_id == driver_id)
-            .values(is_primary=False)
-        )
-
-    for k, v in data.items():
-        setattr(phone, k, v)
+    phone.is_active = False
+    phone.deactivated_at = datetime.now(timezone.utc)
+    phone.deactivated_reason = (reason or "Deactivated").strip()[:255]
 
     await db.commit()
     await db.refresh(phone)
     return phone
 
 
-@router.api_route("/{phone_id}", methods=["DELETE"], include_in_schema=False)
-async def delete_driver_phone(driver_id: int, phone_id: int):
-    raise HTTPException(
-        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
-        detail="Hard delete is not supported. Use PATCH/PUT to deactivate a phone (to be implemented)."
-    )
+@router.post("/{phone_id}/reactivate", response_model=DriverPhoneRead)
+async def reactivate_driver_phone(
+    phone_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    phone = await db.get(DriverPhone, phone_id)
+    if not phone:
+        raise HTTPException(status_code=404, detail="Driver phone not found")
 
+    phone.is_active = True
+    phone.deactivated_at = None
+    phone.deactivated_reason = None
+
+    await db.commit()
+    await db.refresh(phone)
+    return phone

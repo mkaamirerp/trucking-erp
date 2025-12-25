@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+
+from datetime import datetime
 from datetime import date, datetime
 from pydantic import BaseModel, Field
 
@@ -37,5 +39,8 @@ class DriverDocumentOut(DriverDocumentBase):
     created_at: datetime
     updated_at: datetime
 
+    is_active: bool = True
+    deactivated_at: datetime | None = None
+    deactivated_reason: str | None = None
     class Config:
         from_attributes = True
