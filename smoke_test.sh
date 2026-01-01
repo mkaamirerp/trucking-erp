@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8001}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 API="${API:-$BASE_URL/api/v1}"
 TENANT_ID="${TENANT_ID:-1}"
 TENANT_HEADER=(-H "X-Tenant-ID: ${TENANT_ID}")
@@ -387,8 +387,10 @@ echo "$emps" | jq -e --arg code "$emp_code" 'map(select(.employee_code==$code)) 
 # ---------- 26) Payroll foundations: create pay period (draft -> open) ----------
 hr
 echo "26) Payroll foundations: create pay period"
-pay_period_name="Smoke Payroll $(date -u +%s)"
-pp_start="$(date -u -d 'now + 30 days' +%Y-%m-%d)"
+ts_now="$(date -u +%s)"
+pay_period_name="Smoke Payroll $ts_now"
+offset_days=$((ts_now % 30000))
+pp_start="$(date -u -d "2030-01-01 +${offset_days} days" +%Y-%m-%d)"
 pp_end="$(date -u -d "$pp_start +13 days" +%Y-%m-%d 2>/dev/null || true)"
 if [[ -z "$pp_end" ]]; then
   pp_end="$pp_start"
@@ -475,6 +477,55 @@ code_closed_entry="$(http_code -X POST "$API/payroll/pay-entries" "${TENANT_HEAD
 echo "Closed period entry code: $code_closed_entry"
 [[ "$code_closed_entry" == "409" ]] && ok "Closed period write blocked" || fail "Closed period write not blocked"
 
-# ---------- 35) Final summary (extended) ----------
+# ---------- 35) Pay runs: create draft ----------
+hr
+echo "35) Pay runs: create draft for closed period"
+pay_run_resp="$(curl_json -X POST "$API/payroll/pay-runs" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "{\"pay_period_id\":$PAY_PERIOD_ID}")"
+echo "$pay_run_resp" | jq .
+PAY_RUN_ID="$(echo "$pay_run_resp" | jq -r '.id // empty')"
+[[ -n "$PAY_RUN_ID" ]] && ok "Created/loaded pay run id=$PAY_RUN_ID" || fail "Failed to create pay run"
+
+# ---------- 36) Pay runs: generate items ----------
+hr
+echo "36) Pay runs: generate items"
+generate_resp="$(curl_json -X POST "$API/payroll/pay-runs/$PAY_RUN_ID/generate" "${TENANT_HEADER[@]}")"
+echo "$generate_resp" | jq .
+item_count="$(echo "$generate_resp" | jq -r '.item_count // 0')"
+[[ "$item_count" -ge 1 ]] && ok "Generated $item_count pay run items" || fail "No pay run items generated"
+
+# ---------- 37) Pay runs: finalize ----------
+hr
+echo "37) Pay runs: finalize"
+finalize_resp="$(curl_json -X POST "$API/payroll/pay-runs/$PAY_RUN_ID/finalize" "${TENANT_HEADER[@]}")"
+echo "$finalize_resp" | jq .
+echo "$finalize_resp" | jq -e '.status=="FINALIZED"' >/dev/null && ok "Pay run finalized" || fail "Pay run not finalized"
+
+# ---------- 38) Pay runs: re-finalize should fail ----------
+hr
+echo "38) Pay runs: re-finalize should fail (expect 409)"
+code_refinal="$(http_code -X POST "$API/payroll/pay-runs/$PAY_RUN_ID/finalize" "${TENANT_HEADER[@]}")"
+echo "Re-finalize code: $code_refinal"
+[[ "$code_refinal" == "409" ]] && ok "Re-finalize blocked" || fail "Re-finalize not blocked"
+
+# ---------- 39) Pay runs: generate after finalize should fail ----------
+hr
+echo "39) Pay runs: generate after finalize should fail (expect 409)"
+code_regen="$(http_code -X POST "$API/payroll/pay-runs/$PAY_RUN_ID/generate" "${TENANT_HEADER[@]}")"
+echo "Re-generate code: $code_regen"
+[[ "$code_regen" == "409" ]] && ok "Generate after finalize blocked" || fail "Generate after finalize not blocked"
+
+# ---------- 40) Pay runs: duplicate run for same period should reuse/409 ----------
+hr
+echo "40) Pay runs: duplicate creation should return same run"
+dup_resp="$(curl_json -X POST "$API/payroll/pay-runs" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "{\"pay_period_id\":$PAY_PERIOD_ID}")"
+echo "$dup_resp" | jq .
+dup_id="$(echo "$dup_resp" | jq -r '.id // empty')"
+if [[ "$dup_id" == "$PAY_RUN_ID" ]]; then
+  ok "Duplicate request returned same pay run id"
+else
+  warn "Duplicate request did not return same id (check API); id=$dup_id expected=$PAY_RUN_ID"
+fi
+
+# ---------- 41) Final summary (extended) ----------
 hr
 ok "EXTENDED SMOKE TEST (v2) COMPLETE"

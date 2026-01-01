@@ -9,13 +9,13 @@ Its purpose is to prevent uvicorn/FastAPI startup failures, port conflicts, and 
 ## 1) Runtime Basics (Ports + Base URLs)
 
 ### Ports
-- **Trucking ERP FastAPI API:** 0.0.0.0:8001 (canonical)
-- **Other services (plane, etc.):** 0.0.0.0:8000
-- Never bind the ERP API to port 8000.
+- **Trucking ERP FastAPI API:** 0.0.0.0:8000 (canonical)
+- **Plane (on hold):** do not run on this host
+- ERP owns 8000; do not share that port with any other process/manager.
 
 ### Base URLs
 Smoke tests use:
-- BASE_URL default: http://127.0.0.1:8001
+- BASE_URL default: http://127.0.0.1:8000
 - API prefix: /api/v1
 
 Health endpoint:
@@ -123,7 +123,7 @@ Rule:
 ## 5) Logging Discipline
 
 Canonical dev start:
-nohup venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8001 > /tmp/truckerp_8001.log 2>&1 &
+nohup venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/truckerp_8000.log 2>&1 &
 
 Always inspect logs before restarting services.
 
@@ -141,9 +141,8 @@ Legacy imports are deprecated and forbidden in new code.
 ## 7) Definition of Done (DoD)
 
 A module is DONE only when:
-- App boots on port 8001
+- App boots on port 8000
 - Health endpoint returns 200
 - Migrations are applied
 - Tenant scoping enforced
 - Smoke tests pass
-
