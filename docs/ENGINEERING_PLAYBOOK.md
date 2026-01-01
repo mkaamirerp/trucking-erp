@@ -141,7 +141,7 @@ Legacy imports are deprecated and forbidden in new code.
 ## 7) Definition of Done (DoD)
 
 A module is DONE only when:
-- App boots on port 8001
+- App boots on port 8000
 - Health endpoint returns 200
 - Migrations are applied
 - Tenant scoping enforced
