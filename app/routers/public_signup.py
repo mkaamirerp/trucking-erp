@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.session import get_db
+from app.core.database import get_db
 from app.models.platform import PlatformTenant, PlatformUser, PlatformTenantMember
 from app.schemas.platform_signup import SignupRequest, SignupResponse, VerifyRequest, VerifyResponse
 

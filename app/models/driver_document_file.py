@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import String, Boolean, DateTime, BigInteger, ForeignKey, func
+from sqlalchemy import String, Boolean, DateTime, BigInteger, ForeignKey, Integer, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -12,6 +12,9 @@ class DriverDocumentFile(Base):
     __tablename__ = "driver_document_files"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     driver_document_id: Mapped[int] = mapped_column(
         ForeignKey("driver_documents.id", ondelete="CASCADE"),

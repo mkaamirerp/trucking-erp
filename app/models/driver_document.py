@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import String, Date, Boolean, DateTime, Text, ForeignKey, func, text
+from sqlalchemy import String, Date, Boolean, DateTime, Text, ForeignKey, Integer, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -10,6 +10,7 @@ class DriverDocument(Base):
     __tablename__ = "driver_documents"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
 
     driver_id: Mapped[int] = mapped_column(
         ForeignKey("drivers.id", ondelete="CASCADE"),
@@ -18,6 +19,8 @@ class DriverDocument(Base):
     )
 
     doc_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    doc_subtype: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    issuing_country_snapshot: Mapped[str | None] = mapped_column(String(10), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     issue_date: Mapped[Date | None] = mapped_column(Date, nullable=True)

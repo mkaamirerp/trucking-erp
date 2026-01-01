@@ -15,10 +15,22 @@ class DriverDocumentCreate(BaseModel):
     is_current: bool = True
 
 
+class DriverDocumentCreatePath(BaseModel):
+    doc_type: str = Field(..., max_length=50)
+    title: str | None = Field(default=None, max_length=255)
+    issue_date: date | None = None
+    expiry_date: date | None = None
+    status: str = Field(default="ACTIVE", max_length=30)
+    notes: str | None = None
+    is_current: bool = True
+
+
 class DriverDocumentOut(BaseModel):
     id: int
     driver_id: int
     doc_type: str
+    doc_subtype: str | None = None
+    issuing_country_snapshot: str | None = None
     title: str | None
     issue_date: date | None
     expiry_date: date | None

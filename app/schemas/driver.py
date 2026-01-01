@@ -23,6 +23,12 @@ class DriverBase(BaseModel):
     hire_date: Optional[date] = None
     is_active: bool = True
     termination_date: Optional[date] = None
+    issuing_country: Optional[str] = Field(default=None, max_length=10)
+    issuing_region: Optional[str] = Field(default=None, max_length=100)
+    license_number: Optional[str] = Field(default=None, max_length=100)
+    license_class: Optional[str] = Field(default=None, max_length=50)
+    license_issue_date: Optional[date] = None
+    license_expiry_date: Optional[date] = None
 
     @field_validator("first_name", "last_name")
     @classmethod
@@ -33,6 +39,10 @@ class DriverBase(BaseModel):
     @classmethod
     def v_phone(cls, v: Optional[str]) -> Optional[str]:
         return normalize_phone(v)
+    @field_validator("issuing_country")
+    @classmethod
+    def v_country(cls, v: Optional[str]) -> Optional[str]:
+        return v.upper() if v else v
 
     @model_validator(mode="after")
     def v_dates(self):
@@ -67,6 +77,12 @@ class DriverUpdate(BaseModel):
     hire_date: Optional[date] = None
     is_active: Optional[bool] = None
     termination_date: Optional[date] = None
+    issuing_country: Optional[str] = Field(default=None, max_length=10)
+    issuing_region: Optional[str] = Field(default=None, max_length=100)
+    license_number: Optional[str] = Field(default=None, max_length=100)
+    license_class: Optional[str] = Field(default=None, max_length=50)
+    license_issue_date: Optional[date] = None
+    license_expiry_date: Optional[date] = None
 
     @field_validator("first_name", "last_name")
     @classmethod

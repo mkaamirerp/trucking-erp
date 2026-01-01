@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:8001}"
 API="${API:-$BASE_URL/api/v1}"
+TENANT_ID="${TENANT_ID:-1}"
+TENANT_HEADER=(-H "X-Tenant-ID: ${TENANT_ID}")
 
 # ========== helpers ==========
 hr() { printf "\n============================================================\n"; }
@@ -53,9 +55,11 @@ echo "Time: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 # ---------- 1) Health ----------
 hr
 echo "1) Health endpoint"
-health="$(curl_json "$API/health")"
-echo "$health" | jq .
-echo "$health" | jq -e '.status=="ok"' >/dev/null && ok "Health OK" || fail "Health failed"
+health_json="$(curl_json "$API/health")"
+  echo "GET /api/v1/health =>"
+  echo "$health_json" | jq .
+  echo "$health_json" | jq -e '.status=="ok"' >/dev/null || { fail "Health failed"; exit 1; }
+  ok "Health OK"
 
 # ---------- 2) OpenAPI ----------
 hr
@@ -67,7 +71,7 @@ echo "GET /openapi.json => HTTP $code_openapi"
 # ---------- 3) Drivers default ----------
 hr
 echo "3) Drivers list (default: active only)"
-drivers_active="$(curl_json "$API/drivers")"
+drivers_active="$(curl_json "${TENANT_HEADER[@]}" "$API/drivers")"
 echo "$drivers_active" | jq .
 json_type_is "$drivers_active" "array" && ok "Drivers default returns array" || fail "Drivers default did not return array"
 active_count="$(count_array "$drivers_active")"
@@ -76,7 +80,7 @@ ok "Active count: $active_count"
 # ---------- 4) Drivers include inactive ----------
 hr
 echo "4) Drivers list (include_inactive=true)"
-drivers_all="$(curl_json "$API/drivers?include_inactive=true")"
+drivers_all="$(curl_json "${TENANT_HEADER[@]}" "$API/drivers?include_inactive=true")"
 echo "$drivers_all" | jq .
 json_type_is "$drivers_all" "array" && ok "Drivers all returns array" || fail "Drivers all did not return array"
 total_count="$(count_array "$drivers_all")"
@@ -116,7 +120,7 @@ fi
 # ---------- 7) Negative test: invalid driver create (expect 422) ----------
 hr
 echo "7) Negative test: create driver with missing required fields (expect 422)"
-code_bad_driver="$(http_code -X POST "$API/drivers" -H "Content-Type: application/json" -d '{"first_name":""}')"
+code_bad_driver="$(http_code -X POST "$API/drivers" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d '{"first_name":""}')"
 echo "POST /drivers bad payload => HTTP $code_bad_driver (expected 422)"
 [[ "$code_bad_driver" == "422" ]] && ok "Validation works (422)" || warn "Expected 422, got $code_bad_driver"
 
@@ -126,8 +130,8 @@ echo "8) Ensure we have at least 1 active driver for doc tests"
 ACTIVE_DRIVER_ID="$(echo "$drivers_active" | jq -r '.[0].id // empty')"
 if [[ -z "$ACTIVE_DRIVER_ID" ]]; then
   warn "No active driver found. Creating one for smoke test..."
-  new_driver_payload='{"first_name":"Smoke","last_name":"Test","email":"smoke.test@example.com","phone":"4165559999","hire_date":"2025-01-01","is_active":true}'
-  created_driver="$(curl_json -X POST "$API/drivers" -H "Content-Type: application/json" -d "$new_driver_payload")"
+  new_driver_payload='{"first_name":"Smoke","last_name":"Test","email":"smoke.test@example.com","phone":"4165559999","hire_date":"2025-01-01","is_active":true,"issuing_country":"US","license_number":"SAMPLE123","license_class":"CDL A","license_expiry_date":"2026-01-01"}'
+  created_driver="$(curl_json -X POST "$API/drivers" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$new_driver_payload")"
   echo "$created_driver" | jq .
   ACTIVE_DRIVER_ID="$(echo "$created_driver" | jq -r '.id // empty')"
   [[ -n "$ACTIVE_DRIVER_ID" ]] && ok "Created active driver id=$ACTIVE_DRIVER_ID" || fail "Could not create active driver"
@@ -138,7 +142,7 @@ fi
 # ---------- 9) Driver documents list ----------
 hr
 echo "9) List documents for active driver"
-docs_before="$(curl_json "$API/driver-documents/$ACTIVE_DRIVER_ID")"
+docs_before="$(curl_json "${TENANT_HEADER[@]}" "$API/driver-documents?driver_id=$ACTIVE_DRIVER_ID")"
 echo "$docs_before" | jq .
 json_type_is "$docs_before" "array" && ok "Docs list returns array" || fail "Docs list did not return array"
 docs_before_count="$(count_array "$docs_before")"
@@ -147,16 +151,18 @@ ok "Docs before count: $docs_before_count"
 # ---------- 10) Negative test: bad doc payload (expect 422) ----------
 hr
 echo "10) Negative test: create doc with invalid date (expect 422)"
-bad_doc_payload='{"doc_type":"CDL","title":"Bad Date","issue_date":"not-a-date","expiry_date":"2026-01-01","status":"ACTIVE","notes":"smoke"}'
-code_bad_doc="$(http_code -X POST "$API/driver-documents/$ACTIVE_DRIVER_ID" -H "Content-Type: application/json" -d "$bad_doc_payload")"
+  bad_doc_payload=$(printf '{"driver_id":%s,"doc_type":"CDL","title":"Bad Date","issue_date":"not-a-date","expiry_date":"2026-01-01","status":"ACTIVE","notes":"smoke"}' "$ACTIVE_DRIVER_ID")
+code_bad_doc="$(http_code -X POST "$API/driver-documents" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$bad_doc_payload")"
 echo "POST doc bad payload => HTTP $code_bad_doc (expected 422)"
 [[ "$code_bad_doc" == "422" ]] && ok "Doc validation works (422)" || warn "Expected 422, got $code_bad_doc"
 
 # ---------- 11) Create a CDL doc ----------
 hr
 echo "11) Create a CDL doc for active driver"
-doc_payload='{"doc_type":"CDL","title":"Smoke CDL","issue_date":"2024-01-01","expiry_date":"2026-01-01","status":"ACTIVE","notes":"extended smoke_test.sh"}'
-created_doc="$(curl_json -X POST "$API/driver-documents/$ACTIVE_DRIVER_ID" -H "Content-Type: application/json" -d "$doc_payload")"
+  doc_payload=$(printf '{"driver_id":%s,"doc_type":"CDL","title":"Smoke CDL","issue_date":"2024-01-01","expiry_date":"2026-01-01","status":"ACTIVE","notes":"extended smoke_test.sh"}' "$ACTIVE_DRIVER_ID")
+resp="$(curl -sS -X POST "$API/driver-documents" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$doc_payload")"
+echo "$resp" | head -c 300; echo
+created_doc="$resp"
 echo "$created_doc" | jq .
 DOC_ID="$(echo "$created_doc" | jq -r '.id // empty')"
 [[ -n "$DOC_ID" ]] && ok "Created doc id=$DOC_ID" || fail "Doc create failed (no id)"
@@ -165,7 +171,7 @@ echo "$created_doc" | jq -e '.is_current==true' >/dev/null && ok "Doc is_current
 # ---------- 12) List docs again & verify presence ----------
 hr
 echo "12) List docs again; verify created doc is present"
-docs_after="$(curl_json "$API/driver-documents/$ACTIVE_DRIVER_ID")"
+docs_after="$(curl_json "${TENANT_HEADER[@]}" "$API/driver-documents?driver_id=$ACTIVE_DRIVER_ID")"
 echo "$docs_after" | jq .
 docs_after_count="$(count_array "$docs_after")"
 ok "Docs after count: $docs_after_count"
@@ -176,8 +182,8 @@ echo "$docs_after" | jq -e --argjson id "$DOC_ID" 'map(select(.id==$id)) | lengt
 hr
 echo "13) Compliance: hard DELETE should not be supported (expect 404/405)"
 set +e
-del_driver_code="$(http_code -X DELETE "$API/drivers/$ACTIVE_DRIVER_ID")"
-del_doc_code="$(http_code -X DELETE "$API/driver-documents/$ACTIVE_DRIVER_ID/$DOC_ID")"
+del_driver_code="$(http_code -X DELETE "$API/drivers/$ACTIVE_DRIVER_ID" "${TENANT_HEADER[@]}")"
+del_doc_code="$(http_code -X DELETE "$API/driver-documents/$ACTIVE_DRIVER_ID/$DOC_ID" "${TENANT_HEADER[@]}")"
 set -e
 echo "DELETE /drivers/$ACTIVE_DRIVER_ID => HTTP $del_driver_code (expected 404/405)"
 echo "DELETE /driver-documents/...     => HTTP $del_doc_code (expected 404/405)"
@@ -190,8 +196,8 @@ echo "14) Soft-termination test (only if PUT/PATCH endpoint exists)"
 echo "We should NOT delete drivers. We deactivate instead for compliance."
 # Probe common endpoints (PATCH then PUT). If neither exists, we skip.
 set +e
-patch_code="$(http_code -X PATCH "$API/drivers/$ACTIVE_DRIVER_ID" -H "Content-Type: application/json" -d '{"is_active":false,"termination_date":"2025-12-24"}')"
-put_code="$(http_code -X PUT "$API/drivers/$ACTIVE_DRIVER_ID" -H "Content-Type: application/json" -d '{"is_active":false,"termination_date":"2025-12-24"}')"
+patch_code="$(http_code -X PATCH "$API/drivers/$ACTIVE_DRIVER_ID" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d '{"is_active":false,"termination_date":"2025-12-24"}')"
+put_code="$(http_code -X PUT "$API/drivers/$ACTIVE_DRIVER_ID" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d '{"is_active":false,"termination_date":"2025-12-24"}')"
 set -e
 
 if [[ "$patch_code" == "200" || "$patch_code" == "204" ]]; then
@@ -206,8 +212,8 @@ fi
 if [[ "$patch_code" == "200" || "$patch_code" == "204" || "$put_code" == "200" || "$put_code" == "204" ]]; then
   subhr
   echo "14b) Confirm driver removed from active list but still present in include_inactive list"
-  drivers_active2="$(curl_json "$API/drivers")"
-  drivers_all2="$(curl_json "$API/drivers?include_inactive=true")"
+  drivers_active2="$(curl_json "${TENANT_HEADER[@]}" "$API/drivers")"
+  drivers_all2="$(curl_json "${TENANT_HEADER[@]}" "$API/drivers?include_inactive=true")"
   echo "$drivers_active2" | jq .
   echo "$drivers_all2" | jq .
   echo "$drivers_active2" | jq -e --argjson id "$ACTIVE_DRIVER_ID" 'map(select(.id==$id))|length==0' >/dev/null \
@@ -244,14 +250,14 @@ echo "- If driver update endpoints are not implemented yet, deactivate tests are
 # ---------- 17) Driver-documents endpoint: must be driver-specific ----------
 hr
 echo "17) Route sanity: /driver-documents (no id) should NOT exist"
-code_docs_root="$(http_code "$API/driver-documents")"
+code_docs_root="$(http_code "${TENANT_HEADER[@]}" "$API/driver-documents")"
 echo "GET /driver-documents => HTTP $code_docs_root (expected 404)"
 [[ "$code_docs_root" == "404" ]] && ok "Docs root not found (good)" || warn "Unexpected docs root code: $code_docs_root"
 
 # ---------- 18) Docs list should include required keys ----------
 hr
 echo "18) Validate document fields shape (if any docs exist)"
-docs_now="$(curl_json "$API/driver-documents/$ACTIVE_DRIVER_ID")"
+docs_now="$(curl_json "${TENANT_HEADER[@]}" "$API/driver-documents/$ACTIVE_DRIVER_ID")"
 echo "$docs_now" | jq .
 docs_now_count="$(count_array "$docs_now")"
 ok "Docs current count: $docs_now_count"
@@ -281,7 +287,7 @@ fi
 hr
 echo "20) Create another CDL and see if 'current' is enforced (NO deletes)"
 doc_payload2='{"doc_type":"CDL","title":"Smoke CDL v2","issue_date":"2024-02-01","expiry_date":"2026-02-01","status":"ACTIVE","notes":"duplicate CDL test"}'
-created_doc2="$(curl_json -X POST "$API/driver-documents/$ACTIVE_DRIVER_ID" -H "Content-Type: application/json" -d "$doc_payload2")"
+created_doc2="$(curl_json -X POST "$API/driver-documents/$ACTIVE_DRIVER_ID" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$doc_payload2")"
 echo "$created_doc2" | jq .
 DOC2_ID="$(echo "$created_doc2" | jq -r '.id // empty')"
 if [[ -n "$DOC2_ID" ]]; then
@@ -290,7 +296,7 @@ else
   warn "Second CDL create did not return id (check API behavior)"
 fi
 
-docs_after2="$(curl_json "$API/driver-documents/$ACTIVE_DRIVER_ID")"
+docs_after2="$(curl_json "${TENANT_HEADER[@]}" "$API/driver-documents/$ACTIVE_DRIVER_ID")"
 echo "$docs_after2" | jq .
 current_cdl_count2="$(echo "$docs_after2" | jq '[.[] | select(.doc_type=="CDL" and .is_current==true)] | length')"
 echo "Current CDL count after second create: $current_cdl_count2"
@@ -352,6 +358,32 @@ echo "24) Canonical DB files exist"
 [[ -f app/core/config.py ]] && ok "app/core/config.py exists" || fail "Missing app/core/config.py"
 [[ -f app/core/database.py ]] && ok "app/core/database.py exists" || fail "Missing app/core/database.py"
 
-# ---------- 25) Final summary (extended) ----------
+# ---------- 25) Employees: create + assign role + list ----------
+hr
+echo "25) Employees module sanity"
+emp_code="EMP-$(date -u +%s)"
+emp_payload=$(printf '{"employee_code":"%s","first_name":"Smoke","last_name":"Employee","phone":"4165550000","email":"smoke.employee@example.com","hire_date":"2025-01-01"}' "$emp_code")
+emp_resp="$(curl_json -X POST "$API/employees" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$emp_payload")"
+echo "$emp_resp" | jq .
+EMP_ID="$(echo "$emp_resp" | jq -r '.id // empty')"
+[[ -n "$EMP_ID" ]] && ok "Created employee id=$EMP_ID" || fail "Failed to create employee"
+
+subhr
+echo "25b) Assign role DISPATCHER"
+role_payload='{"role":"DISPATCHER","is_primary":true}'
+role_resp="$(curl_json -X POST "$API/employees/$EMP_ID/roles" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$role_payload")"
+echo "$role_resp" | jq .
+ROLE_ID="$(echo "$role_resp" | jq -r '.id // empty')"
+[[ -n "$ROLE_ID" ]] && ok "Assigned role id=$ROLE_ID to employee $EMP_ID" || fail "Failed to assign role"
+
+subhr
+echo "25c) List employees (include_inactive=true)"
+emps="$(curl_json "${TENANT_HEADER[@]}" "$API/employees?include_inactive=true")"
+echo "$emps" | jq .
+json_type_is "$emps" "array" && ok "Employees list returns array" || fail "Employees list did not return array"
+echo "$emps" | jq -e --arg code "$emp_code" 'map(select(.employee_code==$code)) | length == 1' >/dev/null \
+  && ok "Created employee appears in list" || fail "Created employee missing from list"
+
+# ---------- 26) Final summary (extended) ----------
 hr
 ok "EXTENDED SMOKE TEST (v2) COMPLETE"

@@ -1,4 +1,4 @@
-from sqlalchemy import String, Boolean, ForeignKey, DateTime, func
+from sqlalchemy import String, Boolean, ForeignKey, DateTime, Integer, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
@@ -7,6 +7,9 @@ class DriverPhone(Base):
     __tablename__ = "driver_phones"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     driver_id: Mapped[int] = mapped_column(
         ForeignKey("drivers.id", ondelete="CASCADE"),

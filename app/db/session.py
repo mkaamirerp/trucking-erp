@@ -1,8 +1,6 @@
 """Compatibility shim.
 
-Old imports used: from app.db.session import get_db
-Canonical location: from app.core.database import get_db
-
+app.db.session is deprecated; prefer app.core.database.get_db.
 We keep this file to avoid service crashes when older modules still import it.
 """
 

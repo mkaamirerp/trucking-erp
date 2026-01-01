@@ -1,22 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from datetime import datetime, timezone
 
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
 from app.models.driver_phone import DriverPhone
 from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
 
 router = APIRouter(prefix="/driver-phones", tags=["Driver Phones"])
 
 
+def resolve_tenant_id(request: Request) -> int:
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if tenant_id is None:
+        raise HTTPException(status_code=401, detail="Tenant context missing")
+    return int(tenant_id)
+
+
 @router.get("", response_model=list[DriverPhoneRead])
 async def list_driver_phones(
+    request: Request,
     driver_id: int | None = None,
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(DriverPhone)
+    tenant_id = resolve_tenant_id(request)
+    stmt = select(DriverPhone).where(DriverPhone.tenant_id == tenant_id)
 
     if driver_id is not None:
         stmt = stmt.where(DriverPhone.driver_id == driver_id)
@@ -32,9 +42,11 @@ async def list_driver_phones(
 @router.post("", response_model=DriverPhoneRead)
 async def create_driver_phone(
     payload: DriverPhoneCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    phone = DriverPhone(**payload.model_dump())
+    tenant_id = resolve_tenant_id(request)
+    phone = DriverPhone(**payload.model_dump(), tenant_id=tenant_id)
     db.add(phone)
     await db.commit()
     await db.refresh(phone)
@@ -44,10 +56,15 @@ async def create_driver_phone(
 @router.delete("/{phone_id}", response_model=DriverPhoneRead)
 async def deactivate_driver_phone(
     phone_id: int,
+    request: Request,
     reason: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    phone = await db.get(DriverPhone, phone_id)
+    tenant_id = resolve_tenant_id(request)
+    res = await db.execute(
+        select(DriverPhone).where(DriverPhone.id == phone_id, DriverPhone.tenant_id == tenant_id)
+    )
+    phone = res.scalar_one_or_none()
     if not phone:
         raise HTTPException(status_code=404, detail="Driver phone not found")
 
@@ -66,9 +83,14 @@ async def deactivate_driver_phone(
 @router.post("/{phone_id}/reactivate", response_model=DriverPhoneRead)
 async def reactivate_driver_phone(
     phone_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    phone = await db.get(DriverPhone, phone_id)
+    tenant_id = resolve_tenant_id(request)
+    res = await db.execute(
+        select(DriverPhone).where(DriverPhone.id == phone_id, DriverPhone.tenant_id == tenant_id)
+    )
+    phone = res.scalar_one_or_none()
     if not phone:
         raise HTTPException(status_code=404, detail="Driver phone not found")
 

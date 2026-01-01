@@ -30,11 +30,12 @@ class PlatformTenant(Base):
     db_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     db_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     db_user: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    db_password_encrypted: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     ssl_mode: Mapped[str | None] = mapped_column(String(30), nullable=True)
     provisioning_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     db_status: Mapped[str | None] = mapped_column(String(20), nullable=True, default="NOT_PROVISIONED")
     db_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    db_last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provisioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
