@@ -30,6 +30,50 @@ class PayPeriod(Base):
     )
 
 
+class PayRun(Base):
+    __tablename__ = "pay_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    pay_period_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("pay_periods.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    totals_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finalized_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PayRunItem(Base):
+    __tablename__ = "pay_run_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    pay_run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    driver_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entry_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    source_entry_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("pay_entries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PayProfile(Base):
     __tablename__ = "pay_profiles"
 
