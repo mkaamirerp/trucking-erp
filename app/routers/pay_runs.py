@@ -160,13 +160,14 @@ async def finalize_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
 
         run.status = "FINALIZED"
         run.finalized_at = datetime.now(timezone.utc)
-        run.totals_snapshot = {
+        totals_snapshot = {
             "gross": _to_json_amount(totals["gross"]),
             "by_type": {k: _to_json_amount(v) for k, v in totals["by_type"].items()},
             "count": totals["count"],
         }
+        run.totals_snapshot = totals_snapshot
 
-    return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=run.totals_snapshot)
+    return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=totals_snapshot)
 
 
 @router.get("/pay-runs/{run_id}", response_model=PayRunOut)
