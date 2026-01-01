@@ -10,6 +10,7 @@ from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.employees import router as employees_router
 from app.routers.meta import router as meta_router
+from app.routers.payroll import router as payroll_router
 from app.middleware.tenant_context import tenant_context_middleware
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -27,6 +28,7 @@ app.include_router(driver_documents_router, prefix="/api/v1")
 app.include_router(onboarding_router)
 app.include_router(employees_router)
 app.include_router(meta_router)
+app.include_router(payroll_router)
 
 # Optional: keep old root so bookmarks don't break
 @app.get("/", include_in_schema=False)

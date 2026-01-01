@@ -384,6 +384,67 @@ json_type_is "$emps" "array" && ok "Employees list returns array" || fail "Emplo
 echo "$emps" | jq -e --arg code "$emp_code" 'map(select(.employee_code==$code)) | length == 1' >/dev/null \
   && ok "Created employee appears in list" || fail "Created employee missing from list"
 
-# ---------- 26) Final summary (extended) ----------
+# ---------- 26) Payroll foundations: create pay period (draft -> open) ----------
+hr
+echo "26) Payroll foundations: create pay period"
+pay_period_name="Smoke Payroll $(date -u +%s)"
+pp_start="$(date -u +%Y-%m-01)"
+pp_end="$(date -u -d "$pp_start +13 days" +%Y-%m-%d 2>/dev/null || true)"
+if [[ -z "$pp_end" ]]; then
+  pp_end="$pp_start"
+fi
+pp_payload=$(printf '{"name":"%s","start_date":"%s","end_date":"%s"}' "$pay_period_name" "$pp_start" "$pp_end")
+pp_resp="$(curl_json -X POST "$API/payroll/pay-periods" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$pp_payload")"
+echo "$pp_resp" | jq .
+PAY_PERIOD_ID="$(echo "$pp_resp" | jq -r '.id // empty')"
+[[ -n "$PAY_PERIOD_ID" ]] && ok "Created pay period id=$PAY_PERIOD_ID" || fail "Failed to create pay period"
+
+subhr
+echo "26b) Open pay period"
+pp_open_resp="$(curl_json -X POST "$API/payroll/pay-periods/$PAY_PERIOD_ID/open" "${TENANT_HEADER[@]}")"
+echo "$pp_open_resp" | jq .
+echo "$pp_open_resp" | jq -e '.status=="OPEN"' >/dev/null || warn "Pay period not OPEN after open call"
+
+# ---------- 27) Payroll foundations: create pay profile ----------
+hr
+echo "27) Create pay profile for active driver (per mile)"
+pay_profile_payload=$(printf '{"driver_id":%s,"pay_type":"PER_MILE","rate_amount":0.65,"rate_unit":"mile","effective_start":"%s"}' "$ACTIVE_DRIVER_ID" "$pp_start")
+pay_profile_resp="$(curl_json -X POST "$API/payroll/pay-profiles" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$pay_profile_payload")"
+echo "$pay_profile_resp" | jq .
+PAY_PROFILE_ID="$(echo "$pay_profile_resp" | jq -r '.id // empty')"
+[[ -n "$PAY_PROFILE_ID" ]] && ok "Created pay profile id=$PAY_PROFILE_ID" || fail "Failed to create pay profile"
+
+# ---------- 28) Payroll foundations: add manual pay entry ----------
+hr
+echo "28) Add manual miles entry"
+pay_entry_payload=$(printf '{"pay_period_id":%s,"driver_id":%s,"pay_profile_id":%s,"entry_type":"MILES","quantity":1200,"rate_amount":0.65,"notes":"smoke payroll test"}' "$PAY_PERIOD_ID" "$ACTIVE_DRIVER_ID" "$PAY_PROFILE_ID")
+pay_entry_resp="$(curl_json -X POST "$API/payroll/pay-entries" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$pay_entry_payload")"
+echo "$pay_entry_resp" | jq .
+PAY_ENTRY_ID="$(echo "$pay_entry_resp" | jq -r '.id // empty')"
+[[ -n "$PAY_ENTRY_ID" ]] && ok "Created pay entry id=$PAY_ENTRY_ID" || fail "Failed to create pay entry"
+
+subhr
+echo "28b) List pay entries for the period"
+pay_entries="$(curl_json "${TENANT_HEADER[@]}" "$API/payroll/pay-entries?pay_period_id=$PAY_PERIOD_ID")"
+echo "$pay_entries" | jq .
+echo "$pay_entries" | jq -e --argjson id "$PAY_ENTRY_ID" 'map(select(.id==$id))|length==1' >/dev/null \
+  && ok "Pay entry appears in list" || fail "Pay entry missing from list"
+
+# ---------- 29) Payroll foundations: summary ----------
+hr
+echo "29) Pay period summary"
+summary="$(curl_json "${TENANT_HEADER[@]}" "$API/payroll/pay-periods/$PAY_PERIOD_ID/summary")"
+echo "$summary" | jq .
+echo "$summary" | jq -e --argjson driver "$ACTIVE_DRIVER_ID" '.totals | map(select(.driver_id==$driver)) | length >= 1' >/dev/null \
+  && ok "Summary includes driver totals" || fail "Summary missing driver totals"
+
+# ---------- 30) Payroll foundations: close pay period ----------
+hr
+echo "30) Close pay period"
+pp_close_resp="$(curl_json -X POST "$API/payroll/pay-periods/$PAY_PERIOD_ID/close" "${TENANT_HEADER[@]}")"
+echo "$pp_close_resp" | jq .
+echo "$pp_close_resp" | jq -e '.status=="CLOSED"' >/dev/null && ok "Pay period closed" || warn "Pay period not closed"
+
+# ---------- 31) Final summary (extended) ----------
 hr
 ok "EXTENDED SMOKE TEST (v2) COMPLETE"
