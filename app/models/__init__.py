@@ -7,7 +7,25 @@ from app.models.truck import Truck
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
 from app.models.tenant import Tenant
-from app.models.employee import Employee
+from app.models.payee import (
+    Payee,
+    Employee,
+    CompensationProfile,
+    TenantMileagePolicy,
+    ChargeCategory,
+    CompProfileChargeRule,
+    EscrowAccount,
+    EscrowRule,
+    EscrowLedgerEntry,
+    PayeeBalance,
+    PayRunOverride,
+    PayDocument,
+    PayoutRail,
+    TenantPayoutRailSetting,
+    PayeePayoutPreference,
+    PayRunPayment,
+    TenantBankConnector,
+)
 from app.models.employee_role import EmployeeRole
 
 # Platform models (B3 onboarding)

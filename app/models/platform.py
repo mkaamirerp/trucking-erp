@@ -37,6 +37,12 @@ class PlatformTenant(Base):
     db_last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provisioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    timezone: Mapped[str] = mapped_column(Text, nullable=False, default="America/Toronto")
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    billing_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    billing_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 

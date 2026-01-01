@@ -1,21 +1,38 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.dependencies.authz import require_tenant_admin
+from app.models.driver import Driver
+from app.models.payee import (
+    ChargeCategory,
+    PayDocument,
+    Payee,
+    PayeePayoutPreference,
+    PayRunOverride,
+)
 from app.models.payroll import PayEntry, PayPeriod, PayRun, PayRunItem
+from app.models.enums import SourceType, PayRunStatus, PayoutStatus, WorkerType, PayeeType
+from app.core.storage import resolve_storage_path, DEFAULT_PAY_DOCS_DIR
+from app.schemas.pay_documents import PayDocumentSummary
 from app.schemas.pay_runs import (
     PayRunCreate,
+    PayRunDetail,
     PayRunFinalizeResponse,
     PayRunGenerateResponse,
     PayRunItemOut,
-    PayRunOut,
+    PayRunPayeeRow,
+    PayRunSummary,
 )
 
 router = APIRouter(prefix="/api/v1/payroll", tags=["Payroll Runs"])
@@ -36,6 +53,24 @@ def _to_json_amount(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+def _compute_totals(items: list[PayRunItem]) -> dict:
+    totals = {
+        "gross": Decimal("0.00"),
+        "by_type": {},
+        "count": len(items),
+        "net": Decimal("0.00"),
+    }
+    for item in items:
+        amt = (item.amount_signed or Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        totals["net"] += amt
+        totals["by_type"][item.source_type] = totals["by_type"].get(item.source_type, Decimal("0.00")) + amt
+    totals["gross"] = totals["by_type"].get(SourceType.EARNING.value, Decimal("0.00"))
+    for k, v in totals["by_type"].items():
+        totals["by_type"][k] = v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    totals["net"] = totals["net"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return totals
+
+
 async def _get_period(db: AsyncSession, tenant_id: int, period_id: int) -> PayPeriod:
     period = await db.scalar(select(PayPeriod).where(PayPeriod.id == period_id, PayPeriod.tenant_id == tenant_id))
     if not period:
@@ -50,20 +85,66 @@ async def _get_run(db: AsyncSession, tenant_id: int, run_id: int) -> PayRun:
     return run
 
 
-@router.post("/pay-runs", response_model=PayRunOut, status_code=status.HTTP_201_CREATED)
+@router.get("/pay-runs", response_model=list[PayRunSummary])
+async def list_pay_runs(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    pay_period_id: Optional[int] = Query(default=None),
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    document_type: Optional[str] = Query(default=None),
+    payout_status: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    tenant_id = get_tenant_id(request)
+    stmt = select(PayRun).where(PayRun.tenant_id == tenant_id)
+    if pay_period_id is not None:
+        stmt = stmt.where(PayRun.pay_period_id == pay_period_id)
+    if status_filter:
+        stmt = stmt.where(PayRun.status == status_filter.upper())
+    if document_type:
+        stmt = stmt.where(PayRun.pay_document_type == document_type)
+    if payout_status:
+        stmt = stmt.where(PayRun.payout_status == payout_status.upper())
+    stmt = stmt.order_by(PayRun.id.desc()).limit(limit).offset(offset)
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+@router.post(
+    "/pay-runs",
+    response_model=PayRunDetail,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def create_pay_run(payload: PayRunCreate, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
-    await _get_period(db, tenant_id, payload.pay_period_id)
-    # get or create
+    period = await _get_period(db, tenant_id, payload.pay_period_id)
+    pay_document_type = (payload.pay_document_type or "PAYSTUB").upper()
+    worker_type_snapshot = (payload.worker_type_snapshot or "EMPLOYEE_DRIVER").upper()
+    pay_date = payload.pay_date or (period.end_date + timedelta(days=1))
+    base_currency = payload.base_currency_snapshot or "USD"
     existing = await db.scalar(
-        select(PayRun).where(PayRun.tenant_id == tenant_id, PayRun.pay_period_id == payload.pay_period_id)
+        select(PayRun).where(
+            PayRun.tenant_id == tenant_id,
+            PayRun.pay_period_id == payload.pay_period_id,
+            PayRun.pay_document_type == pay_document_type,
+            PayRun.worker_type_snapshot == worker_type_snapshot,
+        )
     )
     if existing:
-        items = await db.execute(select(PayRunItem).where(PayRunItem.pay_run_id == existing.id))
-        existing.items = list(items.scalars().all())
         return existing
 
-    run = PayRun(tenant_id=tenant_id, pay_period_id=payload.pay_period_id, status="DRAFT")
+    run = PayRun(
+        tenant_id=tenant_id,
+        pay_period_id=payload.pay_period_id,
+        pay_document_type=pay_document_type,
+        worker_type_snapshot=worker_type_snapshot,
+        base_currency_snapshot=base_currency,
+        pay_date=pay_date,
+        status=PayRunStatus.DRAFT,
+        payout_status=PayoutStatus.UNPAID,
+    )
     db.add(run)
     try:
         await db.commit()
@@ -71,18 +152,21 @@ async def create_pay_run(payload: PayRunCreate, request: Request, db: AsyncSessi
         await db.rollback()
         raise run_error("Pay run already exists", "PAYRUN_DUPLICATE", status.HTTP_409_CONFLICT)
     await db.refresh(run)
-    run.items = []
     return run
 
 
-@router.post("/pay-runs/{run_id}/generate", response_model=PayRunGenerateResponse)
+@router.post(
+    "/pay-runs/{run_id}/generate",
+    response_model=PayRunGenerateResponse,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     async with db.begin():
         run = await db.scalar(select(PayRun).where(PayRun.id == run_id, PayRun.tenant_id == tenant_id).with_for_update())
         if not run:
             raise run_error("Pay run not found", "PAYRUN_NOT_FOUND", status.HTTP_404_NOT_FOUND)
-        if run.status == "FINALIZED":
+        if run.status == PayRunStatus.FINALIZED:
             raise run_error("Cannot regenerate finalized pay run", "PAYRUN_FINALIZED", status.HTTP_409_CONFLICT)
 
         period = await db.scalar(select(PayPeriod).where(PayPeriod.id == run.pay_period_id, PayPeriod.tenant_id == tenant_id))
@@ -92,8 +176,7 @@ async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
             raise run_error("Pay period must be closed before generation", "PAYRUN_PERIOD_OPEN", status.HTTP_409_CONFLICT)
 
         # clear existing items
-        await db.execute(select(PayRunItem).where(PayRunItem.pay_run_id == run.id).execution_options(synchronize_session=False))
-        await db.execute(PayRunItem.__table__.delete().where(PayRunItem.pay_run_id == run.id))
+        await db.execute(delete(PayRunItem).where(PayRunItem.pay_run_id == run.id))
 
         entries = await db.execute(
             select(PayEntry).where(
@@ -104,33 +187,70 @@ async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
             )
         )
         entries_list = list(entries.scalars().all())
+
+        driver_ids = {e.driver_id for e in entries_list}
+        driver_map = {}
+        if driver_ids:
+            drivers_res = await db.execute(select(Driver).where(Driver.id.in_(driver_ids)))
+            driver_objs = list(drivers_res.scalars().all())
+            driver_map = {d.id: d for d in driver_objs}
+
         items = []
         for e in entries_list:
+            driver = driver_map.get(e.driver_id)
+            payee_id = driver.payee_id if driver else None
+            if not payee_id:
+                if not driver:
+                    raise run_error(
+                        f"Driver {e.driver_id} missing payee",
+                        "PAYRUN_DRIVER_NOT_FOUND",
+                        status.HTTP_404_NOT_FOUND,
+                    )
+                display_name = f"{driver.first_name} {driver.last_name}".strip() or f"Driver {driver.id}"
+                payee = Payee(
+                    tenant_id=tenant_id,
+                    payee_type=PayeeType.DRIVER,
+                    worker_type=WorkerType.EMPLOYEE_DRIVER,
+                    display_name=display_name,
+                    is_active=True,
+                )
+                db.add(payee)
+                await db.flush()
+                driver.payee_id = payee.id
+                payee_id = payee.id
             amt = e.amount
             if amt is None:
                 amt = (e.quantity or Decimal("0")) * (e.rate_amount or Decimal("0"))
             amt = (amt or Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             item = PayRunItem(
+                tenant_id=tenant_id,
                 pay_run_id=run.id,
-                driver_id=e.driver_id,
-                entry_type=e.entry_type,
-                amount=amt,
-                source_entry_id=e.id,
+                payee_id=payee_id,
+                source_type=SourceType.EARNING.value,
+                description=e.entry_type,
+                quantity=e.quantity,
+                unit_rate=e.rate_amount,
+                amount_signed=amt,
+                currency=run.base_currency_snapshot,
             )
             db.add(item)
             items.append(item)
-        run.totals_snapshot = None  # regenerated, will set at finalize
+        run.status = PayRunStatus.GENERATED
     return PayRunGenerateResponse(pay_run_id=run.id, item_count=len(items))
 
 
-@router.post("/pay-runs/{run_id}/finalize", response_model=PayRunFinalizeResponse)
+@router.post(
+    "/pay-runs/{run_id}/finalize",
+    response_model=PayRunFinalizeResponse,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def finalize_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     async with db.begin():
         run = await db.scalar(select(PayRun).where(PayRun.id == run_id, PayRun.tenant_id == tenant_id).with_for_update())
         if not run:
             raise run_error("Pay run not found", "PAYRUN_NOT_FOUND", status.HTTP_404_NOT_FOUND)
-        if run.status == "FINALIZED":
+        if run.status == PayRunStatus.FINALIZED:
             raise run_error("Pay run already finalized", "PAYRUN_FINALIZED", status.HTTP_409_CONFLICT)
 
         period = await db.scalar(select(PayPeriod).where(PayPeriod.id == run.pay_period_id, PayPeriod.tenant_id == tenant_id))
@@ -144,36 +264,165 @@ async def finalize_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
         if not items:
             raise run_error("No items to finalize", "PAYRUN_NO_ITEMS", status.HTTP_422_UNPROCESSABLE_ENTITY)
 
-        totals = {
-            "gross": Decimal("0.00"),
-            "by_type": {},
-            "count": len(items),
-        }
-        for item in items:
-            amt = (item.amount or Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            totals["gross"] += amt
-            totals["by_type"][item.entry_type] = totals["by_type"].get(item.entry_type, Decimal("0.00")) + amt
-        # quantize totals
-        totals["gross"] = totals["gross"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        for k, v in totals["by_type"].items():
-            totals["by_type"][k] = v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        run.status = "FINALIZED"
+        totals = _compute_totals(items)
+        run.status = PayRunStatus.FINALIZED
         run.finalized_at = datetime.now(timezone.utc)
         totals_snapshot = {
             "gross": _to_json_amount(totals["gross"]),
+            "net": _to_json_amount(totals["net"]),
             "by_type": {k: _to_json_amount(v) for k, v in totals["by_type"].items()},
             "count": totals["count"],
         }
-        run.totals_snapshot = totals_snapshot
+        run.calculation_snapshot_json = totals_snapshot
 
     return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=totals_snapshot)
 
 
-@router.get("/pay-runs/{run_id}", response_model=PayRunOut)
+@router.get("/pay-runs/{run_id}", response_model=PayRunDetail)
 async def get_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     run = await _get_run(db, tenant_id, run_id)
-    items_res = await db.execute(select(PayRunItem).where(PayRunItem.pay_run_id == run.id))
-    run.items = list(items_res.scalars().all())
+    if run.calculation_snapshot_json is None:
+        items_res = await db.execute(select(PayRunItem).where(PayRunItem.pay_run_id == run.id))
+        items = list(items_res.scalars().all())
+        totals = _compute_totals(items)
+        run.calculation_snapshot_json = {
+            "gross": _to_json_amount(totals["gross"]),
+            "net": _to_json_amount(totals["net"]),
+            "by_type": {k: _to_json_amount(v) for k, v in totals["by_type"].items()},
+            "count": totals["count"],
+        }
     return run
+
+
+@router.get("/pay-runs/{run_id}/payees", response_model=list[PayRunPayeeRow])
+async def list_pay_run_payees(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    await _get_run(db, tenant_id, run_id)
+
+    overrides_exists = await db.scalar(
+        select(func.count()).select_from(PayRunOverride).where(PayRunOverride.pay_run_id == run_id)
+    )
+
+    prefs_res = await db.execute(
+        select(PayeePayoutPreference.payee_id).where(
+            PayeePayoutPreference.tenant_id == tenant_id,
+            PayeePayoutPreference.is_active.is_(True),
+        )
+    )
+    pref_set = {row.payee_id for row in prefs_res}
+
+    rows = await db.execute(
+        select(
+            PayRunItem.payee_id,
+            Payee.display_name,
+            func.sum(PayRunItem.amount_signed).label("net_amount"),
+        )
+        .join(Payee, Payee.id == PayRunItem.payee_id)
+        .where(PayRunItem.pay_run_id == run_id, PayRunItem.tenant_id == tenant_id)
+        .group_by(PayRunItem.payee_id, Payee.display_name)
+    )
+    results = []
+    for payee_id, display_name, net_amount in rows.all():
+        net = net_amount or Decimal("0")
+        results.append(
+            PayRunPayeeRow(
+                payee_id=payee_id,
+                display_name=display_name,
+                net_amount=net,
+                flags={
+                    "negative_net": net < 0,
+                    "has_overrides": bool(overrides_exists),
+                    "missing_payout_preference": payee_id not in pref_set,
+                },
+            )
+        )
+    return results
+
+
+@router.get("/pay-runs/{run_id}/items", response_model=list[PayRunItemOut])
+async def list_pay_run_items(
+    run_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    payee_id: Optional[int] = Query(default=None),
+):
+    tenant_id = get_tenant_id(request)
+    await _get_run(db, tenant_id, run_id)
+    stmt = (
+        select(PayRunItem, ChargeCategory.code)
+        .select_from(PayRunItem)
+        .join(ChargeCategory, ChargeCategory.id == PayRunItem.charge_category_id, isouter=True)
+        .where(PayRunItem.pay_run_id == run_id, PayRunItem.tenant_id == tenant_id)
+    )
+    if payee_id:
+        stmt = stmt.where(PayRunItem.payee_id == payee_id)
+    res = await db.execute(stmt)
+    items_out: list[PayRunItemOut] = []
+    for item, code in res.all():
+        items_out.append(
+            PayRunItemOut(
+                id=item.id,
+                payee_id=item.payee_id,
+                source_type=item.source_type,
+                description=item.description,
+                amount_signed=item.amount_signed,
+                currency=item.currency,
+                quantity=item.quantity,
+                unit_rate=item.unit_rate,
+                charge_category_id=item.charge_category_id,
+                charge_category_code=code,
+                metadata_json=item.metadata_json,
+                created_at=item.created_at,
+            )
+        )
+    return items_out
+
+
+@router.get("/documents", response_model=list[PayDocumentSummary])
+async def list_pay_documents(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    pay_period_id: Optional[int] = Query(default=None),
+    payee_id: Optional[int] = Query(default=None),
+    document_type: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    tenant_id = get_tenant_id(request)
+    stmt = (
+        select(PayDocument)
+        .join(PayRun, PayRun.id == PayDocument.pay_run_id)
+        .where(PayRun.tenant_id == tenant_id)
+    )
+    if pay_period_id is not None:
+        stmt = stmt.where(PayRun.pay_period_id == pay_period_id)
+    if payee_id is not None:
+        stmt = stmt.where(PayDocument.payee_id == payee_id)
+    if document_type:
+        stmt = stmt.where(PayDocument.document_type == document_type)
+    stmt = stmt.order_by(PayDocument.generated_at.desc()).limit(limit).offset(offset)
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+@router.get("/documents/{document_id}/download")
+async def download_pay_document(document_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    doc = await db.scalar(
+        select(PayDocument)
+        .join(PayRun, PayRun.id == PayDocument.pay_run_id)
+        .where(PayDocument.id == document_id, PayRun.tenant_id == tenant_id)
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    key = doc.file_storage_key
+    if key.startswith("http://") or key.startswith("https://"):
+        return RedirectResponse(key)
+
+    path = resolve_storage_path(key, default_dir=DEFAULT_PAY_DOCS_DIR)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+
+    return FileResponse(path, media_type="application/pdf", filename=path.name)

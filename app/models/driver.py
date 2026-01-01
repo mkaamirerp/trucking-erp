@@ -11,6 +11,9 @@ class Driver(Base):
     tenant_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    payee_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("payees.id", ondelete="RESTRICT"), nullable=True, unique=True
+    )
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
 

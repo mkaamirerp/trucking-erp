@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.models.driver import Driver
 from app.models.payroll import PayEntry, PayPeriod, PayProfile
+from app.dependencies.authz import require_tenant_admin
 from app.schemas.payroll import (
     PAY_PERIOD_STATUSES,
     PayDriverSummary,
@@ -48,7 +49,7 @@ async def _pay_period_overlap_exists(
         PayPeriod.tenant_id == tenant_id,
         PayPeriod.start_date <= end_date,
         PayPeriod.end_date >= start_date,
-        PayPeriod.status.in_(["DRAFT", "OPEN"]),
+        PayPeriod.status.in_(["OPEN"]),
     )
     if exclude_id:
         stmt = stmt.where(PayPeriod.id != exclude_id)
@@ -56,7 +57,12 @@ async def _pay_period_overlap_exists(
     return res.scalar_one_or_none() is not None
 
 
-@router.post("/pay-periods", response_model=PayPeriodOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/pay-periods",
+    response_model=PayPeriodOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def create_pay_period(payload: PayPeriodCreate, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     if await _pay_period_overlap_exists(db, tenant_id, payload.start_date, payload.end_date):
@@ -67,7 +73,7 @@ async def create_pay_period(payload: PayPeriodCreate, request: Request, db: Asyn
         name=payload.name,
         start_date=payload.start_date,
         end_date=payload.end_date,
-        status="DRAFT",
+        status="OPEN",
     )
     db.add(period)
     await db.commit()
@@ -136,12 +142,16 @@ async def update_pay_period(
     return period
 
 
-@router.post("/pay-periods/{pay_period_id}/open", response_model=PayPeriodOut)
+@router.post(
+    "/pay-periods/{pay_period_id}/open",
+    response_model=PayPeriodOut,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def open_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
-    if period.status != "DRAFT":
-        raise payroll_error("Only draft periods can be opened", "PAYROLL_BAD_STATUS", status.HTTP_409_CONFLICT)
+    if period.status != "CLOSED":
+        raise payroll_error("Only closed periods can be re-opened", "PAYROLL_BAD_STATUS", status.HTTP_409_CONFLICT)
     if await _pay_period_overlap_exists(db, tenant_id, period.start_date, period.end_date, exclude_id=period.id):
         raise payroll_error("Pay period overlaps an existing period", "PAYROLL_PERIOD_OVERLAP", status.HTTP_409_CONFLICT)
     period.status = "OPEN"
@@ -150,7 +160,11 @@ async def open_pay_period(pay_period_id: int, request: Request, db: AsyncSession
     return period
 
 
-@router.post("/pay-periods/{pay_period_id}/close", response_model=PayPeriodOut)
+@router.post(
+    "/pay-periods/{pay_period_id}/close",
+    response_model=PayPeriodOut,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def close_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     async with db.begin():
@@ -163,6 +177,8 @@ async def close_pay_period(pay_period_id: int, request: Request, db: AsyncSessio
             raise payroll_error("Pay period not found", "PAYROLL_PERIOD_NOT_FOUND", status.HTTP_404_NOT_FOUND)
         if period.status == "CLOSED":
             raise payroll_error("Pay period already closed", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
+        if period.status != "OPEN":
+            raise payroll_error("Only open periods can be closed", "PAYROLL_BAD_STATUS", status.HTTP_409_CONFLICT)
         period.status = "CLOSED"
         period.closed_at = datetime.now(timezone.utc)
     await db.refresh(period)

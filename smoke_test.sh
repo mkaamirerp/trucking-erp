@@ -4,7 +4,11 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 API="${API:-$BASE_URL/api/v1}"
 TENANT_ID="${TENANT_ID:-1}"
-TENANT_HEADER=(-H "X-Tenant-ID: ${TENANT_ID}")
+TENANT_ROLES="${TENANT_ROLES:-TENANT_ADMIN}"
+TENANT_HEADER=(
+  -H "X-Tenant-ID: ${TENANT_ID}"
+  -H "X-Tenant-Roles: ${TENANT_ROLES}"
+)
 
 # ========== helpers ==========
 hr() { printf "\n============================================================\n"; }

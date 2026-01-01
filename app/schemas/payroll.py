@@ -6,7 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-PAY_PERIOD_STATUSES = {"DRAFT", "OPEN", "CLOSED"}
+PAY_PERIOD_STATUSES = {"OPEN", "CLOSED"}
 PAY_TYPES = {"PER_MILE", "HOURLY", "PERCENTAGE", "SALARY"}
 ENTRY_TYPES = {"MILES", "HOURS", "GROSS", "ADJUSTMENT", "DEDUCTION"}
 

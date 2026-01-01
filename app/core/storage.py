@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import UploadFile
 
 DEFAULT_LOCAL_DIR = Path("/home/admin/trucking_erp/storage/driver_docs")
+DEFAULT_PAY_DOCS_DIR = Path("/home/admin/trucking_erp/storage/pay_documents")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,16 @@ def _safe_filename(name: str | None) -> str:
 def _local_dir() -> Path:
     d = os.getenv("LOCAL_STORAGE_DIR")
     return Path(d) if d else DEFAULT_LOCAL_DIR
+
+
+def resolve_storage_path(storage_key: str, default_dir: Path | None = None) -> Path:
+    """
+    Resolve a storage key to a local filesystem path.
+    Honors LOCAL_STORAGE_DIR if set; otherwise uses provided default_dir or DEFAULT_LOCAL_DIR.
+    """
+    base = os.getenv("LOCAL_STORAGE_DIR")
+    root = Path(base) if base else (default_dir or DEFAULT_LOCAL_DIR)
+    return root / storage_key
 
 
 async def save_driver_doc_upload_local(file: UploadFile) -> StoredFile:

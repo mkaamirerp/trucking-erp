@@ -1,0 +1,13 @@
+Codex handoff notes (2026-01-01)
+---------------------------------
+- Frontend lives at apps/web (React+Vite+Tailwind). npm install done; npm run build passes. Dev server: `cd apps/web && npm run dev -- --host --port 5173` (API on :8000). Use headers in API calls: `X-Tenant-ID: 1`, `X-Tenant-Roles: TENANT_ADMIN`.
+- Backend endpoints added:
+  - /api/v1/me for roles (reads X-Tenant-Roles and X-User-Id headers).
+  - Payroll: list/detail pay runs, payees/items, documents list + download via storage abstraction; pay run create defaults (PAYSTUB/EMPLOYEE_DRIVER, pay_date=period end+1, USD) and auto-create payee for drivers missing payee_id during generation.
+  - Employees: accepts legacy fields, exposes employee_code alias, role assignment idempotent.
+  - Storage helper resolve_storage_path; document download works for local files (storage/pay_documents/ dummy.pdf seeded).
+- Migration b8f9cfe34f1b: renames legacy employees table to employees_legacy_<date> if present, then creates new employees table per B8.
+- Seed data (tenant_id=1): payee EMPLOYEE_DRIVER id=2, employee EMP-0001, pay_run id=1 (GENERATED) with items and dummy pay_document pointing to storage/pay_documents/dummy.pdf. Smoke test also created extra drivers/payees/pay_runs; ok for dev.
+- Smoke test: `BASE_URL=http://127.0.0.1:8000 bash smoke_test.sh` now passes (requires X-Tenant-Roles header; script updated to send TENANT_ADMIN).
+- RBAC dependency require_tenant_admin enforces TENANT_ADMIN on payroll write endpoints; UI should rely on /me roles.
+- Port 8000 FastAPI running via uvicorn (manual start). systemd trucking_erp inactive.

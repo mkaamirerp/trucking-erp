@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from enum import Enum
+
+
+class WorkerType(str, Enum):
+    EMPLOYEE_DRIVER = "EMPLOYEE_DRIVER"
+    CONTRACTOR_COMPANY_DRIVER = "CONTRACTOR_COMPANY_DRIVER"
+    OWNER_OPERATOR_LEASED_ON = "OWNER_OPERATOR_LEASED_ON"
+    THIRD_PARTY_CARRIER = "THIRD_PARTY_CARRIER"
+
+
+class PayeeType(str, Enum):
+    DRIVER = "DRIVER"
+    CARRIER = "CARRIER"
+
+
+class PayDocumentType(str, Enum):
+    PAYSTUB = "PAYSTUB"
+    SETTLEMENT_STATEMENT = "SETTLEMENT_STATEMENT"
+    CONTRACTOR_PAY_STATEMENT = "CONTRACTOR_PAY_STATEMENT"
+    CARRIER_PAYOUT_STATEMENT = "CARRIER_PAYOUT_STATEMENT"
+
+
+class PayRunStatus(str, Enum):
+    DRAFT = "DRAFT"
+    GENERATED = "GENERATED"
+    FINALIZED = "FINALIZED"
+    VOIDED = "VOIDED"
+
+
+class PayoutStatus(str, Enum):
+    UNPAID = "UNPAID"
+    PARTIAL = "PARTIAL"
+    PAID = "PAID"
+
+
+class SourceType(str, Enum):
+    EARNING = "EARNING"
+    DEDUCTION = "DEDUCTION"
+    FEE = "FEE"
+    ESCROW = "ESCROW"
+    ADJUSTMENT = "ADJUSTMENT"
+    TAX = "TAX"
+
+
+class Responsibility(str, Enum):
+    COMPANY = "COMPANY"
+    WORKER = "WORKER"
+
+
+class CalcMethod(str, Enum):
+    ACTUAL = "ACTUAL"
+    FLAT = "FLAT"
+    PERCENT_OF_GROSS = "PERCENT_OF_GROSS"
+    PERCENT_OF_NET_AFTER_DISPATCH = "PERCENT_OF_NET_AFTER_DISPATCH"
+
+
+class Frequency(str, Enum):
+    ONE_TIME = "ONE_TIME"
+    WEEKLY = "WEEKLY"
+    BIWEEKLY = "BIWEEKLY"
+    MONTHLY = "MONTHLY"
+    QUARTERLY = "QUARTERLY"
+    YEARLY = "YEARLY"
+
+
+class GrossCalcType(str, Enum):
+    CPM = "CPM"
+    PERCENT_REVENUE = "PERCENT_REVENUE"
+    FLAT_PER_LOAD = "FLAT_PER_LOAD"
+    HOURLY = "HOURLY"
+    SALARY = "SALARY"
+    HYBRID = "HYBRID"
+
+
+class SettlementFrequency(str, Enum):
+    WEEKLY = "WEEKLY"
+    BIWEEKLY = "BIWEEKLY"
+    SEMI_MONTHLY = "SEMI_MONTHLY"
+    MONTHLY = "MONTHLY"
+
+
+class MileSource(str, Enum):
+    ADDRESS_TO_ADDRESS = "ADDRESS_TO_ADDRESS"
+    ZIP_TO_ZIP = "ZIP_TO_ZIP"
+    CITY_TO_CITY = "CITY_TO_CITY"
+    MANUAL = "MANUAL"
+
+
+class PayMileMode(str, Enum):
+    ALL_MILES = "ALL_MILES"
+    LOADED_ONLY = "LOADED_ONLY"
+    LOADED_AND_EMPTY_DIFFERENT_RATES = "LOADED_AND_EMPTY_DIFFERENT_RATES"
+
+
+class EscrowRuleType(str, Enum):
+    HOLD_WEEKS = "HOLD_WEEKS"
+    HOLD_FIXED_PER_PERIOD = "HOLD_FIXED_PER_PERIOD"
+    HOLD_UNTIL_TARGET = "HOLD_UNTIL_TARGET"
+
+
+class EscrowEntryType(str, Enum):
+    HOLD = "HOLD"
+    RELEASE = "RELEASE"
+    ADJUSTMENT = "ADJUSTMENT"
+
+
+class OverrideType(str, Enum):
+    CHANGE_AMOUNT = "CHANGE_AMOUNT"
+    ADD_ITEM = "ADD_ITEM"
+    REMOVE_ITEM = "REMOVE_ITEM"
+
+
+class PayoutPaymentStatus(str, Enum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    CONFIRMED = "CONFIRMED"
+    FAILED = "FAILED"
+    VOIDED = "VOIDED"
