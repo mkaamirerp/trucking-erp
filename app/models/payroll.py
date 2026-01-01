@@ -20,6 +20,7 @@ class PayPeriod(Base):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="DRAFT", server_default="DRAFT")
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -76,11 +77,15 @@ class PayEntry(Base):
         Integer, ForeignKey("pay_profiles.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    work_date: Mapped[date] = mapped_column(Date, nullable=False)
     entry_type: Mapped[str] = mapped_column(String(20), nullable=False)  # MILES, HOURS, GROSS, ADJUSTMENT, DEDUCTION
+    reference_code: Mapped[str] = mapped_column(String(100), nullable=False, default="", server_default="")
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     rate_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     is_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE", server_default="ACTIVE")

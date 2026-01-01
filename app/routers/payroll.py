@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.models.driver import Driver
@@ -35,6 +36,10 @@ def get_tenant_id(request: Request) -> int:
     return int(tenant_id)
 
 
+def payroll_error(detail: str, code: str, status_code: int) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"detail": detail, "code": code})
+
+
 # ---- Pay Periods ----
 async def _pay_period_overlap_exists(
     db: AsyncSession, tenant_id: int, start_date: date, end_date: date, exclude_id: int | None = None
@@ -55,7 +60,7 @@ async def _pay_period_overlap_exists(
 async def create_pay_period(payload: PayPeriodCreate, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
     if await _pay_period_overlap_exists(db, tenant_id, payload.start_date, payload.end_date):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pay period overlaps an existing period")
+        raise payroll_error("Pay period overlaps an existing period", "PAYROLL_PERIOD_OVERLAP", status.HTTP_409_CONFLICT)
 
     period = PayPeriod(
         tenant_id=tenant_id,
@@ -93,7 +98,7 @@ async def _get_pay_period_or_404(db: AsyncSession, tenant_id: int, pay_period_id
         select(PayPeriod).where(PayPeriod.id == pay_period_id, PayPeriod.tenant_id == tenant_id)
     )
     if not period:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pay period not found")
+        raise payroll_error("Pay period not found", "PAYROLL_PERIOD_NOT_FOUND", status.HTTP_404_NOT_FOUND)
     return period
 
 
@@ -111,7 +116,7 @@ async def update_pay_period(
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 
     if period.status == "CLOSED":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Closed pay periods cannot be edited")
+        raise payroll_error("Closed pay periods cannot be edited", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
 
     data = payload.model_dump(exclude_unset=True)
     new_start = data.get("start_date", period.start_date)
@@ -122,7 +127,7 @@ async def update_pay_period(
     if (new_start != period.start_date or new_end != period.end_date) and await _pay_period_overlap_exists(
         db, tenant_id, new_start, new_end, exclude_id=period.id
     ):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pay period overlaps an existing period")
+        raise payroll_error("Pay period overlaps an existing period", "PAYROLL_PERIOD_OVERLAP", status.HTTP_409_CONFLICT)
 
     for k, v in data.items():
         setattr(period, k, v)
@@ -136,9 +141,9 @@ async def open_pay_period(pay_period_id: int, request: Request, db: AsyncSession
     tenant_id = get_tenant_id(request)
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
     if period.status != "DRAFT":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only draft periods can be opened")
+        raise payroll_error("Only draft periods can be opened", "PAYROLL_BAD_STATUS", status.HTTP_409_CONFLICT)
     if await _pay_period_overlap_exists(db, tenant_id, period.start_date, period.end_date, exclude_id=period.id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pay period overlaps an existing period")
+        raise payroll_error("Pay period overlaps an existing period", "PAYROLL_PERIOD_OVERLAP", status.HTTP_409_CONFLICT)
     period.status = "OPEN"
     await db.commit()
     await db.refresh(period)
@@ -148,11 +153,18 @@ async def open_pay_period(pay_period_id: int, request: Request, db: AsyncSession
 @router.post("/pay-periods/{pay_period_id}/close", response_model=PayPeriodOut)
 async def close_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = get_tenant_id(request)
-    period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
-    if period.status == "CLOSED":
-        return period
-    period.status = "CLOSED"
-    await db.commit()
+    async with db.begin():
+        period = (
+            await db.execute(
+                select(PayPeriod).where(PayPeriod.id == pay_period_id, PayPeriod.tenant_id == tenant_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if not period:
+            raise payroll_error("Pay period not found", "PAYROLL_PERIOD_NOT_FOUND", status.HTTP_404_NOT_FOUND)
+        if period.status == "CLOSED":
+            raise payroll_error("Pay period already closed", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
+        period.status = "CLOSED"
+        period.closed_at = datetime.now(timezone.utc)
     await db.refresh(period)
     return period
 
@@ -161,7 +173,7 @@ async def close_pay_period(pay_period_id: int, request: Request, db: AsyncSessio
 async def _get_driver_or_404(db: AsyncSession, tenant_id: int, driver_id: int) -> Driver:
     driver = await db.scalar(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
     if not driver:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
+        raise payroll_error("Driver not found", "PAYROLL_DRIVER_NOT_FOUND", status.HTTP_404_NOT_FOUND)
     return driver
 
 
@@ -240,7 +252,7 @@ async def list_pay_profiles(
 async def _get_pay_profile_or_404(db: AsyncSession, tenant_id: int, profile_id: int) -> PayProfile:
     profile = await db.scalar(select(PayProfile).where(PayProfile.id == profile_id, PayProfile.tenant_id == tenant_id))
     if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pay profile not found")
+        raise payroll_error("Pay profile not found", "PAYROLL_PROFILE_NOT_FOUND", status.HTTP_404_NOT_FOUND)
     return profile
 
 
@@ -303,10 +315,25 @@ def _compute_amount(amount: Decimal | None, quantity: Decimal | None, rate_amoun
     return None
 
 
+def _normalize_amount(value: Decimal | None) -> Decimal | None:
+    if value is None:
+        return None
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _validate_amount(value: Decimal | None) -> None:
+    if value is None:
+        raise payroll_error("amount is required (or quantity and rate_amount)", "PAYROLL_AMOUNT_REQUIRED", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    if value == Decimal("0"):
+        raise payroll_error("amount cannot be zero", "PAYROLL_AMOUNT_ZERO", status.HTTP_422_UNPROCESSABLE_ENTITY)
+    if value.copy_abs() > Decimal("100000"):
+        raise payroll_error("amount exceeds allowed maximum", "PAYROLL_AMOUNT_TOO_LARGE", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
 async def _get_pay_entry_or_404(db: AsyncSession, tenant_id: int, entry_id: int) -> PayEntry:
     entry = await db.scalar(select(PayEntry).where(PayEntry.id == entry_id, PayEntry.tenant_id == tenant_id))
     if not entry:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pay entry not found")
+        raise payroll_error("Pay entry not found", "PAYROLL_ENTRY_NOT_FOUND", status.HTTP_404_NOT_FOUND)
     return entry
 
 
@@ -315,7 +342,24 @@ async def create_pay_entry(payload: PayEntryCreate, request: Request, db: AsyncS
     tenant_id = get_tenant_id(request)
     period = await _get_pay_period_or_404(db, tenant_id, payload.pay_period_id)
     if period.status == "CLOSED":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot add entries to a closed period")
+        raise payroll_error("Cannot add entries to a closed period", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
+
+    if payload.work_date < period.start_date or payload.work_date > period.end_date:
+        raise payroll_error("work_date must be within the pay period", "PAYROLL_WORK_DATE_RANGE", status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    # block if work_date falls in any closed period (even if different id)
+    closed_overlap = await db.scalar(
+        select(PayPeriod.id).where(
+            PayPeriod.tenant_id == tenant_id,
+            PayPeriod.status == "CLOSED",
+            PayPeriod.start_date <= payload.work_date,
+            PayPeriod.end_date >= payload.work_date,
+        )
+    )
+    if closed_overlap:
+        raise payroll_error(
+            "work_date falls inside a closed pay period", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT
+        )
 
     await _get_driver_or_404(db, tenant_id, payload.driver_id)
 
@@ -323,28 +367,39 @@ async def create_pay_entry(payload: PayEntryCreate, request: Request, db: AsyncS
     if payload.pay_profile_id is not None:
         profile = await _get_pay_profile_or_404(db, tenant_id, payload.pay_profile_id)
         if profile.driver_id != payload.driver_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pay profile does not match driver")
+            raise payroll_error("Pay profile does not match driver", "PAYROLL_PROFILE_MISMATCH", status.HTTP_400_BAD_REQUEST)
         if not profile.is_active:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pay profile is inactive")
+            raise payroll_error("Pay profile is inactive", "PAYROLL_PROFILE_INACTIVE", status.HTTP_400_BAD_REQUEST)
 
-    amount = _compute_amount(payload.amount, payload.quantity, payload.rate_amount)
+    reference_code = (payload.reference_code or "").strip()
+    amount_raw = _compute_amount(payload.amount, payload.quantity, payload.rate_amount)
+    amount = _normalize_amount(amount_raw)
+    _validate_amount(amount)
 
     entry = PayEntry(
         tenant_id=tenant_id,
         pay_period_id=payload.pay_period_id,
         driver_id=payload.driver_id,
         pay_profile_id=payload.pay_profile_id,
+        work_date=payload.work_date,
         entry_type=payload.entry_type,
         quantity=payload.quantity,
         rate_amount=payload.rate_amount,
         amount=amount,
+        reference_code=reference_code,
         notes=payload.notes,
         is_manual=True,
         status="ACTIVE",
         is_active=True,
     )
     db.add(entry)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if "uq_pay_entries_unique" in str(exc.orig):
+            raise payroll_error("Duplicate pay entry for driver/date/type", "PAYROLL_ENTRY_DUPLICATE", status.HTTP_409_CONFLICT)
+        raise
     await db.refresh(entry)
     return entry
 
@@ -359,7 +414,7 @@ async def list_pay_entries(
 ):
     tenant_id = get_tenant_id(request)
     if pay_period_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pay_period_id is required")
+        raise payroll_error("pay_period_id is required", "PAYROLL_BAD_REQUEST", status.HTTP_400_BAD_REQUEST)
     stmt = select(PayEntry).where(PayEntry.tenant_id == tenant_id, PayEntry.pay_period_id == pay_period_id)
     if driver_id is not None:
         stmt = stmt.where(PayEntry.driver_id == driver_id)
@@ -378,15 +433,23 @@ async def update_pay_entry(
     entry = await _get_pay_entry_or_404(db, tenant_id, entry_id)
     period = await _get_pay_period_or_404(db, tenant_id, entry.pay_period_id)
     if period.status == "CLOSED":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot edit entries in a closed period")
+        raise payroll_error("Cannot edit entries in a closed period", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
 
     data = payload.model_dump(exclude_unset=True)
     for k, v in data.items():
         setattr(entry, k, v)
 
     provided_amount = data.get("amount")
-    entry.amount = _compute_amount(provided_amount, entry.quantity, entry.rate_amount)
-    await db.commit()
+    entry.reference_code = (data.get("reference_code", entry.reference_code) or "").strip()
+    entry.amount = _normalize_amount(_compute_amount(provided_amount, entry.quantity, entry.rate_amount))
+    _validate_amount(entry.amount)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if "uq_pay_entries_unique" in str(exc.orig):
+            raise payroll_error("Duplicate pay entry for driver/date/type", "PAYROLL_ENTRY_DUPLICATE", status.HTTP_409_CONFLICT)
+        raise
     await db.refresh(entry)
     return entry
 
@@ -399,7 +462,7 @@ async def void_pay_entry(entry_id: int, request: Request, db: AsyncSession = Dep
         return entry
     period = await _get_pay_period_or_404(db, tenant_id, entry.pay_period_id)
     if period.status == "CLOSED":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot void entries in a closed period")
+        raise payroll_error("Cannot void entries in a closed period", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
     entry.is_active = False
     entry.status = "VOID"
     entry.deactivated_at = datetime.now(timezone.utc)

@@ -417,7 +417,7 @@ PAY_PROFILE_ID="$(echo "$pay_profile_resp" | jq -r '.id // empty')"
 # ---------- 28) Payroll foundations: add manual pay entry ----------
 hr
 echo "28) Add manual miles entry"
-pay_entry_payload=$(printf '{"pay_period_id":%s,"driver_id":%s,"pay_profile_id":%s,"entry_type":"MILES","quantity":1200,"rate_amount":0.65,"notes":"smoke payroll test"}' "$PAY_PERIOD_ID" "$ACTIVE_DRIVER_ID" "$PAY_PROFILE_ID")
+pay_entry_payload=$(printf '{"pay_period_id":%s,"driver_id":%s,"pay_profile_id":%s,"work_date":"%s","entry_type":"MILES","quantity":1200,"rate_amount":0.65,"notes":"smoke payroll test"}' "$PAY_PERIOD_ID" "$ACTIVE_DRIVER_ID" "$PAY_PROFILE_ID" "$pp_start")
 pay_entry_resp="$(curl_json -X POST "$API/payroll/pay-entries" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$pay_entry_payload")"
 echo "$pay_entry_resp" | jq .
 PAY_ENTRY_ID="$(echo "$pay_entry_resp" | jq -r '.id // empty')"
@@ -438,13 +438,43 @@ echo "$summary" | jq .
 echo "$summary" | jq -e --argjson driver "$ACTIVE_DRIVER_ID" '.totals | map(select(.driver_id==$driver)) | length >= 1' >/dev/null \
   && ok "Summary includes driver totals" || fail "Summary missing driver totals"
 
-# ---------- 30) Payroll foundations: close pay period ----------
+# ---------- 30) Payroll hardening: duplicate entry should fail ----------
 hr
-echo "30) Close pay period"
+echo "30) Duplicate pay entry should fail (expect 409)"
+code_dup="$(http_code -X POST "$API/payroll/pay-entries" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$pay_entry_payload")"
+echo "Duplicate entry code: $code_dup"
+[[ "$code_dup" == "409" ]] && ok "Duplicate prevented" || fail "Duplicate not blocked"
+
+# ---------- 31) Payroll hardening: work_date outside period should fail ----------
+hr
+echo "31) work_date outside period should fail (expect 422)"
+bad_date=$(date -u -d "$pp_end + 5 days" +%Y-%m-%d 2>/dev/null || echo "2026-12-31")
+bad_entry_payload=$(printf '{"pay_period_id":%s,"driver_id":%s,"pay_profile_id":%s,"work_date":"%s","entry_type":"MILES","quantity":100,"rate_amount":0.65,"notes":"out of range"}' "$PAY_PERIOD_ID" "$ACTIVE_DRIVER_ID" "$PAY_PROFILE_ID" "$bad_date")
+code_outside="$(http_code -X POST "$API/payroll/pay-entries" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$bad_entry_payload")"
+echo "Outside period code: $code_outside"
+[[ "$code_outside" == "422" ]] && ok "Out-of-range work_date blocked" || fail "Out-of-range work_date not blocked"
+
+# ---------- 32) Payroll foundations: close pay period ----------
+hr
+echo "32) Close pay period"
 pp_close_resp="$(curl_json -X POST "$API/payroll/pay-periods/$PAY_PERIOD_ID/close" "${TENANT_HEADER[@]}")"
 echo "$pp_close_resp" | jq .
 echo "$pp_close_resp" | jq -e '.status=="CLOSED"' >/dev/null && ok "Pay period closed" || warn "Pay period not closed"
 
-# ---------- 31) Final summary (extended) ----------
+# ---------- 33) Payroll hardening: cannot reopen closed period ----------
+hr
+echo "33) Close already closed period should fail (expect 409)"
+code_reclose="$(http_code -X POST "$API/payroll/pay-periods/$PAY_PERIOD_ID/close" "${TENANT_HEADER[@]}")"
+echo "Re-close code: $code_reclose"
+[[ "$code_reclose" == "409" ]] && ok "Re-closing blocked" || fail "Re-closing not blocked"
+
+# ---------- 34) Payroll hardening: cannot add entry to closed period ----------
+hr
+echo "34) Create entry in closed period should fail (expect 409)"
+code_closed_entry="$(http_code -X POST "$API/payroll/pay-entries" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$pay_entry_payload")"
+echo "Closed period entry code: $code_closed_entry"
+[[ "$code_closed_entry" == "409" ]] && ok "Closed period write blocked" || fail "Closed period write not blocked"
+
+# ---------- 35) Final summary (extended) ----------
 hr
 ok "EXTENDED SMOKE TEST (v2) COMPLETE"

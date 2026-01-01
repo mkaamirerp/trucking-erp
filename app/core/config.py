@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     tenant_db_app_user: str | None = None
     tenant_db_app_password: str | None = None
     # Tenant alembic target revision for provisioning
-    tenant_alembic_target_rev: str = "b6f6bba0c1d3"
+    tenant_alembic_target_rev: str = "cc9e8af6c7b8"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -42,6 +42,7 @@ class PayPeriodUpdate(BaseModel):
 class PayPeriodOut(PayPeriodBase):
     id: int
     status: str
+    closed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -115,11 +116,13 @@ class PayProfileOut(PayProfileBase):
 class PayEntryBase(BaseModel):
     pay_period_id: int
     driver_id: int
+    work_date: date
     pay_profile_id: Optional[int] = None
     entry_type: str
     quantity: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     rate_amount: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     amount: Optional[Decimal] = Field(default=None)
+    reference_code: Optional[str] = Field(default=None, max_length=100)
     notes: Optional[str] = None
 
     @field_validator("entry_type")
@@ -145,6 +148,7 @@ class PayEntryUpdate(BaseModel):
     quantity: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     rate_amount: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     amount: Optional[Decimal] = None
+    reference_code: Optional[str] = Field(default=None, max_length=100)
     notes: Optional[str] = None
 
     @model_validator(mode="after")
@@ -159,6 +163,8 @@ class PayEntryOut(PayEntryBase):
     is_manual: bool
     status: str
     is_active: bool
+    created_by: Optional[str] = None
+    updated_by: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
