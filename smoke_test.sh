@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8001}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 API="${API:-$BASE_URL/api/v1}"
 TENANT_ID="${TENANT_ID:-1}"
 TENANT_HEADER=(-H "X-Tenant-ID: ${TENANT_ID}")
