@@ -388,7 +388,7 @@ echo "$emps" | jq -e --arg code "$emp_code" 'map(select(.employee_code==$code)) 
 hr
 echo "26) Payroll foundations: create pay period"
 pay_period_name="Smoke Payroll $(date -u +%s)"
-pp_start="$(date -u +%Y-%m-01)"
+pp_start="$(date -u -d 'now + 30 days' +%Y-%m-%d)"
 pp_end="$(date -u -d "$pp_start +13 days" +%Y-%m-%d 2>/dev/null || true)"
 if [[ -z "$pp_end" ]]; then
   pp_end="$pp_start"
