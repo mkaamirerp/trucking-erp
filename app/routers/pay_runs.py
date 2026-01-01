@@ -32,6 +32,10 @@ def run_error(detail: str, code: str, status_code: int) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"detail": detail, "code": code})
 
 
+def _to_json_amount(value: Decimal) -> float:
+    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
 async def _get_period(db: AsyncSession, tenant_id: int, period_id: int) -> PayPeriod:
     period = await db.scalar(select(PayPeriod).where(PayPeriod.id == period_id, PayPeriod.tenant_id == tenant_id))
     if not period:
@@ -156,9 +160,13 @@ async def finalize_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
 
         run.status = "FINALIZED"
         run.finalized_at = datetime.now(timezone.utc)
-        run.totals_snapshot = totals
+        run.totals_snapshot = {
+            "gross": _to_json_amount(totals["gross"]),
+            "by_type": {k: _to_json_amount(v) for k, v in totals["by_type"].items()},
+            "count": totals["count"],
+        }
 
-    return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=totals)
+    return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=run.totals_snapshot)
 
 
 @router.get("/pay-runs/{run_id}", response_model=PayRunOut)
