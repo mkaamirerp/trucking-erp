@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
+from app.deps.tenant import require_tenant
 from app.schemas.onboarding import (
     DriverLicenseOCRRequest,
     DriverLicenseOCRResponse,
@@ -17,31 +18,22 @@ from app.schemas.onboarding import (
 router = APIRouter(prefix="/api/v1/onboarding", tags=["Onboarding"])
 
 
-def get_tenant_id(request: Request) -> int:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context missing")
-    return int(tenant_id)
-
-
 @router.post("/driver-license/ocr", response_model=DriverLicenseOCRResponse)
 async def driver_license_ocr(
     _: DriverLicenseOCRRequest,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
 ):
     # Placeholder: return empty suggestions; frontend can still integrate contract
-    _ = get_tenant_id(request)
+    _ = tenant_id
     return DriverLicenseOCRResponse(suggestions={})
 
 
 @router.post("/driver-license/confirm", response_model=DriverLicenseConfirmResponse)
 async def driver_license_confirm(
     payload: DriverLicenseConfirmRequest,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
-
     driver = await db.scalar(select(Driver).where(Driver.id == payload.driver_id, Driver.tenant_id == tenant_id))
     if not driver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")

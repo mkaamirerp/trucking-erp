@@ -13,12 +13,13 @@ from app.routers.meta import router as meta_router
 from app.routers.payroll import router as payroll_router
 from app.routers.pay_runs import router as pay_runs_router
 from app.routers.me import router as me_router
-from app.middleware.tenant_context import tenant_context_middleware
+from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
-
-# Global tenant-context enforcement (skips health/docs/public/platform)
-app.middleware("http")(tenant_context_middleware)
+app.add_middleware(
+    TenantContextMiddleware,
+    allow_paths=DEFAULT_ALLOW_PATHS,
+)
 
 # API routers
 app.include_router(health_router, prefix="/api/v1")

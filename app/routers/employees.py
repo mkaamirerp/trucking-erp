@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import date
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,20 +12,17 @@ from app.models.payee import Payee
 from app.models.enums import WorkerType, PayeeType
 from app.schemas.employee import EmployeeCreate, EmployeeOut, EmployeeUpdate
 from app.schemas.employee_role import EmployeeRoleCreate, EmployeeRoleOut, ROLE_CHOICES
+from app.deps.tenant import require_tenant
 
 router = APIRouter(prefix="/api/v1/employees", tags=["Employees"])
 
 
-def get_tenant_id(request: Request) -> int:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context missing")
-    return int(tenant_id)
-
-
 @router.post("", response_model=EmployeeOut, status_code=status.HTTP_201_CREATED)
-async def create_employee(payload: EmployeeCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def create_employee(
+    payload: EmployeeCreate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     employee_number = payload.employee_number or payload.employee_code
     if not employee_number:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="employee_number is required")
@@ -78,11 +75,10 @@ async def create_employee(payload: EmployeeCreate, request: Request, db: AsyncSe
 
 @router.get("", response_model=list[EmployeeOut])
 async def list_employees(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     include_inactive: bool = False,
 ):
-    tenant_id = get_tenant_id(request)
     stmt = select(Employee).where(Employee.tenant_id == tenant_id)
     if not include_inactive:
         stmt = stmt.where(Employee.is_active.is_(True))
@@ -91,8 +87,11 @@ async def list_employees(
 
 
 @router.get("/{employee_id}", response_model=EmployeeOut)
-async def get_employee(employee_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def get_employee(
+    employee_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     employee = await db.scalar(
         select(Employee).where(Employee.id == employee_id, Employee.tenant_id == tenant_id)
     )
@@ -105,10 +104,9 @@ async def get_employee(employee_id: int, request: Request, db: AsyncSession = De
 async def update_employee(
     employee_id: int,
     payload: EmployeeUpdate,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     employee = await db.scalar(
         select(Employee).where(Employee.id == employee_id, Employee.tenant_id == tenant_id)
     )
@@ -154,10 +152,9 @@ async def update_employee(
 async def add_employee_role(
     employee_id: int,
     payload: EmployeeRoleCreate,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     employee = await db.scalar(
         select(Employee).where(Employee.id == employee_id, Employee.tenant_id == tenant_id)
     )
@@ -191,8 +188,11 @@ async def add_employee_role(
 
 
 @router.get("/{employee_id}/roles", response_model=list[EmployeeRoleOut])
-async def list_employee_roles(employee_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def list_employee_roles(
+    employee_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     res = await db.execute(
         select(EmployeeRole).where(EmployeeRole.employee_id == employee_id, EmployeeRole.tenant_id == tenant_id)
     )
@@ -203,10 +203,9 @@ async def list_employee_roles(employee_id: int, request: Request, db: AsyncSessi
 async def delete_employee_role(
     employee_id: int,
     role_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     res = await db.execute(
         select(EmployeeRole).where(
             EmployeeRole.id == role_id,

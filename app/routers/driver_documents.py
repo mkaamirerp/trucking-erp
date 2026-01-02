@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,24 +16,17 @@ from app.schemas.driver_documents import (
     DriverDocumentOut,
     DriverDocumentFileOut,
 )
+from app.deps.tenant import require_tenant
 
 router = APIRouter(tags=["Driver Documents"])
-
-
-def get_tenant_id(request: Request) -> int:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=401, detail="Tenant context missing")
-    return int(tenant_id)
 
 
 @router.post("/driver-documents", response_model=DriverDocumentOut)
 async def create_driver_document(
     payload: DriverDocumentCreate,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     # Enforce single current CDL/DRIVER_LICENSE per driver
     if payload.doc_type in {"CDL", "DRIVER_LICENSE"} and payload.is_current:
         await db.execute(
@@ -58,10 +51,9 @@ async def create_driver_document(
 async def create_driver_document_for_driver(
     driver_id: int,
     payload: DriverDocumentCreatePath,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     # Enforce single current CDL/DRIVER_LICENSE per driver
     if payload.doc_type in {"CDL", "DRIVER_LICENSE"} and payload.is_current:
         await db.execute(
@@ -94,12 +86,11 @@ async def _list_docs_for_driver(
 
 @router.get("/driver-documents", response_model=list[DriverDocumentOut])
 async def list_driver_documents(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     driver_id: int | None = Query(None),
     include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     if driver_id is None:
         raise HTTPException(status_code=404, detail="Driver id is required")
     return await _list_docs_for_driver(db, tenant_id, driver_id, include_inactive)
@@ -108,22 +99,20 @@ async def list_driver_documents(
 @router.get("/driver-documents/{driver_id}", response_model=list[DriverDocumentOut])
 async def list_driver_documents_by_path(
     driver_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     return await _list_docs_for_driver(db, tenant_id, driver_id, include_inactive)
 
 
 @router.post("/driver-documents/{document_id}/deactivate", response_model=DriverDocumentOut)
 async def deactivate_driver_document(
     document_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     reason: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     res = await db.execute(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)
     )
@@ -146,11 +135,10 @@ async def deactivate_driver_document(
 @router.post("/driver-documents/{document_id}/files", response_model=DriverDocumentFileOut)
 async def upload_driver_document_file(
     document_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     res = await db.execute(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)
     )
@@ -182,11 +170,10 @@ async def upload_driver_document_file(
 @router.get("/driver-documents/{document_id}/files", response_model=list[DriverDocumentFileOut])
 async def list_driver_document_files(
     document_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     include_inactive: bool = Query(False),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     # Ensure document belongs to tenant
     doc = await db.scalar(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)
@@ -207,11 +194,10 @@ async def list_driver_document_files(
 async def deactivate_driver_document_file(
     document_id: int,
     file_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     reason: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     res_doc = await db.execute(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)
     )
@@ -223,6 +209,7 @@ async def deactivate_driver_document_file(
         select(DriverDocumentFile).where(
             DriverDocumentFile.id == file_id,
             DriverDocumentFile.driver_document_id == document_id,
+            DriverDocumentFile.tenant_id == tenant_id,
         )
     )
     doc_file = res.scalar_one_or_none()

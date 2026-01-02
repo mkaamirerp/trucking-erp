@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, case, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
+from app.dependencies.authz import require_tenant_admin
+from app.deps.tenant import require_tenant
+from app.deps.tenant_status import require_active_tenant
 from app.models.driver import Driver
 from app.models.payroll import PayEntry, PayPeriod, PayProfile
-from app.dependencies.authz import require_tenant_admin
 from app.schemas.payroll import (
     PAY_PERIOD_STATUSES,
     PayDriverSummary,
@@ -27,14 +30,13 @@ from app.schemas.payroll import (
     PayProfileUpdate,
 )
 
-router = APIRouter(prefix="/api/v1/payroll", tags=["Payroll"])
+router = APIRouter(
+    prefix="/api/v1/payroll",
+    tags=["Payroll"],
+    dependencies=[Depends(require_active_tenant)],
+)
 
-
-def get_tenant_id(request: Request) -> int:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context missing")
-    return int(tenant_id)
+logger = logging.getLogger(__name__)
 
 
 def payroll_error(detail: str, code: str, status_code: int) -> HTTPException:
@@ -63,8 +65,11 @@ async def _pay_period_overlap_exists(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_tenant_admin)],
 )
-async def create_pay_period(payload: PayPeriodCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def create_pay_period(
+    payload: PayPeriodCreate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     if await _pay_period_overlap_exists(db, tenant_id, payload.start_date, payload.end_date):
         raise payroll_error("Pay period overlaps an existing period", "PAYROLL_PERIOD_OVERLAP", status.HTTP_409_CONFLICT)
 
@@ -83,11 +88,10 @@ async def create_pay_period(payload: PayPeriodCreate, request: Request, db: Asyn
 
 @router.get("/pay-periods", response_model=list[PayPeriodOut])
 async def list_pay_periods(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     status_filter: str | None = Query(default=None, alias="status"),
 ):
-    tenant_id = get_tenant_id(request)
     stmt = select(PayPeriod).where(PayPeriod.tenant_id == tenant_id)
     if status_filter:
         status_val = status_filter.upper()
@@ -109,16 +113,21 @@ async def _get_pay_period_or_404(db: AsyncSession, tenant_id: int, pay_period_id
 
 
 @router.get("/pay-periods/{pay_period_id}", response_model=PayPeriodOut)
-async def get_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def get_pay_period(
+    pay_period_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     return await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 
 
 @router.patch("/pay-periods/{pay_period_id}", response_model=PayPeriodOut)
 async def update_pay_period(
-    pay_period_id: int, payload: PayPeriodUpdate, request: Request, db: AsyncSession = Depends(get_db)
+    pay_period_id: int,
+    payload: PayPeriodUpdate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 
     if period.status == "CLOSED":
@@ -147,8 +156,11 @@ async def update_pay_period(
     response_model=PayPeriodOut,
     dependencies=[Depends(require_tenant_admin)],
 )
-async def open_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def open_pay_period(
+    pay_period_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
     if period.status != "CLOSED":
         raise payroll_error("Only closed periods can be re-opened", "PAYROLL_BAD_STATUS", status.HTTP_409_CONFLICT)
@@ -165,14 +177,15 @@ async def open_pay_period(pay_period_id: int, request: Request, db: AsyncSession
     response_model=PayPeriodOut,
     dependencies=[Depends(require_tenant_admin)],
 )
-async def close_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
-    async with db.begin():
-        period = (
-            await db.execute(
-                select(PayPeriod).where(PayPeriod.id == pay_period_id, PayPeriod.tenant_id == tenant_id).with_for_update()
-            )
-        ).scalar_one_or_none()
+async def close_pay_period(
+    pay_period_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        period = await db.scalar(
+            select(PayPeriod).where(PayPeriod.id == pay_period_id, PayPeriod.tenant_id == tenant_id).with_for_update()
+        )
         if not period:
             raise payroll_error("Pay period not found", "PAYROLL_PERIOD_NOT_FOUND", status.HTTP_404_NOT_FOUND)
         if period.status == "CLOSED":
@@ -181,8 +194,14 @@ async def close_pay_period(pay_period_id: int, request: Request, db: AsyncSessio
             raise payroll_error("Only open periods can be closed", "PAYROLL_BAD_STATUS", status.HTTP_409_CONFLICT)
         period.status = "CLOSED"
         period.closed_at = datetime.now(timezone.utc)
-    await db.refresh(period)
-    return period
+        await db.commit()
+        await db.refresh(period)
+        return period
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("close_pay_period_failed pay_period_id=%s tenant_id=%s", pay_period_id, tenant_id)
+        raise payroll_error("Close pay period failed", "PAYROLL_CLOSE_ERROR", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
 
 
 # ---- Pay Profiles ----
@@ -216,8 +235,11 @@ async def _profile_overlap_exists(
 
 
 @router.post("/pay-profiles", response_model=PayProfileOut, status_code=status.HTTP_201_CREATED)
-async def create_pay_profile(payload: PayProfileCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def create_pay_profile(
+    payload: PayProfileCreate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     await _get_driver_or_404(db, tenant_id, payload.driver_id)
 
     if await _profile_overlap_exists(
@@ -249,12 +271,11 @@ async def create_pay_profile(payload: PayProfileCreate, request: Request, db: As
 
 @router.get("/pay-profiles", response_model=list[PayProfileOut])
 async def list_pay_profiles(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     driver_id: int | None = None,
     include_inactive: bool = False,
 ):
-    tenant_id = get_tenant_id(request)
     stmt = select(PayProfile).where(PayProfile.tenant_id == tenant_id)
     if driver_id is not None:
         stmt = stmt.where(PayProfile.driver_id == driver_id)
@@ -273,16 +294,21 @@ async def _get_pay_profile_or_404(db: AsyncSession, tenant_id: int, profile_id: 
 
 
 @router.get("/pay-profiles/{profile_id}", response_model=PayProfileOut)
-async def get_pay_profile(profile_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def get_pay_profile(
+    profile_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     return await _get_pay_profile_or_404(db, tenant_id, profile_id)
 
 
 @router.patch("/pay-profiles/{profile_id}", response_model=PayProfileOut)
 async def update_pay_profile(
-    profile_id: int, payload: PayProfileUpdate, request: Request, db: AsyncSession = Depends(get_db)
+    profile_id: int,
+    payload: PayProfileUpdate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     profile = await _get_pay_profile_or_404(db, tenant_id, profile_id)
 
     data = payload.model_dump(exclude_unset=True)
@@ -309,8 +335,11 @@ async def update_pay_profile(
 
 
 @router.post("/pay-profiles/{profile_id}/deactivate", response_model=PayProfileOut)
-async def deactivate_pay_profile(profile_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def deactivate_pay_profile(
+    profile_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     profile = await _get_pay_profile_or_404(db, tenant_id, profile_id)
     if not profile.is_active:
         return profile
@@ -354,8 +383,11 @@ async def _get_pay_entry_or_404(db: AsyncSession, tenant_id: int, entry_id: int)
 
 
 @router.post("/pay-entries", response_model=PayEntryOut, status_code=status.HTTP_201_CREATED)
-async def create_pay_entry(payload: PayEntryCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def create_pay_entry(
+    payload: PayEntryCreate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     period = await _get_pay_period_or_404(db, tenant_id, payload.pay_period_id)
     if period.status == "CLOSED":
         raise payroll_error("Cannot add entries to a closed period", "PAYROLL_PERIOD_CLOSED", status.HTTP_409_CONFLICT)
@@ -422,13 +454,12 @@ async def create_pay_entry(payload: PayEntryCreate, request: Request, db: AsyncS
 
 @router.get("/pay-entries", response_model=list[PayEntryOut])
 async def list_pay_entries(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     pay_period_id: int | None = Query(default=None),
     driver_id: int | None = None,
     include_inactive: bool = False,
 ):
-    tenant_id = get_tenant_id(request)
     if pay_period_id is None:
         raise payroll_error("pay_period_id is required", "PAYROLL_BAD_REQUEST", status.HTTP_400_BAD_REQUEST)
     stmt = select(PayEntry).where(PayEntry.tenant_id == tenant_id, PayEntry.pay_period_id == pay_period_id)
@@ -443,9 +474,11 @@ async def list_pay_entries(
 
 @router.patch("/pay-entries/{entry_id}", response_model=PayEntryOut)
 async def update_pay_entry(
-    entry_id: int, payload: PayEntryUpdate, request: Request, db: AsyncSession = Depends(get_db)
+    entry_id: int,
+    payload: PayEntryUpdate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = get_tenant_id(request)
     entry = await _get_pay_entry_or_404(db, tenant_id, entry_id)
     period = await _get_pay_period_or_404(db, tenant_id, entry.pay_period_id)
     if period.status == "CLOSED":
@@ -471,8 +504,11 @@ async def update_pay_entry(
 
 
 @router.post("/pay-entries/{entry_id}/void", response_model=PayEntryOut)
-async def void_pay_entry(entry_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def void_pay_entry(
+    entry_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     entry = await _get_pay_entry_or_404(db, tenant_id, entry_id)
     if not entry.is_active:
         return entry
@@ -490,8 +526,11 @@ async def void_pay_entry(entry_id: int, request: Request, db: AsyncSession = Dep
 
 # ---- Summary ----
 @router.get("/pay-periods/{pay_period_id}/summary", response_model=PayPeriodSummary)
-async def summarize_pay_period(pay_period_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def summarize_pay_period(
+    pay_period_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 
     amount_expr = func.coalesce(PayEntry.amount, PayEntry.quantity * PayEntry.rate_amount, 0)

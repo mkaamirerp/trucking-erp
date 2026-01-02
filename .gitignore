@@ -20,3 +20,7 @@ venv/
 alembic/versions/__pycache__/
 storage/
 scripts/
+
+# Python
+__pycache__/
+*.pyc

@@ -4,8 +4,9 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.dependencies.authz import require_tenant_admin
+from app.deps.tenant import require_tenant
+from app.deps.tenant_status import require_active_tenant
 from app.models.driver import Driver
 from app.models.payee import (
     ChargeCategory,
@@ -35,14 +38,13 @@ from app.schemas.pay_runs import (
     PayRunSummary,
 )
 
-router = APIRouter(prefix="/api/v1/payroll", tags=["Payroll Runs"])
+router = APIRouter(
+    prefix="/api/v1/payroll",
+    tags=["Payroll Runs"],
+    dependencies=[Depends(require_active_tenant)],
+)
 
-
-def get_tenant_id(request: Request) -> int:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context missing")
-    return int(tenant_id)
+logger = logging.getLogger(__name__)
 
 
 def run_error(detail: str, code: str, status_code: int) -> HTTPException:
@@ -87,7 +89,7 @@ async def _get_run(db: AsyncSession, tenant_id: int, run_id: int) -> PayRun:
 
 @router.get("/pay-runs", response_model=list[PayRunSummary])
 async def list_pay_runs(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     pay_period_id: Optional[int] = Query(default=None),
     status_filter: Optional[str] = Query(default=None, alias="status"),
@@ -96,7 +98,6 @@ async def list_pay_runs(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    tenant_id = get_tenant_id(request)
     stmt = select(PayRun).where(PayRun.tenant_id == tenant_id)
     if pay_period_id is not None:
         stmt = stmt.where(PayRun.pay_period_id == pay_period_id)
@@ -117,8 +118,11 @@ async def list_pay_runs(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_tenant_admin)],
 )
-async def create_pay_run(payload: PayRunCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def create_pay_run(
+    payload: PayRunCreate,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     period = await _get_period(db, tenant_id, payload.pay_period_id)
     pay_document_type = (payload.pay_document_type or "PAYSTUB").upper()
     worker_type_snapshot = (payload.worker_type_snapshot or "EMPLOYEE_DRIVER").upper()
@@ -160,9 +164,12 @@ async def create_pay_run(payload: PayRunCreate, request: Request, db: AsyncSessi
     response_model=PayRunGenerateResponse,
     dependencies=[Depends(require_tenant_admin)],
 )
-async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
-    async with db.begin():
+async def generate_pay_run(
+    run_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
         run = await db.scalar(select(PayRun).where(PayRun.id == run_id, PayRun.tenant_id == tenant_id).with_for_update())
         if not run:
             raise run_error("Pay run not found", "PAYRUN_NOT_FOUND", status.HTTP_404_NOT_FOUND)
@@ -191,7 +198,9 @@ async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
         driver_ids = {e.driver_id for e in entries_list}
         driver_map = {}
         if driver_ids:
-            drivers_res = await db.execute(select(Driver).where(Driver.id.in_(driver_ids)))
+            drivers_res = await db.execute(
+                select(Driver).where(Driver.id.in_(driver_ids), Driver.tenant_id == tenant_id)
+            )
             driver_objs = list(drivers_res.scalars().all())
             driver_map = {d.id: d for d in driver_objs}
 
@@ -236,7 +245,13 @@ async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
             db.add(item)
             items.append(item)
         run.status = PayRunStatus.GENERATED
-    return PayRunGenerateResponse(pay_run_id=run.id, item_count=len(items))
+        await db.commit()
+        return PayRunGenerateResponse(pay_run_id=run.id, item_count=len(items))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("generate_pay_run_failed run_id=%s tenant_id=%s", run_id, tenant_id)
+        raise run_error("Generate pay run failed", "PAYRUN_GENERATE_ERROR", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
 
 
 @router.post(
@@ -244,9 +259,12 @@ async def generate_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
     response_model=PayRunFinalizeResponse,
     dependencies=[Depends(require_tenant_admin)],
 )
-async def finalize_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
-    async with db.begin():
+async def finalize_pay_run(
+    run_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
         run = await db.scalar(select(PayRun).where(PayRun.id == run_id, PayRun.tenant_id == tenant_id).with_for_update())
         if not run:
             raise run_error("Pay run not found", "PAYRUN_NOT_FOUND", status.HTTP_404_NOT_FOUND)
@@ -275,12 +293,21 @@ async def finalize_pay_run(run_id: int, request: Request, db: AsyncSession = Dep
         }
         run.calculation_snapshot_json = totals_snapshot
 
-    return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=totals_snapshot)
+        await db.commit()
+        return PayRunFinalizeResponse(pay_run_id=run.id, status=run.status, totals_snapshot=totals_snapshot)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("finalize_pay_run_failed run_id=%s tenant_id=%s", run_id, tenant_id)
+        raise run_error("Finalize pay run failed", "PAYRUN_FINALIZE_ERROR", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
 
 
 @router.get("/pay-runs/{run_id}", response_model=PayRunDetail)
-async def get_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def get_pay_run(
+    run_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     run = await _get_run(db, tenant_id, run_id)
     if run.calculation_snapshot_json is None:
         items_res = await db.execute(select(PayRunItem).where(PayRunItem.pay_run_id == run.id))
@@ -296,8 +323,11 @@ async def get_pay_run(run_id: int, request: Request, db: AsyncSession = Depends(
 
 
 @router.get("/pay-runs/{run_id}/payees", response_model=list[PayRunPayeeRow])
-async def list_pay_run_payees(run_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def list_pay_run_payees(
+    run_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     await _get_run(db, tenant_id, run_id)
 
     overrides_exists = await db.scalar(
@@ -343,11 +373,10 @@ async def list_pay_run_payees(run_id: int, request: Request, db: AsyncSession = 
 @router.get("/pay-runs/{run_id}/items", response_model=list[PayRunItemOut])
 async def list_pay_run_items(
     run_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     payee_id: Optional[int] = Query(default=None),
 ):
-    tenant_id = get_tenant_id(request)
     await _get_run(db, tenant_id, run_id)
     stmt = (
         select(PayRunItem, ChargeCategory.code)
@@ -381,7 +410,7 @@ async def list_pay_run_items(
 
 @router.get("/documents", response_model=list[PayDocumentSummary])
 async def list_pay_documents(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
     pay_period_id: Optional[int] = Query(default=None),
     payee_id: Optional[int] = Query(default=None),
@@ -389,7 +418,6 @@ async def list_pay_documents(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    tenant_id = get_tenant_id(request)
     stmt = (
         select(PayDocument)
         .join(PayRun, PayRun.id == PayDocument.pay_run_id)
@@ -407,8 +435,11 @@ async def list_pay_documents(
 
 
 @router.get("/documents/{document_id}/download")
-async def download_pay_document(document_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    tenant_id = get_tenant_id(request)
+async def download_pay_document(
+    document_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_db),
+):
     doc = await db.scalar(
         select(PayDocument)
         .join(PayRun, PayRun.id == PayDocument.pay_run_id)

@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header
+from app.deps.tenant import require_tenant
 
 router = APIRouter(prefix="/api/v1", tags=["Auth"])
 
 
 @router.get("/me")
 async def get_me(
-    request: Request,
     x_tenant_roles: str | None = Header(None),
     x_user_id: str | None = Header(None),
+    tenant_id: int = Depends(require_tenant),
 ) -> dict:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context missing")
-
     roles = [r.strip().upper() for r in (x_tenant_roles or "").split(",") if r.strip()]
     user_id: int | None = None
     if x_user_id:

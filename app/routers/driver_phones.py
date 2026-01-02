@@ -1,31 +1,24 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.driver_phone import DriverPhone
 from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
+from app.deps.tenant import require_tenant
 
 router = APIRouter(prefix="/driver-phones", tags=["Driver Phones"])
 
 
-def resolve_tenant_id(request: Request) -> int:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(status_code=401, detail="Tenant context missing")
-    return int(tenant_id)
-
-
 @router.get("", response_model=list[DriverPhoneRead])
 async def list_driver_phones(
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     driver_id: int | None = None,
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = resolve_tenant_id(request)
     stmt = select(DriverPhone).where(DriverPhone.tenant_id == tenant_id)
 
     if driver_id is not None:
@@ -42,10 +35,9 @@ async def list_driver_phones(
 @router.post("", response_model=DriverPhoneRead)
 async def create_driver_phone(
     payload: DriverPhoneCreate,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = resolve_tenant_id(request)
     phone = DriverPhone(**payload.model_dump(), tenant_id=tenant_id)
     db.add(phone)
     await db.commit()
@@ -56,11 +48,10 @@ async def create_driver_phone(
 @router.delete("/{phone_id}", response_model=DriverPhoneRead)
 async def deactivate_driver_phone(
     phone_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     reason: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = resolve_tenant_id(request)
     res = await db.execute(
         select(DriverPhone).where(DriverPhone.id == phone_id, DriverPhone.tenant_id == tenant_id)
     )
@@ -83,10 +74,9 @@ async def deactivate_driver_phone(
 @router.post("/{phone_id}/reactivate", response_model=DriverPhoneRead)
 async def reactivate_driver_phone(
     phone_id: int,
-    request: Request,
+    tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = resolve_tenant_id(request)
     res = await db.execute(
         select(DriverPhone).where(DriverPhone.id == phone_id, DriverPhone.tenant_id == tenant_id)
     )

@@ -44,6 +44,45 @@ count_array() {
   echo "$json" | jq 'length'
 }
 
+PYTHON="${PYTHON:-venv/bin/python}"
+
+ensure_tenant() {
+  local slug="$1" name="$2"
+  local tenants id
+  tenants="$(curl_json "$API/platform/tenants")"
+  id="$(echo "$tenants" | jq -r --arg slug "$slug" '.[] | select(.slug==$slug) | .id' | head -n1)"
+  if [[ -n "$id" && "$id" != "null" ]]; then
+    echo "$id"
+    return
+  fi
+  local resp
+  resp="$(curl_json -X POST "$API/platform/tenants" -H "Content-Type: application/json" -d "{\"company_name\":\"$name\",\"slug\":\"$slug\"}")"
+  echo "$resp" | jq -r '.id'
+}
+
+set_tenant_status() {
+  local slug="$1" status="$2"
+  "$PYTHON" - <<PY
+import asyncio
+from sqlalchemy import select
+from app.core.database import AsyncSessionLocal
+from app.models.platform import PlatformTenant
+
+slug = "$slug"
+status = "$status"
+
+async def main():
+    async with AsyncSessionLocal() as session:
+        tenant = await session.scalar(select(PlatformTenant).where(PlatformTenant.slug == slug))
+        if not tenant:
+            return
+        tenant.status = status
+        await session.commit()
+
+asyncio.run(main())
+PY
+}
+
 # ========== start ==========
 need_cmd jq
 need_cmd curl
@@ -65,12 +104,45 @@ health_json="$(curl_json "$API/health")"
   echo "$health_json" | jq -e '.status=="ok"' >/dev/null || { fail "Health failed"; exit 1; }
   ok "Health OK"
 
+subhr
+echo "1b) Tenant enforcement: drivers without tenant header should fail (400)"
+code_no_tenant="$(http_code "$API/drivers")"
+echo "GET /drivers (no tenant) => HTTP $code_no_tenant"
+[[ "$code_no_tenant" == "400" ]] && ok "Missing tenant rejected" || fail "Expected 400 for missing tenant"
+
 # ---------- 2) OpenAPI ----------
 hr
 echo "2) OpenAPI sanity"
 code_openapi="$(http_code "$BASE_URL/openapi.json")"
 echo "GET /openapi.json => HTTP $code_openapi"
 [[ "$code_openapi" == "200" ]] && ok "OpenAPI reachable" || warn "OpenAPI not reachable (not fatal)"
+
+# ---------- 2b) Tenant status enforcement ----------
+hr
+echo "2b) Tenant status enforcement (PROVISIONING vs ACTIVE)"
+PROV_ID="$(ensure_tenant "smoke-provision" "Smoke Provision Tenant")"
+ACTIVE_ID="$(ensure_tenant "smoke-active" "Smoke Active Tenant")"
+set_tenant_status "smoke-provision" "PROVISIONING"
+set_tenant_status "smoke-active" "ACTIVE"
+echo "Provisioning tenant id=$PROV_ID | Active tenant id=$ACTIVE_ID"
+
+echo "Provisioning tenant -> onboarding (allowed)"
+code_prov_onboard="$(http_code -X POST "$API/onboarding/driver-license/ocr" -H "Content-Type: application/json" -H "X-Tenant-ID: ${PROV_ID}" -d '{"doc_image":"placeholder"}')"
+echo "POST onboarding/ocr => HTTP $code_prov_onboard (expect 200)"
+[[ "$code_prov_onboard" == "200" ]] && ok "Provisioning onboarding allowed" || warn "Provisioning onboarding unexpected code $code_prov_onboard"
+
+echo "Provisioning tenant -> payroll (should be blocked 403)"
+code_prov_payroll="$(http_code -H "X-Tenant-ID: ${PROV_ID}" "$API/payroll/pay-periods")"
+echo "GET payroll/pay-periods => HTTP $code_prov_payroll (expect 403)"
+[[ "$code_prov_payroll" == "403" ]] && ok "Provisioning payroll blocked" || warn "Provisioning payroll not blocked (code $code_prov_payroll)"
+
+echo "Active tenant -> payroll (should be allowed 200)"
+code_active_payroll="$(http_code -H "X-Tenant-ID: ${ACTIVE_ID}" "$API/payroll/pay-periods")"
+echo "GET payroll/pay-periods (active) => HTTP $code_active_payroll (expect 200)"
+[[ "$code_active_payroll" == "200" ]] && ok "Active payroll allowed" || warn "Active payroll unexpected code $code_active_payroll"
+
+# Ensure primary smoke tenant is ACTIVE so downstream tests run
+set_tenant_status "test-co" "ACTIVE"
 
 # ---------- 3) Drivers default ----------
 hr
