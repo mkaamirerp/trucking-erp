@@ -9,10 +9,10 @@ from sqlalchemy import and_, case, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from app.core.database import get_db
 from app.dependencies.authz import require_tenant_admin
 from app.deps.tenant import require_tenant
 from app.deps.tenant_status import require_active_tenant
+from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
 from app.models.payroll import PayEntry, PayPeriod, PayProfile
 from app.schemas.payroll import (
@@ -68,7 +68,7 @@ async def _pay_period_overlap_exists(
 async def create_pay_period(
     payload: PayPeriodCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     if await _pay_period_overlap_exists(db, tenant_id, payload.start_date, payload.end_date):
         raise payroll_error("Pay period overlaps an existing period", "PAYROLL_PERIOD_OVERLAP", status.HTTP_409_CONFLICT)
@@ -89,7 +89,7 @@ async def create_pay_period(
 @router.get("/pay-periods", response_model=list[PayPeriodOut])
 async def list_pay_periods(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     status_filter: str | None = Query(default=None, alias="status"),
 ):
     stmt = select(PayPeriod).where(PayPeriod.tenant_id == tenant_id)
@@ -116,7 +116,7 @@ async def _get_pay_period_or_404(db: AsyncSession, tenant_id: int, pay_period_id
 async def get_pay_period(
     pay_period_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     return await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 
@@ -126,7 +126,7 @@ async def update_pay_period(
     pay_period_id: int,
     payload: PayPeriodUpdate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 
@@ -159,7 +159,7 @@ async def update_pay_period(
 async def open_pay_period(
     pay_period_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
     if period.status != "CLOSED":
@@ -180,7 +180,7 @@ async def open_pay_period(
 async def close_pay_period(
     pay_period_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     try:
         period = await db.scalar(
@@ -238,7 +238,7 @@ async def _profile_overlap_exists(
 async def create_pay_profile(
     payload: PayProfileCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     await _get_driver_or_404(db, tenant_id, payload.driver_id)
 
@@ -272,7 +272,7 @@ async def create_pay_profile(
 @router.get("/pay-profiles", response_model=list[PayProfileOut])
 async def list_pay_profiles(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     driver_id: int | None = None,
     include_inactive: bool = False,
 ):
@@ -297,7 +297,7 @@ async def _get_pay_profile_or_404(db: AsyncSession, tenant_id: int, profile_id: 
 async def get_pay_profile(
     profile_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     return await _get_pay_profile_or_404(db, tenant_id, profile_id)
 
@@ -307,7 +307,7 @@ async def update_pay_profile(
     profile_id: int,
     payload: PayProfileUpdate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     profile = await _get_pay_profile_or_404(db, tenant_id, profile_id)
 
@@ -338,7 +338,7 @@ async def update_pay_profile(
 async def deactivate_pay_profile(
     profile_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     profile = await _get_pay_profile_or_404(db, tenant_id, profile_id)
     if not profile.is_active:
@@ -386,7 +386,7 @@ async def _get_pay_entry_or_404(db: AsyncSession, tenant_id: int, entry_id: int)
 async def create_pay_entry(
     payload: PayEntryCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     period = await _get_pay_period_or_404(db, tenant_id, payload.pay_period_id)
     if period.status == "CLOSED":
@@ -455,7 +455,7 @@ async def create_pay_entry(
 @router.get("/pay-entries", response_model=list[PayEntryOut])
 async def list_pay_entries(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     pay_period_id: int | None = Query(default=None),
     driver_id: int | None = None,
     include_inactive: bool = False,
@@ -477,7 +477,7 @@ async def update_pay_entry(
     entry_id: int,
     payload: PayEntryUpdate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     entry = await _get_pay_entry_or_404(db, tenant_id, entry_id)
     period = await _get_pay_period_or_404(db, tenant_id, entry.pay_period_id)
@@ -507,7 +507,7 @@ async def update_pay_entry(
 async def void_pay_entry(
     entry_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     entry = await _get_pay_entry_or_404(db, tenant_id, entry_id)
     if not entry.is_active:
@@ -529,7 +529,7 @@ async def void_pay_entry(
 async def summarize_pay_period(
     pay_period_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     period = await _get_pay_period_or_404(db, tenant_id, pay_period_id)
 

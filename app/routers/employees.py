@@ -5,7 +5,6 @@ from datetime import date
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.models.employee import Employee
 from app.models.employee_role import EmployeeRole
 from app.models.payee import Payee
@@ -13,6 +12,7 @@ from app.models.enums import WorkerType, PayeeType
 from app.schemas.employee import EmployeeCreate, EmployeeOut, EmployeeUpdate
 from app.schemas.employee_role import EmployeeRoleCreate, EmployeeRoleOut, ROLE_CHOICES
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
 
 router = APIRouter(prefix="/api/v1/employees", tags=["Employees"])
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1/employees", tags=["Employees"])
 async def create_employee(
     payload: EmployeeCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     employee_number = payload.employee_number or payload.employee_code
     if not employee_number:
@@ -76,7 +76,7 @@ async def create_employee(
 @router.get("", response_model=list[EmployeeOut])
 async def list_employees(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     include_inactive: bool = False,
 ):
     stmt = select(Employee).where(Employee.tenant_id == tenant_id)
@@ -90,7 +90,7 @@ async def list_employees(
 async def get_employee(
     employee_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     employee = await db.scalar(
         select(Employee).where(Employee.id == employee_id, Employee.tenant_id == tenant_id)
@@ -105,7 +105,7 @@ async def update_employee(
     employee_id: int,
     payload: EmployeeUpdate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     employee = await db.scalar(
         select(Employee).where(Employee.id == employee_id, Employee.tenant_id == tenant_id)
@@ -153,7 +153,7 @@ async def add_employee_role(
     employee_id: int,
     payload: EmployeeRoleCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     employee = await db.scalar(
         select(Employee).where(Employee.id == employee_id, Employee.tenant_id == tenant_id)
@@ -191,7 +191,7 @@ async def add_employee_role(
 async def list_employee_roles(
     employee_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res = await db.execute(
         select(EmployeeRole).where(EmployeeRole.employee_id == employee_id, EmployeeRole.tenant_id == tenant_id)
@@ -204,7 +204,7 @@ async def delete_employee_role(
     employee_id: int,
     role_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res = await db.execute(
         select(EmployeeRole).where(

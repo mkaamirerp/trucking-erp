@@ -1,4 +1,8 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from app.routers.fleet import router as fleet_router
 
 from app.core.config import settings
 from app.routers.health import router as health_router
@@ -16,6 +20,7 @@ from app.routers.me import router as me_router
 from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+logger = logging.getLogger("trucking_erp")
 app.add_middleware(
     TenantContextMiddleware,
     allow_paths=DEFAULT_ALLOW_PATHS,
@@ -26,6 +31,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(public_signup_router)
 app.include_router(platform_tenants_router)
 app.include_router(drivers_router, prefix="/api/v1")
+app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")
 app.include_router(driver_documents_router, prefix="/api/v1")
 app.include_router(onboarding_router)
@@ -34,6 +40,13 @@ app.include_router(meta_router)
 app.include_router(payroll_router)
 app.include_router(pay_runs_router)
 app.include_router(me_router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("unhandled_exception path=%s method=%s", request.url.path, request.method)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 # Optional: keep old root so bookmarks don't break
 @app.get("/", include_in_schema=False)

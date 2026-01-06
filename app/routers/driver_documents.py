@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.storage import save_driver_doc_upload_local
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
@@ -17,6 +16,7 @@ from app.schemas.driver_documents import (
     DriverDocumentFileOut,
 )
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
 
 router = APIRouter(tags=["Driver Documents"])
 
@@ -25,7 +25,7 @@ router = APIRouter(tags=["Driver Documents"])
 async def create_driver_document(
     payload: DriverDocumentCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     # Enforce single current CDL/DRIVER_LICENSE per driver
     if payload.doc_type in {"CDL", "DRIVER_LICENSE"} and payload.is_current:
@@ -52,7 +52,7 @@ async def create_driver_document_for_driver(
     driver_id: int,
     payload: DriverDocumentCreatePath,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     # Enforce single current CDL/DRIVER_LICENSE per driver
     if payload.doc_type in {"CDL", "DRIVER_LICENSE"} and payload.is_current:
@@ -89,7 +89,7 @@ async def list_driver_documents(
     tenant_id: int = Depends(require_tenant),
     driver_id: int | None = Query(None),
     include_inactive: bool = Query(False),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     if driver_id is None:
         raise HTTPException(status_code=404, detail="Driver id is required")
@@ -101,7 +101,7 @@ async def list_driver_documents_by_path(
     driver_id: int,
     tenant_id: int = Depends(require_tenant),
     include_inactive: bool = Query(False),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     return await _list_docs_for_driver(db, tenant_id, driver_id, include_inactive)
 
@@ -111,7 +111,7 @@ async def deactivate_driver_document(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
     reason: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res = await db.execute(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)
@@ -137,7 +137,7 @@ async def upload_driver_document_file(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res = await db.execute(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)
@@ -172,7 +172,7 @@ async def list_driver_document_files(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
     include_inactive: bool = Query(False),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     # Ensure document belongs to tenant
     doc = await db.scalar(
@@ -196,7 +196,7 @@ async def deactivate_driver_document_file(
     file_id: int,
     tenant_id: int = Depends(require_tenant),
     reason: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res_doc = await db.execute(
         select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.tenant_id == tenant_id)

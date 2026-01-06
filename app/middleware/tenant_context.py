@@ -150,9 +150,6 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     )
         except SQLAlchemyError as exc:  # schema drift or connectivity issue
             logger.warning("tenant_lookup_failed error=%s", exc)
-            # Fallback: accept provided id when DB lookup is unavailable
-            if tenant_id is not None:
-                return tenant_id
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Tenant lookup unavailable; retry later",
@@ -163,10 +160,10 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_403_FORBIDDEN, detail="Tenant inactive or not found"
             )
 
-        allowed_statuses = {"ACTIVE", "PROVISIONING"}
-        if row.status not in allowed_statuses:
+        if row.status != "ACTIVE" or row.db_status != "READY":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Tenant inactive or not found"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tenant not ready",
             )
 
         return int(row.id)

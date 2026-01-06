@@ -1,0 +1,108 @@
+set -euo pipefail
+
+FILE=""
+for f in docker-compose.yml compose.yml docker-compose.yaml compose.yaml; do
+  [ -f "$f" ] && FILE="$f" && break
+done
+[ -n "$FILE" ] || { echo "❌ No compose file found"; exit 1; }
+echo "== Using compose file: $FILE =="
+
+TS="$(date -u +%Y%m%d_%H%M%S)"
+cp -a "$FILE" "${FILE}.bak_${TS}"
+echo "✅ Backed up to ${FILE}.bak_${TS}"
+
+python3 - <<PY
+import sys, re
+from pathlib import Path
+
+path = Path("$FILE")
+txt = path.read_text()
+
+if "TENANT_DATABASE_URL" in txt:
+    print("✅ TENANT_DATABASE_URL already present (no change).")
+    sys.exit(0)
+
+lines = txt.splitlines(True)
+out = []
+in_api = False
+inserted = False
+
+def indent_of(s): return len(s) - len(s.lstrip(" "))
+
+for i, line in enumerate(lines):
+    out.append(line)
+
+    if re.match(r"^\\s*truckerp-api:\\s*$", line):
+        in_api = True
+
+    if in_api and re.match(r"^\\s{2}[^\\s].*:\\s*$", line) and not re.match(r"^\\s{2}truckerp-api:\\s*$", line):
+        in_api = False
+
+    if in_api and re.match(r"^\\s*environment:\\s*$", line):
+        base_indent = indent_of(line)
+        item_indent = " " * (base_indent + 2)
+
+        j = i + 1
+        while j < len(lines) and lines[j].strip() == "":
+            j += 1
+        next_line = lines[j] if j < len(lines) else ""
+
+        if next_line.lstrip().startswith("-"):
+            out.append(f"{item_indent}- TENANT_DATABASE_URL=postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/tenant_smoke_active\\n")
+        else:
+            out.append(f"{item_indent}TENANT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/tenant_smoke_active\\n")
+        inserted = True
+        break
+
+if not inserted:
+    print("❌ Could not find truckerp-api environment block to patch. No changes written.")
+    sys.exit(2)
+
+path.write_text("".join(out))
+print("✅ Patched TENANT_DATABASE_URL into compose.")
+PY
+
+echo
+echo "== Recreating truckerp-api =="
+docker compose -f "$FILE" up -d --force-recreate --no-deps truckerp-api
+
+echo
+echo "============================================================"
+echo "TENANT ROUTING SMOKE (docker-network)"
+echo "============================================================"
+
+docker run --rm --network truckerp_net alpine:3.20 sh -lc '
+  apk add --no-cache curl >/dev/null
+  api="http://truckerp-api:8000/api/v1"
+
+  hit() {
+    name="$1"; shift
+    code=$(curl -sS -o /tmp/body -w "%{http_code}" "$@")
+    echo "[$name] http_code=$code"
+    if [ "$code" -ge 400 ]; then
+      echo "--- body ---"; cat /tmp/body; echo; echo "------------"
+    fi
+    echo "$code"
+  }
+
+  c1=$(hit "Tenant OK  " -H "X-Tenant-ID: 1" "$api/drivers")
+  c2=$(hit "Tenant miss" "$api/drivers")
+  c3=$(hit "Tenant bad " -H "X-Tenant-ID: 999999" "$api/drivers")
+
+  echo
+  [ "$c1" = "200" ] && echo "✅ Tenant 1 => 200" || echo "❌ Tenant 1 expected 200 got $c1"
+  [ "$c2" = "400" ] && echo "✅ Missing header => 400" || echo "❌ Missing header expected 400 got $c2"
+  [ "$c3" = "403" ] && echo "✅ Invalid tenant => 403" || echo "❌ Invalid tenant expected 403 got $c3"
+
+  [ "$c1" = "200" ] && [ "$c2" = "400" ] && [ "$c3" = "403" ]
+' || {
+  echo
+  echo "============================================================"
+  echo "❌ Smoke failed — last API logs"
+  echo "============================================================"
+  docker logs --tail 250 truckerp-api || true
+  exit 1
+}
+
+echo
+echo "✅ All tenant routing checks passed."
