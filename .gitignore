@@ -1,26 +1,34 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-
-# Virtual environment
-venv/
+# =========================
+# Environment
+# =========================
 .env
+.env.*
+*.env
 
-# OS / Editor
-.DS_Store
+# =========================
+# Backups / temp
+# =========================
+*.bak
+*.tmp
+*=
+
+# =========================
+# Audit / diagnostics
+# =========================
+audit_*.txt
+*_inspect*.json
+
+# =========================
+# Internal scratch
+# =========================
+writing/
+exporting/
+transferring/
+naming/
+
+# =========================
+# Editor / OS
+# =========================
 .vscode/
 .idea/
-
-# Logs
-*.log
-
-# Alembic
-alembic/versions/__pycache__/
-storage/
-scripts/
-
-# Python
-__pycache__/
-*.pyc
+.DS_Store
