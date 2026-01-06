@@ -1,6 +1,6 @@
 # Database Schema Docs
 
-Generated: 2026-01-06T07:24:09Z
+Generated: 2026-01-06T07:25:42Z
 
 ## Included databases
 

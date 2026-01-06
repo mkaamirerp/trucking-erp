@@ -1,6 +1,6 @@
 # Schema: tenant_smoke_provision
 
-Generated: 2026-01-06T07:24:10Z
+Generated: 2026-01-06T07:25:42Z
 
 ## Tables
 

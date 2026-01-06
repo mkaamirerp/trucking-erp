@@ -1,6 +1,6 @@
 # Schema: trucking_erp
 
-Generated: 2026-01-06T07:24:10Z
+Generated: 2026-01-06T07:25:43Z
 
 ## Tables
 
