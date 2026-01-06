@@ -1,30 +1,25 @@
 # Schema: trucking_erp
 
-Generated: 2026-01-06T07:25:43Z
+- Generated (UTC): `2026-01-06 07:42:56Z`
+- Postgres container: `trucking_erp-truckerp-postgres-1`
 
-## Tables
-
-- `public.alembic_version`
-- `public.plan_features`
-- `public.plans`
-- `public.platform_audit_log`
-- `public.platform_tenant_members`
-- `public.platform_tenants`
-- `public.platform_users`
-- `public.tenant_subscriptions`
-
----
-
-## `public.alembic_version`
-
-**Primary Key:** `(version_num)`
-
-**Foreign Keys:**
-- _(none)_
+## alembic_version
 
 ### Columns
 
-| # | Column | Type | Boolean? | Nullable? | Default | Enum values |
-|---:|---|---|---|---|---|---|
-| 1 | `` | version_num |   | character varying(32) | ` ` | ||NO|||| |
+| Column | Type | Nullable | Default |
+|---|---|---:|---|
+| `version_num` | `character varying` | NO | `` |
+
+### Primary Key
+
+- `version_num`
+
+### Foreign Keys (Outbound)
+
+_None_
+
+### Referenced By
+
+_None_
 
