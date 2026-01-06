@@ -1,50 +1,25 @@
 # Schema: tenant_smoke_provision
 
-Generated: 2026-01-06T07:25:42Z
+- Generated (UTC): `2026-01-06 07:42:56Z`
+- Postgres container: `trucking_erp-truckerp-postgres-1`
 
-## Tables
-
-- `public.alembic_version`
-- `public.audit_log`
-- `public.driver_document_files`
-- `public.driver_documents`
-- `public.driver_phones`
-- `public.driver_phones_old`
-- `public.drivers`
-- `public.employee_roles`
-- `public.employees`
-- `public.pay_entries`
-- `public.pay_periods`
-- `public.pay_profiles`
-- `public.pay_run_items`
-- `public.pay_runs`
-- `public.permissions`
-- `public.plan_features`
-- `public.plans`
-- `public.platform_audit_log`
-- `public.platform_tenant_members`
-- `public.platform_tenants`
-- `public.platform_users`
-- `public.role_permissions`
-- `public.roles`
-- `public.tenant_subscriptions`
-- `public.tenants`
-- `public.trucks`
-- `public.user_roles`
-- `public.users`
-
----
-
-## `public.alembic_version`
-
-**Primary Key:** `(version_num)`
-
-**Foreign Keys:**
-- _(none)_
+## alembic_version
 
 ### Columns
 
-| # | Column | Type | Boolean? | Nullable? | Default | Enum values |
-|---:|---|---|---|---|---|---|
-| 1 | `` | version_num |   | character varying(255) | ` ` | ||NO|||| |
+| Column | Type | Nullable | Default |
+|---|---|---:|---|
+| `version_num` | `character varying` | NO | `` |
+
+### Primary Key
+
+- `version_num`
+
+### Foreign Keys (Outbound)
+
+_None_
+
+### Referenced By
+
+_None_
 
