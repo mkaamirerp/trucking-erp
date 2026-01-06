@@ -32,3 +32,23 @@ naming/
 .vscode/
 .idea/
 .DS_Store
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Logs ---
+*.log
+
+# --- Node / web ---
+node_modules/
+
+# --- Local scratch dirs (do not commit) ---
+exporting/
+transferring/
+naming/
+writing/
+storage/
+web/
+scripts/
