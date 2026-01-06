@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:15.7-alpine
+    container_name: shared-postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: test_password_123
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    container_name: trucking_api
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:test_password_123@db:5432/postgres
+    volumes:
+      - .:/app
+
+volumes:
+  postgres_data:

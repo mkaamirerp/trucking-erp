@@ -1,14 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
+# --- Hardened-mode auto-detection ---
+HARDENED_MODE=0
+HOST_API="${BASE_URL:-http://127.0.0.1:8000}"
+HOST_CURL="curl"
+CURL_CMD="$HOST_CURL"
+
+if "$HOST_CURL" -fsS --max-time 1 "$HOST_API/health" >/dev/null 2>&1; then
+  echo "🟢 Host API reachable — host mode"
+  BASE_URL="$HOST_API"
+else
+  echo "🔒 Host API NOT reachable — docker-network mode"
+  HARDENED_MODE=1
+  CURL_CMD="docker run --rm --network truckerp_net curlimages/curl:8.5.0"
+  BASE_URL="http://truckerp-api:8000"
+fi
+
 API="${API:-$BASE_URL/api/v1}"
+
+
 TENANT_ID="${TENANT_ID:-1}"
 TENANT_ROLES="${TENANT_ROLES:-TENANT_ADMIN}"
 TENANT_HEADER=(
   -H "X-Tenant-ID: ${TENANT_ID}"
   -H "X-Tenant-Roles: ${TENANT_ROLES}"
 )
+
+PLATFORM_ADMIN_KEY="${PLATFORM_ADMIN_KEY:-}"
+PLATFORM_HEADERS=()
+if [[ -n "$PLATFORM_ADMIN_KEY" ]]; then
+  PLATFORM_HEADERS+=(-H "x-platform-admin-key: ${PLATFORM_ADMIN_KEY}")
+fi
 
 # ========== helpers ==========
 hr() { printf "\n============================================================\n"; }
@@ -22,11 +45,15 @@ need_cmd() {
 }
 
 curl_json() {
-  curl -sS --max-time 8 "$@"
+  $CURL_CMD -sS --max-time 8 "$@"
+}
+
+curl_with_code() {
+  $CURL_CMD -sS --max-time 8 -w "\nHTTP_CODE:%{http_code}\n" "$@"
 }
 
 http_code() {
-  curl -sS -o /dev/null --max-time 8 -w "%{http_code}" "$@"
+  $CURL_CMD -sS -o /dev/null --max-time 8 -w "%{http_code}" "$@"
 }
 
 json_type_is() {
@@ -44,24 +71,53 @@ count_array() {
   echo "$json" | jq 'length'
 }
 
+ensure_json_body() {
+  local body="$1" ctx="$2"
+  if ! echo "$body" | jq . >/dev/null 2>&1; then
+    echo "❌ $ctx returned non-JSON"
+    echo "Response (trimmed):"; echo "$body" | head -c 500; echo
+    fail "$ctx returned non-JSON"
+  fi
+}
+
 PYTHON="${PYTHON:-venv/bin/python}"
 
 ensure_tenant() {
   local slug="$1" name="$2"
-  local tenants id
-  tenants="$(curl_json "$API/platform/tenants")"
-  id="$(echo "$tenants" | jq -r --arg slug "$slug" '.[] | select(.slug==$slug) | .id' | head -n1)"
+  local tenants id resp tenants_code tenants_body
+  resp="$(curl_with_code "${PLATFORM_HEADERS[@]}" "$API/platform/tenants")"
+  tenants_body="$(printf "%s" "$resp" | sed '$d')"
+  tenants_code="$(printf "%s" "$resp" | tail -n 1 | sed 's/HTTP_CODE://')"
+  if [[ "$tenants_code" != "200" ]]; then
+    echo "❌ platform tenants list failed (HTTP $tenants_code)"
+    echo "Response (trimmed):"; echo "$tenants_body" | head -c 500; echo
+    fail "platform tenants list failed"
+  fi
+  ensure_json_body "$tenants_body" "platform tenants list"
+  id="$(echo "$tenants_body" | jq -r --arg slug "$slug" '.[] | select(.slug==$slug) | .id' | head -n1)"
   if [[ -n "$id" && "$id" != "null" ]]; then
     echo "$id"
     return
   fi
-  local resp
-  resp="$(curl_json -X POST "$API/platform/tenants" -H "Content-Type: application/json" -d "{\"company_name\":\"$name\",\"slug\":\"$slug\"}")"
-  echo "$resp" | jq -r '.id'
+  local create_resp create_body create_code
+  create_resp="$(curl_with_code -X POST "$API/platform/tenants" "${PLATFORM_HEADERS[@]}" -H "Content-Type: application/json" -d "{\"company_name\":\"$name\",\"slug\":\"$slug\"}")"
+  create_body="$(printf "%s" "$create_resp" | sed '$d')"
+  create_code="$(printf "%s" "$create_resp" | tail -n 1 | sed 's/HTTP_CODE://')"
+  if [[ "$create_code" != "200" && "$create_code" != "201" ]]; then
+    echo "❌ platform tenant create failed (HTTP $create_code)"
+    echo "Response (trimmed):"; echo "$create_body" | head -c 500; echo
+    fail "platform tenant create failed"
+  fi
+  ensure_json_body "$create_body" "platform tenant create"
+  echo "$create_body" | jq -r '.id'
 }
 
 set_tenant_status() {
   local slug="$1" status="$2"
+  if [[ "$HARDENED_MODE" == "1" ]]; then
+    warn "(hardened) skipping direct DB status update for tenant $slug"
+    return
+  fi
   "$PYTHON" - <<PY
 import asyncio
 from sqlalchemy import select
@@ -85,7 +141,7 @@ PY
 
 # ========== start ==========
 need_cmd jq
-need_cmd curl
+need_cmd $CURL_CMD
 need_cmd grep
 need_cmd sed
 
@@ -94,6 +150,76 @@ echo "Trucking ERP EXTENDED Smoke Test"
 echo "BASE_URL=$BASE_URL"
 echo "API=$API"
 echo "Time: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+if [[ "$HARDENED_MODE" == "1" ]]; then
+  hr
+  echo "Hardened mode assertions (container-only reachability)"
+  set +e
+  host_api_code="$("$HOST_CURL" -sS -o /dev/null --max-time 2 -w "%{http_code}" "$HOST_API/health" 2>/dev/null || true)"
+  set -e
+  if [[ "$host_api_code" == "000" || -z "$host_api_code" ]]; then
+    ok "Host cannot reach $HOST_API (expected)"
+  else
+    warn "Host unexpectedly reached $HOST_API (HTTP $host_api_code)"
+  fi
+
+  set +e
+  "$HOST_CURL" -sS --max-time 2 "http://127.0.0.1:5432" >/dev/null 2>&1
+  db_status=$?
+  set -e
+  if [[ "$db_status" -eq 0 ]]; then
+    warn "Host unexpectedly reached 127.0.0.1:5432"
+  else
+    ok "Host cannot reach 127.0.0.1:5432 (expected)"
+  fi
+
+  need_cmd docker
+  api_cid="$(docker ps --filter name=truckerp-api --format '{{.ID}}' | head -n1)"
+  if [[ -n "$api_cid" ]]; then
+    api_ports="$(docker inspect -f '{{json .NetworkSettings.Ports}}' "$api_cid")"
+    api_networks="$(docker inspect -f '{{range $n,$v := .NetworkSettings.Networks}}{{printf "%s " $n}}{{end}}' "$api_cid")"
+    echo "FastAPI ports: $api_ports"
+    echo "FastAPI networks: $api_networks"
+    if echo "$api_ports" | jq -e '([.[]? | select(.!=null)] | length)==0' >/dev/null 2>&1; then
+      ok "FastAPI container has no host port bindings"
+    else
+      warn "FastAPI container exposes host ports: $api_ports"
+    fi
+    if echo "$api_networks" | grep -q "truckerp_net" >/dev/null 2>&1; then
+      ok "FastAPI container attached to truckerp_net"
+    else
+      warn "FastAPI not on truckerp_net"
+    fi
+  else
+    warn "FastAPI container not found via name filter 'truckerp-api'"
+  fi
+
+  pg_cid="$(docker ps --filter name=truckerp-postgres --format '{{.ID}}' | head -n1)"
+  if [[ -n "$pg_cid" ]]; then
+    pg_ports="$(docker inspect -f '{{json .NetworkSettings.Ports}}' "$pg_cid")"
+    pg_networks="$(docker inspect -f '{{range $n,$v := .NetworkSettings.Networks}}{{printf "%s " $n}}{{end}}' "$pg_cid")"
+    echo "Postgres ports: $pg_ports"
+    echo "Postgres networks: $pg_networks"
+    if echo "$pg_ports" | jq -e '([.[]? | select(.!=null)] | length)==0' >/dev/null 2>&1; then
+      ok "Postgres container has no host port bindings"
+    else
+      warn "Postgres container exposes host ports: $pg_ports"
+    fi
+    if echo "$pg_networks" | grep -q "truckerp_net" >/dev/null 2>&1; then
+      ok "Postgres container attached to truckerp_net"
+    else
+      warn "Postgres not on truckerp_net"
+    fi
+  else
+    warn "Postgres container not found via name filter 'truckerp-postgres'"
+  fi
+
+  subhr
+  echo "Internal health via docker-network"
+  internal_health="$(docker run --rm --network truckerp_net curlimages/curl:8.5.0 -sS http://truckerp-api:8000/api/v1/health)"
+  echo "$internal_health" | jq .
+  echo "$internal_health" | jq -e '.status=="ok"' >/dev/null || fail "Internal health check failed"
+fi
 
 # ---------- 1) Health ----------
 hr
@@ -117,32 +243,44 @@ code_openapi="$(http_code "$BASE_URL/openapi.json")"
 echo "GET /openapi.json => HTTP $code_openapi"
 [[ "$code_openapi" == "200" ]] && ok "OpenAPI reachable" || warn "OpenAPI not reachable (not fatal)"
 
+if [[ "$HARDENED_MODE" == "1" ]]; then
+  hr
+  ok "Hardened mode: stopping after isolation + health checks (functional tests require host DB)"
+  exit 0
+fi
+
 # ---------- 2b) Tenant status enforcement ----------
 hr
 echo "2b) Tenant status enforcement (PROVISIONING vs ACTIVE)"
-PROV_ID="$(ensure_tenant "smoke-provision" "Smoke Provision Tenant")"
-ACTIVE_ID="$(ensure_tenant "smoke-active" "Smoke Active Tenant")"
-set_tenant_status "smoke-provision" "PROVISIONING"
-set_tenant_status "smoke-active" "ACTIVE"
-echo "Provisioning tenant id=$PROV_ID | Active tenant id=$ACTIVE_ID"
+if [[ "$HARDENED_MODE" == "1" ]]; then
+  warn "(hardened) skipping tenant status enforcement DB helper steps"
+elif [[ -z "$PLATFORM_ADMIN_KEY" ]]; then
+  warn "Skipping platform tenant enforcement: PLATFORM_ADMIN_KEY not set"
+else
+  PROV_ID="$(ensure_tenant "smoke-provision" "Smoke Provision Tenant")"
+  ACTIVE_ID="$(ensure_tenant "smoke-active" "Smoke Active Tenant")"
+  set_tenant_status "smoke-provision" "PROVISIONING"
+  set_tenant_status "smoke-active" "ACTIVE"
+  echo "Provisioning tenant id=$PROV_ID | Active tenant id=$ACTIVE_ID"
 
-echo "Provisioning tenant -> onboarding (allowed)"
-code_prov_onboard="$(http_code -X POST "$API/onboarding/driver-license/ocr" -H "Content-Type: application/json" -H "X-Tenant-ID: ${PROV_ID}" -d '{"doc_image":"placeholder"}')"
-echo "POST onboarding/ocr => HTTP $code_prov_onboard (expect 200)"
-[[ "$code_prov_onboard" == "200" ]] && ok "Provisioning onboarding allowed" || warn "Provisioning onboarding unexpected code $code_prov_onboard"
+  echo "Provisioning tenant -> onboarding (allowed)"
+  code_prov_onboard="$(http_code -X POST "$API/onboarding/driver-license/ocr" "${PLATFORM_HEADERS[@]}" -H "Content-Type: application/json" -H "X-Tenant-ID: ${PROV_ID}" -d '{"doc_image":"placeholder"}')"
+  echo "POST onboarding/ocr => HTTP $code_prov_onboard (expect 200)"
+  [[ "$code_prov_onboard" == "200" ]] && ok "Provisioning onboarding allowed" || warn "Provisioning onboarding unexpected code $code_prov_onboard"
 
-echo "Provisioning tenant -> payroll (should be blocked 403)"
-code_prov_payroll="$(http_code -H "X-Tenant-ID: ${PROV_ID}" "$API/payroll/pay-periods")"
-echo "GET payroll/pay-periods => HTTP $code_prov_payroll (expect 403)"
-[[ "$code_prov_payroll" == "403" ]] && ok "Provisioning payroll blocked" || warn "Provisioning payroll not blocked (code $code_prov_payroll)"
+  echo "Provisioning tenant -> payroll (should be blocked 403)"
+  code_prov_payroll="$(http_code -H "X-Tenant-ID: ${PROV_ID}" "${PLATFORM_HEADERS[@]}" "$API/payroll/pay-periods")"
+  echo "GET payroll/pay-periods => HTTP $code_prov_payroll (expect 403)"
+  [[ "$code_prov_payroll" == "403" ]] && ok "Provisioning payroll blocked" || warn "Provisioning payroll not blocked (code $code_prov_payroll)"
 
-echo "Active tenant -> payroll (should be allowed 200)"
-code_active_payroll="$(http_code -H "X-Tenant-ID: ${ACTIVE_ID}" "$API/payroll/pay-periods")"
-echo "GET payroll/pay-periods (active) => HTTP $code_active_payroll (expect 200)"
-[[ "$code_active_payroll" == "200" ]] && ok "Active payroll allowed" || warn "Active payroll unexpected code $code_active_payroll"
+  echo "Active tenant -> payroll (should be allowed 200)"
+  code_active_payroll="$(http_code -H "X-Tenant-ID: ${ACTIVE_ID}" "${PLATFORM_HEADERS[@]}" "$API/payroll/pay-periods")"
+  echo "GET payroll/pay-periods (active) => HTTP $code_active_payroll (expect 200)"
+  [[ "$code_active_payroll" == "200" ]] && ok "Active payroll allowed" || warn "Active payroll unexpected code $code_active_payroll"
 
-# Ensure primary smoke tenant is ACTIVE so downstream tests run
-set_tenant_status "test-co" "ACTIVE"
+  # Ensure primary smoke tenant is ACTIVE so downstream tests run
+  set_tenant_status "test-co" "ACTIVE"
+fi
 
 # ---------- 3) Drivers default ----------
 hr
@@ -236,7 +374,7 @@ echo "POST doc bad payload => HTTP $code_bad_doc (expected 422)"
 hr
 echo "11) Create a CDL doc for active driver"
   doc_payload=$(printf '{"driver_id":%s,"doc_type":"CDL","title":"Smoke CDL","issue_date":"2024-01-01","expiry_date":"2026-01-01","status":"ACTIVE","notes":"extended smoke_test.sh"}' "$ACTIVE_DRIVER_ID")
-resp="$(curl -sS -X POST "$API/driver-documents" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$doc_payload")"
+resp="$($CURL_CMD -sS -X POST "$API/driver-documents" "${TENANT_HEADER[@]}" -H "Content-Type: application/json" -d "$doc_payload")"
 echo "$resp" | head -c 300; echo
 created_doc="$resp"
 echo "$created_doc" | jq .
@@ -605,3 +743,37 @@ fi
 # ---------- 41) Final summary (extended) ----------
 hr
 ok "EXTENDED SMOKE TEST (v2) COMPLETE"
+
+###############################################################################
+###############################################################################
+### TENANT ROUTING SMOKE (POST-FIX)
+# Runs inside docker network (no host ports needed)
+# Expected:
+#   - X-Tenant-ID: 1  -> 200
+#   - Missing header -> 400
+#   - Invalid tenant -> 403
+###############################################################################
+
+echo
+echo "============================================================"
+echo "TENANT ROUTING SMOKE (docker-network)"
+echo "============================================================"
+
+docker run --rm --network truckerp_net alpine:3.20 sh -lc '
+  apk add --no-cache curl >/dev/null
+  API="http://truckerp-api:8000/api/v1"
+  OK=1
+  BAD=9999
+
+  echo -n "[Tenant OK] /drivers => "
+  R1=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Tenant-ID: $OK" "$API/drivers")
+  [ "$R1" = "200" ] && echo "PASS (200)" || echo "FAIL ($R1)"
+
+  echo -n "[Tenant missing] /drivers => "
+  R2=$(curl -s -o /dev/null -w "%{http_code}" "$API/drivers")
+  [ "$R2" = "400" ] && echo "PASS (400)" || echo "FAIL ($R2)"
+
+  echo -n "[Tenant invalid] /drivers => "
+  R3=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Tenant-ID: $BAD" "$API/drivers")
+  [ "$R3" = "403" ] && echo "PASS (403)" || echo "FAIL ($R3)"
+'

@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    container_name: truckerp-postgres
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - truckerp_pgdata_20260104:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  platform:
+    container_name: truckerp-platform
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    environment:
+      PLATFORM_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/trucking_erp
+    ports:
+      - "8000:8000"
+      - "80:80"
+    networks:
+      - truckerp_net
+
+networks:
+  truckerp_net:
+    driver: bridge
+
+volumes:
+  truckerp_pgdata_20260104:

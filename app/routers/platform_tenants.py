@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, urlsplit, urlunsplit
+from typing import Union
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select, text
@@ -14,8 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.platform import PlatformTenant
+from app.schemas.platform import PlatformTenantOut
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform-tenants"])
+logger = logging.getLogger(__name__)
 
 
 def require_admin_header(x_platform_admin_key: str | None = Header(None)) -> None:
@@ -24,13 +28,19 @@ def require_admin_header(x_platform_admin_key: str | None = Header(None)) -> Non
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
-@router.get("/tenants")
+@router.get("/tenants", response_model=list[PlatformTenantOut])
 async def list_tenants(db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
-    rows = (await db.execute(select(PlatformTenant))).scalars().all()
-    return [{"id": t.id, "name": t.name, "slug": t.slug, "status": t.status, "db_status": t.db_status} for t in rows]
+    try:
+        rows = (await db.execute(select(PlatformTenant))).scalars().all()
+    except Exception as exc:
+        logger.exception("platform_tenants.list_failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list platform tenants"
+        ) from exc
+    return [PlatformTenantOut.model_validate(t) for t in rows]
 
 
-@router.post("/tenants")
+@router.post("/tenants", response_model=PlatformTenantOut)
 async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
     name = body.get("company_name") or body.get("name")
     slug = body.get("slug")
@@ -50,12 +60,20 @@ async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None 
     )
     db.add(tenant)
     await db.commit()
-    return {"id": tenant.id, "slug": tenant.slug, "status": tenant.status, "db_status": tenant.db_status}
+    await db.refresh(tenant)
+    return PlatformTenantOut.model_validate(tenant)
 
 
 @router.post("/tenants/{tenant_id}/provision")
 async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
-    admin_url = settings.postgres_admin_url
+    raw_admin_url = settings.postgres_admin_url or settings.database_url
+    logger.info(
+        "postgres_admin_url type=%s value=%r database_url_present=%s",
+        type(settings.postgres_admin_url),
+        settings.postgres_admin_url,
+        bool(settings.database_url),
+    )
+    admin_url = _ensure_asyncpg_url(raw_admin_url)
     if not admin_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -63,6 +81,18 @@ async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _
         )
     app_user = settings.tenant_db_app_user
     app_pass = settings.tenant_db_app_password
+    if not app_user or not app_pass:
+        # Fallback: reuse admin URL credentials if dedicated tenant creds are not set
+        parsed_admin = urlparse(admin_url)
+        admin_username = parsed_admin.username
+        admin_password = parsed_admin.password
+        if admin_username and admin_password:
+            logger.warning(
+                "tenant_db_app_user_password_missing: falling back to admin credentials. "
+                "Set TENANT_DB_APP_USER and TENANT_DB_APP_PASSWORD for production."
+            )
+            app_user = app_user or admin_username
+            app_pass = app_pass or admin_password
     if not app_user or not app_pass:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -97,7 +127,7 @@ async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _
         tenant.db_port = parsed.port
         tenant.db_user = app_user
 
-    tenant_db_url = _build_tenant_db_url(admin_url, db_name, app_user, app_pass)
+    tenant_db_url = _ensure_asyncpg_url(_build_tenant_db_url(admin_url, db_name, app_user, app_pass))
 
     try:
         await _create_database_if_not_exists(admin_url, db_name)
@@ -128,22 +158,24 @@ async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _
     return _provision_response(tenant)
 
 
-@router.get("/tenants/{tenant_id}")
+@router.get("/tenants/{tenant_id}", response_model=PlatformTenantOut)
 async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
-    tenant = await db.get(PlatformTenant, tenant_id)
+    try:
+        tenant = await db.get(PlatformTenant, tenant_id)
+    except Exception as exc:
+        logger.exception("platform_tenants.get_failed tenant_id=%s", tenant_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load platform tenant"
+        ) from exc
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
-    return {
-        "id": tenant.id,
-        "name": tenant.name,
-        "slug": tenant.slug,
-        "status": tenant.status,
-        "plan": tenant.plan,
-        "db_status": tenant.db_status,
-        "db_last_error": tenant.db_last_error,
-        "db_last_error_at": tenant.db_last_error_at,
-        "provisioned_at": tenant.provisioned_at,
-    }
+    try:
+        return PlatformTenantOut.model_validate(tenant)
+    except Exception as exc:
+        logger.exception("platform_tenants.serialize_failed tenant_id=%s", tenant_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to serialize platform tenant"
+        ) from exc
 
 
 @router.post("/tenants/{tenant_id}/retry-provision")
@@ -166,7 +198,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 async def _create_database_if_not_exists(admin_url: str, db_name: str) -> None:
-    engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    engine = create_async_engine(_ensure_asyncpg_url(admin_url), isolation_level="AUTOCOMMIT")
     async with engine.connect() as conn:
         try:
             await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
@@ -180,8 +212,9 @@ async def _create_database_if_not_exists(admin_url: str, db_name: str) -> None:
 async def _run_tenant_migrations(tenant_db_url: str, target_rev: str) -> None:
     # Run alembic upgrade for tenant schema only (targeting configured tenant head)
     env = os.environ.copy()
-    env["DATABASE_URL"] = tenant_db_url
-    cmd = ["alembic", "upgrade", target_rev]
+    env["DATABASE_URL"] = tenant_db_url  # backward compat if referenced
+    env["TENANT_DATABASE_URL"] = tenant_db_url
+    cmd = ["python", "-m", "alembic", "-c", "alembic_tenant.ini", "upgrade", target_rev]
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=str(PROJECT_ROOT), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
@@ -194,6 +227,29 @@ def _sanitize_db_name(slug: str) -> str:
     name = slug.lower().replace("-", "_")
     name = re.sub(r"[^a-z0-9_]", "", name)
     return name[:50]
+
+
+def _ensure_asyncpg_url(url: Union[str, bytes]) -> str:
+    """Force Postgres URLs to use the asyncpg driver for async engine usage."""
+    if url is None:
+        return ""
+    if isinstance(url, (bytes, bytearray, memoryview)):
+        url = bytes(url).decode("utf-8", errors="strict")
+
+    parsed = urlsplit(url)
+    scheme = parsed.scheme
+
+    if scheme.startswith("postgresql+asyncpg"):
+        new_scheme = scheme
+    elif scheme.startswith("postgresql+psycopg2") or scheme == "postgresql":
+        new_scheme = "postgresql+asyncpg"
+    else:
+        new_scheme = scheme
+
+    if new_scheme == scheme:
+        return url
+
+    return urlunsplit((new_scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def _build_tenant_db_url(admin_url: str, db_name: str, user: str, password: str) -> str:

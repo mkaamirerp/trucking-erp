@@ -1,0 +1,9 @@
+Trucking ERP Deep Audit Report
+Generated: 2026-01-03T06:20:21+00:00
+Host: ip-172-31-90-82
+User: admin
+Kernel: Linux ip-172-31-90-82 6.12.57+deb13-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.57-1 (2025-11-05) x86_64 GNU/Linux
+
+===== 1) Repo quick view =====
+
+$ ls -la /home/admin/trucking_erp || true

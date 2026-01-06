@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.models.driver_phone import DriverPhone
 from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
 
 router = APIRouter(prefix="/driver-phones", tags=["Driver Phones"])
 
@@ -17,7 +17,7 @@ async def list_driver_phones(
     tenant_id: int = Depends(require_tenant),
     driver_id: int | None = None,
     include_inactive: bool = False,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     stmt = select(DriverPhone).where(DriverPhone.tenant_id == tenant_id)
 
@@ -36,7 +36,7 @@ async def list_driver_phones(
 async def create_driver_phone(
     payload: DriverPhoneCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     phone = DriverPhone(**payload.model_dump(), tenant_id=tenant_id)
     db.add(phone)
@@ -50,7 +50,7 @@ async def deactivate_driver_phone(
     phone_id: int,
     tenant_id: int = Depends(require_tenant),
     reason: str | None = None,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res = await db.execute(
         select(DriverPhone).where(DriverPhone.id == phone_id, DriverPhone.tenant_id == tenant_id)
@@ -75,7 +75,7 @@ async def deactivate_driver_phone(
 async def reactivate_driver_phone(
     phone_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     res = await db.execute(
         select(DriverPhone).where(DriverPhone.id == phone_id, DriverPhone.tenant_id == tenant_id)

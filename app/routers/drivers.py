@@ -4,10 +4,10 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.models.driver import Driver
 from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/drivers", tags=["drivers"])
 async def create_driver(
     payload: DriverCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     driver = Driver(**payload.model_dump(), tenant_id=tenant_id)
     db.add(driver)
@@ -26,7 +26,7 @@ async def create_driver(
 @router.get("", response_model=list[DriverOut])
 async def list_drivers(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     limit: int = 50,
     offset: int = 0,
     q: str | None = None,
@@ -55,7 +55,7 @@ async def list_drivers(
 async def get_driver(
     driver_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
     driver = result.scalar_one_or_none()
@@ -68,7 +68,7 @@ async def update_driver(
     driver_id: int,
     payload: DriverUpdate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
     driver = result.scalar_one_or_none()

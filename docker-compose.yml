@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  truckerp-postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - truckerp_pgdata_20260104:/var/lib/postgresql/data
+    networks:
+      - truckerp_net
+
+  truckerp-api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - truckerp-postgres
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/trucking_erp
+      POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/trucking_erp
+      TENANT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/tenant_smoke_active
+    networks:
+      - truckerp_net
+
+networks:
+  truckerp_net:
+    external: true
+
+volumes:
+  truckerp_pgdata_20260104:
+    external: true

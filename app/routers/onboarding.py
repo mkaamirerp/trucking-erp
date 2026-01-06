@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
 from app.schemas.onboarding import (
     DriverLicenseOCRRequest,
     DriverLicenseOCRResponse,
@@ -32,7 +32,7 @@ async def driver_license_ocr(
 async def driver_license_confirm(
     payload: DriverLicenseConfirmRequest,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     driver = await db.scalar(select(Driver).where(Driver.id == payload.driver_id, Driver.tenant_id == tenant_id))
     if not driver:

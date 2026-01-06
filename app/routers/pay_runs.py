@@ -12,10 +12,10 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.dependencies.authz import require_tenant_admin
 from app.deps.tenant import require_tenant
 from app.deps.tenant_status import require_active_tenant
+from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
 from app.models.payee import (
     ChargeCategory,
@@ -90,7 +90,7 @@ async def _get_run(db: AsyncSession, tenant_id: int, run_id: int) -> PayRun:
 @router.get("/pay-runs", response_model=list[PayRunSummary])
 async def list_pay_runs(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     pay_period_id: Optional[int] = Query(default=None),
     status_filter: Optional[str] = Query(default=None, alias="status"),
     document_type: Optional[str] = Query(default=None),
@@ -121,7 +121,7 @@ async def list_pay_runs(
 async def create_pay_run(
     payload: PayRunCreate,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     period = await _get_period(db, tenant_id, payload.pay_period_id)
     pay_document_type = (payload.pay_document_type or "PAYSTUB").upper()
@@ -167,7 +167,7 @@ async def create_pay_run(
 async def generate_pay_run(
     run_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     try:
         run = await db.scalar(select(PayRun).where(PayRun.id == run_id, PayRun.tenant_id == tenant_id).with_for_update())
@@ -262,7 +262,7 @@ async def generate_pay_run(
 async def finalize_pay_run(
     run_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     try:
         run = await db.scalar(select(PayRun).where(PayRun.id == run_id, PayRun.tenant_id == tenant_id).with_for_update())
@@ -306,7 +306,7 @@ async def finalize_pay_run(
 async def get_pay_run(
     run_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     run = await _get_run(db, tenant_id, run_id)
     if run.calculation_snapshot_json is None:
@@ -326,7 +326,7 @@ async def get_pay_run(
 async def list_pay_run_payees(
     run_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     await _get_run(db, tenant_id, run_id)
 
@@ -374,7 +374,7 @@ async def list_pay_run_payees(
 async def list_pay_run_items(
     run_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     payee_id: Optional[int] = Query(default=None),
 ):
     await _get_run(db, tenant_id, run_id)
@@ -411,7 +411,7 @@ async def list_pay_run_items(
 @router.get("/documents", response_model=list[PayDocumentSummary])
 async def list_pay_documents(
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
     pay_period_id: Optional[int] = Query(default=None),
     payee_id: Optional[int] = Query(default=None),
     document_type: Optional[str] = Query(default=None),
@@ -438,7 +438,7 @@ async def list_pay_documents(
 async def download_pay_document(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     doc = await db.scalar(
         select(PayDocument)
