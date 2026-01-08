@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fetchWithTenant } from "../api";
 
 export type FetchState<T> = {
   data: T | null;
@@ -12,7 +13,7 @@ export function useFetch<T>(url: string, deps: unknown[] = []) {
   useEffect(() => {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
-    fetch(url)
+    fetchWithTenant(url)
       .then(async (res) => {
         if (!res.ok) {
           const text = await res.text();

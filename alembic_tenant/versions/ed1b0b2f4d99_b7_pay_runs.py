@@ -21,58 +21,74 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.create_table(
-        "pay_runs",
-        sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
-        sa.Column(
-            "tenant_id",
-            sa.Integer(),
-            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column(
-            "pay_period_id",
-            sa.Integer(),
-            sa.ForeignKey("pay_periods.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("status", sa.String(length=20), nullable=False, server_default=sa.text("'DRAFT'")),
-        sa.Column("totals_snapshot", JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("finalized_by", sa.String(length=100), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-    )
-    op.create_index("ix_pay_runs_unique_period", "pay_runs", ["tenant_id", "pay_period_id"], unique=True)
-    op.create_index("ix_pay_runs_status", "pay_runs", ["tenant_id", "status"])
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
 
-    op.create_table(
-        "pay_run_items",
-        sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
-        sa.Column(
-            "pay_run_id",
-            sa.Integer(),
-            sa.ForeignKey("pay_runs.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column(
-            "driver_id",
-            sa.Integer(),
-            sa.ForeignKey("drivers.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("entry_type", sa.String(length=20), nullable=False),
-        sa.Column("amount", sa.Numeric(14, 2), nullable=False),
-        sa.Column(
-            "source_entry_id",
-            sa.Integer(),
-            sa.ForeignKey("pay_entries.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-    )
-    op.create_index("ix_pay_run_items_pay_run", "pay_run_items", ["pay_run_id"])
-    op.create_index("ix_pay_run_items_driver", "pay_run_items", ["pay_run_id", "driver_id"])
+    if "pay_runs" not in tables:
+        op.create_table(
+            "pay_runs",
+            sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+            sa.Column(
+                "tenant_id",
+                sa.Integer(),
+                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "pay_period_id",
+                sa.Integer(),
+                sa.ForeignKey("pay_periods.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("status", sa.String(length=20), nullable=False, server_default=sa.text("'DRAFT'")),
+            sa.Column("totals_snapshot", JSONB(astext_type=sa.Text()), nullable=True),
+            sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("finalized_by", sa.String(length=100), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        )
+        tables.add("pay_runs")
+    inspector = sa.inspect(bind)
+    pay_run_indexes = {idx["name"] for idx in inspector.get_indexes("pay_runs")} if "pay_runs" in tables else set()
+    if "ix_pay_runs_unique_period" not in pay_run_indexes and "pay_runs" in tables:
+        op.create_index("ix_pay_runs_unique_period", "pay_runs", ["tenant_id", "pay_period_id"], unique=True)
+    if "ix_pay_runs_status" not in pay_run_indexes and "pay_runs" in tables:
+        op.create_index("ix_pay_runs_status", "pay_runs", ["tenant_id", "status"])
+
+    if "pay_run_items" not in tables:
+        op.create_table(
+            "pay_run_items",
+            sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
+            sa.Column(
+                "pay_run_id",
+                sa.Integer(),
+                sa.ForeignKey("pay_runs.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "driver_id",
+                sa.Integer(),
+                sa.ForeignKey("drivers.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("entry_type", sa.String(length=20), nullable=False),
+            sa.Column("amount", sa.Numeric(14, 2), nullable=False),
+            sa.Column(
+                "source_entry_id",
+                sa.Integer(),
+                sa.ForeignKey("pay_entries.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        )
+        tables.add("pay_run_items")
+    inspector = sa.inspect(bind)
+    pay_run_item_indexes = {idx["name"] for idx in inspector.get_indexes("pay_run_items")} if "pay_run_items" in tables else set()
+    if "ix_pay_run_items_pay_run" not in pay_run_item_indexes and "pay_run_items" in tables:
+        op.create_index("ix_pay_run_items_pay_run", "pay_run_items", ["pay_run_id"])
+    if "ix_pay_run_items_driver" not in pay_run_item_indexes and "pay_run_items" in tables:
+        op.create_index("ix_pay_run_items_driver", "pay_run_items", ["pay_run_id", "driver_id"])
 
 
 def downgrade() -> None:

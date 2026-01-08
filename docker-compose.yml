@@ -2,32 +2,49 @@ version: "3.9"
 
 services:
   truckerp-postgres:
-    image: postgres:15
+    image: postgres:15.7-alpine
+    container_name: truckerp-postgres
     restart: unless-stopped
     environment:
+      POSTGRES_DB: trucking_erp
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - truckerp_pgdata_20260104:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - truckerp_net
 
   truckerp-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: truckerp-api
     restart: unless-stopped
     depends_on:
       - truckerp-postgres
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/trucking_erp
-      POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/trucking_erp
-      TENANT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@truckerp-postgres:5432/tenant_smoke_active
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/trucking_erp
+      POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/postgres
+      TENANT_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_smoke_active
     networks:
       - truckerp_net
 
-networks:
-  truckerp_net:
-    external: true
+  truckerp-nginx:
+    build:
+      context: .
+      dockerfile: infra/nginx/Dockerfile
+    container_name: truckerp-nginx
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - truckerp-api
+    networks:
+      - truckerp_net
 
 volumes:
-  truckerp_pgdata_20260104:
+  postgres_data:
+
+networks:
+  truckerp_net:
     external: true
