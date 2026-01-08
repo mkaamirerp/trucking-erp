@@ -1,4 +1,17 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "/api/v1";
+const DEFAULT_TENANT_ID = import.meta.env.VITE_TENANT_ID || "1";
+
+function withTenantHeaders(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers as HeadersInit | undefined);
+  if (!headers.has("X-Tenant-ID") && !headers.has("X-Tenant-Slug")) {
+    headers.set("X-Tenant-ID", DEFAULT_TENANT_ID);
+  }
+  return { ...init, headers };
+}
+
+export function fetchWithTenant(input: RequestInfo | URL, init?: RequestInit) {
+  return fetch(input, withTenantHeaders(init));
+}
 
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -9,17 +22,17 @@ async function handle<T>(res: Response): Promise<T> {
 }
 
 export async function getPayPeriods() {
-  const res = await fetch(`${API_BASE}/payroll/pay-periods`);
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-periods`);
   return handle<PayPeriod[]>(res);
 }
 
 export async function getMe() {
-  const res = await fetch(`/api/v1/me`);
+  const res = await fetchWithTenant(`/api/v1/me`);
   return handle<Me>(res);
 }
 
 export async function createPayPeriod(payload: PayPeriodCreate) {
-  const res = await fetch(`${API_BASE}/payroll/pay-periods`, {
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-periods`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -28,18 +41,18 @@ export async function createPayPeriod(payload: PayPeriodCreate) {
 }
 
 export async function closePayPeriod(id: number) {
-  const res = await fetch(`${API_BASE}/payroll/pay-periods/${id}/close`, { method: "POST" });
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-periods/${id}/close`, { method: "POST" });
   return handle<PayPeriod>(res);
 }
 
 export async function listPayRuns() {
   // NOTE: backend currently lacks a list endpoint; this will fail until implemented.
-  const res = await fetch(`${API_BASE}/payroll/pay-runs`);
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-runs`);
   return handle<PayRunSummary[]>(res);
 }
 
 export async function createPayRun(payload: PayRunCreatePayload) {
-  const res = await fetch(`${API_BASE}/payroll/pay-runs`, {
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -48,34 +61,34 @@ export async function createPayRun(payload: PayRunCreatePayload) {
 }
 
 export async function generatePayRun(id: number) {
-  const res = await fetch(`${API_BASE}/payroll/pay-runs/${id}/generate`, { method: "POST" });
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-runs/${id}/generate`, { method: "POST" });
   return handle<{ pay_run_id: number; item_count: number }>(res);
 }
 
 export async function finalizePayRun(id: number) {
-  const res = await fetch(`${API_BASE}/payroll/pay-runs/${id}/finalize`, { method: "POST" });
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-runs/${id}/finalize`, { method: "POST" });
   return handle<{ pay_run_id: number; status: string; totals_snapshot?: unknown }>(res);
 }
 
 export async function getPayRun(id: number) {
-  const res = await fetch(`${API_BASE}/payroll/pay-runs/${id}`);
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-runs/${id}`);
   return handle<PayRunDetail>(res);
 }
 
 export async function getPayRunPayees(runId: number) {
-  const res = await fetch(`${API_BASE}/payroll/pay-runs/${runId}/payees`);
+  const res = await fetchWithTenant(`${API_BASE}/payroll/pay-runs/${runId}/payees`);
   return handle<PayRunPayeeRow[]>(res);
 }
 
 export async function getPayRunItems(runId: number, payeeId?: number) {
   const url = new URL(`${API_BASE}/payroll/pay-runs/${runId}/items`, window.location.origin);
   if (payeeId) url.searchParams.set("payee_id", String(payeeId));
-  const res = await fetch(url.toString().replace(window.location.origin, ""));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
   return handle<PayRunItem[]>(res);
 }
 
 export async function listDocuments() {
-  const res = await fetch(`${API_BASE}/payroll/documents`);
+  const res = await fetchWithTenant(`${API_BASE}/payroll/documents`);
   return handle<PayDocument[]>(res);
 }
 

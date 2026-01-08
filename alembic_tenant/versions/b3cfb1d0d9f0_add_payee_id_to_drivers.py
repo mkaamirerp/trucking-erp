@@ -1,7 +1,7 @@
 """Add payee_id to drivers (with optional FK).
 
 Revision ID: b3cfb1d0d9f0
-Revises: a12c8f7f2c2d
+Revises: t001_merge_heads_driver_license_payroll
 Create Date: 2026-01-06 00:05:00
 """
 
@@ -22,6 +22,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
+    tables = set(inspector.get_table_names(schema="public"))
+    if "drivers" not in tables:
+        return
     columns = {col["name"] for col in inspector.get_columns("drivers", schema="public")}
     if "payee_id" not in columns:
         op.add_column(
@@ -36,7 +39,6 @@ def upgrade() -> None:
         op.create_unique_constraint("uq_drivers_payee_id", "drivers", ["payee_id"], schema="public")
 
     fk_names = {fk["name"] for fk in inspector.get_foreign_keys("drivers", schema="public")}
-    tables = set(inspector.get_table_names(schema="public"))
     if "payees" in tables and "fk_drivers_payee_id" not in fk_names and "payee_id" in columns:
         op.create_foreign_key(
             "fk_drivers_payee_id",
