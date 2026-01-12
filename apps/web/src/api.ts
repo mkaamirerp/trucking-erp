@@ -238,6 +238,60 @@ export async function login(payload: { email: string; password: string }) {
   return handle<{ ok: boolean; workspace_url?: string }>(res);
 }
 
+// ---- Loads, Brokers, Dashboard ----
+export async function getDashboardSummary() {
+  const res = await fetchWithTenant(`/api/v1/dashboard/summary`);
+  return handle<DashboardSummary>(res);
+}
+
+export async function listLoads(params: {
+  status?: string[];
+  driver_id?: number;
+  broker_id?: number;
+  pickup_start?: string;
+  pickup_end?: string;
+  page?: number;
+  size?: number;
+} = {}) {
+  const url = new URL(`/api/v1/loads`, window.location.origin);
+  if (params.status) params.status.forEach((s) => url.searchParams.append("status", s));
+  if (params.driver_id) url.searchParams.set("driver_id", String(params.driver_id));
+  if (params.broker_id) url.searchParams.set("broker_id", String(params.broker_id));
+  if (params.pickup_start) url.searchParams.set("pickup_start", params.pickup_start);
+  if (params.pickup_end) url.searchParams.set("pickup_end", params.pickup_end);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<Load>>(res);
+}
+
+export async function getLoad(id: number) {
+  const res = await fetchWithTenant(`/api/v1/loads/${id}`);
+  return handle<Load>(res);
+}
+
+export async function listBrokers(params: { page?: number; size?: number } = {}) {
+  const url = new URL(`/api/v1/brokers`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<Broker>>(res);
+}
+
+export async function getDriverSummary(id: number) {
+  const res = await fetchWithTenant(`/api/v1/drivers/${id}/summary`);
+  return handle<DriverSummary>(res);
+}
+
+export async function listDrivers(params: { limit?: number; offset?: number; include_inactive?: boolean } = {}) {
+  const url = new URL(`/api/v1/drivers`, window.location.origin);
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
+  if (params.offset) url.searchParams.set("offset", String(params.offset));
+  if (params.include_inactive) url.searchParams.set("include_inactive", String(params.include_inactive));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<Driver[]>(res);
+}
+
 // ---- Types ----
 export type PayPeriod = {
   id: number;
@@ -410,4 +464,84 @@ export type UploadedFileResponse = {
   content_type?: string | null;
   file_size_bytes: number;
   sha256?: string;
+};
+
+export type PagedResponse<T> = {
+  items: T[];
+  page: number;
+  size: number;
+  total: number;
+};
+
+export type DashboardSummary = {
+  active_loads: number;
+  delivered_today: number;
+  miles_this_week: number;
+  revenue_this_week: number;
+  drivers_active: number;
+  drivers_total: number;
+};
+
+export type Broker = {
+  id: number;
+  name: string;
+  mc_number?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  notes?: string | null;
+};
+
+export type Load = {
+  id: number;
+  load_number: string;
+  broker_id?: number | null;
+  driver_id?: number | null;
+  pickup_date?: string | null;
+  delivery_date?: string | null;
+  pickup_location?: string | null;
+  delivery_location?: string | null;
+  rate?: number | null;
+  miles?: number | null;
+  status: string;
+  broker?: Broker | null;
+  driver?: { id: number; first_name: string; last_name: string } | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type DriverSummary = {
+  driver: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    phone?: string | null;
+    email?: string | null;
+    license_number?: string | null;
+    license_expiry?: string | null;
+    notes?: string | null;
+    is_active: boolean;
+  };
+  stats: {
+    miles_this_week: number;
+    revenue_this_week: number;
+    active_loads: number;
+  };
+  upcoming_loads: Array<{
+    id: number;
+    load_number: string;
+    pickup_date?: string | null;
+    delivery_date?: string | null;
+    pickup_location?: string | null;
+    delivery_location?: string | null;
+    status: string;
+  }>;
+};
+
+export type Driver = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string | null;
+  email?: string | null;
+  is_active: boolean;
 };
