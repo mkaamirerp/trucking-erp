@@ -26,6 +26,15 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/trucking_erp
       POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/postgres
       TENANT_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_smoke_active
+      BASE_DOMAIN: truckerp.me
+      COOKIE_DOMAIN: .truckerp.me
+      SECURE_COOKIES: "false"
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS}
+      SMTP_USE_TLS: ${SMTP_USE_TLS}
     networks:
       - truckerp_net
 

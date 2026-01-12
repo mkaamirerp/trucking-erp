@@ -5,6 +5,10 @@ export type MeResponse = {
   user_id: number | null;
   tenant_id: number;
   roles: string[];
+  requires_account_setup?: boolean;
+  account_setup_missing?: string[];
+  country_code?: string | null;
+  tenant_slug?: string | null;
 };
 
 type MeContextValue = {

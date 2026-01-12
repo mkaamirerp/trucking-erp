@@ -10,6 +10,7 @@ from fastapi import UploadFile
 
 DEFAULT_LOCAL_DIR = Path("/home/admin/trucking_erp/storage/driver_docs")
 DEFAULT_PAY_DOCS_DIR = Path("/home/admin/trucking_erp/storage/pay_documents")
+DEFAULT_COMPANY_DOCS_DIR = Path("/home/admin/trucking_erp/storage/company_docs")
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,11 @@ def _safe_filename(name: str | None) -> str:
 def _local_dir() -> Path:
     d = os.getenv("LOCAL_STORAGE_DIR")
     return Path(d) if d else DEFAULT_LOCAL_DIR
+
+
+def _company_dir() -> Path:
+    d = os.getenv("COMPANY_DOCS_DIR")
+    return Path(d) if d else DEFAULT_COMPANY_DOCS_DIR
 
 
 def resolve_storage_path(storage_key: str, default_dir: Path | None = None) -> Path:
@@ -57,6 +63,36 @@ async def save_driver_doc_upload_local(file: UploadFile) -> StoredFile:
     with open(dest, "wb") as f:
         while True:
             chunk = await file.read(1024 * 1024)  # 1MB
+            if not chunk:
+                break
+            f.write(chunk)
+            h.update(chunk)
+            size += len(chunk)
+
+    return StoredFile(
+        storage_key=key,
+        original_filename=original,
+        content_type=file.content_type,
+        file_size_bytes=size,
+        sha256=h.hexdigest(),
+    )
+
+
+async def save_company_doc_upload_local(file: UploadFile) -> StoredFile:
+    base = _company_dir()
+    base.mkdir(parents=True, exist_ok=True)
+
+    original = _safe_filename(file.filename)
+    ext = Path(original).suffix.lower()[:10]
+    key = f"{uuid.uuid4().hex}{ext}"
+    dest = base / key
+
+    h = hashlib.sha256()
+    size = 0
+
+    with open(dest, "wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
             if not chunk:
                 break
             f.write(chunk)

@@ -29,7 +29,16 @@ from app.models.payee import (
 from app.models.employee_role import EmployeeRole
 
 # Platform models (B3 onboarding)
-from app.models.platform import PlatformTenant, PlatformUser, PlatformTenantMember
+from app.models.platform import (
+    PlatformTenant,
+    PlatformUser,
+    PlatformTenantMember,
+    PlatformSubscription,
+    PlatformOTPToken,
+    PlatformSecurityEvent,
+    PlatformCompanyProfile,
+    ReservedSlug,
+)
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem

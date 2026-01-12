@@ -1,0 +1,12 @@
+venv
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+node_modules
+apps/web/node_modules
+artifacts
+archive
