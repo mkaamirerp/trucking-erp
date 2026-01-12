@@ -1,10 +1,12 @@
-from datetime import date
+from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.deps.auth import get_current_user
 from app.models.driver import Driver
+from app.models.load import Load
 from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -15,6 +17,7 @@ router = APIRouter(prefix="/drivers", tags=["drivers"])
 async def create_driver(
     payload: DriverCreate,
     tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     driver = Driver(**payload.model_dump(), tenant_id=tenant_id)
@@ -26,6 +29,7 @@ async def create_driver(
 @router.get("", response_model=list[DriverOut])
 async def list_drivers(
     tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
     limit: int = 50,
     offset: int = 0,
@@ -55,6 +59,7 @@ async def list_drivers(
 async def get_driver(
     driver_id: int,
     tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
@@ -68,6 +73,7 @@ async def update_driver(
     driver_id: int,
     payload: DriverUpdate,
     tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
@@ -108,3 +114,86 @@ async def delete_driver(driver_id: int):
         status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
         detail="Hard delete is not supported. Use PATCH to deactivate/terminate the driver."
     )
+
+
+@router.get("/{driver_id}/summary")
+async def driver_summary(
+    driver_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    driver = await db.scalar(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
+    if not driver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
+
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+
+    miles_week = await db.scalar(
+        select(func.coalesce(func.sum(Load.miles), 0)).where(
+            Load.tenant_id == tenant_id,
+            Load.driver_id == driver_id,
+            Load.pickup_date >= week_start,
+        )
+    )
+    revenue_week = await db.scalar(
+        select(func.coalesce(func.sum(Load.rate), 0)).where(
+            Load.tenant_id == tenant_id,
+            Load.driver_id == driver_id,
+            Load.pickup_date >= week_start,
+        )
+    )
+    active_loads = await db.scalar(
+        select(func.count()).where(
+            Load.tenant_id == tenant_id,
+            Load.driver_id == driver_id,
+            Load.status.in_(["assigned", "picked_up"]),
+        )
+    )
+    upcoming = await db.execute(
+        select(Load)
+        .where(
+            Load.tenant_id == tenant_id,
+            Load.driver_id == driver_id,
+            Load.status != "cancelled",
+            Load.pickup_date >= today,
+        )
+        .order_by(Load.pickup_date.asc())
+        .limit(10)
+    )
+
+    driver_data = {
+        "id": driver.id,
+        "first_name": driver.first_name,
+        "last_name": driver.last_name,
+        "phone": driver.phone,
+        "email": driver.email,
+        "license_number": driver.license_number,
+        "license_expiry": driver.license_expiry_date,
+        "notes": None,  # placeholder; extend when notes field exists
+        "is_active": driver.is_active,
+    }
+
+    upcoming_items = [
+        {
+            "id": l.id,
+            "load_number": l.load_number,
+            "pickup_date": l.pickup_date,
+            "delivery_date": l.delivery_date,
+            "pickup_location": l.pickup_location,
+            "delivery_location": l.delivery_location,
+            "status": l.status,
+        }
+        for l in upcoming.scalars().all()
+    ]
+
+    return {
+        "driver": driver_data,
+        "stats": {
+            "miles_this_week": int(miles_week or 0),
+            "revenue_this_week": float(revenue_week or 0),
+            "active_loads": int(active_loads or 0),
+        },
+        "upcoming_loads": upcoming_items,
+    }

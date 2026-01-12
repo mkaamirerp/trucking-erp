@@ -44,3 +44,5 @@ class Driver(Base):
         back_populates="driver",
         cascade="all, delete-orphan",
     )
+
+    loads = relationship("Load", back_populates="driver")

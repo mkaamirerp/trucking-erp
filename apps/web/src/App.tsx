@@ -10,13 +10,16 @@ import SignupPage from "./pages/SignupPage";
 import CompanySetupPage from "./pages/CompanySetupPage";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
+import LoadsListPage from "./pages/LoadsListPage";
+import LoadDetailPage from "./pages/LoadDetailPage";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
 
 function App() {
   const { me, loading, error } = useMe();
   const location = useLocation();
-  const isAppRoute = /^\/payroll\//.test(location.pathname) || /^\/dashboard/.test(location.pathname);
+  const isAppRoute =
+    /^\/payroll\//.test(location.pathname) || /^\/dashboard/.test(location.pathname) || /^\/loads/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
     location.pathname.startsWith(accountSetupPath) || location.pathname.startsWith("/company-setup");
@@ -61,6 +64,22 @@ function App() {
         element={
           <Layout>
             <DashboardPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/loads"
+        element={
+          <Layout>
+            <LoadsListPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/loads/:id"
+        element={
+          <Layout>
+            <LoadDetailPage />
           </Layout>
         }
       />

@@ -27,6 +27,8 @@ from app.models.payee import (
     TenantBankConnector,
 )
 from app.models.employee_role import EmployeeRole
+from app.models.broker import Broker
+from app.models.load import Load
 
 # Platform models (B3 onboarding)
 from app.models.platform import (
