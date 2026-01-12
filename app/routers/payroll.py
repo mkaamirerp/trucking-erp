@@ -15,6 +15,7 @@ from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
 from app.models.payroll import PayEntry, PayPeriod, PayProfile
+from app.deps.auth import get_current_user
 from app.schemas.payroll import (
     PAY_PERIOD_STATUSES,
     PayDriverSummary,
@@ -67,6 +68,7 @@ async def _pay_period_overlap_exists(
 )
 async def create_pay_period(
     payload: PayPeriodCreate,
+    _user=Depends(get_current_user),
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
@@ -88,6 +90,7 @@ async def create_pay_period(
 
 @router.get("/pay-periods", response_model=list[PayPeriodOut])
 async def list_pay_periods(
+    _user=Depends(get_current_user),
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
     status_filter: str | None = Query(default=None, alias="status"),

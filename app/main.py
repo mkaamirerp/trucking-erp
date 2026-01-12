@@ -17,6 +17,7 @@ from app.routers.meta import router as meta_router
 from app.routers.payroll import router as payroll_router
 from app.routers.pay_runs import router as pay_runs_router
 from app.routers.me import router as me_router
+from app.routers.auth import router as auth_router
 from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -40,6 +41,7 @@ app.include_router(meta_router)
 app.include_router(payroll_router)
 app.include_router(pay_runs_router)
 app.include_router(me_router)
+app.include_router(auth_router)
 
 
 @app.exception_handler(Exception)

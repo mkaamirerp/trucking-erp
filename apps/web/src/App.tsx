@@ -6,12 +6,27 @@ import PayRunNewPage from "./pages/PayRunNewPage";
 import PayRunDetailPage from "./pages/PayRunDetailPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import LandingPage from "./pages/LandingPage";
+import SignupPage from "./pages/SignupPage";
+import CompanySetupPage from "./pages/CompanySetupPage";
+import LoginPage from "./pages/LoginPage";
+import DashboardPage from "./pages/DashboardPage";
 import { useMe } from "./hooks/useMe";
+import { getTenantSlugFromHost } from "./tenant";
 
 function App() {
-  const { loading, error } = useMe();
+  const { me, loading, error } = useMe();
   const location = useLocation();
-  const isAppRoute = location.pathname.startsWith("/payroll");
+  const isAppRoute = /^\/payroll\//.test(location.pathname) || /^\/dashboard/.test(location.pathname);
+  const accountSetupPath = "/account-setup";
+  const onAccountSetupRoute =
+    location.pathname.startsWith(accountSetupPath) || location.pathname.startsWith("/company-setup");
+  const hostSlug = getTenantSlugFromHost();
+
+  // If user hits subdomain root, send them to the right place
+  if (hostSlug && location.pathname === "/") {
+    const target = me?.requires_account_setup ? "/company-setup" : "/dashboard";
+    return <Navigate to={target} replace />;
+  }
 
   if (isAppRoute && loading) {
     return (
@@ -22,16 +37,33 @@ function App() {
   }
 
   if (isAppRoute && error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen text-sm text-red-600">
-        Unable to load your session. Please try again later.
-      </div>
-    );
+    return <Navigate to="/login" replace />;
+  }
+
+  if (isAppRoute && !loading && !error && me?.requires_account_setup && !onAccountSetupRoute) {
+    return <Navigate to={accountSetupPath} replace />;
+  }
+
+  if (isAppRoute && error) {
+    return <Navigate to="/login" replace />;
   }
 
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/signup" element={<SignupPage />} />
+      <Route path="/signup/*" element={<SignupPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/company-setup" element={<CompanySetupPage />} />
+      <Route path="/account-setup" element={<CompanySetupPage />} />
+      <Route
+        path="/dashboard"
+        element={
+          <Layout>
+            <DashboardPage />
+          </Layout>
+        }
+      />
       <Route
         path="/payroll/pay-periods"
         element={

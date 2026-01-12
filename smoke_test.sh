@@ -62,6 +62,22 @@ need_cmd jq
 need_cmd $HOST_CURL
 need_cmd docker
 
+smtp_smoke() {
+  hr
+  echo "SMTP connectivity smoke"
+  if PYTHONPATH="." $PYTHON scripts/smoke_smtp.py; then
+    ok "SMTP smoke passed"
+  else
+    fail "SMTP smoke test failed"
+  fi
+}
+
+frontend_smoke() {
+  hr
+  echo "Frontend public smoke"
+  FRONTEND_BASE="${FRONTEND_BASE:-http://localhost}" PUBLIC_API_BASE="${BASE_URL}/api/v1/public" PUBLIC_CURL="$CURL_CMD" bash scripts/smoke_frontend_public.sh
+}
+
 hr
 echo "Trucking ERP EXTENDED Smoke Test (simplified)"
 echo "BASE_URL=$BASE_URL"
@@ -198,6 +214,49 @@ docker run --rm --network truckerp_net alpine:3.20 sh -lc '
   [ "$R3" = "403" ] || fail "[Tenant invalid] expected 403, got $R3"
   echo "[Tenant invalid] /drivers => PASS (403)"
 '
+
+# SMTP connectivity smoke
+smtp_smoke
+
+# Slug availability HTTP smokes
+hr
+echo "Slug availability checks"
+slug_ok="test-company-$(date +%s)"
+slug_bad='BAD!!SLUG"'
+slug_reserved="admin"
+
+slug_ok_body="$($CURL_CMD -sS --max-time 8 "$BASE_URL/api/v1/public/check-slug-availability?slug=${slug_ok}")"
+code_slug_ok="$($CURL_CMD -sS -o /dev/null --max-time 8 -w "%{http_code}" "$BASE_URL/api/v1/public/check-slug-availability?slug=${slug_ok}")"
+echo "GET /api/v1/public/check-slug-availability?slug=${slug_ok} => HTTP $code_slug_ok"
+echo "$slug_ok_body" | jq .
+[[ "$code_slug_ok" == "200" ]] || fail "Slug availability expected 200"
+echo "$slug_ok_body" | jq -e '.available==true' >/dev/null || fail "Expected available=true for slug_ok"
+
+slug_reserved_body="$($CURL_CMD -sS --max-time 8 "$BASE_URL/api/v1/public/check-slug-availability?slug=${slug_reserved}")"
+code_slug_reserved="$($CURL_CMD -sS -o /dev/null --max-time 8 -w "%{http_code}" "$BASE_URL/api/v1/public/check-slug-availability?slug=${slug_reserved}")"
+echo "GET /api/v1/public/check-slug-availability?slug=${slug_reserved} => HTTP $code_slug_reserved"
+echo "$slug_reserved_body" | jq .
+[[ "$code_slug_reserved" == "200" ]] || fail "Reserved slug expected 200"
+echo "$slug_reserved_body" | jq -e '.available==false' >/dev/null || fail "Expected available=false for reserved slug"
+
+slug_bad_body="$($CURL_CMD -sS --max-time 8 --get --data-urlencode "slug=${slug_bad}" "$BASE_URL/api/v1/public/check-slug-availability")"
+code_slug_bad="$($CURL_CMD -sS -o /dev/null --max-time 8 -w "%{http_code}" --get --data-urlencode "slug=${slug_bad}" "$BASE_URL/api/v1/public/check-slug-availability")"
+echo "GET /api/v1/public/check-slug-availability?slug=${slug_bad} => HTTP $code_slug_bad"
+echo "$slug_bad_body" | jq .
+[[ "$code_slug_bad" == "400" ]] || fail "Invalid slug expected 400"
+
+# Signup flow smoke (Python)
+hr
+echo "Signup flow smoke (python helper)"
+if [[ -n "${PLATFORM_DATABASE_URL:-}" || -n "${DATABASE_URL:-}" ]]; then
+  API_PUBLIC="$BASE_URL/api/v1/public" \
+    $PYTHON scripts/smoke_signup_flow.py
+else
+  warn "Skipping signup flow smoke: DATABASE_URL/PLATFORM_DATABASE_URL not set"
+fi
+
+# Frontend smoke
+frontend_smoke
 
 # 4) Python smokes
 hr

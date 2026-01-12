@@ -2,22 +2,59 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from enum import Enum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
 
+class TenantStatus(str, Enum):
+    PENDING = "PENDING"
+    PROVISIONING = "PROVISIONING"
+    ACTIVE = "ACTIVE"
+
+
+class TenantDBStatus(str, Enum):
+    NOT_CREATED = "NOT_CREATED"
+    NOT_PROVISIONED = "NOT_PROVISIONED"
+    READY = "READY"
+    ERROR = "ERROR"
+
+
+class SubscriptionPlan(str, Enum):
+    TRIAL = "TRIAL"
+    PAID = "PAID"
+
+
+class SubscriptionStatus(str, Enum):
+    TRIAL_ACTIVE = "TRIAL_ACTIVE"
+    ACTIVE = "ACTIVE"
+    CANCELLED = "CANCELLED"
+
+
+class OTPPurpose(str, Enum):
+    SIGNUP_EMAIL_VERIFY = "signup_email_verify"
+
+
+class ReservedSlug(Base):
+    __tablename__ = "reserved_slugs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
 class PlatformTenant(Base):
     __tablename__ = "platform_tenants"
     __table_args__ = (UniqueConstraint("slug", name="uq_platform_tenants_slug"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    slug: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="PROVISIONING")
+    slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default=TenantStatus.PROVISIONING.value)
     plan: Mapped[str | None] = mapped_column(String(50), nullable=True)
     modules_json: Mapped[dict | None] = mapped_column("modules_enabled", JSONB, nullable=True)
     privacy_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="standard")
@@ -32,7 +69,7 @@ class PlatformTenant(Base):
     db_user: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ssl_mode: Mapped[str | None] = mapped_column(String(30), nullable=True)
     provisioning_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    db_status: Mapped[str | None] = mapped_column(String(20), nullable=True, default="NOT_PROVISIONED")
+    db_status: Mapped[str | None] = mapped_column(String(20), nullable=True, default=TenantDBStatus.NOT_PROVISIONED.value)
     db_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     db_last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     provisioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -47,6 +84,10 @@ class PlatformTenant(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     members = relationship("PlatformTenantMember", back_populates="tenant", cascade="all, delete-orphan")
+    subscriptions = relationship("PlatformSubscription", back_populates="tenant", cascade="all, delete-orphan")
+    company_profile = relationship(
+        "PlatformCompanyProfile", back_populates="tenant", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class PlatformUser(Base):
@@ -67,6 +108,7 @@ class PlatformUser(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     memberships = relationship("PlatformTenantMember", back_populates="platform_user", cascade="all, delete-orphan")
+    otp_tokens = relationship("PlatformOTPToken", back_populates="user", cascade="all, delete-orphan")
 
 
 class PlatformTenantMember(Base):
@@ -82,3 +124,73 @@ class PlatformTenantMember(Base):
 
     tenant = relationship("PlatformTenant", back_populates="members")
     platform_user = relationship("PlatformUser", back_populates="memberships")
+
+
+class PlatformSubscription(Base):
+    __tablename__ = "platform_subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False)
+    plan: Mapped[str] = mapped_column(String(50), nullable=False, default=SubscriptionPlan.TRIAL.value)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default=SubscriptionStatus.TRIAL_ACTIVE.value)
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    tenant = relationship("PlatformTenant", back_populates="subscriptions")
+
+
+class PlatformOTPToken(Base):
+    __tablename__ = "platform_otp_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=True)
+    otp_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    request_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    user = relationship("PlatformUser", back_populates="otp_tokens")
+
+
+class PlatformSecurityEvent(Base):
+    __tablename__ = "platform_security_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class PlatformCompanyProfile(Base):
+    __tablename__ = "platform_company_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, unique=True)
+    legal_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    address_street: Mapped[str] = mapped_column(String(255), nullable=False)
+    address_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    address_region: Mapped[str] = mapped_column(String(100), nullable=False)
+    address_postal: Mapped[str] = mapped_column(String(20), nullable=False)
+    address_country: Mapped[str] = mapped_column(String(2), nullable=False)
+    usdot_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    mc_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    cvor_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    operator_license: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    hst_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    w9_storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    w9_original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    setup_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    tenant = relationship("PlatformTenant", back_populates="company_profile")

@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse, Response
 
 from app.core.database import AsyncSessionLocal
 from app.models.platform import PlatformTenant
+from app.utils.jwt_auth import get_token_from_request, decode_token, TokenType
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,28 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             set_request_id(response)
             log("platform_no_tenant")
+            return response
+
+        # Try JWT-based context first
+        prefer_refresh = path.startswith("/api/v1/auth/refresh")
+        token, token_type = get_token_from_request(request, prefer_refresh=prefer_refresh)
+        if token:
+            try:
+                payload = decode_token(token, expected_type=TokenType.REFRESH if prefer_refresh else TokenType.ACCESS)
+                request.state.user_id = payload.get("sub")
+                request.state.roles = payload.get("roles") or []
+                tenant_id = payload.get("tenant_id")
+                if tenant_id is not None:
+                    request.state.tenant_id = int(tenant_id)
+            except HTTPException as exc:
+                response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+                set_request_id(response)
+                log("token_invalid", level="warning")
+                return response
+        if getattr(request.state, "tenant_id", None) is not None:
+            response = await call_next(request)
+            set_request_id(response)
+            log("success", tenant_id=request.state.tenant_id)
             return response
 
         # Tenant-scoped route: require tenant header

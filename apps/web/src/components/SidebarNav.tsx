@@ -1,5 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
+import { getTenantSlugFromHost } from "../tenant";
 
 const links = [
   { to: "/payroll/pay-periods", label: "Pay Periods" },
@@ -8,6 +9,9 @@ const links = [
 ];
 
 export default function SidebarNav() {
+  const location = useLocation();
+  const slug = getTenantSlugFromHost() ? "" : "";
+
   return (
     <aside className="w-64 min-h-screen bg-white border-r border-gray-200">
       <div className="px-4 py-5 border-b border-gray-200">
@@ -18,7 +22,7 @@ export default function SidebarNav() {
         {links.map((link) => (
           <NavLink
             key={link.to}
-            to={link.to}
+            to={`${slug}${link.to}`}
             className={({ isActive }) =>
               clsx(
                 "block px-3 py-2 rounded-md text-sm font-medium",
