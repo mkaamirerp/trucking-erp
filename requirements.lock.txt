@@ -17,7 +17,7 @@ dnspython==2.8.0
 dparse==0.6.4
 email-validator==2.3.0
 fastapi==0.127.0
-filelock==3.20.1
+filelock==3.20.3
 fonttools==4.61.1
 greenlet==3.3.0
 h11==0.16.0
