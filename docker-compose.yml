@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   truckerp-postgres:
     image: postgres:15.7-alpine
@@ -22,6 +20,12 @@ services:
     restart: unless-stopped
     depends_on:
       - truckerp-postgres
+    command:
+      [
+        "/bin/sh",
+        "-lc",
+        "last_log=0; while [ ! -s /run/secrets/truckerp.env ]; do now=$$(date +%s); if [ $$((now - last_log)) -ge 10 ]; then echo \"Waiting for /run/secrets/truckerp.env\"; last_log=$$now; fi; sleep 1; done; set -a; . /run/secrets/truckerp.env; set +a; echo \"Loaded env from /run/secrets/truckerp.env\"; exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000",
+      ]
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/trucking_erp
       POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/postgres
@@ -35,6 +39,8 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS}
       SMTP_USE_TLS: ${SMTP_USE_TLS}
+    volumes:
+      - ./runtime/rendered:/run/secrets:ro
     networks:
       - truckerp_net
 
