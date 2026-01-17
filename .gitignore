@@ -52,3 +52,10 @@ writing/
 storage/
 web/
 scripts/
+
+# Vault/runtime rendered secrets
+runtime/rendered/
+*.env
+
+# Vault runtime data (never commit)
+vault/
