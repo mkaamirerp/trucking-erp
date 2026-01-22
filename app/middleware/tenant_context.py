@@ -96,7 +96,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
         # Try JWT-based context first
         prefer_refresh = path.startswith("/api/v1/auth/refresh")
-        token, token_type = get_token_from_request(request, prefer_refresh=prefer_refresh)
+        try:
+            token, token_type = get_token_from_request(request, prefer_refresh=prefer_refresh)
+        except HTTPException as exc:
+            response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            set_request_id(response)
+            log("token_invalid", level="warning")
+            return response
         if token:
             try:
                 payload = decode_token(token, expected_type=TokenType.REFRESH if prefer_refresh else TokenType.ACCESS)

@@ -59,3 +59,15 @@ runtime/rendered/
 
 # Vault runtime data (never commit)
 vault/
+.env.*.ssm
+.env.*.ssm
+vault-data/
+vault-data/
+vault-data/
+
+# Vault (retired)
+vault/
+infra/vault/
+runtime/vault/
+**/role_id
+**/secret_id
