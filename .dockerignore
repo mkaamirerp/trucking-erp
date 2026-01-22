@@ -10,3 +10,6 @@ node_modules
 apps/web/node_modules
 artifacts
 archive
+vault
+vault-data
+vault.BAK_20260117_045113

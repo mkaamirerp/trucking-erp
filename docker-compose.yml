@@ -6,7 +6,6 @@ services:
     environment:
       POSTGRES_DB: trucking_erp
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -20,27 +19,21 @@ services:
     restart: unless-stopped
     depends_on:
       - truckerp-postgres
-    command:
-      [
-        "/bin/sh",
-        "-lc",
-        "last_log=0; while [ ! -s /run/secrets/truckerp.env ]; do now=$$(date +%s); if [ $$((now - last_log)) -ge 10 ]; then echo \"Waiting for /run/secrets/truckerp.env\"; last_log=$$now; fi; sleep 1; done; set -a; . /run/secrets/truckerp.env; set +a; echo \"Loaded env from /run/secrets/truckerp.env\"; exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000",
-      ]
+    command: ["/bin/sh", "-lc", "/app/scripts/start_api_with_ssm.sh"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/trucking_erp
-      POSTGRES_ADMIN_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/postgres
-      TENANT_DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_smoke_active
       BASE_DOMAIN: truckerp.me
       COOKIE_DOMAIN: .truckerp.me
       SECURE_COOKIES: "false"
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT}
-      SMTP_USERNAME: ${SMTP_USERNAME}
-      SMTP_PASSWORD: ${SMTP_PASSWORD}
-      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS}
-      SMTP_USE_TLS: ${SMTP_USE_TLS}
-    volumes:
-      - ./runtime/rendered:/run/secrets:ro
+    tmpfs:
+      - /run/secrets
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c 'import urllib.request,sys; data=urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health",timeout=2).read().decode(); sys.exit(0 if "\"status\":\"ok\"" in data else 1)'
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - truckerp_net
 
@@ -49,16 +42,37 @@ services:
       context: .
       dockerfile: infra/nginx/Dockerfile
     container_name: truckerp-nginx
-    restart: always
+    restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     depends_on:
       - truckerp-api
+    volumes:
+      - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
     networks:
       - truckerp_net
 
+  certbot:
+    image: certbot/certbot:latest
+    container_name: truckerp-certbot
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: >
+      sh -c 'trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        sleep 12h;
+      done'
+
 volumes:
   postgres_data:
+  letsencrypt:
+  certbot_www:
 
 networks:
   truckerp_net:

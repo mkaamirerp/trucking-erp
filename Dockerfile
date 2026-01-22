@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y libpq-dev gcc && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libpq-dev gcc awscli jq && rm -rf /var/lib/apt/lists/*
 # Base runtime deps
 RUN python -m pip install --no-cache-dir uvicorn fastapi sqlalchemy asyncpg psutil pydantic-settings
 
@@ -16,4 +16,5 @@ print("imports OK")
 PY
 
 COPY . .
+RUN chmod +x scripts/start_api_with_ssm.sh
 CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
