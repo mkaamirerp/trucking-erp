@@ -71,3 +71,6 @@ infra/vault/
 runtime/vault/
 **/role_id
 **/secret_id
+
+# Runtime outputs (never commit)
+runtime/
