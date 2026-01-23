@@ -1,0 +1,61 @@
+name: Alembic Guardrails
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  alembic-safety:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          pip install alembic
+
+      # -------- Template checks --------
+      - name: Check Alembic templates exist
+        run: |
+          test -f alembic/script.py.mako || (echo "❌ Missing alembic/script.py.mako" && exit 1)
+          test -f alembic_tenant/script.py.mako || (echo "❌ Missing alembic_tenant/script.py.mako" && exit 1)
+          echo "✅ Alembic templates present"
+
+      # -------- Multiple head checks --------
+      - name: Check single head (platform)
+        run: |
+          HEADS=$(alembic heads | wc -l)
+          if [ "$HEADS" -ne 1 ]; then
+            echo "❌ Platform Alembic has multiple heads"
+            alembic heads
+            exit 1
+          fi
+          echo "✅ Platform Alembic single head"
+
+      - name: Check single head (tenant)
+        run: |
+          HEADS=$(alembic -c alembic_tenant.ini heads | wc -l)
+          if [ "$HEADS" -ne 1 ]; then
+            echo "❌ Tenant Alembic has multiple heads"
+            alembic -c alembic_tenant.ini heads
+            exit 1
+          fi
+          echo "✅ Tenant Alembic single head"
+
+      # -------- Structure checks --------
+      - name: Validate Alembic structure
+        run: |
+          test -d alembic/versions || (echo "❌ Missing alembic/versions" && exit 1)
+          test -d alembic_tenant/versions || (echo "❌ Missing alembic_tenant/versions" && exit 1)
+          test -f alembic/env.py || (echo "❌ Missing alembic/env.py" && exit 1)
+          test -f alembic_tenant/env.py || (echo "❌ Missing alembic_tenant/env.py" && exit 1)
+          echo "✅ Alembic structure valid"
