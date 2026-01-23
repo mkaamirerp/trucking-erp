@@ -34,9 +34,9 @@ target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
-    url = os.getenv("TENANT_DATABASE_URL")
+    url = os.getenv("ALEMBIC_TENANT_DATABASE_URL")
     if not url:
-        raise RuntimeError("TENANT_DATABASE_URL is not set. Put it in /home/admin/trucking_erp/.env")
+        raise RuntimeError("ALEMBIC_TENANT_DATABASE_URL is not set. Provide it explicitly for tenant migrations (or set it in .env for local dev)")
     return url
 
 

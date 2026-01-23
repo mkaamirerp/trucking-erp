@@ -14,6 +14,12 @@ _ENGINE_CACHE: Dict[str, object] = {}
 
 
 def _swap_db(url: str, db_name: str) -> str:
+    """
+    Swap the database name portion of a URL, keeping scheme/creds/host/port intact.
+
+    Works for URLs like:
+      postgresql+asyncpg://user:pass@host:5432/some_db
+    """
     base, _sep, _old = url.rpartition("/")
     return f"{base}/{db_name}" if base else url
 
@@ -23,16 +29,23 @@ async def get_tenant_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     if tenant_id is None:
         raise HTTPException(status_code=400, detail="Tenant context missing")
 
-    # lookup tenant in PLATFORM DB
+    # Lookup tenant in PLATFORM DB
     async with AsyncSessionLocal() as platform_db:
         tenant = await platform_db.scalar(
             select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)).limit(1)
         )
 
+    # Enforce tenant readiness
     if not tenant or tenant.status != "ACTIVE" or tenant.db_status != "READY":
         raise HTTPException(status_code=403, detail="Tenant inactive or not found")
 
-    template = os.getenv("POSTGRES_ADMIN_URL") or os.getenv("TENANT_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not tenant.db_name:
+        raise HTTPException(status_code=403, detail="Tenant DB not provisioned")
+
+    # IMPORTANT:
+    # Use a stable template URL (host/creds/port) and dynamically swap in tenant.db_name.
+    # Do NOT rely on TENANT_DATABASE_URL as a single-DB setting (breaks multi-tenant).
+    template = os.getenv("POSTGRES_ADMIN_URL") or os.getenv("DATABASE_URL")
     if not template:
         raise HTTPException(status_code=503, detail="DB config missing")
 
