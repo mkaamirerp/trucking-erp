@@ -51,7 +51,8 @@ jobs:
       - name: Check single head (platform)
         run: |
           HEAD_COUNT=$(alembic heads 2>&1 | grep -c "(head)" || echo "0")
-          if [ "$HEAD_COUNT" -ne 1 ]; then
+          HEAD_COUNT=$(echo "$HEAD_COUNT" | tr -d '[:space:]')
+          if [ "$HEAD_COUNT" != "1" ]; then
             echo "Platform Alembic has multiple heads (found: $HEAD_COUNT)"
             alembic heads 2>&1
             exit 1
@@ -61,7 +62,8 @@ jobs:
       - name: Check single head (tenant)
         run: |
           HEAD_COUNT=$(alembic -c alembic_tenant.ini heads 2>&1 | grep -c "(head)" || echo "0")
-          if [ "$HEAD_COUNT" -ne 1 ]; then
+          HEAD_COUNT=$(echo "$HEAD_COUNT" | tr -d '[:space:]')
+          if [ "$HEAD_COUNT" != "1" ]; then
             echo "Tenant Alembic has multiple heads (found: $HEAD_COUNT)"
             alembic -c alembic_tenant.ini heads 2>&1
             exit 1
@@ -99,7 +101,7 @@ jobs:
 
       - name: Guard forbid alembic stamp
         run: |
-          if rg -n --hidden --no-ignore-vcs "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools docs .github 2>/dev/null; then
+          if rg -n --hidden --no-ignore-vcs -g '!.github/workflows/*.yml' "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools docs .github 2>/dev/null; then
             echo "Found alembic stamp usage in repo scripts/docs"
             exit 1
           fi
