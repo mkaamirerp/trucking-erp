@@ -51,7 +51,7 @@ jobs:
       - name: Check single head (platform)
         run: |
           HEAD_COUNT=$(alembic heads 2>&1 | grep -c "(head)" || echo "0")
-          HEAD_COUNT=$(echo "$HEAD_COUNT" | tr -d '[:space:]')
+          HEAD_COUNT=$(echo "$HEAD_COUNT" | xargs)
           if [ "$HEAD_COUNT" != "1" ]; then
             echo "Platform Alembic has multiple heads (found: $HEAD_COUNT)"
             alembic heads 2>&1
@@ -62,7 +62,7 @@ jobs:
       - name: Check single head (tenant)
         run: |
           HEAD_COUNT=$(alembic -c alembic_tenant.ini heads 2>&1 | grep -c "(head)" || echo "0")
-          HEAD_COUNT=$(echo "$HEAD_COUNT" | tr -d '[:space:]')
+          HEAD_COUNT=$(echo "$HEAD_COUNT" | xargs)
           if [ "$HEAD_COUNT" != "1" ]; then
             echo "Tenant Alembic has multiple heads (found: $HEAD_COUNT)"
             alembic -c alembic_tenant.ini heads 2>&1
@@ -77,9 +77,7 @@ jobs:
 
       - name: Guard platform revisions
         run: |
-          # Check for actual schema operations on tenant tables
-          # Match: op.create_table("drivers"), op.batch_alter_table("loads"), op.add_column("payroll"), etc.
-          # Excludes: permission strings like "drivers.read", comments, column names like "max_drivers"
+          # Check for actual schema operations on tenant tables (exclude permission strings)
           if rg -n --hidden --no-ignore-vcs "op\.(create_table|drop_table|add_column|drop_column|create_foreign_key|create_index|drop_index|add_constraint|drop_constraint|alter_table|batch_alter_table)\s*\(\s*[\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)" alembic/versions 2>/dev/null; then
             echo "Platform migrations appear to touch tenant business tables"
             exit 1
