@@ -23,6 +23,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
 
+      - name: Install project dependencies (if present)
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+
+      - name: Guard: tenant safety script must exist
+        run: |
+          test -f scripts/ci_tenant_safety.sh
+
       - name: Run tenant safety enforcement
         run: |
           chmod +x scripts/ci_tenant_safety.sh
