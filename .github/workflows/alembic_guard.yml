@@ -23,73 +23,76 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install alembic
+          if ! command -v rg &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y ripgrep
+          fi
 
-      - name: Install project dependencies (if present)
+      - name: Install project dependencies
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
       - name: Check Alembic templates exist
         run: |
-          test -f alembic/script.py.mako || (echo "❌ Missing alembic/script.py.mako" && exit 1)
-          test -f alembic_tenant/script.py.mako || (echo "❌ Missing alembic_tenant/script.py.mako" && exit 1)
-          echo "✅ Alembic templates present"
+          test -f alembic/script.py.mako || (echo "Missing alembic/script.py.mako" && exit 1)
+          test -f alembic_tenant/script.py.mako || (echo "Missing alembic_tenant/script.py.mako" && exit 1)
+          echo "Alembic templates present"
 
       - name: Validate Alembic structure
         run: |
-          test -d alembic/versions || (echo "❌ Missing alembic/versions" && exit 1)
-          test -d alembic_tenant/versions || (echo "❌ Missing alembic_tenant/versions" && exit 1)
-          test -f alembic/env.py || (echo "❌ Missing alembic/env.py" && exit 1)
-          test -f alembic_tenant/env.py || (echo "❌ Missing alembic_tenant/env.py" && exit 1)
-          test -f alembic.ini || (echo "❌ Missing alembic.ini" && exit 1)
-          test -f alembic_tenant.ini || (echo "❌ Missing alembic_tenant.ini" && exit 1)
-          echo "✅ Alembic structure valid"
+          test -d alembic/versions || (echo "Missing alembic/versions" && exit 1)
+          test -d alembic_tenant/versions || (echo "Missing alembic_tenant/versions" && exit 1)
+          test -f alembic/env.py || (echo "Missing alembic/env.py" && exit 1)
+          test -f alembic_tenant/env.py || (echo "Missing alembic_tenant/env.py" && exit 1)
+          test -f alembic.ini || (echo "Missing alembic.ini" && exit 1)
+          test -f alembic_tenant.ini || (echo "Missing alembic_tenant.ini" && exit 1)
+          echo "Alembic structure valid"
 
       - name: Check single head (platform)
         run: |
-          HEADS=$(alembic heads | wc -l | tr -d ' ')
-          if [ "$HEADS" -ne 1 ]; then
-            echo "❌ Platform Alembic has multiple heads"
-            alembic heads
+          HEAD_COUNT=$(alembic heads 2>&1 | grep -c "(head)" || echo "0")
+          if [ "$HEAD_COUNT" -ne 1 ]; then
+            echo "Platform Alembic has multiple heads (found: $HEAD_COUNT)"
+            alembic heads 2>&1
             exit 1
           fi
-          echo "✅ Platform Alembic single head"
+          echo "Platform Alembic single head"
 
       - name: Check single head (tenant)
         run: |
-          HEADS=$(alembic -c alembic_tenant.ini heads | wc -l | tr -d ' ')
-          if [ "$HEADS" -ne 1 ]; then
-            echo "❌ Tenant Alembic has multiple heads"
-            alembic -c alembic_tenant.ini heads
+          HEAD_COUNT=$(alembic -c alembic_tenant.ini heads 2>&1 | grep -c "(head)" || echo "0")
+          if [ "$HEAD_COUNT" -ne 1 ]; then
+            echo "Tenant Alembic has multiple heads (found: $HEAD_COUNT)"
+            alembic -c alembic_tenant.ini heads 2>&1
             exit 1
           fi
-          echo "✅ Tenant Alembic single head"
+          echo "Tenant Alembic single head"
 
-      - name: Python compile check (alembic revisions)
+      - name: Python compile check
         run: |
           python -m compileall -q alembic/versions alembic_tenant/versions
-          echo "✅ Revision files compile"
+          echo "Revision files compile"
 
-      - name: Guard: platform revisions must not touch tenant-only objects
+      - name: Guard platform revisions
         run: |
-          if rg -n --hidden --no-ignore-vcs "(drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)\b" alembic/versions; then
-            echo "❌ Platform migrations appear to touch tenant business tables."
+          if rg -n --hidden --no-ignore-vcs "(drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)\b" alembic/versions 2>/dev/null; then
+            echo "Platform migrations appear to touch tenant business tables"
             exit 1
           fi
-          echo "✅ Platform revisions look platform-only"
+          echo "Platform revisions look platform-only"
 
-      - name: Guard: tenant revisions must not touch platform-only objects
+      - name: Guard tenant revisions
         run: |
-          if rg -n --hidden --no-ignore-vcs "(platform_tenants|platform_users|platform_subscriptions|reserved_slugs|plan_features|platform_)\b" alembic_tenant/versions; then
-            echo "❌ Tenant migrations appear to touch platform control-plane tables."
+          if rg -n --hidden --no-ignore-vcs "(platform_tenants|platform_users|platform_subscriptions|reserved_slugs|plan_features|platform_)\b" alembic_tenant/versions 2>/dev/null; then
+            echo "Tenant migrations appear to touch platform control-plane tables"
             exit 1
           fi
-          echo "✅ Tenant revisions look tenant-only"
+          echo "Tenant revisions look tenant-only"
 
-      - name: Guard: forbid alembic stamp usage in repo scripts/docs
+      - name: Guard forbid alembic stamp
         run: |
           if rg -n --hidden --no-ignore-vcs "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools docs .github 2>/dev/null; then
-            echo "❌ Found 'alembic stamp' usage in repo scripts/docs."
+            echo "Found alembic stamp usage in repo scripts/docs"
             exit 1
           fi
-          echo "✅ No committed 'alembic stamp' usage found"
+          echo "No committed alembic stamp usage found"
