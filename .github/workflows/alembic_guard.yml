@@ -75,8 +75,16 @@ jobs:
 
       - name: Guard platform revisions
         run: |
-          if rg -n --hidden --no-ignore-vcs "(drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)\b" alembic/versions 2>/dev/null; then
+          # Check for actual schema operations on tenant tables
+          # Look for: op.create_table("drivers"), op.alter_table("loads"), op.add_column("payroll"), etc.
+          # Exclude comments and string literals in permission definitions
+          if rg -n --hidden --no-ignore-vcs "op\.(create_table|alter_table|add_column|drop_column|create_index|drop_index|add_constraint|drop_constraint|drop_table)\s*\([\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)" alembic/versions 2>/dev/null; then
             echo "Platform migrations appear to touch tenant business tables"
+            exit 1
+          fi
+          # Check for ForeignKey references to tenant tables (excluding permission strings)
+          if rg -n --hidden --no-ignore-vcs "ForeignKey\s*\([\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)\." alembic/versions 2>/dev/null; then
+            echo "Platform migrations appear to reference tenant business tables via ForeignKey"
             exit 1
           fi
           echo "Platform revisions look platform-only"
