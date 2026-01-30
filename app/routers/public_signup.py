@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, File, UploadFile, Response
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -31,6 +32,7 @@ from app.schemas.signup import (
     SignupRequest,
     SignupResponse,
     SlugAvailabilityResponse,
+    ResendOTPRequest,
     VerifyOTPRequest,
     VerifyOTPResponse,
 )
@@ -39,9 +41,61 @@ from app.utils.jwt_auth import create_access_token, create_refresh_token, TokenT
 from app.utils.otp import generate_otp, get_otp_expiration, hash_otp
 from app.utils.password import hash_password
 from app.utils.slug import SLUG_REGEX, generate_slug_suggestions, is_slug_available, normalize_slug
+from app.services.tenant_provisioning import provision_tenant_db
 
 router = APIRouter(prefix="/api/v1/public", tags=["public-signup"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/tenant/{slug}")
+async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
+    """
+    Public endpoint to check tenant status by slug.
+    
+    Returns tenant status information without requiring authentication.
+    Used by frontend to validate tenant before routing to protected pages.
+    
+    Returns:
+    - 200: Tenant exists and is ACTIVE/READY
+    - 404: Tenant does not exist
+    - 403: Tenant exists but is NOT ACTIVE or NOT READY
+    """
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.slug == slug.lower().strip()))
+    
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found"
+        )
+    
+    if tenant.status == TenantStatus.SUSPENDED.value:
+        return {
+            "exists": True,
+            "slug": tenant.slug,
+            "status": tenant.status,
+            "db_status": tenant.db_status,
+            "ready": False,
+            "reason": "Tenant account is suspended",
+        }
+
+    if tenant.db_status != TenantDBStatus.READY.value:
+        return {
+            "exists": True,
+            "slug": tenant.slug,
+            "status": tenant.status,
+            "db_status": tenant.db_status,
+            "ready": False,
+            "reason": "Tenant database is not ready",
+        }
+
+    # Tenant is ready for app access only when ACTIVE
+    return {
+        "exists": True,
+        "slug": tenant.slug,
+        "status": tenant.status,
+        "db_status": tenant.db_status,
+        "ready": tenant.status == TenantStatus.ACTIVE.value,
+    }
 
 
 @router.get("/check-slug-availability", response_model=SlugAvailabilityResponse)
@@ -95,11 +149,58 @@ async def public_signup(request: Request, payload: SignupRequest, db: AsyncSessi
             except Exception:
                 pass
 
-        # Email uniqueness
+        # Email uniqueness (allow resend OTP if unverified)
         existing = await db.scalar(select(PlatformUser).where(PlatformUser.email == payload.email.lower()))
         if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email already exists"
+            if existing.is_email_verified:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email already exists"
+                )
+            membership = await db.scalar(
+                select(PlatformTenantMember).where(PlatformTenantMember.platform_user_id == existing.id)
+            )
+            tenant = None
+            if membership:
+                tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == membership.tenant_id))
+            if not tenant:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Account exists but workspace is missing. Contact support.",
+                )
+
+            normalized_slug = normalize_slug(payload.slug)
+            if normalized_slug != tenant.slug:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already registered for another workspace",
+                )
+
+            otp = generate_otp()
+            otp_hash = hash_otp(otp)
+            otp_row = PlatformOTPToken(
+                purpose=OTPPurpose.SIGNUP_EMAIL_VERIFY.value,
+                email=existing.email,
+                user_id=existing.id,
+                otp_hash=otp_hash,
+                expires_at=get_otp_expiration(),
+                request_ip=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+            db.add(otp_row)
+            try:
+                await send_otp_email(existing.email, otp)
+            except Exception as exc:
+                logger.warning("signup_otp_resend_failed error=%s", exc)
+            await db.commit()
+
+            debug_otp = otp if settings.environment == "dev" else None
+            return SignupResponse(
+                success=True,
+                message="OTP resent. Please check your email for the verification code.",
+                user_id=existing.id,
+                tenant_id=tenant.id,
+                email=existing.email,
+                debug_otp=debug_otp,
             )
 
         normalized_slug = normalize_slug(payload.slug)
@@ -116,7 +217,7 @@ async def public_signup(request: Request, payload: SignupRequest, db: AsyncSessi
         tenant = PlatformTenant(
             name=payload.company_name.strip(),
             slug=normalized_slug,
-            status=TenantStatus.PENDING.value,
+            status=TenantStatus.PENDING_SETUP.value,
             db_status=TenantDBStatus.NOT_CREATED.value,
             country_code=payload.country,
         )
@@ -259,97 +360,189 @@ def _account_setup_missing_for_payload(country: str, payload: CompanySetupReques
 
 @router.post("/verify-otp", response_model=VerifyOTPResponse)
 async def verify_otp(payload: VerifyOTPRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    otp_row = await db.scalar(
-        select(PlatformOTPToken)
-        .where(
-            PlatformOTPToken.email == payload.email.lower(),
-            PlatformOTPToken.purpose == OTPPurpose.SIGNUP_EMAIL_VERIFY.value,
-            PlatformOTPToken.consumed_at.is_(None),
-            PlatformOTPToken.expires_at > now,
+    context = {
+        "email": payload.email.lower(),
+        "slug": None,
+        "tenant_id": None,
+        "request_host": request.headers.get("host"),
+        "db_name": None,
+        "provisioning_step": "start",
+    }
+    step = "start"
+    try:
+        now = datetime.now(timezone.utc)
+        step = "lookup_otp"
+        context["provisioning_step"] = step
+        otp_row = await db.scalar(
+            select(PlatformOTPToken)
+            .where(
+                PlatformOTPToken.email == payload.email.lower(),
+                PlatformOTPToken.purpose == OTPPurpose.SIGNUP_EMAIL_VERIFY.value,
+                PlatformOTPToken.consumed_at.is_(None),
+                PlatformOTPToken.expires_at > now,
+            )
+            .order_by(PlatformOTPToken.created_at.desc())
         )
-        .order_by(PlatformOTPToken.created_at.desc())
-    )
-    if not otp_row or otp_row.otp_hash != hash_otp(payload.otp):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+        if not otp_row or otp_row.otp_hash != hash_otp(payload.otp):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
 
-    otp_row.consumed_at = now
+        otp_row.consumed_at = now
 
-    user = await db.scalar(select(PlatformUser).where(PlatformUser.id == otp_row.user_id))
-    if user:
-        user.is_email_verified = True
+        step = "lookup_user"
+        context["provisioning_step"] = step
+        user = await db.scalar(select(PlatformUser).where(PlatformUser.id == otp_row.user_id))
+        if user:
+            user.is_email_verified = True
 
-    membership = await db.scalar(
-        select(PlatformTenantMember).where(PlatformTenantMember.platform_user_id == otp_row.user_id)
-    )
-    tenant = None
-    if membership:
-        tenant = await db.scalar(
-            select(PlatformTenant)
-            .options(selectinload(PlatformTenant.company_profile))
-            .where(PlatformTenant.id == membership.tenant_id)
+        step = "lookup_membership"
+        context["provisioning_step"] = step
+        membership = await db.scalar(
+            select(PlatformTenantMember).where(PlatformTenantMember.platform_user_id == otp_row.user_id)
         )
+        tenant = None
+        if membership:
+            step = "lookup_tenant"
+            context["provisioning_step"] = step
+            tenant = await db.scalar(
+                select(PlatformTenant)
+                .options(selectinload(PlatformTenant.company_profile))
+                .where(PlatformTenant.id == membership.tenant_id)
+            )
 
+        await db.commit()
+
+        requires_company_setup = True
+        workspace_url = ""
+        tenant_id: int | None = None
+        tenant_slug: str | None = None
+        if tenant:
+            context["tenant_id"] = int(tenant.id)
+            context["slug"] = tenant.slug
+            context["db_name"] = tenant.db_name
+
+            if tenant.status == TenantStatus.SUSPENDED.value:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tenant suspended")
+
+            requires_company_setup = tenant.status == TenantStatus.PENDING_SETUP.value
+            tenant_id = int(tenant.id)
+            tenant_slug = tenant.slug
+            if requires_company_setup and tenant.db_status != TenantDBStatus.READY.value:
+                step = "provision_tenant_db"
+                context["provisioning_step"] = step
+                tenant = await provision_tenant_db(int(tenant.id), db, activate=False)
+                context["db_name"] = tenant.db_name
+
+            if requires_company_setup and tenant.db_status != TenantDBStatus.READY.value:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Tenant provisioning in progress",
+                )
+
+            workspace_url = _workspace_url(
+                request,
+                tenant.slug,
+                "/company-setup" if requires_company_setup else "/dashboard",
+            )
+
+        # Send post-verification welcome email (best-effort)
+        try:
+            if tenant and user:
+                login_url = workspace_url or _workspace_url(request, tenant.slug, "/company-setup")
+                await send_signup_welcome_email(
+                    to=user.email,
+                    company_name=tenant.name,
+                    slug=tenant.slug,
+                    login_url=login_url,
+                )
+        except Exception as exc:
+            logger.warning("send_signup_welcome_email_failed error=%s", exc)
+
+        # Issue tokens
+        if tenant and user:
+            step = "issue_tokens"
+            context["provisioning_step"] = step
+            access = create_access_token(
+                user_id=user.id,
+                tenant_id=int(tenant.id),
+                tenant_slug=tenant.slug,
+                roles=[membership.role] if membership else [],
+            )
+            refresh = create_refresh_token(
+                user_id=user.id,
+                tenant_id=int(tenant.id),
+                tenant_slug=tenant.slug,
+                roles=[membership.role] if membership else [],
+            )
+            secure = bool(settings.secure_cookies)
+            domain = settings.cookie_domain or (f".{settings.base_domain}" if settings.base_domain else None)
+            response.set_cookie(
+                "access_token",
+                access,
+                httponly=True,
+                secure=secure,
+                samesite=settings.jwt_same_site,
+                domain=domain,
+                max_age=settings.jwt_access_minutes * 60,
+                path="/",
+            )
+            response.set_cookie(
+                "refresh_token",
+                refresh,
+                httponly=True,
+                secure=secure,
+                samesite=settings.jwt_same_site,
+                domain=domain,
+                max_age=settings.jwt_refresh_days * 24 * 3600,
+                path="/api/v1/auth/refresh",
+            )
+
+        return VerifyOTPResponse(
+            message="Email verified.",
+            verified=True,
+            requires_company_setup=requires_company_setup,
+            workspace_url=workspace_url,
+            tenant_id=tenant_id,
+            slug=tenant_slug,
+        )
+    except HTTPException:
+        raise
+    except IntegrityError:
+        logger.exception("verify_otp failed", extra=context)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="OTP verification conflict")
+    except Exception:
+        logger.exception("verify_otp failed", extra=context)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="OTP verification failed")
+
+
+@router.post("/resend-otp")
+async def resend_otp(payload: ResendOTPRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    user = await db.scalar(select(PlatformUser).where(PlatformUser.email == payload.email.lower()))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if user.is_email_verified:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already verified")
+
+    otp = generate_otp()
+    otp_hash = hash_otp(otp)
+    otp_row = PlatformOTPToken(
+        purpose=OTPPurpose.SIGNUP_EMAIL_VERIFY.value,
+        email=user.email,
+        user_id=user.id,
+        otp_hash=otp_hash,
+        expires_at=get_otp_expiration(),
+        request_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    db.add(otp_row)
     await db.commit()
 
-    requires_company_setup = True
-    workspace_url = ""
-    tenant_id: int | None = None
-    tenant_slug: str | None = None
-    if tenant:
-        requires_company_setup = tenant.company_profile is None or tenant.company_profile.setup_completed_at is None
-        tenant_id = int(tenant.id)
-        tenant_slug = tenant.slug
-        workspace_url = _workspace_url(request, tenant.slug, "/company-setup" if requires_company_setup else "/dashboard")
-
-    # Send post-verification welcome email (best-effort)
     try:
-        if tenant and user:
-            login_url = workspace_url or _workspace_url(request, tenant.slug, "/company-setup")
-            await send_signup_welcome_email(
-                to=user.email,
-                company_name=tenant.name,
-                slug=tenant.slug,
-                login_url=login_url,
-            )
+        await send_otp_email(user.email, otp)
     except Exception as exc:
-        logger.warning("send_signup_welcome_email_failed error=%s", exc)
+        logger.warning("resend_otp_failed error=%s", exc)
 
-    # Issue tokens
-    if tenant and user:
-        access = create_access_token(user_id=user.id, tenant_id=int(tenant.id), tenant_slug=tenant.slug, roles=[membership.role] if membership else [])
-        refresh = create_refresh_token(user_id=user.id, tenant_id=int(tenant.id), tenant_slug=tenant.slug, roles=[membership.role] if membership else [])
-        secure = bool(settings.secure_cookies)
-        domain = settings.cookie_domain or (f".{settings.base_domain}" if settings.base_domain else None)
-        response.set_cookie(
-            "access_token",
-            access,
-            httponly=True,
-            secure=secure,
-            samesite=settings.jwt_same_site,
-            domain=domain,
-            max_age=settings.jwt_access_minutes * 60,
-            path="/",
-        )
-        response.set_cookie(
-            "refresh_token",
-            refresh,
-            httponly=True,
-            secure=secure,
-            samesite=settings.jwt_same_site,
-            domain=domain,
-            max_age=settings.jwt_refresh_days * 24 * 3600,
-            path="/api/v1/auth/refresh",
-        )
-
-    return VerifyOTPResponse(
-        message="Email verified.",
-        verified=True,
-        requires_company_setup=requires_company_setup,
-        workspace_url=workspace_url,
-        tenant_id=tenant_id,
-        slug=tenant_slug,
-    )
+    debug_otp = otp if settings.environment == "dev" else None
+    return {"ok": True, "message": "OTP resent.", "debug_otp": debug_otp}
 
 
 @router.post("/company-setup/w9-upload")
@@ -463,9 +656,8 @@ async def company_setup(payload: CompanySetupRequest, request: Request, db: Asyn
         )
         db.add(profile)
 
-    tenant.status = TenantStatus.ACTIVE.value
-    tenant.db_status = TenantDBStatus.READY.value
     await db.commit()
 
+    tenant = await provision_tenant_db(int(tenant.id), db)
     dashboard_url = _workspace_url(request, tenant.slug, "/dashboard")
     return CompanySetupResponse(tenant_status=tenant.status, db_status=tenant.db_status, dashboard_url=dashboard_url)
