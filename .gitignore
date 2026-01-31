@@ -74,3 +74,22 @@ runtime/vault/
 
 # Runtime outputs (never commit)
 runtime/
+
+# env files (never commit)
+.env
+.env.*
+*.env
+*.env.*
+
+# common backups
+*.bak
+*.backup
+*~
+*.swp
+
+# your specific pattern
+.env.bak.*
+
+# local debug artifacts
+cookies.txt
+drop_truckerp_tenant.sql
