@@ -6,6 +6,8 @@ const links = [
   { to: "/payroll/pay-periods", label: "Pay Periods" },
   { to: "/payroll/pay-runs", label: "Pay Runs" },
   { to: "/payroll/documents", label: "Documents" },
+  { to: "/driver-onboarding", label: "Driver Onboarding" },
+  { to: "/admin/driver-onboarding", label: "Onboarding Review" },
 ];
 
 export default function SidebarNav() {

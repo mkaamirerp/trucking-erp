@@ -9,6 +9,7 @@ from app.routers.health import router as health_router
 from app.routers.drivers import router as drivers_router
 from app.routers.driver_phones import router as driver_phones_router
 from app.routers.driver_documents import router as driver_documents_router
+from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
 from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.onboarding import router as onboarding_router
@@ -38,6 +39,7 @@ app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")
 app.include_router(driver_documents_router, prefix="/api/v1")
+app.include_router(driver_onboarding_router)
 app.include_router(onboarding_router)
 app.include_router(employees_router)
 app.include_router(meta_router)

@@ -11,10 +11,11 @@ from app.utils.jwt_auth import decode_token, get_token_from_request, TokenType
 
 
 class CurrentUser:
-    def __init__(self, user: PlatformUser, tenant: PlatformTenant, role: str | None):
+    def __init__(self, user: PlatformUser, tenant: PlatformTenant, role: str | None, member_id: int | None):
         self.user = user
         self.tenant = tenant
         self.role = role
+        self.member_id = member_id
 
     @property
     def user_id(self) -> str:
@@ -66,4 +67,4 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     if membership.role:
         role = membership.role
 
-    return CurrentUser(user=user, tenant=tenant, role=role)
+    return CurrentUser(user=user, tenant=tenant, role=role, member_id=membership.id if membership else None)

@@ -211,7 +211,11 @@ async def _create_database_if_not_exists(admin_url: str, db_name: str) -> None:
 
 async def _run_tenant_migrations(tenant_db_url: str, target_rev: str) -> None:
     # Run alembic upgrade for tenant schema only (targeting configured tenant head)
+    # MUST set ALEMBIC_TENANT_DATABASE_URL explicitly so tenant env.py connects to the
+    # correct tenant DB. If unset or pointing at platform DB, you get "Can't locate revision"
+    # (e.g. a9f1b2c3d4e5 is platform-only, not in alembic_tenant/versions).
     env = os.environ.copy()
+    env["ALEMBIC_TENANT_DATABASE_URL"] = tenant_db_url
     env["DATABASE_URL"] = tenant_db_url  # backward compat if referenced
     env["TENANT_DATABASE_URL"] = tenant_db_url
     cmd = ["python", "-m", "alembic", "-c", "alembic_tenant.ini", "upgrade", target_rev]

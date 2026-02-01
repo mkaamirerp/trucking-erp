@@ -11,7 +11,17 @@ function currentSlugFromPath(): string | null {
   const segments = window.location.pathname.split("/").filter(Boolean);
   if (!segments.length) return null;
   const candidate = segments[0];
-  const reserved = new Set(["signup", "payroll", "drivers", "api", "dashboard", "company-setup", "account-setup"]);
+  const reserved = new Set([
+    "signup",
+    "payroll",
+    "drivers",
+    "api",
+    "dashboard",
+    "company-setup",
+    "account-setup",
+    "driver-onboarding",
+    "admin",
+  ]);
   if (reserved.has(candidate)) return null;
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/i.test(candidate)) return null;
   return candidate;
@@ -292,6 +302,57 @@ export async function listDrivers(params: { limit?: number; offset?: number; inc
   return handle<Driver[]>(res);
 }
 
+export async function createDriverOnboardingSubmission(payload: DriverOnboardingSubmissionCreate) {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<DriverOnboardingCreateResponse>(res);
+}
+
+export async function getMyDriverOnboardingSubmission() {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/me`);
+  return handle<DriverOnboardingSubmission | null>(res);
+}
+
+export async function listDriverOnboardingSubmissions(params: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}) {
+  const url = new URL(`${API_BASE}/driver-onboarding/submissions`, window.location.origin);
+  if (params.status) url.searchParams.set("status", params.status);
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
+  if (params.offset) url.searchParams.set("offset", String(params.offset));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<DriverOnboardingSubmission[]>(res);
+}
+
+export async function getDriverOnboardingSubmission(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}`);
+  return handle<DriverOnboardingSubmission>(res);
+}
+
+export async function submitDriverOnboardingSubmission(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}/submit`, { method: "POST" });
+  return handle<DriverOnboardingSubmission>(res);
+}
+
+export async function approveDriverOnboardingSubmission(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}/approve`, { method: "POST" });
+  return handle<DriverOnboardingApproveResponse>(res);
+}
+
+export async function rejectDriverOnboardingSubmission(id: number, rejection_reason: string) {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rejection_reason }),
+  });
+  return handle<DriverOnboardingSubmission>(res);
+}
+
 // ---- Types ----
 export type PayPeriod = {
   id: number;
@@ -544,4 +605,58 @@ export type Driver = {
   phone?: string | null;
   email?: string | null;
   is_active: boolean;
+};
+
+export type DriverOnboardingSubmission = {
+  id: number;
+  tenant_id: number;
+  created_by_user_id: number;
+  status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+  source: string;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: number | null;
+  rejection_reason?: string | null;
+  first_name: string;
+  last_name: string;
+  phone?: string | null;
+  email?: string | null;
+  address_street?: string | null;
+  address_city?: string | null;
+  address_region?: string | null;
+  address_postal?: string | null;
+  address_country?: string | null;
+  driver_license_number?: string | null;
+  license_region?: string | null;
+  license_expiry?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DriverOnboardingSubmissionCreate = {
+  first_name: string;
+  last_name: string;
+  phone?: string;
+  email?: string;
+  address_street?: string;
+  address_city?: string;
+  address_region?: string;
+  address_postal?: string;
+  address_country?: string;
+  driver_license_number?: string;
+  license_region?: string;
+  license_expiry?: string;
+  notes?: string;
+  submit?: boolean;
+};
+
+export type DriverOnboardingCreateResponse = {
+  submission: DriverOnboardingSubmission;
+  missing_required_documents: string[];
+};
+
+export type DriverOnboardingApproveResponse = {
+  submission: DriverOnboardingSubmission;
+  driver: Driver;
 };

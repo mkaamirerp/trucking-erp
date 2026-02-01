@@ -12,6 +12,9 @@ import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import LoadDetailPage from "./pages/LoadDetailPage";
+import DriverOnboardingPage from "./pages/DriverOnboardingPage";
+import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
+import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
 
@@ -19,7 +22,11 @@ function App() {
   const { me, loading, error } = useMe();
   const location = useLocation();
   const isAppRoute =
-    /^\/payroll\//.test(location.pathname) || /^\/dashboard/.test(location.pathname) || /^\/loads/.test(location.pathname);
+    /^\/payroll\//.test(location.pathname) ||
+    /^\/dashboard/.test(location.pathname) ||
+    /^\/loads/.test(location.pathname) ||
+    /^\/driver-onboarding/.test(location.pathname) ||
+    /^\/admin\/driver-onboarding/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
     location.pathname.startsWith(accountSetupPath) || location.pathname.startsWith("/company-setup");
@@ -120,6 +127,30 @@ function App() {
         element={
           <Layout>
             <DocumentsPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/driver-onboarding"
+        element={
+          <Layout>
+            <DriverOnboardingPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/admin/driver-onboarding"
+        element={
+          <Layout>
+            <DriverOnboardingAdminListPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/admin/driver-onboarding/:id"
+        element={
+          <Layout>
+            <DriverOnboardingAdminDetailPage />
           </Layout>
         }
       />

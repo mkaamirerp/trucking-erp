@@ -6,6 +6,7 @@ from app.models.truck import Truck
 
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
+from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.tenant import Tenant
 from app.models.payee import (
     Payee,
