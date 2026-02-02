@@ -31,7 +31,6 @@ def upgrade() -> None:
             sa.Column(
                 "tenant_id",
                 sa.Integer(),
-                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column("name", sa.String(length=100), nullable=False),
@@ -58,7 +57,6 @@ def upgrade() -> None:
             sa.Column(
                 "tenant_id",
                 sa.Integer(),
-                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column(
@@ -94,7 +92,6 @@ def upgrade() -> None:
             sa.Column(
                 "tenant_id",
                 sa.Integer(),
-                sa.ForeignKey("tenants.id", ondelete="CASCADE"),
                 nullable=False,
             ),
             sa.Column(

@@ -82,6 +82,7 @@ class SignupResponse(BaseModel):
     user_id: str
     tenant_id: int
     email: EmailStr
+    attempt_id: str | None = None  # For frontend tracking; defaults to tenant_id when omitted
     debug_otp: str | None = None
 
 
@@ -90,11 +91,17 @@ class VerifyOTPRequest(BaseModel):
     otp: constr(min_length=4, max_length=10)
 
 
+class ResendOTPRequest(BaseModel):
+    email: EmailStr
+
+
 class VerifyOTPResponse(BaseModel):
     message: str
     verified: bool
     requires_company_setup: bool
     workspace_url: str
+    company_setup_url: str | None = None  # Explicit URL for frontend redirect when setup required
+    dashboard_url: str | None = None  # URL when setup already complete
     tenant_id: int | None = None
     slug: str | None = None
 

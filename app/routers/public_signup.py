@@ -46,6 +46,27 @@ from app.services.tenant_provisioning import provision_tenant_db
 router = APIRouter(prefix="/api/v1/public", tags=["public-signup"])
 logger = logging.getLogger(__name__)
 
+def _request_host(request: Request) -> str | None:
+    host = request.headers.get("host") or request.url.hostname
+    if not host:
+        return None
+    return host.split(":", 1)[0].lower().strip()
+
+
+def _is_tenant_subdomain(host: str | None) -> bool:
+    if not host:
+        return False
+    if host in {"localhost", "127.0.0.1"}:
+        return False
+    base_domain = (settings.base_domain or "").lower().strip()
+    if not base_domain:
+        return False
+    if host == base_domain:
+        return False
+    if host in {f"www.{base_domain}", f"auth.{base_domain}"}:
+        return False
+    return host.endswith(f".{base_domain}")
+
 
 @router.get("/tenant/{slug}")
 async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
@@ -131,6 +152,11 @@ async def public_signup(request: Request, payload: SignupRequest, db: AsyncSessi
             logger.warning("signup_failure_alert_failed error=%s", exc)
 
     try:
+        if _is_tenant_subdomain(_request_host(request)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signup must be performed on truckerp.me, not a tenant subdomain.",
+            )
         # Security event log
         try:
             security_event = PlatformSecurityEvent(

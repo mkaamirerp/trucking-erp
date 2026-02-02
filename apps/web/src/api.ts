@@ -171,9 +171,73 @@ export async function verifyOtp(payload: VerifyOtpRequest) {
     message: raw.message,
     requires_company_setup: raw.requires_company_setup,
     workspace_url: raw.workspace_url,
+    company_setup_url: (raw as any).company_setup_url ?? raw.workspace_url,
+    dashboard_url: (raw as any).dashboard_url,
     tenant_id: (raw as any).tenant_id,
     slug: (raw as any).slug,
   } as VerifyOtpResponse;
+}
+
+export async function resendOtp(payload: { email: string; attempt_id?: string; slug?: string }) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/resend-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: payload.email }),
+  });
+  return handle<{ ok: boolean; message: string; debug_otp?: string | null }>(res);
+}
+
+export async function getSignupStatus(_attemptId: string) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/signup-status?attempt_id=${encodeURIComponent(_attemptId)}`);
+  if (res.status === 404) return null;
+  return handle<{ state?: string; db_status?: string; slug?: string; setup_url?: string }>(res);
+}
+
+export async function resumeSignup(payload: { email: string; slug: string }) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/resume-signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<{
+    attempt_id?: string;
+    slug?: string;
+    first_name?: string;
+    last_name?: string;
+    company_name?: string;
+    phone?: string;
+    country?: string;
+    plan?: string;
+    reservation_expires_at?: string;
+    state?: string;
+  }>(res);
+}
+
+export async function changeSignupSlug(payload: { attempt_id: string; new_slug: string }) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/change-signup-slug`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ slug?: string; reservation_expires_at?: string }>(res);
+}
+
+export async function retryProvisioning(payload: { attempt_id: string }) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/retry-provisioning`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ company_setup_url?: string }>(res);
+}
+
+export async function cancelSignup(payload: { attempt_id: string }) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/cancel-signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 export async function companySetup(payload: CompanySetupRequest) {
@@ -183,6 +247,37 @@ export async function companySetup(payload: CompanySetupRequest) {
     body: JSON.stringify(payload),
   });
   return handle<CompanySetupResponse>(res);
+}
+
+export type SetupTenantPayload = {
+  dot_number?: string;
+  mc_number?: string;
+  cvor_number?: string;
+  hst_number?: string;
+  operator_license?: string;
+  country?: string;
+  geo_country?: string;
+  fleet_size?: number;
+};
+
+export async function setupTenant(payload: SetupTenantPayload) {
+  const c = (payload.country || "US").substring(0, 2).toUpperCase();
+  const req: CompanySetupRequest = {
+    legal_name: "Company",
+    address: {
+      street: "TBD",
+      city: "TBD",
+      region: "TBD",
+      postal: "TBD",
+      country: c as "US" | "CA",
+    },
+    usdot_number: payload.dot_number || undefined,
+    mc_number: payload.mc_number || undefined,
+    cvor_number: payload.cvor_number || undefined,
+    operator_license: payload.operator_license || undefined,
+    hst_number: payload.hst_number || undefined,
+  };
+  return companySetup(req);
 }
 
 export async function uploadW9(file: File) {

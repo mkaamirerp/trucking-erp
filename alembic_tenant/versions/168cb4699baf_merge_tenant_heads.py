@@ -1,8 +1,8 @@
-"""merge tenant heads to single lineage
+"""merge tenant heads
 
-Revision ID: 8c84780c154b
-Revises: 611cde19a3a1
-Create Date: 2026-01-30 07:00:56.270343
+Revision ID: 168cb4699baf
+Revises: 9e4f2c1b7a6d, a867a473deb7
+Create Date: 2026-02-02 05:38:53.978960
 
 """
 from __future__ import annotations
@@ -12,8 +12,8 @@ import sqlalchemy as sa  # noqa: F401
 
 
 # revision identifiers, used by Alembic.
-revision = '8c84780c154b'
-down_revision = ('611cde19a3a1',)
+revision = '168cb4699baf'
+down_revision = ('9e4f2c1b7a6d', 'a867a473deb7')
 branch_labels = None
 depends_on = None
 

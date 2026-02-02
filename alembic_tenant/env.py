@@ -1,6 +1,31 @@
-
-
 from __future__ import annotations
+
+# --- TruckERP guardrail: load env file for alembic runs ---
+import os
+from pathlib import Path as _Path
+
+def _load_env_file(path: str) -> None:
+    try:
+        fp = _Path(path)
+        if not fp.exists():
+            return
+        for line in fp.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            k = k.strip()
+            v = v.strip()
+            # do not override already-set env vars
+            os.environ.setdefault(k, v)
+    except Exception:
+        # never fail alembic just because env file parsing failed
+        return
+
+# Prefer production secrets file if present; fallback to local .env
+_load_env_file('/run/secrets/truckerp.env')
+_load_env_file('.env')
+# --- end guardrail ---
 
 from pathlib import Path
 from dotenv import load_dotenv

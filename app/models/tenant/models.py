@@ -1,3 +1,5 @@
+"""Tenant DB models (tenants table)."""
+
 from __future__ import annotations
 
 from datetime import datetime

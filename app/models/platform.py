@@ -13,8 +13,10 @@ from app.models.base import Base
 
 class TenantStatus(str, Enum):
     PENDING = "PENDING"
+    PENDING_SETUP = "PENDING_SETUP"
     PROVISIONING = "PROVISIONING"
     ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
 
 
 class TenantDBStatus(str, Enum):

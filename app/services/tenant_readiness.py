@@ -9,7 +9,9 @@ from app.models.platform import PlatformTenant
 logger = logging.getLogger(__name__)
 
 # Allowed/ready values are case-insensitive.
-ALLOWED_TENANT_STATUSES = {"ACTIVE", "READ_ONLY"}
+# IMPORTANT: PENDING_SETUP must be allowed so OTP -> company-setup flow can work.
+# ACTIVE-only routes should enforce ACTIVE separately (e.g., require_active_tenant).
+ALLOWED_TENANT_STATUSES = {"ACTIVE", "READ_ONLY", "PENDING_SETUP"}
 ALLOWED_BILLING_STATUSES = {None, "OK", "ACTIVE"}
 
 
@@ -18,11 +20,22 @@ def _norm(value: str | None) -> str:
 
 
 def ensure_tenant_ready(tenant: PlatformTenant | None) -> PlatformTenant:
-    """Validate that the platform tenant is usable for tenant-scoped routes."""
-    if tenant is None or _norm(tenant.status) not in ALLOWED_TENANT_STATUSES:
+    """Validate that the platform tenant can be resolved and its DB is usable.
+
+    This should NOT block PENDING_SETUP tenants; frontend must be able to call /me
+    and then redirect the user to company setup. Only ACTIVE-only endpoints should
+    enforce ACTIVE.
+    """
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+
+    if _norm(tenant.status) not in ALLOWED_TENANT_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant inactive or not found",
+            detail="Tenant inactive",
         )
 
     if _norm(tenant.db_status) != "READY":
