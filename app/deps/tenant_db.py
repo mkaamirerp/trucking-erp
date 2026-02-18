@@ -60,3 +60,40 @@ async def get_tenant_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
 
     async with SessionLocal() as tenant_db:
         yield tenant_db
+
+
+async def get_tenant_db_for_tools(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Same as get_tenant_db but only requires tenant to exist and have db_name.
+    Used by DB Inspector so you can view a tenant DB even if status != ACTIVE or db_status != READY.
+    """
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if tenant_id is None:
+        raise HTTPException(status_code=400, detail="Tenant context missing")
+
+    async with AsyncSessionLocal() as platform_db:
+        tenant = await platform_db.scalar(
+            select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)).limit(1)
+        )
+
+    if not tenant:
+        raise HTTPException(status_code=403, detail="Tenant not found")
+
+    if not tenant.db_name:
+        raise HTTPException(status_code=403, detail="Tenant DB not provisioned")
+
+    template = os.getenv("POSTGRES_ADMIN_URL") or os.getenv("DATABASE_URL")
+    if not template:
+        raise HTTPException(status_code=503, detail="DB config missing")
+
+    tenant_url = _swap_db(template, tenant.db_name)
+
+    engine = _ENGINE_CACHE.get(tenant_url)
+    if engine is None:
+        engine = create_async_engine(tenant_url, pool_pre_ping=True)
+        _ENGINE_CACHE[tenant_url] = engine
+
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async with SessionLocal() as tenant_db:
+        yield tenant_db

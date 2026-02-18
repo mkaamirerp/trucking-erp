@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchWithTenant, refreshSession } from "../api";
+import { authErrorToMessage } from "../utils/authErrorToMessage";
 
 export type FetchState<T> = {
   data: T | null;
@@ -7,10 +8,18 @@ export type FetchState<T> = {
   error: string | null;
 };
 
-export function useFetch<T>(url: string, deps: unknown[] = []) {
-  const [state, setState] = useState<FetchState<T>>({ data: null, loading: true, error: null });
+export function useFetch<T>(url: string, deps: unknown[] = [], enabled: boolean = true) {
+  const [state, setState] = useState<FetchState<T>>({
+    data: null,
+    loading: enabled,
+    error: null,
+  });
 
   useEffect(() => {
+    if (!enabled) {
+      setState({ data: null, loading: false, error: null });
+      return;
+    }
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
     const run = async () => {
@@ -24,7 +33,11 @@ export function useFetch<T>(url: string, deps: unknown[] = []) {
         }
         if (!res.ok) {
           const text = await res.text();
-          throw new Error(text || res.statusText);
+          const message =
+            res.status === 401 || res.status === 403
+              ? authErrorToMessage(res.status, text || res.statusText)
+              : text || res.statusText;
+          throw new Error(message);
         }
         const data = await res.json();
         if (!cancelled) setState({ data, loading: false, error: null });
@@ -37,7 +50,7 @@ export function useFetch<T>(url: string, deps: unknown[] = []) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [enabled, ...deps]);
 
   return state;
 }

@@ -1,7 +1,9 @@
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from app.routers.fleet import router as fleet_router
 
 from app.core.config import settings
@@ -22,6 +24,8 @@ from app.routers.auth import router as auth_router
 from app.routers.brokers import router as brokers_router
 from app.routers.loads import router as loads_router
 from app.routers.dashboard import router as dashboard_router
+from app.routers.dev_tools import router as dev_tools_router
+from app.routers.dev_tools_db import router as dev_tools_db_router
 from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -50,6 +54,22 @@ app.include_router(auth_router)
 app.include_router(brokers_router, prefix="/api/v1")
 app.include_router(loads_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(dev_tools_router)
+app.include_router(dev_tools_db_router)
+
+# Static assets and dashboard UI (reference layout: sidebar, KPIs, drivers, loads, alerts, chat)
+_static_dir = Path(__file__).resolve().parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+_dashboard_html = Path(__file__).resolve().parent / "static" / "dashboard" / "index.html"
+
+
+@app.get("/dashboard", include_in_schema=False)
+def serve_dashboard():
+    """Serve the dispatch dashboard UI (sidebar, KPIs, drivers, loads). Requires auth + tenant cookie."""
+    if _dashboard_html.is_file():
+        return FileResponse(_dashboard_html, media_type="text/html")
+    return JSONResponse(status_code=404, content={"detail": "Dashboard UI not found"})
 
 
 @app.exception_handler(Exception)

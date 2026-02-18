@@ -12,13 +12,19 @@ RUN python -m pip install --upgrade pip wheel setuptools
 RUN python -m pip wheel --wheel-dir /wheels -r requirements.txt
 
 # ---------- Runtime (no compilers) ----------
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim-bookworm AS prod
 WORKDIR /app
 
-# Only runtime libs (no gcc, no libpq-dev)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    jq \
+# Runtime libs: libpq5, curl, jq, ca-certificates
+# Workaround for CI/sandbox: allow insecure repos if apt GPG verification fails.
+RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+        -o Acquire::AllowInsecureRepositories=true \
+        -o Acquire::AllowDowngradeFromInsecureRepositories=true \
+    && apt-get install -y --no-install-recommends -o APT::Get::AllowUnauthenticated=true \
+        libpq5 \
+        curl \
+        jq \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m pip install --no-cache-dir awscli
@@ -39,3 +45,19 @@ COPY . .
 RUN chmod +x scripts/start_api_with_ssm.sh
 
 CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# --- DEV TOOLBELT STAGE (debug utilities, non-prod) ---
+FROM prod AS dev
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    jq \
+    bash \
+    ca-certificates \
+    procps \
+    iproute2 \
+    netcat-openbsd \
+    postgresql-client \
+    openssl \
+    less \
+    vim-tiny \
+ && rm -rf /var/lib/apt/lists/*

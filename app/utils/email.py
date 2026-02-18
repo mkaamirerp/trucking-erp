@@ -7,7 +7,10 @@ Reads configuration from environment variables:
 - SMTP_USERNAME
 - SMTP_PASSWORD
 - SMTP_FROM_ADDRESS
-- SMTP_USE_TLS
+- SMTP_USE_TLS (default true): use STARTTLS when connecting via SMTP
+- SMTP_USE_SSL (default false): use SMTP_SSL (port 465); when true, starttls() is not used
+- PUBLIC_WEB_BASE_URL (default https://truckerp.me): base for Terms/Privacy/Preferences links in footer
+- SUPPORT_EMAIL: support contact in footer (falls back to SMTP_FROM_ADDRESS then support@truckerp.me)
 
 Optional alert recipient:
 - SIGNUP_ALERT_RECIPIENT (defaults to SMTP_FROM_ADDRESS)
@@ -19,6 +22,7 @@ import logging
 import os
 import smtplib
 from email.message import EmailMessage
+from email.utils import parseaddr
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -39,6 +43,7 @@ class SMTPConfig:
         self.password: Optional[str] = os.getenv("SMTP_PASSWORD")
         self.from_address: Optional[str] = os.getenv("SMTP_FROM_ADDRESS")
         self.use_tls: bool = _get_bool_env("SMTP_USE_TLS", True)
+        self.use_ssl: bool = _get_bool_env("SMTP_USE_SSL", False)
 
     def validate_basic(self) -> None:
         if not self.host:
@@ -50,40 +55,88 @@ class SMTPConfig:
 _config = SMTPConfig()
 
 
-def _send_email_sync(to: str, subject: str, body: str, from_address: Optional[str] = None) -> None:
+def _public_url(path: str) -> str:
+    base = (os.getenv("PUBLIC_WEB_BASE_URL") or "https://truckerp.me").rstrip("/")
+    p = path if path.startswith("/") else f"/{path}"
+    return f"{base}{p}"
+
+
+def _email_footer(category: str) -> str:
+    support = os.getenv("SUPPORT_EMAIL") or _config.from_address or "support@truckerp.me"
+    lines = [
+        "",
+        "---",
+        f"Terms: {_public_url('/terms')}",
+        f"Privacy: {_public_url('/privacy')}",
+        f"Support: {support}",
+    ]
+    if category != "required":
+        lines.append(f"Manage email preferences: {_public_url('/email/preferences')}")
+    else:
+        lines.append("This is a required service email related to your TruckERP account.")
+    return "\n".join(lines)
+
+
+def _validate_recipient(to: str) -> None:
+    _, addr = parseaddr(to)
+    if not addr or "@" not in addr:
+        raise ValueError("Invalid recipient email address")
+
+
+def _send_email_sync(
+    to: str, subject: str, body: str, from_address: Optional[str] = None, category: str = "required"
+) -> None:
     _config.validate_basic()
+    _validate_recipient(to)
 
     from_addr = from_address or _config.from_address
     if not from_addr:
         raise RuntimeError("From address is not configured")
 
+    full_body = body + _email_footer(category)
+
     msg = EmailMessage()
     msg["From"] = from_addr
     msg["To"] = to
     msg["Subject"] = subject
-    msg.set_content(body)
+    msg.set_content(full_body)
 
     try:
-        with smtplib.SMTP(_config.host, _config.port, timeout=10) as client:
-            if _config.use_tls:
-                client.starttls()
-            if _config.username and _config.password:
-                client.login(_config.username, _config.password)
-            client.send_message(msg)
+        if _config.use_ssl:
+            with smtplib.SMTP_SSL(_config.host, _config.port, timeout=10) as client:
+                if _config.username and _config.password:
+                    client.login(_config.username, _config.password)
+                client.send_message(msg)
+        else:
+            with smtplib.SMTP(_config.host, _config.port, timeout=10) as client:
+                if _config.use_tls:
+                    client.starttls()
+                if _config.username and _config.password:
+                    client.login(_config.username, _config.password)
+                client.send_message(msg)
     except Exception as exc:
         logger.error(
-            "SMTP send failed (host=%s, port=%s, use_tls=%s): %s",
+            "SMTP send failed (host=%s, port=%s, use_tls=%s, use_ssl=%s): %s",
             _config.host,
             _config.port,
             _config.use_tls,
+            _config.use_ssl,
             exc,
         )
         raise
 
 
-async def send_email(to: str, subject: str, body: str, *, from_address: Optional[str] = None) -> None:
+async def send_email(
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    from_address: Optional[str] = None,
+    category: str = "required",
+) -> None:
+    """Send a plain-text email. category: 'required' (no preferences link), 'operational' or 'product' (include preferences link)."""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _send_email_sync, to, subject, body, from_address)
+    await loop.run_in_executor(None, _send_email_sync, to, subject, body, from_address, category)
 
 
 async def send_otp_email(to: str, otp: str) -> None:
@@ -144,6 +197,31 @@ async def send_signup_failure_alert(
     except Exception as exc:
         # Let caller decide how to react; avoid leaking credentials
         logger.warning("send_signup_failure_alert failed to deliver: %s", exc)
+
+
+async def send_password_reset_email(
+    *,
+    to: str,
+    reset_link: str,
+    expires_minutes: int = 60,
+) -> None:
+    """
+    Sends a password reset email with a one-time link.
+    """
+    subject = "Reset your TruckERP password"
+    body_lines = [
+        "Hi,",
+        "",
+        "We received a request to reset the password for your TruckERP account.",
+        "",
+        "Click the link below to set a new password (this link expires in about {} minutes):".format(expires_minutes),
+        "",
+        reset_link,
+        "",
+        "If you didn't request this, you can safely ignore this email. Your password will not be changed.",
+    ]
+    body = "\n".join(body_lines)
+    await send_email(to=to, subject=subject, body=body)
 
 
 async def send_signup_welcome_email(

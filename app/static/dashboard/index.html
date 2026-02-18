@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard – Trucking ERP</title>
+  <link rel="stylesheet" href="/static/dashboard/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="logo">☁</span>
+        <span>Dashboard</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item">Dashboard</a>
+        <a href="#" class="nav-item">Loads</a>
+        <a href="#" class="nav-item active">Dispatch</a>
+        <a href="#" class="nav-item">Tracking</a>
+        <a href="#" class="nav-item">Billing</a>
+        <a href="#" class="nav-item">Maintenance</a>
+        <a href="#" class="nav-item">Reports</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="factored-rate">
+          <div class="factored-label">Factored Rate</div>
+          <div class="factored-value">$1,900</div>
+          <div class="factored-sub">$1,355</div>
+          <div class="factored-detail">Broker Mate · 3137 Gross · 3817 Semi · 5.1mg margin · 200.2 Margin</div>
+        </div>
+        <div class="messages">
+          <span>Messages</span>
+          <span class="badge" id="messages-badge">3</span>
+        </div>
+        <div class="sidebar-icons">
+          <span title="Settings">⚙</span>
+          <span title="Map">📍</span>
+          <span title="Email">✉</span>
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <input type="search" class="search" placeholder="Search..." />
+        <div class="topbar-actions">
+          <span class="icon" title="Notifications">🔔</span>
+          <span class="icon" title="Profile">👤</span>
+          <span class="icon" title="Activity">📊</span>
+        </div>
+      </header>
+      <section class="kpis">
+        <div class="kpi-card">
+          <span class="kpi-icon green">🚛</span>
+          <span class="kpi-value" id="kpi-active-loads">0</span>
+          <span class="kpi-label">Active Loads</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-icon blue">🚐</span>
+          <span class="kpi-value" id="kpi-drivers">0</span>
+          <span class="kpi-label">Drivers On Duty</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-icon yellow">🚚</span>
+          <span class="kpi-value" id="kpi-in-transit">0</span>
+          <span class="kpi-label">In Transit</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-icon red">🚛</span>
+          <span class="kpi-value" id="kpi-delayed">0</span>
+          <span class="kpi-label">Delayed</span>
+        </div>
+        <div class="kpi-card revenue">
+          <span class="kpi-value" id="kpi-revenue">$0</span>
+          <span class="kpi-label">Revenue This Week</span>
+          <span class="kpi-trend">↗ 9</span>
+        </div>
+      </section>
+      <section class="tabs-row">
+        <div class="tabs">
+          <button class="tab active">All</button>
+          <button class="tab">Active</button>
+          <button class="tab">Delayed</button>
+          <button class="tab">Available</button>
+          <button class="tab">En Route</button>
+        </div>
+        <div class="filters">
+          <span>Loads</span>
+          <span>Route Plan</span>
+          <span>Traffic</span>
+          <span>Weather</span>
+          <span id="date-display">Today</span>
+        </div>
+      </section>
+      <section class="content-three">
+        <div class="pane drivers-pane">
+          <div class="pane-header">
+            <select class="driver-select" id="driver-select">
+              <option>Mike T. TRK 456 59 Dry Van</option>
+            </select>
+          </div>
+          <ul class="driver-list" id="driver-list"></ul>
+          <div class="assignment-hint">Drag load to driver</div>
+        </div>
+        <div class="pane map-pane">
+          <div class="map-placeholder">
+            <span>Map</span>
+            <div class="map-overlays">
+              <span>KPIs 89%</span>
+              <span>Idle Trucks 4</span>
+              <span>Detention 2.33hrs</span>
+            </div>
+          </div>
+        </div>
+        <div class="pane loads-pane">
+          <div class="pane-header loads-header">
+            <span>TODAY</span>
+            <span id="loads-available">#6892 Available</span>
+            <span>ETA</span>
+          </div>
+          <div class="loads-table-wrap">
+            <table class="loads-table">
+              <thead>
+                <tr>
+                  <th>Load ID</th>
+                  <th>Status</th>
+                  <th>Driver</th>
+                  <th>Pickup</th>
+                  <th>Delivery</th>
+                </tr>
+              </thead>
+              <tbody id="loads-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+      <section class="bottom-row">
+        <div class="alerts-panel">
+          <h3>Alerts</h3>
+          <ul>
+            <li><input type="checkbox" /> Trailer #56 Maintenance Due</li>
+            <li>⚠ HOS Warning for Mark A.</li>
+          </ul>
+        </div>
+        <div class="chat-panel">
+          <h3>Driver Chat</h3>
+          <button class="chat-btn">Good Arrived</button>
+          <div class="chat-messages">
+            <p><strong>Tom W.:</strong> Arrived at receiver</p>
+            <p><strong>Dispatch:</strong> Great, please upload the ??00 when ready.</p>
+          </div>
+          <div class="chat-input-wrap">
+            <input type="text" class="chat-input" placeholder="Type a message..." />
+            <button class="send-btn">➤</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="seed-banner" id="seed-banner">
+    <span>No demo data yet.</span>
+    <button id="seed-demo-btn">Seed demo data</button>
+  </div>
+  <script src="/static/dashboard/app.js"></script>
+</body>
+</html>

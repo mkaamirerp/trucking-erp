@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -90,6 +90,35 @@ class PlatformTenant(Base):
     company_profile = relationship(
         "PlatformCompanyProfile", back_populates="tenant", cascade="all, delete-orphan", uselist=False
     )
+    onboarding_payload = relationship(
+        "PlatformOnboardingPayload", back_populates="tenant", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class OnboardingStatus(str, Enum):
+    PENDING = "PENDING"
+    STALE = "STALE"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class PlatformOnboardingPayload(Base):
+    """Server-side signup payload; prefill at setup, consumed on complete. Expires (e.g. 7 days)."""
+
+    __tablename__ = "platform_onboarding_payloads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    public_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=True, unique=True, index=True)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=OnboardingStatus.PENDING.value, server_default="PENDING")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    tenant = relationship("PlatformTenant", back_populates="onboarding_payload")
+    otp_tokens: Mapped[list["PlatformOTPToken"]] = relationship("PlatformOTPToken", back_populates="onboarding_payload", cascade="all, delete-orphan")
 
 
 class PlatformUser(Base):
@@ -106,6 +135,8 @@ class PlatformUser(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     verification_token_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     verification_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_reset_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
@@ -128,6 +159,23 @@ class PlatformTenantMember(Base):
     platform_user = relationship("PlatformUser", back_populates="memberships")
 
 
+class TenantMembership(Base):
+    """Platform membership gate: gates tenant access by status (active|suspended|pending|invited)."""
+
+    __tablename__ = "tenant_memberships"
+    __table_args__ = (UniqueConstraint("user_id", "tenant_id", name="uq_tenant_memberships_user_tenant"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    is_break_glass_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    tenant = relationship("PlatformTenant", backref="tenant_memberships")
+    platform_user = relationship("PlatformUser", backref="tenant_memberships")
+
+
 class PlatformSubscription(Base):
     __tablename__ = "platform_subscriptions"
 
@@ -147,16 +195,23 @@ class PlatformOTPToken(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     purpose: Mapped[str] = mapped_column(String(50), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=True)
+    onboarding_payload_id: Mapped[int | None] = mapped_column(
+        ForeignKey("platform_onboarding_payloads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     otp_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     request_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     user = relationship("PlatformUser", back_populates="otp_tokens")
+    onboarding_payload: Mapped["PlatformOnboardingPayload | None"] = relationship(
+        "PlatformOnboardingPayload", back_populates="otp_tokens", foreign_keys=[onboarding_payload_id]
+    )
 
 
 class PlatformSecurityEvent(Base):

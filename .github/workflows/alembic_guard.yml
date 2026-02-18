@@ -48,27 +48,39 @@ jobs:
           test -f alembic_tenant.ini || (echo "Missing alembic_tenant.ini" && exit 1)
           echo "Alembic structure valid"
 
+      - name: Check Alembic down_revision
+        run: |
+          chmod +x scripts/ci_check_alembic_down_revision.sh
+          bash scripts/ci_check_alembic_down_revision.sh
+
+      - name: Check platform/tenant revision id separation
+        run: |
+          chmod +x scripts/ci_check_alembic_platform_tenant_ids.sh
+          bash scripts/ci_check_alembic_platform_tenant_ids.sh
+
       - name: Check single head (platform)
         run: |
-          HEAD_COUNT=$(alembic heads 2>&1 | grep -c "(head)" || echo "0")
+          OUT=$(python -m alembic -c alembic_platform.ini heads 2>&1)
+          HEAD_COUNT=$(echo "$OUT" | grep -c "(head)" || echo "0")
           HEAD_COUNT=$(echo "$HEAD_COUNT" | xargs)
           if [ "$HEAD_COUNT" != "1" ]; then
-            echo "Platform Alembic has multiple heads (found: $HEAD_COUNT)"
-            alembic heads 2>&1
+            echo "Platform Alembic must have exactly one head (found: $HEAD_COUNT)"
+            echo "$OUT"
             exit 1
           fi
-          echo "Platform Alembic single head"
+          echo "Platform Alembic single head: $OUT"
 
       - name: Check single head (tenant)
         run: |
-          HEAD_COUNT=$(alembic -c alembic_tenant.ini heads 2>&1 | grep -c "(head)" || echo "0")
+          OUT=$(python -m alembic -c alembic_tenant.ini heads 2>&1)
+          HEAD_COUNT=$(echo "$OUT" | grep -c "(head)" || echo "0")
           HEAD_COUNT=$(echo "$HEAD_COUNT" | xargs)
           if [ "$HEAD_COUNT" != "1" ]; then
-            echo "Tenant Alembic has multiple heads (found: $HEAD_COUNT)"
-            alembic -c alembic_tenant.ini heads 2>&1
+            echo "Tenant Alembic must have exactly one head (found: $HEAD_COUNT)"
+            echo "$OUT"
             exit 1
           fi
-          echo "Tenant Alembic single head"
+          echo "Tenant Alembic single head: $OUT"
 
       - name: Python compile check
         run: |

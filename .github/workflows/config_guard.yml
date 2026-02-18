@@ -1,0 +1,100 @@
+# Layer B — Infra diff guard
+# Fails if protected files change unless CONFIG-CHANGE is explicitly declared
+# (PR title, commit message, or docs/CONFIG_CHANGE_APPROVAL.md).
+
+name: Config Guard
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  config-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get base ref
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: List changed files
+        id: files
+        run: |
+          BASE="${{ steps.base.outputs.ref }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            touch changed.txt
+          else
+            git diff --name-only "$BASE" HEAD > changed.txt
+          fi
+          echo "count=$(wc -l < changed.txt)" >> $GITHUB_OUTPUT
+
+      - name: Check for protected file changes
+        id: protected
+        run: |
+          PROTECTED_LIST=protected_list.txt
+          > "$PROTECTED_LIST"
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              .env.example) ;;
+              docker-compose.yml) echo "$f" >> "$PROTECTED_LIST" ;;
+              docker-compose.*.yml) echo "$f" >> "$PROTECTED_LIST" ;;
+              .env) echo "$f" >> "$PROTECTED_LIST" ;;
+              .env.*) echo "$f" >> "$PROTECTED_LIST" ;;
+              infra/nginx/*) echo "$f" >> "$PROTECTED_LIST" ;;
+              scripts/start_api_with_ssm.sh) echo "$f" >> "$PROTECTED_LIST" ;;
+              scripts/*ssm*.sh) echo "$f" >> "$PROTECTED_LIST" ;;
+              scripts/render_truckerp_env_from_ssm.sh) echo "$f" >> "$PROTECTED_LIST" ;;
+              scripts/with_env.sh) echo "$f" >> "$PROTECTED_LIST" ;;
+              run/secrets|run/secrets/*) echo "$f" >> "$PROTECTED_LIST" ;;
+              *) ;;
+            esac
+          done < changed.txt
+          if [ -s "$PROTECTED_LIST" ]; then
+            echo "has_protected=true" >> $GITHUB_OUTPUT
+            echo "Protected files changed:" >> $GITHUB_STEP_SUMMARY
+            cat "$PROTECTED_LIST" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "has_protected=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Require CONFIG-CHANGE approval
+        if: steps.protected.outputs.has_protected == 'true'
+        run: |
+          APPROVED=false
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if echo "${{ github.event.pull_request.title }}" | grep -qi "CONFIG-CHANGE:"; then
+              APPROVED=true
+            fi
+          fi
+
+          BASE="${{ steps.base.outputs.ref }}"
+          if [ "$APPROVED" = "false" ] && [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ]; then
+            if git log --format=%B "$BASE"..HEAD | grep -qi "CONFIG-CHANGE:"; then
+              APPROVED=true
+            fi
+          fi
+
+          if [ "$APPROVED" = "false" ] && [ -f changed.txt ]; then
+            if grep -q "docs/CONFIG_CHANGE_APPROVAL.md" changed.txt; then
+              APPROVED=true
+            fi
+          fi
+
+          if [ "$APPROVED" = "false" ]; then
+            echo "::error::Protected config changed. Require one of: PR title 'CONFIG-CHANGE:', a commit message 'CONFIG-CHANGE:', or update docs/CONFIG_CHANGE_APPROVAL.md with justification."
+            exit 1
+          fi
+          echo "CONFIG-CHANGE approval present."

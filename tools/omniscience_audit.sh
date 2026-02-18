@@ -86,7 +86,7 @@ extract_user_from_url() {
   echo "$1" | sed -E 's#^postgresql(\+asyncpg)?://([^:]+):[^@]+@.*$#\2#' 2>/dev/null || true
 }
 
-# Test API endpoint
+# Test API endpoint (GET)
 test_endpoint() {
     local endpoint="$1"
     local expected_code="${2:-200}"
@@ -103,6 +103,46 @@ test_endpoint() {
         return 0
     else
         log "  HTTP $response_code (expected $expected_code) for $endpoint"
+        return 1
+    fi
+}
+
+# Test API endpoint with headers (GET). Pass header as "Header-Name: value" in second arg.
+test_endpoint_headers() {
+    local endpoint="$1"
+    local header_value="$2"
+    local expected_code="${3:-200}"
+    local timeout="${4:-10}"
+    local response_code
+    response_code=$(docker run --rm --network "$NETWORK" \
+        -e "CURL_HEADER=$header_value" \
+        curlimages/curl:latest \
+        sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -H "$CURL_HEADER" "http://'"${API_HOST}"':'"${API_PORT}"''"${endpoint}"'" --max-time '"$timeout"' 2>/dev/null || echo "000"' | tail -n1)
+    if [[ "$response_code" == "$expected_code" ]]; then
+        return 0
+    else
+        log "  HTTP $response_code (expected $expected_code) for $endpoint (with headers)"
+        return 1
+    fi
+}
+
+# Test API endpoint POST (e.g. login). Capture only status code (last line) in case body leaks to stdout.
+test_endpoint_post() {
+    local endpoint="$1"
+    local body="${2:-{}}"
+    local extra_headers="${3:-}"
+    local expected_code="${4:-200}"
+    local timeout="${5:-10}"
+    local response_code
+    response_code=$(docker run --rm --network "$NETWORK" \
+        -e "CURL_BODY=$body" \
+        -e "CURL_EXTRA=$extra_headers" \
+        curlimages/curl:latest \
+        sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" $CURL_EXTRA -d "$CURL_BODY" "http://'"${API_HOST}"':'"${API_PORT}"''"${endpoint}"'" --max-time '"$timeout"' 2>/dev/null || echo "000"' | tail -n1)
+    if [[ "$response_code" == "$expected_code" ]]; then
+        return 0
+    else
+        log "  HTTP $response_code (expected $expected_code) for POST $endpoint"
         return 1
     fi
 }
@@ -376,17 +416,45 @@ if [[ -n "${API_CID:-}" ]]; then
     section_result FAIL "Public health endpoint failed"
   fi
   
-  # Test 2: Tenant status endpoint
-  if test_endpoint "/api/v1/tenant/${TENANT_SLUG}/status" "200" "10" || \
-     test_endpoint "/api/v1/tenant/${TENANT_SLUG}/status" "401" "10" || \
-     test_endpoint "/api/v1/tenant/${TENANT_SLUG}/status" "400" "10"; then
-    log "  Tenant status endpoint test completed"
+  # Test 2: Public tenant status by slug (no auth); 200 if tenant exists, 404 if slug not in DB
+  if test_endpoint "/api/v1/public/tenant/${TENANT_SLUG}" "200" "10" || \
+     test_endpoint "/api/v1/public/tenant/${TENANT_SLUG}" "404" "10"; then
+    section_result PASS "Public tenant status endpoint OK (200 or 404)"
+  else
+    section_result FAIL "Public tenant status /api/v1/public/tenant/${TENANT_SLUG} failed"
   fi
   
-  # Test 3: Auth endpoint existence
-  if test_endpoint "/api/v1/auth/login" "405" "5" || \
-     test_endpoint "/api/v1/auth/login" "400" "5"; then
-    log "  Auth login endpoint exists"
+  # Test 3: No tenant → 400 on tenant-scoped route
+  if test_endpoint "/api/v1/drivers" "400" "10"; then
+    section_result PASS "Tenant-scoped route returns 400 without tenant"
+  else
+    section_result FAIL "GET /api/v1/drivers without tenant (expected 400)"
+  fi
+  
+  # Test 4: Invalid tenant ID → 403
+  if test_endpoint_headers "/api/v1/drivers" "X-Tenant-ID: 99999" "403" "10"; then
+    section_result PASS "Tenant-scoped route returns 403 for invalid tenant"
+  else
+    section_result FAIL "GET /api/v1/drivers with invalid tenant (expected 403)"
+  fi
+  
+  # Test 5: Valid tenant but no auth → 403 (membership gate)
+  if test_endpoint_headers "/api/v1/drivers" "X-Tenant-ID: 24" "403" "10"; then
+    section_result PASS "Tenant-scoped route returns 403 without auth (membership gate)"
+  else
+    section_result FAIL "GET /api/v1/drivers with tenant, no auth (expected 403)"
+  fi
+  
+  # Test 6: Auth login – GET requires tenant (middleware) → 400; POST without tenant → 400
+  if test_endpoint "/api/v1/auth/login" "400" "5"; then
+    section_result PASS "GET /api/v1/auth/login returns 400 (tenant required)"
+  else
+    section_result FAIL "GET /api/v1/auth/login (expected 400)"
+  fi
+  if test_endpoint_post "/api/v1/auth/login" "{}" "" "400" "5"; then
+    section_result PASS "POST /api/v1/auth/login (no tenant) returns 400"
+  else
+    section_result FAIL "POST /api/v1/auth/login without tenant (expected 400)"
   fi
 fi
 

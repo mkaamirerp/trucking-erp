@@ -39,7 +39,7 @@ def test_resolve_tenant_blocks_when_not_ready():
             session_factory.return_value = session
 
             try:
-                await middleware._resolve_tenant(request)
+                await middleware._resolve_tenant_from_request(request, None)
             except HTTPException as exc:
                 assert exc.status_code == 403
                 assert exc.detail == "Tenant not ready"

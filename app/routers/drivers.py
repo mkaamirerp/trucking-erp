@@ -1,13 +1,17 @@
+import logging
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 from app.models.driver import Driver
 from app.models.load import Load
-from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate
+from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate, DriverListOut, driver_row_to_list_out
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 
@@ -26,7 +30,7 @@ async def create_driver(
     await db.refresh(driver)
     return driver
 
-@router.get("", response_model=list[DriverOut])
+@router.get("", response_model=list[DriverListOut])
 async def list_drivers(
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
@@ -36,24 +40,29 @@ async def list_drivers(
     q: str | None = None,
     include_inactive: bool = False,
 ):
-    stmt = select(Driver).where(Driver.tenant_id == tenant_id).order_by(Driver.id.desc())
+    try:
+        stmt = select(Driver).where(Driver.tenant_id == tenant_id).order_by(Driver.id.desc())
 
-    if not include_inactive:
-        stmt = stmt.where(Driver.is_active == True)
+        if not include_inactive:
+            stmt = stmt.where(Driver.is_active == True)
 
-    if q:
-        qq = f"%{q.strip()}%"
-        stmt = stmt.where(or_(
-            Driver.first_name.ilike(qq),
-            Driver.last_name.ilike(qq),
-            Driver.email.ilike(qq),
-            Driver.phone.ilike(qq),
-        ))
+        if q:
+            qq = f"%{q.strip()}%"
+            stmt = stmt.where(or_(
+                Driver.first_name.ilike(qq),
+                Driver.last_name.ilike(qq),
+                Driver.email.ilike(qq),
+                Driver.phone.ilike(qq),
+            ))
 
-    stmt = stmt.offset(offset).limit(limit)
+        stmt = stmt.offset(offset).limit(limit)
 
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+        result = await db.execute(stmt)
+        rows = list(result.scalars().all())
+        return [driver_row_to_list_out(d) for d in rows]
+    except Exception as e:
+        logger.exception("list_drivers failed: %s", e)
+        return []
 
 @router.get("/{driver_id}", response_model=DriverOut)
 async def get_driver(

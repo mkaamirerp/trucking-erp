@@ -90,6 +90,20 @@ async def get_me(
     )
     requires_setup, missing_fields, country = _account_setup_missing(tenant)
 
+    company_profile = None
+    if tenant and tenant.company_profile:
+        p = tenant.company_profile
+        company_profile = {
+            "legal_name": p.legal_name,
+            "address": {
+                "street": p.address_street,
+                "city": p.address_city,
+                "region": p.address_region,
+                "postal": p.address_postal,
+                "country": p.address_country,
+            },
+        }
+
     return {
         "user_id": user_id,
         "tenant_id": tenant_id,
@@ -98,4 +112,5 @@ async def get_me(
         "account_setup_missing": missing_fields,
         "country_code": country,
         "tenant_slug": tenant.slug if tenant else None,
+        "company_profile": company_profile,
     }

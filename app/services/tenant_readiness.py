@@ -8,10 +8,9 @@ from app.models.platform import PlatformTenant
 
 logger = logging.getLogger(__name__)
 
-# Allowed/ready values are case-insensitive.
-# IMPORTANT: PENDING_SETUP must be allowed so OTP -> company-setup flow can work.
-# ACTIVE-only routes should enforce ACTIVE separately (e.g., require_active_tenant).
-ALLOWED_TENANT_STATUSES = {"ACTIVE", "READ_ONLY", "PENDING_SETUP"}
+# Block only when: tenant not found, tenant.status != ACTIVE, or tenant.db_status != READY.
+# Do NOT block on setup_completed_at; company setup is optional (Settings).
+ALLOWED_TENANT_STATUSES = {"ACTIVE", "READ_ONLY"}
 ALLOWED_BILLING_STATUSES = {None, "OK", "ACTIVE"}
 
 

@@ -15,6 +15,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: prod
     container_name: truckerp-api
     restart: unless-stopped
     depends_on:
@@ -77,3 +78,4 @@ volumes:
 networks:
   truckerp_net:
     external: true
+# test

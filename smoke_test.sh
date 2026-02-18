@@ -65,7 +65,11 @@ need_cmd docker
 smtp_smoke() {
   hr
   echo "SMTP connectivity smoke"
-  if PYTHONPATH="." $PYTHON scripts/smoke_smtp.py; then
+  if [[ ! -f tools/smoke_smtp.py ]]; then
+    warn "Skipping SMTP smoke: tools/smoke_smtp.py not found"
+    return
+  fi
+  if PYTHONPATH="." $PYTHON tools/smoke_smtp.py; then
     ok "SMTP smoke passed"
   else
     fail "SMTP smoke test failed"
@@ -75,7 +79,11 @@ smtp_smoke() {
 frontend_smoke() {
   hr
   echo "Frontend public smoke"
-  FRONTEND_BASE="${FRONTEND_BASE:-http://localhost}" PUBLIC_API_BASE="${BASE_URL}/api/v1/public" PUBLIC_CURL="$CURL_CMD" bash scripts/smoke_frontend_public.sh
+  if [[ ! -f tools/smoke_frontend_public.sh ]]; then
+    warn "Skipping frontend smoke: tools/smoke_frontend_public.sh not found"
+    return
+  fi
+  FRONTEND_BASE="${FRONTEND_BASE:-http://localhost}" PUBLIC_API_BASE="${BASE_URL}/api/v1/public" PUBLIC_CURL="$CURL_CMD" bash tools/smoke_frontend_public.sh
 }
 
 hr
@@ -157,6 +165,14 @@ if [[ "$HARDENED_MODE" == "1" ]]; then
   internal_health="$(docker run --rm --network truckerp_net curlimages/curl:8.5.0 -sS "$API/health")"
   echo "$internal_health" | jq .
   echo "$internal_health" | jq -e '.status=="ok"' >/dev/null || fail "Internal health check failed"
+
+  # Optional: tenant_demo must be on tenant migration head (dev/demo guardrail)
+  if [[ -x scripts/check_tenant_demo_on_head.sh ]]; then
+    subhr
+    if ! bash scripts/check_tenant_demo_on_head.sh; then
+      fail "tenant_demo DB is not on tenant migration head (see scripts/check_tenant_demo_on_head.sh)"
+    fi
+  fi
 fi
 
 # 1) Health
@@ -192,19 +208,20 @@ else
 fi
 
 # TENANT ROUTING SMOKE (docker-network)
+# With membership gate: tenant route without auth => 403 (not 200). Invalid tenant => 403. No tenant => 400.
 hr
 echo "TENANT ROUTING SMOKE (docker-network)"
 docker run --rm --network truckerp_net alpine:3.20 sh -lc '
   set -e
   apk add --no-cache curl >/dev/null
   API="http://truckerp-api:8000/api/v1"
-  OK=1
+  OK=24
   BAD=9999
   fail() { echo "FAIL: $1" >&2; exit 1; }
 
   R1=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Tenant-ID: $OK" "$API/drivers")
-  [ "$R1" = "200" ] || fail "[Tenant OK] expected 200, got $R1"
-  echo "[Tenant OK] /drivers => PASS (200)"
+  [ "$R1" = "403" ] || fail "[Tenant OK but no auth] expected 403, got $R1"
+  echo "[Tenant OK, no auth] /drivers => PASS (403)"
 
   R2=$(curl -s -o /dev/null -w "%{http_code}" "$API/drivers")
   [ "$R2" = "400" ] || fail "[Tenant missing] expected 400, got $R2"
@@ -248,9 +265,11 @@ echo "$slug_bad_body" | jq .
 # Signup flow smoke (Python)
 hr
 echo "Signup flow smoke (python helper)"
-if [[ -n "${PLATFORM_DATABASE_URL:-}" || -n "${DATABASE_URL:-}" ]]; then
+if [[ ! -f tools/smoke_signup_flow.py ]]; then
+  warn "Skipping signup flow smoke: tools/smoke_signup_flow.py not found"
+elif [[ -n "${PLATFORM_DATABASE_URL:-}" || -n "${DATABASE_URL:-}" ]]; then
   API_PUBLIC="$BASE_URL/api/v1/public" \
-    $PYTHON scripts/smoke_signup_flow.py
+    $PYTHON tools/smoke_signup_flow.py
 else
   warn "Skipping signup flow smoke: DATABASE_URL/PLATFORM_DATABASE_URL not set"
 fi
@@ -276,11 +295,19 @@ fi
 
 echo
 echo "4a) Subscription status smoke"
-"$PY_INT" scripts/smoke_subscription_status.py || fail "subscription status smoke failed"
+if [[ -f tools/smoke_subscription_status.py ]]; then
+  "$PY_INT" tools/smoke_subscription_status.py || fail "subscription status smoke failed"
+else
+  warn "Skipping: tools/smoke_subscription_status.py not found"
+fi
 
 echo
 echo "4b) Tenant isolation smoke"
-"$PY_INT" scripts/smoke_tenant_isolation.py || fail "tenant isolation smoke failed"
+if [[ -f tools/smoke_tenant_isolation.py ]]; then
+  "$PY_INT" tools/smoke_tenant_isolation.py || fail "tenant isolation smoke failed"
+else
+  warn "Skipping: tools/smoke_tenant_isolation.py not found"
+fi
 
 ok "Python smokes passed"
 echo

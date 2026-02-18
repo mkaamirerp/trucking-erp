@@ -24,6 +24,9 @@ class DriverOnboardingSubmission(Base):
         BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_by_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    person_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("people.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="driver_portal", server_default="driver_portal")

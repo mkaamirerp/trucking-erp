@@ -7,7 +7,19 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 
 from app.core.validators import normalize_phone_number as normalize_phone
-from app.schemas.driver import DriverOut
+
+
+class PersonOut(BaseModel):
+    """Minimal person record returned on approve (people-first; no driver row)."""
+    id: int
+    tenant_id: int
+    onboarding_status: str
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DriverOnboardingStatus(str, Enum):
@@ -46,6 +58,7 @@ class DriverOnboardingSubmissionOut(DriverOnboardingSubmissionBase):
     id: int
     tenant_id: int
     created_by_user_id: int
+    person_id: Optional[int] = None
     status: DriverOnboardingStatus
     source: str
     submitted_at: Optional[datetime] = None
@@ -69,4 +82,4 @@ class DriverOnboardingRejectRequest(BaseModel):
 
 class DriverOnboardingApproveResponse(BaseModel):
     submission: DriverOnboardingSubmissionOut
-    driver: DriverOut
+    person: PersonOut

@@ -1,4 +1,5 @@
 import { createContext, ReactNode, useContext } from "react";
+import { useLocation } from "react-router-dom";
 import { useFetch } from "./useFetch";
 
 export type MeResponse = {
@@ -19,8 +20,12 @@ type MeContextValue = {
 
 const MeContext = createContext<MeContextValue>({ me: null, loading: true, error: null });
 
+const PUBLIC_PATHS = ["/", "/signup", "/login", "/forgot-password", "/reset-password", "/company-setup", "/account-setup"];
+
 export function MeProvider({ children }: { children: ReactNode }) {
-  const { data, loading, error } = useFetch<MeResponse>("/api/v1/me", []);
+  const location = useLocation();
+  const isPublicPath = PUBLIC_PATHS.some((p) => p === location.pathname || location.pathname.startsWith(p + "/"));
+  const { data, loading, error } = useFetch<MeResponse>("/api/v1/me", [], isPublicPath ? false : true);
   return <MeContext.Provider value={{ me: data, loading, error }}>{children}</MeContext.Provider>;
 }
 

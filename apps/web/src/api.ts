@@ -13,6 +13,9 @@ function currentSlugFromPath(): string | null {
   const candidate = segments[0];
   const reserved = new Set([
     "signup",
+    "login",
+    "forgot-password",
+    "reset-password",
     "payroll",
     "drivers",
     "api",
@@ -140,11 +143,37 @@ export async function checkSlugAvailability(slug: string) {
 }
 
 export async function signup(payload: SignupPayload) {
+  // Send form payload with only key renames for backend: slug → workspace_slug, company_name → company_legal_name. Pass address through as the form sends it.
+  const body = {
+    workspace_slug: payload.slug,
+    email: payload.email.trim(),
+    password: payload.password,
+    first_name: payload.first_name.trim(),
+    last_name: payload.last_name.trim(),
+    phone: payload.phone.trim(),
+    company_legal_name: payload.company_name?.trim() ?? payload.slug,
+    address: payload.address,
+  };
   const res = await fetchPublic(`${PUBLIC_API_BASE}/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Signup failed";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string | Array<{ msg?: string }> }) : null;
+      if (json?.detail) {
+        message = Array.isArray(json.detail)
+          ? (json.detail as Array<{ msg?: string }>).map((d) => d?.msg ?? "").filter(Boolean).join(". ") || "Validation failed"
+          : String(json.detail);
+      }
+    } catch {
+      /* use default */
+    }
+    throw new Error(message);
+  }
   return handle<SignupResponse>(res);
 }
 
@@ -240,8 +269,24 @@ export async function cancelSignup(payload: { attempt_id: string }) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+export type SetupPrefillResponse = {
+  prefill: {
+    company_legal_name?: string;
+    country?: string;
+    owner_email?: string;
+    address?: { street?: string; city?: string; region?: string; postal?: string; country?: string };
+  };
+  required_remaining_fields: string[];
+  country?: string | null;
+};
+
+export async function getSetupPrefill() {
+  const res = await fetchWithTenant(`${API_BASE}/public/company-setup/prefill`);
+  return handle<SetupPrefillResponse>(res);
+}
+
 export async function companySetup(payload: CompanySetupRequest) {
-  const res = await fetchWithTenant(`/api/v1/public/company-setup`, {
+  const res = await fetchWithTenant(`${API_BASE}/public/company-setup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -250,6 +295,8 @@ export async function companySetup(payload: CompanySetupRequest) {
 }
 
 export type SetupTenantPayload = {
+  legal_name?: string;
+  address?: { street: string; city: string; region: string; postal: string; country: string };
   dot_number?: string;
   mc_number?: string;
   cvor_number?: string;
@@ -261,10 +308,10 @@ export type SetupTenantPayload = {
 };
 
 export async function setupTenant(payload: SetupTenantPayload) {
-  const c = (payload.country || "US").substring(0, 2).toUpperCase();
+  const c = (payload.country || payload.address?.country || "US").substring(0, 2).toUpperCase();
   const req: CompanySetupRequest = {
-    legal_name: "Company",
-    address: {
+    legal_name: payload.legal_name ?? "Company",
+    address: payload.address ?? {
       street: "TBD",
       city: "TBD",
       region: "TBD",
@@ -283,7 +330,7 @@ export async function setupTenant(payload: SetupTenantPayload) {
 export async function uploadW9(file: File) {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetchWithTenant(`/api/v1/public/company-setup/w9-upload`, {
+  const res = await fetchWithTenant(`${API_BASE}/public/company-setup/w9-upload`, {
     method: "POST",
     body: form,
   });
@@ -291,7 +338,7 @@ export async function uploadW9(file: File) {
 }
 
 export async function refreshSession() {
-  const res = await fetch(`/api/v1/auth/refresh`, {
+  const res = await fetch(`${API_BASE}/auth/refresh`, {
     method: "POST",
     credentials: "include",
   });
@@ -300,8 +347,13 @@ export async function refreshSession() {
   return true;
 }
 
+export type CompanyProfileFromMe = {
+  legal_name: string;
+  address: { street: string; city: string; region: string; postal: string; country: string };
+};
+
 export async function getAuthMe() {
-  const res = await fetch(`/api/v1/auth/me`, { credentials: "include" });
+  const res = await fetchWithTenant(`${API_BASE}/auth/me`);
   return handle<{
     user_id: number | string;
     email: string;
@@ -309,17 +361,18 @@ export async function getAuthMe() {
     last_name: string;
     tenant_id: number;
     tenant_slug: string;
-    tenant_name: string;
+    tenant_name?: string;
     role?: string | null;
     email_verified?: boolean;
     requires_account_setup?: boolean;
     account_setup_missing?: string[];
     country_code?: string | null;
+    company_profile?: CompanyProfileFromMe | null;
   }>(res);
 }
 
 export async function logout() {
-  const res = await fetch(`/api/v1/auth/logout`, {
+  const res = await fetch(`${API_BASE}/auth/logout`, {
     method: "POST",
     credentials: "include",
   });
@@ -331,22 +384,92 @@ export async function logout() {
 }
 
 export async function login(payload: { email: string; password: string }) {
-  const res = await fetchWithTenant(`/api/v1/auth/login`, {
+  const res = await fetchWithTenant(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || "Login failed");
+    let message = "Invalid email or password";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) message = json.detail;
+    } catch {
+      /* use default */
+    }
+    throw new Error(message);
   }
   return handle<{ ok: boolean; workspace_url?: string }>(res);
 }
 
+/** Request password reset email (no tenant required). */
+export async function forgotPassword(payload: { email: string; reset_base_url?: string }) {
+  const res = await fetchPublic(`${API_BASE}/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Something went wrong. Please try again.";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) {
+        message = json.detail;
+        if (res.status === 403 && (json.detail.toLowerCase().includes("tenant not found") || json.detail.includes("not found in registry"))) {
+          message = "This workspace doesn't exist. Check the URL or use the link from your sign-up email.";
+        }
+      }
+    } catch {
+      /* use default */
+    }
+    throw new Error(message);
+  }
+  return handle<{ ok: boolean; message: string; sent?: boolean }>(res);
+}
+
+/** Set new password with token from reset email (no tenant required). */
+export async function resetPassword(payload: { token: string; new_password: string }) {
+  const res = await fetchPublic(`${API_BASE}/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Invalid or expired link. Please request a new password reset.";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) message = json.detail;
+    } catch {
+      /* use default */
+    }
+    throw new Error(message);
+  }
+  return handle<{ ok: boolean; message: string }>(res);
+}
+
 // ---- Loads, Brokers, Dashboard ----
 export async function getDashboardSummary() {
-  const res = await fetchWithTenant(`/api/v1/dashboard/summary`);
+  const res = await fetchWithTenant(`${API_BASE}/dashboard/summary`);
   return handle<DashboardSummary>(res);
+}
+
+export async function seedDemoData() {
+  const res = await fetchWithTenant(`${API_BASE}/dashboard/seed-demo`, { method: "POST" });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text || "Seed failed";
+    try {
+      const json = JSON.parse(text) as { detail?: string };
+      if (json.detail) message = json.detail;
+    } catch {
+      /* use message as-is */
+    }
+    throw new Error(message);
+  }
+  return handle<{ ok?: boolean; message?: string }>(res);
 }
 
 export async function listLoads(params: {
@@ -358,7 +481,7 @@ export async function listLoads(params: {
   page?: number;
   size?: number;
 } = {}) {
-  const url = new URL(`/api/v1/loads`, window.location.origin);
+  const url = new URL(`${API_BASE}/loads`, window.location.origin);
   if (params.status) params.status.forEach((s) => url.searchParams.append("status", s));
   if (params.driver_id) url.searchParams.set("driver_id", String(params.driver_id));
   if (params.broker_id) url.searchParams.set("broker_id", String(params.broker_id));
@@ -371,12 +494,12 @@ export async function listLoads(params: {
 }
 
 export async function getLoad(id: number) {
-  const res = await fetchWithTenant(`/api/v1/loads/${id}`);
+  const res = await fetchWithTenant(`${API_BASE}/loads/${id}`);
   return handle<Load>(res);
 }
 
 export async function listBrokers(params: { page?: number; size?: number } = {}) {
-  const url = new URL(`/api/v1/brokers`, window.location.origin);
+  const url = new URL(`${API_BASE}/brokers`, window.location.origin);
   if (params.page) url.searchParams.set("page", String(params.page));
   if (params.size) url.searchParams.set("size", String(params.size));
   const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
@@ -384,16 +507,18 @@ export async function listBrokers(params: { page?: number; size?: number } = {})
 }
 
 export async function getDriverSummary(id: number) {
-  const res = await fetchWithTenant(`/api/v1/drivers/${id}/summary`);
+  const res = await fetchWithTenant(`${API_BASE}/drivers/${id}/summary`);
   return handle<DriverSummary>(res);
 }
 
 export async function listDrivers(params: { limit?: number; offset?: number; include_inactive?: boolean } = {}) {
-  const url = new URL(`/api/v1/drivers`, window.location.origin);
-  if (params.limit) url.searchParams.set("limit", String(params.limit));
-  if (params.offset) url.searchParams.set("offset", String(params.offset));
-  if (params.include_inactive) url.searchParams.set("include_inactive", String(params.include_inactive));
-  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  const sp = new URLSearchParams();
+  if (params.limit != null) sp.set("limit", String(params.limit));
+  if (params.offset != null) sp.set("offset", String(params.offset));
+  if (params.include_inactive != null) sp.set("include_inactive", String(params.include_inactive));
+  const qs = sp.toString();
+  const url = `${API_BASE}/drivers${qs ? `?${qs}` : ""}`;
+  const res = await fetchWithTenant(url);
   return handle<Driver[]>(res);
 }
 
@@ -550,15 +675,23 @@ export type SlugAvailabilityResponse = {
   suggestions?: string[] | null;
 };
 
+export type SignupAddress = {
+  street: string;
+  city: string;
+  region: string;
+  postal: string;
+  country: string;
+};
+
 export type SignupPayload = {
   first_name: string;
   last_name: string;
   email: string;
   confirm_email: string;
-  phone?: string;
+  phone: string;
   company_name: string;
   slug: string;
-  country: string;
+  address: SignupAddress;
   password: string;
   confirm_password: string;
   plan: string;
@@ -568,10 +701,12 @@ export type SignupPayload = {
 
 export type SignupResponse = {
   success: boolean;
-  message: string;
-  user_id: number;
-  tenant_id: number;
-  email: string;
+  tenant_slug?: string;
+  redirect_url?: string;
+  message?: string;
+  user_id?: number;
+  tenant_id?: number;
+  email?: string;
   debug_otp?: string | null;
 };
 
@@ -631,11 +766,14 @@ export type PagedResponse<T> = {
 
 export type DashboardSummary = {
   active_loads: number;
+  in_transit: number;
+  delayed: number;
   delivered_today: number;
   miles_this_week: number;
   revenue_this_week: number;
   drivers_active: number;
   drivers_total: number;
+  drivers?: Driver[];
 };
 
 export type Broker = {

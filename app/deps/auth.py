@@ -37,13 +37,19 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
 
     payload = decode_token(token, expected_type=TokenType.ACCESS)
     user_id = payload.get("sub")
-    tenant_id = payload.get("tenant_id")
-    tenant_slug = payload.get("tenant_slug")
+    jwt_tenant_id = payload.get("tenant_id")
     roles = payload.get("roles") or []
     role = roles[0] if roles else None
 
-    if not user_id or not tenant_id:
+    if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims")
+
+    # Use tenant from request (URL/subdomain) when set by middleware; else JWT tenant
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if tenant_id is None and jwt_tenant_id is not None:
+        tenant_id = int(jwt_tenant_id)
+    if tenant_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context required")
 
     user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(user_id)))
     if not user:

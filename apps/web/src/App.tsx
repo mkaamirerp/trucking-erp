@@ -9,12 +9,15 @@ import LandingPage from "./pages/LandingPage";
 import SignupPage from "./pages/SignupPage";
 import CompanySetupPage from "./pages/CompanySetupPage";
 import LoginPage from "./pages/LoginPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import LoadDetailPage from "./pages/LoadDetailPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
+import ToolsDiagnosticsPage from "./pages/ToolsDiagnosticsPage";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
 
@@ -38,6 +41,13 @@ function App() {
     return <Navigate to={target} replace />;
   }
 
+  // Setup pages require a tenant (subdomain). On main domain, send to landing/signup.
+  const onSetupRoute =
+    location.pathname.startsWith("/company-setup") || location.pathname.startsWith("/account-setup");
+  if (!hostSlug && onSetupRoute) {
+    return <Navigate to="/" replace />;
+  }
+
   if (isAppRoute && loading) {
     return (
       <div className="flex items-center justify-center min-h-screen text-sm text-gray-700">
@@ -47,15 +57,11 @@ function App() {
   }
 
   if (isAppRoute && error) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ sessionError: error }} />;
   }
 
   if (isAppRoute && !loading && !error && me?.requires_account_setup && !onAccountSetupRoute) {
     return <Navigate to={accountSetupPath} replace />;
-  }
-
-  if (isAppRoute && error) {
-    return <Navigate to="/login" replace />;
   }
 
   return (
@@ -64,6 +70,8 @@ function App() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/signup/*" element={<SignupPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/company-setup" element={<CompanySetupPage />} />
       <Route path="/account-setup" element={<CompanySetupPage />} />
       <Route
@@ -154,6 +162,7 @@ function App() {
           </Layout>
         }
       />
+      <Route path="/tools/diagnostics" element={<ToolsDiagnosticsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

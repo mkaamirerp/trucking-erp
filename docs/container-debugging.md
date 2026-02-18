@@ -1,5 +1,26 @@
 # Container Debugging
 
+## 502 Bad Gateway (API not responding)
+
+If **all** API calls (e.g. `/api/v1/me`, `/api/v1/tools/ping`) return **502 Bad Gateway**, nginx is not reaching the API. Common causes:
+
+1. **API container not running or crashed**  
+   Check: `docker ps` (is `truckerp-api` up?) and `docker logs truckerp-api`.
+
+2. **API never started** (default command uses AWS SSM)  
+   The default `start_api_with_ssm.sh` needs AWS SSM. If SSM is unavailable, the script exits and uvicorn never starts.
+
+   **Fix for local/dev:** Use the dev override so the API runs without SSM and loads env from `.env`:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+   ```
+   Ensure a **`.env`** file exists in the repo root with at least `DATABASE_URL` (and `JWT_SECRET`, etc.). The dev override runs uvicorn directly and sources `/app/.env` (your repo’s `.env` when the repo is mounted).
+
+3. **Nginx can’t reach API**  
+   Check that `truckerp-api` and `truckerp-nginx` are on the same Docker network and that the API listens on port 8000.
+
+---
+
 ## Why `docker exec` Python commands fail
 
 The `truckerp-api` container gets its environment from `/run/secrets/truckerp.env`, which is written at startup by `scripts/start_api_with_ssm.sh`. Uvicorn is launched with `--env-file /run/secrets/truckerp.env`, so the running process has `DATABASE_URL` and other vars.

@@ -66,7 +66,17 @@ def create_refresh_token(*, user_id: str | int, tenant_id: int, tenant_slug: str
     )
 
 
+def _looks_like_jwt(raw: str) -> bool:
+    """True if the string has the form header.payload.signature (three base64 segments)."""
+    if not raw or not isinstance(raw, str):
+        return False
+    parts = raw.split(".")
+    return len(parts) == 3 and all(len(p) > 0 for p in parts)
+
+
 def decode_token(token: str, *, expected_type: str | None = None) -> dict:
+    if not _looks_like_jwt(token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format")
     try:
         payload = jwt.decode(token, _default_secret(), algorithms=[settings.jwt_algorithm])
     except jwt.ExpiredSignatureError:

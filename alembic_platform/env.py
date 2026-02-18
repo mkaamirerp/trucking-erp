@@ -1,8 +1,25 @@
-
-
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
+
+# Load env in order: SSM-rendered secrets file (container / host with script), then .env
+def _load_env_file(path: str) -> None:
+    try:
+        fp = Path(path)
+        if not fp.exists():
+            return
+        for line in fp.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+    except Exception:
+        pass
+
+_load_env_file("/run/secrets/truckerp.env")
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -33,10 +50,38 @@ import app.models  # noqa: F401
 target_metadata = Base.metadata
 
 
+def _fetch_ssm_param(name: str) -> str | None:
+    """Fetch a single SSM parameter via AWS CLI. Returns None if missing or CLI unavailable."""
+    ssm_path = os.getenv("SSM_PATH_PLATFORM", "/truckerp/prod/platform/").rstrip("/") + "/"
+    param_name = name if name.startswith("/") else ssm_path + name
+    region = os.getenv("AWS_REGION", "us-east-1")
+    try:
+        out = subprocess.run(
+            ["aws", "ssm", "get-parameter", "--name", param_name, "--region", region, "--with-decryption", "--query", "Parameter.Value", "--output", "text"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if out.returncode == 0 and out.stdout:
+            return out.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def get_database_url() -> str:
-    url = os.getenv("PLATFORM_DATABASE_URL")
+    # Platform DB: prefer env (from .env or /run/secrets/truckerp.env), then SSM
+    url = os.getenv("PLATFORM_DATABASE_URL") or os.getenv("DATABASE_URL")
     if not url:
-        raise RuntimeError("PLATFORM_DATABASE_URL is not set. Put it in /home/admin/trucking_erp/.env")
+        url = _fetch_ssm_param("PLATFORM_DATABASE_URL") or _fetch_ssm_param("DATABASE_URL")
+    if not url:
+        env_path = Path(__file__).resolve().parents[1] / ".env"
+        raise RuntimeError(
+            "PLATFORM_DATABASE_URL or DATABASE_URL must be set. "
+            "Use one of: (1) .env in project root, (2) /run/secrets/truckerp.env (SSM-rendered), "
+            "(3) AWS CLI + SSM (SSM_PATH_PLATFORM, AWS_REGION). "
+            f"Example: add to {env_path} or run with env from SSM."
+        )
     return url
 
 

@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     # Tenant DB app user credentials (shared, no per-tenant secrets stored in DB)
     tenant_db_app_user: str | None = None
     tenant_db_app_password: str | None = None
-    # Tenant alembic target revision for provisioning
-    tenant_alembic_target_rev: str = "f2d5b4be0ac2"
+    # Tenant alembic target revision for provisioning; use "head" to always run current migrations
+    tenant_alembic_target_rev: str = "head"
     # Auth
     jwt_secret: str = "dev-change-me"
     jwt_algorithm: str = "HS256"
