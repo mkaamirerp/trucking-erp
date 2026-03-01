@@ -4,9 +4,11 @@
 
 This project uses a **fail-closed, SSM-only** secret management system. The Postgres password and other sensitive configuration values are stored exclusively in AWS Systems Manager (SSM) Parameter Store as SecureString values.
 
-## The Rule
+**DEV vs PROD:** DEV uses `.env` only (no SSM/AWS). PROD uses SSM only (no `.env`). See `docker-compose.dev.yml` (env_file + uvicorn) vs base `docker-compose.yml` (start_api_with_ssm.sh).
 
-**DB passwords and DB URLs come ONLY from SSM.**
+## The Rule (PROD)
+
+**In production, DB passwords and DB URLs come ONLY from SSM.**
 
 - At runtime, secrets are written to `/run/secrets/truckerp.env` by `scripts/start_api_with_ssm.sh`
 - The API container uses this env file exclusively
