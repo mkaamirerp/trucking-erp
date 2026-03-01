@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.driver import Driver
 from app.models.driver_phone import DriverPhone
 from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
 from app.deps.tenant import require_tenant
@@ -38,6 +39,17 @@ async def create_driver_phone(
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    driver = await db.scalar(
+        select(Driver).where(
+            Driver.id == payload.driver_id,
+            Driver.tenant_id == tenant_id,
+        )
+    )
+    if not driver:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Driver not found",
+        )
     phone = DriverPhone(**payload.model_dump(), tenant_id=tenant_id)
     db.add(phone)
     await db.commit()

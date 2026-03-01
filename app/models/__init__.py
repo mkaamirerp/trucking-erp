@@ -8,6 +8,11 @@ from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
 from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
+from app.models.person_application import PersonApplication
+from app.models.person_application_file import PersonApplicationFile
+from app.models.person_application_request import PersonApplicationRequest
+from app.models.document_requirement import DocumentRequirement
+from app.models.application_access_token import ApplicationAccessToken
 from app.models.tenant import Tenant
 from app.models.payee import (
     Payee,

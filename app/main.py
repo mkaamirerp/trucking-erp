@@ -26,6 +26,9 @@ from app.routers.loads import router as loads_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.dev_tools import router as dev_tools_router
 from app.routers.dev_tools_db import router as dev_tools_db_router
+from app.routers.admin_diagnostics import router as admin_diagnostics_router
+from app.routers.admin_onboarding import router as admin_onboarding_router
+from app.routers.person_applications import router as person_applications_router
 from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -44,6 +47,7 @@ app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")
 app.include_router(driver_documents_router, prefix="/api/v1")
 app.include_router(driver_onboarding_router)
+app.include_router(person_applications_router)
 app.include_router(onboarding_router)
 app.include_router(employees_router)
 app.include_router(meta_router)
@@ -56,6 +60,8 @@ app.include_router(loads_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(dev_tools_router)
 app.include_router(dev_tools_db_router)
+app.include_router(admin_diagnostics_router)
+app.include_router(admin_onboarding_router)
 
 # Static assets and dashboard UI (reference layout: sidebar, KPIs, drivers, loads, alerts, chat)
 _static_dir = Path(__file__).resolve().parent / "static"

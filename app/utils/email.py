@@ -143,7 +143,8 @@ async def send_otp_email(to: str, otp: str) -> None:
     subject = "Your TruckERP verification code"
     body = (
         f"Your TruckERP verification code is: {otp}\n\n"
-        "This code will expire in 10 minutes. If you did not request this code, you can ignore this email."
+        "This code expires in 10 minutes. Do not share this code with anyone.\n"
+        "If you did not request this code, you can ignore this email."
     )
     await send_email(to=to, subject=subject, body=body)
 
@@ -219,6 +220,26 @@ async def send_password_reset_email(
         reset_link,
         "",
         "If you didn't request this, you can safely ignore this email. Your password will not be changed.",
+    ]
+    body = "\n".join(body_lines)
+    await send_email(to=to, subject=subject, body=body)
+
+
+async def send_onboarding_invite_email(*, to: str, invite_link: str) -> None:
+    """
+    Sends the driver onboarding invite link to the given email address.
+    """
+    subject = "Your driver onboarding link – TruckERP"
+    body_lines = [
+        "Hi,",
+        "",
+        "You’ve been invited to complete driver onboarding.",
+        "",
+        "Open this link to get started (it expires in 7 days):",
+        "",
+        invite_link,
+        "",
+        "If you didn’t expect this email, you can ignore it.",
     ]
     body = "\n".join(body_lines)
     await send_email(to=to, subject=subject, body=body)

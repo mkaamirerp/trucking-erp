@@ -80,3 +80,8 @@ runtime/
 
 # Alembic backups
 alembic_tenant/versions.BAK.*/
+
+# local tooling
+.cursor-plugin/
+# generated reports/artifacts
+artifacts/

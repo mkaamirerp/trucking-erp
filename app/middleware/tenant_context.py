@@ -32,6 +32,7 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
     "/api/v1/tools/unlock",  # dev-only tools unlock (no tenant)
     "/api/v1/tools/ping",  # dev-only tools ping (no tenant)
     # /api/v1/tools/db/* intentionally not allowed — requires tenant context
+    "/api/v1/person-applications",  # applicant flow: tenant from onboarding token only (resolver sets it)
 }
 
 REQUEST_ID_HEADER = "X-Request-ID"

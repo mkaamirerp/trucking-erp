@@ -21,6 +21,7 @@ class Person(Base):
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     platform_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    onboarding_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="DRAFT")
 
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)

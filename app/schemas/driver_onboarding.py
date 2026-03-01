@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 
 from app.core.validators import normalize_phone_number as normalize_phone
+
+
+class ExtractionStatus(str, Enum):
+    EXTRACTING = "EXTRACTING"
+    EXTRACTED = "EXTRACTED"
+    EXTRACTION_FAILED = "EXTRACTION_FAILED"
 
 
 class PersonOut(BaseModel):
@@ -23,15 +29,21 @@ class PersonOut(BaseModel):
 
 
 class DriverOnboardingStatus(str, Enum):
+    """Application status. DRAFT/IN_PROGRESS both mean editable; UI maps DRAFT to IN_PROGRESS for applicant."""
+
     DRAFT = "DRAFT"
+    IN_PROGRESS = "IN_PROGRESS"
     SUBMITTED = "SUBMITTED"
+    IN_REVIEW = "IN_REVIEW"
+    WAITING_ON_DRIVER = "WAITING_ON_DRIVER"
+    WAITING_INTERNAL = "WAITING_INTERNAL"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
 
 class DriverOnboardingSubmissionBase(BaseModel):
-    first_name: str = Field(..., min_length=1)
-    last_name: str = Field(..., min_length=1)
+    first_name: Optional[str] = Field(None, min_length=0)
+    last_name: Optional[str] = Field(None, min_length=0)
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     address_street: Optional[str] = None
@@ -43,10 +55,13 @@ class DriverOnboardingSubmissionBase(BaseModel):
     license_region: Optional[str] = None
     license_expiry: Optional[date] = None
     notes: Optional[str] = None
+    middle_name: Optional[str] = None
 
     @field_validator("phone")
     @classmethod
     def v_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
         return normalize_phone(v)
 
 
@@ -57,10 +72,12 @@ class DriverOnboardingSubmissionCreate(DriverOnboardingSubmissionBase):
 class DriverOnboardingSubmissionOut(DriverOnboardingSubmissionBase):
     id: int
     tenant_id: int
-    created_by_user_id: int
-    person_id: Optional[int] = None
+    created_by_user_id: int = 0
     status: DriverOnboardingStatus
-    source: str
+    source: str = "driver_portal"
+    extraction_status: Optional[str] = None
+    extraction_result_json: Optional[Any] = None
+    license_uploads_json: Optional[Any] = None
     submitted_at: Optional[datetime] = None
     reviewed_at: Optional[datetime] = None
     reviewed_by_user_id: Optional[int] = None
@@ -68,7 +85,7 @@ class DriverOnboardingSubmissionOut(DriverOnboardingSubmissionBase):
     created_at: datetime
     updated_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=False)
 
 
 class DriverOnboardingCreateResponse(BaseModel):
@@ -82,4 +99,12 @@ class DriverOnboardingRejectRequest(BaseModel):
 
 class DriverOnboardingApproveResponse(BaseModel):
     submission: DriverOnboardingSubmissionOut
-    person: PersonOut
+    person: Optional[PersonOut] = None
+
+
+class LicenseUploadResponse(BaseModel):
+    """Response after uploading license file(s); includes extraction_status for polling."""
+    submission_id: int
+    extraction_status: str
+    inputs: dict[str, Any]
+    message: str = "License uploaded. Extraction started."

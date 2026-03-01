@@ -43,8 +43,7 @@ from app.schemas.signup import (
 )
 from app.utils.email import send_otp_email, send_signup_failure_alert, send_signup_welcome_email
 from app.utils.jwt_auth import create_access_token, create_refresh_token, TokenType
-from app.utils.otp import check_otp, generate_otp, get_otp_expiration, hash_otp
-from app.utils.password import hash_password
+from app.utils.otp import MAX_OTP_ATTEMPTS, check_otp, generate_otp, get_otp_expiration, hash_otp
 from app.utils.rate_limit import (
     check_resend_otp_identity_limit,
     check_verify_otp_identity_limit,
@@ -53,6 +52,7 @@ from app.utils.rate_limit import (
 )
 from app.utils.slug import SLUG_REGEX, generate_slug_suggestions, is_slug_available, normalize_slug
 from app.services.tenant_provisioning import provision_tenant_db
+from app.utils.password import hash_password
 
 router = APIRouter(prefix="/api/v1/public", tags=["public-signup"])
 logger = logging.getLogger(__name__)
@@ -250,11 +250,12 @@ async def public_signup(
             payload_json={
                 "workspace_slug": normalized_slug,
                 "email": email_lower,
+                # Store only a hash (never plaintext) so password login can work post-OTP signup.
+                "password_hash": hash_password(payload.password),
                 "first_name": (payload.first_name or "").strip(),
                 "last_name": (payload.last_name or "").strip(),
                 "phone": payload.phone.strip() if payload.phone else None,
                 "company_legal_name": payload.company_legal_name.strip(),
-                "password_hash": hash_password(payload.password),
                 "address": {
                     "street": payload.address.street.strip(),
                     "city": payload.address.city.strip(),
@@ -428,11 +429,37 @@ async def verify_otp(
             )
 
         if otp_row is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Code is no longer valid. Please request a new one.",
+            )
 
         is_valid, reason = check_otp(payload.otp, otp_row)
         if not is_valid:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+            if reason == "invalid":
+                otp_row.failed_attempts = getattr(otp_row, "failed_attempts", 0) + 1
+                await db.flush()
+                if otp_row.failed_attempts >= MAX_OTP_ATTEMPTS:
+                    otp_row.superseded_at = now
+                    await db.flush()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Too many attempts. Request a new code.",
+                    )
+                left = MAX_OTP_ATTEMPTS - otp_row.failed_attempts
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Incorrect code. You have {left} attempt{'s' if left != 1 else ''} left.",
+                )
+            if reason == "too_many_attempts":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Too many attempts. Request a new code.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Code is no longer valid. Please request a new one.",
+            )
 
         # ── 2. Locate the draft onboarding payload ────────────────────────────
         context["provisioning_step"] = "lookup_draft_payload"
@@ -487,7 +514,6 @@ async def verify_otp(
         email = (p.get("email") or email_lower).lower()
         phone_raw = p.get("phone")
         phone_digits = _normalize_phone_digits(phone_raw) if phone_raw else None
-        password_hash = p.get("password_hash") or ""
 
         # ── 4. Create all platform rows (NOT yet committed) ───────────────────
         context["provisioning_step"] = "create_tenant"
@@ -507,6 +533,7 @@ async def verify_otp(
         await db.flush()
 
         context["provisioning_step"] = "create_user"
+        password_hash = p.get("password_hash") or None
         user = PlatformUser(
             first_name=first_name,
             last_name=last_name,
@@ -709,9 +736,24 @@ async def resend_otp(
 
         if not draft_row:
             # Anti-enumeration: return success even when no draft found.
-            # Do NOT send an OTP in this case (silent no-op).
             logger.info("resend_otp_no_draft email=%s signup_id=%s", email_lower, payload.signup_id)
             return {"ok": True, "message": "If a pending signup exists for this email, a new code has been sent."}
+
+        # ── 60s cooldown: reject resend if an OTP was sent for this payload in the last 60 seconds ───
+        cooldown_cutoff = now - timedelta(seconds=60)
+        recent = await db.scalar(
+            select(PlatformOTPToken)
+            .where(
+                PlatformOTPToken.onboarding_payload_id == draft_row.id,
+                PlatformOTPToken.created_at >= cooldown_cutoff,
+            )
+            .limit(1)
+        )
+        if recent is not None:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait 60 seconds before requesting another code.",
+            )
 
         # ── supersede all active (non-consumed, non-superseded) OTP tokens ────
         active_tokens = (

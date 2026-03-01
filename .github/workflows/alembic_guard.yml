@@ -76,6 +76,7 @@ jobs:
           HEAD_COUNT=$(echo "$OUT" | grep -c "(head)" || echo "0")
           HEAD_COUNT=$(echo "$HEAD_COUNT" | xargs)
           if [ "$HEAD_COUNT" != "1" ]; then
+            echo "Multiple tenant heads detected. Create a merge revision."
             echo "Tenant Alembic must have exactly one head (found: $HEAD_COUNT)"
             echo "$OUT"
             exit 1

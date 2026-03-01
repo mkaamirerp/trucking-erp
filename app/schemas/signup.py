@@ -93,7 +93,7 @@ class SignupResponse(BaseModel):
 
 class VerifyOTPRequest(BaseModel):
     email: EmailStr
-    otp: constr(min_length=4, max_length=10)
+    otp: constr(min_length=4, max_length=10)  # 6-digit numeric; validated/stripped in endpoint
     signup_id: str | None = None  # UUID preferred; fall-back to email-based lookup when absent
 
 

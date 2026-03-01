@@ -19,6 +19,15 @@ def get_otp_expiration(minutes: int = 10) -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
 
+# Max failed verification attempts before OTP is invalidated
+MAX_OTP_ATTEMPTS = 5
+
+
+def normalize_otp_input(candidate: str) -> str:
+    """Strip whitespace; keep only digits (for numeric OTP)."""
+    return "".join(c for c in (candidate or "").strip() if c.isdigit())
+
+
 def check_otp(candidate: str, otp_token) -> tuple[bool, str | None]:
     """Validate an OTP candidate against a PlatformOTPToken row.
 
@@ -29,9 +38,11 @@ def check_otp(candidate: str, otp_token) -> tuple[bool, str | None]:
       1. Already consumed  → "already_used"
       2. Superseded        → "superseded"
       3. Expired           → "expired"
-      4. Hash mismatch     → "invalid"
+      4. Too many attempts → "too_many_attempts"
+      5. Hash mismatch     → "invalid"
     """
     now = datetime.now(timezone.utc)
+    normalized = normalize_otp_input(candidate)
 
     if otp_token.consumed_at is not None:
         return False, "already_used"
@@ -40,13 +51,16 @@ def check_otp(candidate: str, otp_token) -> tuple[bool, str | None]:
         return False, "superseded"
 
     exp = otp_token.expires_at
-    # Make tz-aware if the DB returned a naive datetime
     if exp.tzinfo is None:
         exp = exp.replace(tzinfo=timezone.utc)
     if now > exp:
         return False, "expired"
 
-    if hash_otp(candidate) != otp_token.otp_hash:
+    failed = getattr(otp_token, "failed_attempts", 0)
+    if failed >= MAX_OTP_ATTEMPTS:
+        return False, "too_many_attempts"
+
+    if hash_otp(normalized) != otp_token.otp_hash:
         return False, "invalid"
 
     return True, None

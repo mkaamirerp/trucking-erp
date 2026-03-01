@@ -12,6 +12,7 @@ services:
       - truckerp_net
 
   truckerp-api:
+    # Prod: no env_file. Secrets from SSM only (start_api_with_ssm.sh). Dev override adds env_file: .env.
     build:
       context: .
       dockerfile: Dockerfile

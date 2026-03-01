@@ -9,6 +9,7 @@ import LandingPage from "./pages/LandingPage";
 import SignupPage from "./pages/SignupPage";
 import CompanySetupPage from "./pages/CompanySetupPage";
 import LoginPage from "./pages/LoginPage";
+import { TenantGatedLogin } from "./components/TenantGatedLogin";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -18,6 +19,8 @@ import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
 import ToolsDiagnosticsPage from "./pages/ToolsDiagnosticsPage";
+import AdminDbDiagnosticsPage from "./pages/AdminDbDiagnosticsPage";
+import OnboardingApplicantPage from "./pages/OnboardingApplicantPage";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
 
@@ -29,7 +32,8 @@ function App() {
     /^\/dashboard/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
-    /^\/admin\/driver-onboarding/.test(location.pathname);
+    /^\/admin\/driver-onboarding/.test(location.pathname) ||
+    /^\/admin\/diagnostics/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
     location.pathname.startsWith(accountSetupPath) || location.pathname.startsWith("/company-setup");
@@ -69,11 +73,12 @@ function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/signup/*" element={<SignupPage />} />
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<TenantGatedLogin />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/company-setup" element={<CompanySetupPage />} />
       <Route path="/account-setup" element={<CompanySetupPage />} />
+      <Route path="/onboarding" element={<OnboardingApplicantPage />} />
       <Route
         path="/dashboard"
         element={
@@ -159,6 +164,14 @@ function App() {
         element={
           <Layout>
             <DriverOnboardingAdminDetailPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/admin/diagnostics/database"
+        element={
+          <Layout>
+            <AdminDbDiagnosticsPage />
           </Layout>
         }
       />

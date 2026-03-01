@@ -44,13 +44,13 @@ class SlidingWindowLimiter:
             return True
 
 
-# Per-IP limits (shared by verify and resend)
+# Per-IP limits: resend max 5 per hour; verify 15 per 15 min
 verify_otp_per_ip = SlidingWindowLimiter(max_requests=15, window_seconds=900)   # 15 per 15 min
-resend_otp_per_ip = SlidingWindowLimiter(max_requests=5, window_seconds=900)   # 5 per 15 min
+resend_otp_per_ip = SlidingWindowLimiter(max_requests=5, window_seconds=3600)   # 5 per hour
 
 # Per-identity limits (signup_id or email-hash)
 verify_otp_per_identity = SlidingWindowLimiter(max_requests=20, window_seconds=900)  # 20 per 15 min
-resend_otp_per_identity = SlidingWindowLimiter(max_requests=3, window_seconds=300)     # 3 per 5 min
+resend_otp_per_identity = SlidingWindowLimiter(max_requests=3, window_seconds=300)   # 3 per 5 min
 
 
 def _client_ip(request: Request) -> str:

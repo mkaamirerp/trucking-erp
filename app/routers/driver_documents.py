@@ -7,6 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import save_driver_doc_upload_local
+from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
 from app.schemas.driver_documents import (
@@ -27,6 +28,13 @@ async def create_driver_document(
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    # Ensure driver belongs to tenant before creating document
+    driver = await db.scalar(
+        select(Driver).where(Driver.id == payload.driver_id, Driver.tenant_id == tenant_id)
+    )
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
     # Enforce single current CDL/DRIVER_LICENSE per driver
     if payload.doc_type in {"CDL", "DRIVER_LICENSE"} and payload.is_current:
         await db.execute(
@@ -54,6 +62,13 @@ async def create_driver_document_for_driver(
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    # Ensure driver belongs to tenant before creating document
+    driver = await db.scalar(
+        select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id)
+    )
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
     # Enforce single current CDL/DRIVER_LICENSE per driver
     if payload.doc_type in {"CDL", "DRIVER_LICENSE"} and payload.is_current:
         await db.execute(

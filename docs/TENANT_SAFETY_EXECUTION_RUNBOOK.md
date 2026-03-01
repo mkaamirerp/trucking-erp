@@ -6,6 +6,21 @@
 
 ---
 
+## 0. Migration authority and drift prevention (LOCK)
+
+**Decision:** All tenant Alembic commands are authoritative **only** inside the truckerp-api container at `/app`. The host repo must not be used for tenant migrations unless it is explicitly proven to match the container commit. This eliminates "two heads" caused by host/container drift.
+
+- **Tenant migrations MUST be run inside the container:** `docker exec truckerp-api bash -lc 'cd /app && …'`
+- **Before every tenant upgrade:** Run `alembic -c alembic_tenant.ini heads` inside the container; it **must** show exactly one head.
+- **Env gate (unchanged):** Tenant upgrades require `ALEMBIC_TENANT_DATABASE_URL`; do not weaken this.
+- **Drift proof:** Before relying on host-based migration commands, ensure commit hashes match:
+  - Host: `git rev-parse --short HEAD`
+  - Container: `docker exec truckerp-api bash -lc 'cd /app && git rev-parse --short HEAD'`
+  If they differ, run tenant Alembic only from the container (or sync/rebuild so container has the same tree).
+- **/app:** With docker-compose.dev.yml, `.:/app` is **mounted** (container sees host repo). Without that volume (e.g. prod), `/app` is **baked** in the image — when migrations change, rebuild the API image and redeploy so the container has the new revisions.
+
+---
+
 ✅ **Confirmed clean (tenant-safe / no cross-tenant write-delete paths found in reviewed areas):**
 - **Loads delete:** `delete_load()` fetches via `get_load(db, tenant_id, load_id)` and `get_load()` filters by `(Load.id == load_id, Load.tenant_id == tenant_id)` before delete. (Report H)
 - **Brokers delete:** `delete_broker()` fetches via `get_broker(db, tenant_id, broker_id)` and `get_broker()` filters by `(Broker.id == broker_id, Broker.tenant_id == tenant_id)` before delete. (Report H)

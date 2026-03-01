@@ -1,4 +1,10 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# .env path from repo root so it's found when running in Docker (CWD may vary)
+_env_path = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
     app_name: str = "Trucking ERP API"
@@ -13,7 +19,9 @@ class Settings(BaseSettings):
     tenant_db_app_password: str | None = None
     # Tenant alembic target revision for provisioning; use "head" to always run current migrations
     tenant_alembic_target_rev: str = "head"
-    # Auth
+    # Auth (policy via ENV/SSM; no admin panel yet)
+    auth_password_login_enabled: bool = True
+    auth_mfa_required: bool = False
     jwt_secret: str = "dev-change-me"
     jwt_algorithm: str = "HS256"
     jwt_access_minutes: int = 30
@@ -23,6 +31,9 @@ class Settings(BaseSettings):
     jwt_same_site: str = "lax"
     base_domain: str = "truckerp.me"
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_env_path) if _env_path.exists() else None,
+        extra="ignore",
+    )
 
 settings = Settings()

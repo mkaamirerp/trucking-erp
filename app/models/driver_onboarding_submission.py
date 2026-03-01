@@ -5,6 +5,8 @@ from datetime import datetime, date
 from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, String, Text, func, desc
 from sqlalchemy.orm import Mapped, mapped_column
 
+# Extraction status: EXTRACTING | EXTRACTED | EXTRACTION_FAILED (null = no upload yet)
+
 from app.models.base import Base
 
 
@@ -24,9 +26,6 @@ class DriverOnboardingSubmission(Base):
         BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_by_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    person_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("people.id", ondelete="SET NULL"), nullable=True, index=True
-    )
 
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="driver_portal", server_default="driver_portal")
@@ -35,8 +34,13 @@ class DriverOnboardingSubmission(Base):
     reviewed_by_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    first_name: Mapped[str] = mapped_column(Text, nullable=False)
-    last_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extraction_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    extraction_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    license_uploads_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    middle_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(Text, nullable=True)
     email: Mapped[str | None] = mapped_column(Text, nullable=True)
     address_street: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -8,3 +8,13 @@ httpx==0.28.1
 bcrypt==3.2.2
 PyJWT==2.10.1
 itsdangerous>=2.0.0
+boto3>=1.28.0
+botocore==1.42.56
+# PDF417 + AAMVA for CDL_BACK extraction
+pdf417decoder>=1.0.8
+Pillow>=10.0.0
+opencv-python-headless>=4.5.1
+numpy>=1.20.1
+pymupdf>=1.24.0
+# AAMVA parser (install from GitHub; PyPI name is 'aamva')
+aamva @ git+https://github.com/rechner/py-aamva.git@master

@@ -59,6 +59,93 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+// =========================
+// Applicant onboarding (public, token-based)
+// =========================
+
+export type PersonApplication = {
+  id: number;
+  tenant_id: number;
+  status: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  intake_payload?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PersonApplicationDlUploadResponse = {
+  file_id: number;
+  dl_extract_status: string;
+  license_extract_status: string;
+  intake_payload?: Record<string, unknown> | null;
+};
+
+export async function getPersonApplicationFileThumbnail(opts: {
+  appId: number;
+  fileId: number;
+  onboardingToken: string;
+}): Promise<string> {
+  const res = await fetchPublic(
+    `${API_BASE}/person-applications/${opts.appId}/files/${opts.fileId}/thumbnail`,
+    { headers: { "X-Onboarding-Token": opts.onboardingToken } }
+  );
+  if (!res.ok) throw new Error("Could not load thumbnail");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function getPersonApplicationByOnboardingToken(token: string): Promise<PersonApplication> {
+  const res = await fetchPublic(`${API_BASE}/person-applications/by-token?token=${encodeURIComponent(token)}`);
+  return handle<PersonApplication>(res);
+}
+
+export async function getPersonApplication(
+  appId: number,
+  onboardingToken: string
+): Promise<PersonApplication> {
+  const res = await fetchPublic(`${API_BASE}/person-applications/${appId}`, {
+    headers: { "X-Onboarding-Token": onboardingToken },
+  });
+  return handle<PersonApplication>(res);
+}
+
+export async function uploadPersonApplicationDlFile(opts: {
+  appId: number;
+  onboardingToken: string;
+  docType: "CDL_FRONT" | "CDL_BACK";
+  file: File;
+}): Promise<PersonApplicationDlUploadResponse> {
+  const form = new FormData();
+  form.append("doc_type", opts.docType);
+  form.append("file", opts.file);
+
+  const res = await fetchPublic(`${API_BASE}/person-applications/${opts.appId}/dl-files`, {
+    method: "POST",
+    headers: { "X-Onboarding-Token": opts.onboardingToken },
+    body: form,
+  });
+  return handle<PersonApplicationDlUploadResponse>(res);
+}
+
+export async function submitPersonApplication(opts: {
+  appId: number;
+  onboardingToken: string;
+  intakePayload: Record<string, unknown>;
+}): Promise<PersonApplication> {
+  const res = await fetchPublic(`${API_BASE}/person-applications/${opts.appId}/submit`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Onboarding-Token": opts.onboardingToken,
+    },
+    body: JSON.stringify({ intake_payload: opts.intakePayload }),
+  });
+  return handle<PersonApplication>(res);
+}
+
 export async function getPayPeriods() {
   const res = await fetchWithTenant(`${API_BASE}/payroll/pay-periods`);
   return handle<PayPeriod[]>(res);
@@ -131,15 +218,48 @@ export async function listDocuments() {
 }
 
 // ---- Public signup ----
+const SLUG_CHECK_TIMEOUT_MS = 10000;
+
+/** Public tenant status by slug. Returns { exists: false } when workspace is not found (404) or API error (5xx). */
+export async function getTenantStatus(slug: string): Promise<{
+  exists: boolean;
+  ready?: boolean;
+  slug?: string;
+  status?: string;
+  db_status?: string;
+  reason?: string;
+}> {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/tenant/${encodeURIComponent(slug)}`);
+  if (res.status === 404 || res.status >= 500) return { exists: false };
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json();
+}
+
 export async function checkSlugAvailability(slug: string) {
   const url = new URL(`${PUBLIC_API_BASE}/check-slug-availability`, window.location.origin);
   url.searchParams.set("slug", slug);
-  const res = await fetchPublic(url.toString().replace(window.location.origin, ""));
-  if (res.status === 400) {
-    const text = await res.text();
-    throw new Error(text || "Invalid slug");
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SLUG_CHECK_TIMEOUT_MS);
+  try {
+    const res = await fetchPublic(url.toString().replace(window.location.origin, ""), {
+      signal: controller.signal,
+    });
+    if (res.status === 400) {
+      const text = await res.text();
+      throw new Error(text || "Invalid slug");
+    }
+    return handle<SlugAvailabilityResponse>(res);
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("Slug check timed out. Try again.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return handle<SlugAvailabilityResponse>(res);
 }
 
 export async function signup(payload: SignupPayload) {
@@ -573,6 +693,81 @@ export async function rejectDriverOnboardingSubmission(id: number, rejection_rea
   return handle<DriverOnboardingSubmission>(res);
 }
 
+export type ResendInviteResponse = { email_sent: boolean; email_error?: string | null };
+
+export async function resendOnboardingInvite(submissionId: number): Promise<ResendInviteResponse> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/submissions/${submissionId}/resend-invite`,
+    { method: "POST" }
+  );
+  return handle<ResendInviteResponse>(res);
+}
+
+export async function deleteDriverOnboardingSubmission(submissionId: number): Promise<void> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/submissions/${submissionId}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+}
+
+export type LicenseUploadResponse = {
+  submission_id: number;
+  extraction_status: string;
+  inputs: Record<string, unknown>;
+  message: string;
+};
+
+export async function uploadDriverLicense(
+  submissionId: number,
+  front: File,
+  back?: File | null
+): Promise<LicenseUploadResponse> {
+  const form = new FormData();
+  form.append("front", front);
+  if (back) form.append("back", back);
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/submissions/${submissionId}/license-upload`,
+    { method: "POST", body: form }
+  );
+  return handle<LicenseUploadResponse>(res);
+}
+
+export async function swapDriverLicenseFrontBack(submissionId: number) {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/submissions/${submissionId}/license-upload/swap`,
+    { method: "POST" }
+  );
+  return handle<DriverOnboardingSubmission>(res);
+}
+
+export type OnboardingInviteLinkResponse = {
+  application_id: number;
+  token: string;
+  link: string;
+  email_sent: boolean;
+  email_error?: string | null;
+};
+
+export type OnboardingInviteLinkRequest = {
+  email?: string | null;
+  phone?: string | null;
+};
+
+export async function createOnboardingInviteLink(
+  payload: OnboardingInviteLinkRequest
+): Promise<OnboardingInviteLinkResponse> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/onboarding/invite-link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<OnboardingInviteLinkResponse>(res);
+}
+
 // ---- Types ----
 export type PayPeriod = {
   id: number;
@@ -846,12 +1041,16 @@ export type DriverOnboardingSubmission = {
   created_by_user_id: number;
   status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
   source: string;
+  extraction_status?: string | null;
+  extraction_result_json?: unknown;
+  license_uploads_json?: unknown;
   submitted_at?: string | null;
   reviewed_at?: string | null;
   reviewed_by_user_id?: number | null;
   rejection_reason?: string | null;
-  first_name: string;
-  last_name: string;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
   phone?: string | null;
   email?: string | null;
   address_street?: string | null;
@@ -868,8 +1067,8 @@ export type DriverOnboardingSubmission = {
 };
 
 export type DriverOnboardingSubmissionCreate = {
-  first_name: string;
-  last_name: string;
+  first_name?: string;
+  last_name?: string;
   phone?: string;
   email?: string;
   address_street?: string;
@@ -893,3 +1092,19 @@ export type DriverOnboardingApproveResponse = {
   submission: DriverOnboardingSubmission;
   driver: Driver;
 };
+
+export async function savePersonApplicationIntake(opts: {
+  appId: number;
+  onboardingToken: string;
+  intakePayload: Record<string, unknown>;
+}): Promise<PersonApplication> {
+  const res = await fetchPublic(`${API_BASE}/person-applications/${opts.appId}/intake`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Onboarding-Token": opts.onboardingToken,
+    },
+    body: JSON.stringify({ intake_payload: opts.intakePayload }),
+  });
+  return handle<PersonApplication>(res);
+}

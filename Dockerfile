@@ -5,6 +5,7 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -25,9 +26,12 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         curl \
         jq \
         ca-certificates \
+        libxcb1 \
+        libglib2.0-0 \
+        libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir awscli
+# awscli removed - boto3/botocore managed via requirements.txt
 # Base runtime deps
 RUN python -m pip install --no-cache-dir uvicorn fastapi sqlalchemy asyncpg psutil pydantic-settings alembic
 

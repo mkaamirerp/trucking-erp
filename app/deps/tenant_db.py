@@ -13,6 +13,17 @@ from app.models.platform import PlatformTenant
 _ENGINE_CACHE: Dict[str, object] = {}
 
 
+def _ensure_async_driver(url: str) -> str:
+    """Ensure URL uses an async driver (asyncpg). create_async_engine requires it."""
+    if not url:
+        return url
+    if url.startswith("postgresql://") and "+asyncpg" not in url:
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    return url
+
+
 def _swap_db(url: str, db_name: str) -> str:
     """
     Swap the database name portion of a URL, keeping scheme/creds/host/port intact.
@@ -49,6 +60,7 @@ async def get_tenant_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     if not template:
         raise HTTPException(status_code=503, detail="DB config missing")
 
+    template = _ensure_async_driver(template)
     tenant_url = _swap_db(template, tenant.db_name)
 
     engine = _ENGINE_CACHE.get(tenant_url)
@@ -86,6 +98,7 @@ async def get_tenant_db_for_tools(request: Request) -> AsyncGenerator[AsyncSessi
     if not template:
         raise HTTPException(status_code=503, detail="DB config missing")
 
+    template = _ensure_async_driver(template)
     tenant_url = _swap_db(template, tenant.db_name)
 
     engine = _ENGINE_CACHE.get(tenant_url)

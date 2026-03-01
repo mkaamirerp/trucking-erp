@@ -12,6 +12,7 @@ const links = [
   { to: "/payroll/documents", label: "Documents" },
   { to: "/driver-onboarding", label: "Driver Onboarding" },
   { to: "/admin/driver-onboarding", label: "Onboarding Review" },
+  { to: "/admin/diagnostics/database", label: "DB Diagnostics" },
 ];
 
 export default function SidebarNav() {

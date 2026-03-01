@@ -157,56 +157,33 @@ class ForgotPasswordRequest(BaseModel):
 
 @router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=Depends(get_db)):
-    """Request a password reset email. When on a tenant subdomain, only sends if the user is a member of that tenant. Always returns 200 with a generic message."""
+    """
+    Request a password reset email.
+    Safe-by-default: always returns ok=True to avoid email enumeration.
+    """
+    email = payload.email.lower().strip()
+    user: PlatformUser | None = await db.scalar(select(PlatformUser).where(PlatformUser.email == email))
+    if not user:
+        return {"ok": True, "sent": True, "message": "If an account exists for this email, a reset link has been sent."}
+
+    token = secrets.token_urlsafe(32)
+    user.password_reset_token_hash = _hash_reset_token(token)
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
+    await db.commit()
+
+    base = (payload.reset_base_url or "").strip().rstrip("/")
+    if not base:
+        base_domain = settings.base_domain or request.url.hostname or "truckerp.me"
+        scheme = request.url.scheme or "https"
+        base = f"{scheme}://{base_domain}".rstrip("/")
+    reset_link = f"{base}/reset-password?token={token}"
+
     try:
-        tenant_id = getattr(request.state, "tenant_id", None)
-        user: PlatformUser | None = await db.scalar(
-            select(PlatformUser).where(PlatformUser.email == payload.email.strip().lower())
-        )
-        if not user:
-            return {"ok": True, "sent": False, "message": "No account found with that email. Check the address or sign up."}
-        # On a tenant subdomain: only send reset if user belongs to this tenant
-        if tenant_id is not None:
-            membership = await db.scalar(
-                select(PlatformTenantMember).where(
-                    PlatformTenantMember.platform_user_id == user.id,
-                    PlatformTenantMember.tenant_id == tenant_id,
-                ).limit(1)
-            )
-            if not membership:
-                # Don't leak that the email exists in another workspace
-                return {"ok": True, "sent": False, "message": "If an account exists with that email, you will receive a password reset link shortly."}
-        raw_token = secrets.token_urlsafe(32)
-        token_hash = _hash_reset_token(raw_token)
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
-        user.password_reset_token_hash = token_hash
-        user.password_reset_expires_at = expires_at
-        await db.commit()
-        base = (payload.reset_base_url or "").strip().rstrip("/")
-        if not base and settings.base_domain:
-            base = f"https://{settings.base_domain}"
-        if not base:
-            base = "https://truckerp.me"
-        reset_link = f"{base}/reset-password?token={raw_token}"
-        try:
-            await send_password_reset_email(to=user.email, reset_link=reset_link, expires_minutes=RESET_TOKEN_EXPIRY_MINUTES)
-        except Exception as e:
-            logger.warning("forgot_password: send_email failed: %s", e)
-        return {"ok": True, "sent": True, "message": "If an account exists with that email, you will receive a password reset link shortly."}
-    except HTTPException:
-        raise
-    except SQLAlchemyError as e:
-        logger.exception("forgot_password: database error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Password reset is temporarily unavailable. Please try again in a few minutes.",
-        ) from e
-    except Exception as e:
-        logger.exception("forgot_password: unexpected error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Something went wrong. Please try again later.",
-        ) from e
+        await send_password_reset_email(to=user.email, reset_link=reset_link, expires_minutes=RESET_TOKEN_EXPIRY_MINUTES)
+    except Exception as exc:
+        logger.warning("forgot_password_email_send_failed email=%s err=%s", user.email, exc)
+
+    return {"ok": True, "sent": True, "message": "If an account exists for this email, a reset link has been sent."}
 
 
 class ResetPasswordRequest(BaseModel):
@@ -216,40 +193,25 @@ class ResetPasswordRequest(BaseModel):
 
 @router.post("/reset-password")
 async def reset_password(payload: ResetPasswordRequest, db=Depends(get_db)):
-    """Set a new password using the token from the reset email."""
-    try:
-        token_hash = _hash_reset_token(payload.token)
-        now = datetime.now(timezone.utc)
-        user: PlatformUser | None = await db.scalar(
-            select(PlatformUser).where(
-                PlatformUser.password_reset_token_hash == token_hash,
-                PlatformUser.password_reset_expires_at > now,
-            )
+    token_hash = _hash_reset_token(payload.token)
+    now = datetime.now(timezone.utc)
+    user: PlatformUser | None = await db.scalar(
+        select(PlatformUser).where(
+            PlatformUser.password_reset_token_hash == token_hash,
+            PlatformUser.password_reset_expires_at.is_not(None),
+            PlatformUser.password_reset_expires_at > now,
         )
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired reset link. Please request a new password reset.",
-            )
-        user.password_hash = hash_password(payload.new_password)
-        user.password_reset_token_hash = None
-        user.password_reset_expires_at = None
-        await db.commit()
-        return {"ok": True, "message": "Your password has been reset. You can now sign in."}
-    except HTTPException:
-        raise
-    except SQLAlchemyError as e:
-        logger.exception("reset_password: database error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Password reset is temporarily unavailable. Please try again in a few minutes.",
-        ) from e
-    except Exception as e:
-        logger.exception("reset_password: unexpected error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Something went wrong. Please try again later.",
-        ) from e
+    )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset link.")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    user.updated_at = now
+    await db.commit()
+
+    return {"ok": True, "message": "Password updated successfully."}
 
 
 @router.post("/login")
@@ -260,8 +222,20 @@ async def login(
     tenant_id: int = Depends(require_tenant),
     db=Depends(get_db),
 ):
+    if not settings.auth_password_login_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password login is disabled. Use OTP or contact admin.",
+        )
     user: PlatformUser | None = await db.scalar(select(PlatformUser).where(PlatformUser.email == payload.email.lower()))
-    if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No account exists with this email.")
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password not set for this account. Use 'Forgot password' to set one.",
+        )
+    if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     membership: PlatformTenantMember | None = await db.scalar(
@@ -280,6 +254,9 @@ async def login(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
     if tenant.status != "ACTIVE" or tenant.db_status != "READY":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
+
+    if settings.auth_mfa_required:
+        return {"ok": True, "mfa_required": True, "detail": "MFA_REQUIRED"}
 
     roles = [membership.role] if membership.role else []
     access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
