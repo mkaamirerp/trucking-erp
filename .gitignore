@@ -80,3 +80,6 @@ runtime/
 
 # Alembic backups
 alembic_tenant/versions.BAK.*/
+
+.cursor-plugin/
+artifacts/
