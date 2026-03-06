@@ -3,6 +3,7 @@
 # Usage: ./tools/reset_signup.sh <slug> <email>
 # Example: ./tools/reset_signup.sh demo user@example.com
 #
+# Run from repo root. Uses same compose as API (-f docker-compose.yml -f docker-compose.dev.yml).
 # Platform DB (trucking_erp): removes tenant, user, memberships, subscriptions,
 # onboarding payloads, OTP tokens, security events, and reserved_slugs.
 # Then drops the tenant database (tenant_<slug>).
@@ -17,13 +18,15 @@ fi
 slug="$1"
 email="$2"
 
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+
 # Platform DB: delete in FK-safe order. Tables must match current schema.
 # - tenant_memberships, platform_tenant_members: link user ↔ tenant
 # - platform_onboarding_payloads, platform_subscriptions, platform_company_profiles: tenant children
 # - platform_otp_tokens, platform_security_events: by email/user_id/tenant_id
 # - reserved_slugs: optional (may not exist)
 # - Then tenant, then user.
-docker compose exec -T truckerp-postgres psql -U postgres -d trucking_erp -c "
+$COMPOSE exec -T truckerp-postgres psql -U postgres -d trucking_erp -c "
 DO \$\$
 DECLARE
   tid BIGINT;
@@ -74,7 +77,7 @@ END \$\$;
 # Drop tenant DB (terminate connections first)
 safe_slug=$(printf "%s" "$slug" | tr -c 'a-zA-Z0-9_' '_' | tr 'A-Z' 'a-z')
 db_name="tenant_${safe_slug}"
-docker compose exec -T truckerp-postgres psql -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_name}' AND pid <> pg_backend_pid();" 2>/dev/null || true
-docker compose exec -T truckerp-postgres psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS \"${db_name}\";"
+$COMPOSE exec -T truckerp-postgres psql -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_name}' AND pid <> pg_backend_pid();" 2>/dev/null || true
+$COMPOSE exec -T truckerp-postgres psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS \"${db_name}\";"
 
-echo "Done. Removed workspace '${slug}' and user '${email}' (if present)."
+echo "Done. Removed workspace '${slug}' and user '${email}' (if present). Slug '${slug}' is now available for signup."

@@ -132,18 +132,35 @@ async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/check-slug-availability", response_model=SlugAvailabilityResponse)
 async def check_slug_availability(slug: str, db: AsyncSession = Depends(get_db)):
-    normalized = normalize_slug(slug)
-    # Reject if normalization altered invalid characters or pattern does not match
-    if normalized != slug.strip().lower() or not SLUG_REGEX.match(normalized):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Slug must contain only lowercase letters, numbers, and hyphens",
+    try:
+        normalized = normalize_slug(slug)
+        # Reject if normalization altered invalid characters or pattern does not match
+        if normalized != slug.strip().lower() or not SLUG_REGEX.match(normalized):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Slug must contain only lowercase letters, numbers, and hyphens",
+            )
+        available = await is_slug_available(db, normalized)
+        if available:
+            return SlugAvailabilityResponse(available=True, slug=normalized, suggestions=None)
+        suggestions = await generate_slug_suggestions(db, normalized)
+        return SlugAvailabilityResponse(available=False, slug=normalized, suggestions=suggestions)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("check_slug_availability failed slug=%s: %s", slug, exc)
+        # Never 500: return 200 with error so UI can distinguish system failure from "slug taken".
+        # If we returned only available=False without error, the UI would show "slug already taken".
+        try:
+            safe_slug = normalize_slug(slug) if slug else ""
+        except Exception:
+            safe_slug = (slug or "")[:63]
+        return SlugAvailabilityResponse(
+            available=False,
+            slug=safe_slug or "slug",
+            suggestions=None,
+            error="temporary_check_failure",
         )
-    available = await is_slug_available(db, normalized)
-    if available:
-        return SlugAvailabilityResponse(available=True, slug=normalized, suggestions=None)
-    suggestions = await generate_slug_suggestions(db, normalized)
-    return SlugAvailabilityResponse(available=False, slug=normalized, suggestions=suggestions)
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
@@ -303,8 +320,11 @@ async def public_signup(
             await db.rollback()
         except Exception:
             pass
-        await notify_failure(str(exc))
-        logger.exception("public_signup_failed")
+        logger.exception("public_signup_failed: %s", exc)
+        try:
+            await notify_failure(str(exc))
+        except Exception as alert_exc:
+            logger.warning("notify_failure raised: %s", alert_exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 

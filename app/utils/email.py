@@ -35,13 +35,19 @@ def _get_bool_env(name: str, default: bool = False) -> bool:
     return val.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _get_env_stripped(name: str) -> Optional[str]:
+    """Get env var and strip whitespace/newlines (SSM/jq often append newlines)."""
+    v = os.getenv(name)
+    return v.strip() if v else None
+
+
 class SMTPConfig:
     def __init__(self) -> None:
-        self.host: Optional[str] = os.getenv("SMTP_HOST")
-        self.port: int = int(os.getenv("SMTP_PORT", "587"))
-        self.username: Optional[str] = os.getenv("SMTP_USERNAME")
-        self.password: Optional[str] = os.getenv("SMTP_PASSWORD")
-        self.from_address: Optional[str] = os.getenv("SMTP_FROM_ADDRESS")
+        self.host: Optional[str] = _get_env_stripped("SMTP_HOST")
+        self.port: int = int((os.getenv("SMTP_PORT") or "587").strip())
+        self.username: Optional[str] = _get_env_stripped("SMTP_USERNAME")
+        self.password: Optional[str] = _get_env_stripped("SMTP_PASSWORD")
+        self.from_address: Optional[str] = _get_env_stripped("SMTP_FROM_ADDRESS")
         self.use_tls: bool = _get_bool_env("SMTP_USE_TLS", True)
         self.use_ssl: bool = _get_bool_env("SMTP_USE_SSL", False)
 
@@ -87,6 +93,14 @@ def _send_email_sync(
     to: str, subject: str, body: str, from_address: Optional[str] = None, category: str = "required"
 ) -> None:
     _config.validate_basic()
+    # Log which env source is used and credential lengths (never log secret values)
+    logger.info(
+        "SMTP config: source=%s, SMTP_USERNAME len=%s, SMTP_PASSWORD len=%s, host=%s",
+        os.getenv("SMTP_CONFIG_SOURCE", "env"),
+        len(_config.username or ""),
+        len(_config.password or ""),
+        _config.host,
+    )
     _validate_recipient(to)
 
     from_addr = from_address or _config.from_address
