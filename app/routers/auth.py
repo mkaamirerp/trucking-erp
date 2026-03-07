@@ -164,7 +164,11 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
             select(PlatformUser).where(PlatformUser.email == payload.email.strip().lower())
         )
         if not user:
-            return {"ok": True, "sent": False, "message": "No account found with that email. Check the address or sign up."}
+            return {
+                "ok": True,
+                "sent": True,
+                "message": "If an account exists with that email, you will receive a password reset link shortly.",
+            }
         # On a tenant subdomain: only send reset if user belongs to this tenant
         if tenant_id is not None:
             membership = await db.scalar(
@@ -175,7 +179,11 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
             )
             if not membership:
                 # Don't leak that the email exists in another workspace
-                return {"ok": True, "sent": False, "message": "If an account exists with that email, you will receive a password reset link shortly."}
+                return {
+                    "ok": True,
+                    "sent": True,
+                    "message": "If an account exists with that email, you will receive a password reset link shortly.",
+                }
         raw_token = secrets.token_urlsafe(32)
         token_hash = _hash_reset_token(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
@@ -188,11 +196,18 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
         if not base:
             base = "https://truckerp.me"
         reset_link = f"{base}/reset-password?token={raw_token}"
+        if not bool(settings.secure_cookies):
+            # Dev-only: make reset usable even when SMTP is misconfigured.
+            logger.warning("DEV_PASSWORD_RESET_LINK email=%s link=%s", user.email, reset_link)
         try:
             await send_password_reset_email(to=user.email, reset_link=reset_link, expires_minutes=RESET_TOKEN_EXPIRY_MINUTES)
         except Exception as e:
             logger.warning("forgot_password: send_email failed: %s", e)
-        return {"ok": True, "sent": True, "message": "If an account exists with that email, you will receive a password reset link shortly."}
+        return {
+            "ok": True,
+            "sent": True,
+            "message": "If an account exists with that email, you will receive a password reset link shortly.",
+        }
     except HTTPException:
         raise
     except SQLAlchemyError as e:
@@ -232,6 +247,8 @@ async def reset_password(payload: ResetPasswordRequest, db=Depends(get_db)):
                 detail="Invalid or expired reset link. Please request a new password reset.",
             )
         user.password_hash = hash_password(payload.new_password)
+        # Invalidate existing sessions (token refresh should re-check session_version).
+        user.session_version = int(getattr(user, "session_version", 1)) + 1
         user.password_reset_token_hash = None
         user.password_reset_expires_at = None
         await db.commit()
@@ -260,8 +277,9 @@ async def login(
     tenant_id: int = Depends(require_tenant),
     db=Depends(get_db),
 ):
-    user: PlatformUser | None = await db.scalar(select(PlatformUser).where(PlatformUser.email == payload.email.lower()))
-    if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
+    email_lower = payload.email.strip().lower()
+    user: PlatformUser | None = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_lower))
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     membership: PlatformTenantMember | None = await db.scalar(
@@ -271,6 +289,14 @@ async def login(
     )
     if not membership:
         # Same message as wrong credentials so we don't reveal account exists elsewhere
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password not set for this account. Use 'Forgot password' to set one.",
+        )
+    if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     tenant: PlatformTenant | None = await db.scalar(

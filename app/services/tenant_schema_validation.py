@@ -10,7 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import URL
+
+from app.core.db_url import to_sync_pg_url
 
 
 class SchemaValidationError(Exception):
@@ -34,12 +35,7 @@ def validate_tenant_schema(tenant_db_url: str) -> list[str]:
     """
     errors: list[str] = []
 
-    # Convert async URL to sync for inspection
-    if "postgresql+asyncpg://" in tenant_db_url:
-        sync_url = tenant_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-    else:
-        sync_url = tenant_db_url
-
+    sync_url = to_sync_pg_url(tenant_db_url)
     try:
         engine = create_engine(sync_url, pool_pre_ping=True, pool_size=1, max_overflow=0)
         inspector = inspect(engine)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import AsyncGenerator, Dict
 
 from fastapi import Request, HTTPException
@@ -8,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import AsyncSessionLocal  # platform session
+from app.core.config import settings
+from app.core.db_url import to_async_pg_url
 from app.models.platform import PlatformTenant
 
 _ENGINE_CACHE: Dict[str, object] = {}
@@ -45,11 +46,13 @@ async def get_tenant_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     # IMPORTANT:
     # Use a stable template URL (host/creds/port) and dynamically swap in tenant.db_name.
     # Do NOT rely on TENANT_DATABASE_URL as a single-DB setting (breaks multi-tenant).
-    template = os.getenv("POSTGRES_ADMIN_URL") or os.getenv("DATABASE_URL")
+    template = getattr(settings, "postgres_admin_url", None) or settings.database_url
     if not template:
         raise HTTPException(status_code=503, detail="DB config missing")
 
-    tenant_url = _swap_db(template, tenant.db_name)
+    tenant_url = _swap_db(to_async_pg_url(template), tenant.db_name)
+    if "localhost" in tenant_url or "127.0.0.1" in tenant_url:
+        raise RuntimeError(f"Tenant DB URL resolved to localhost: {tenant_url}")
 
     engine = _ENGINE_CACHE.get(tenant_url)
     if engine is None:
@@ -82,11 +85,13 @@ async def get_tenant_db_for_tools(request: Request) -> AsyncGenerator[AsyncSessi
     if not tenant.db_name:
         raise HTTPException(status_code=403, detail="Tenant DB not provisioned")
 
-    template = os.getenv("POSTGRES_ADMIN_URL") or os.getenv("DATABASE_URL")
+    template = getattr(settings, "postgres_admin_url", None) or settings.database_url
     if not template:
         raise HTTPException(status_code=503, detail="DB config missing")
 
-    tenant_url = _swap_db(template, tenant.db_name)
+    tenant_url = _swap_db(to_async_pg_url(template), tenant.db_name)
+    if "localhost" in tenant_url or "127.0.0.1" in tenant_url:
+        raise RuntimeError(f"Tenant DB URL resolved to localhost: {tenant_url}")
 
     engine = _ENGINE_CACHE.get(tenant_url)
     if engine is None:

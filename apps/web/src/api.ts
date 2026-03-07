@@ -573,6 +573,38 @@ export async function rejectDriverOnboardingSubmission(id: number, rejection_rea
   return handle<DriverOnboardingSubmission>(res);
 }
 
+/** Stub: not implemented. Used by DriverOnboardingPage. */
+export async function uploadDriverLicense(
+  _submissionId: number,
+  _frontFile: File,
+  _backFile: File | null
+): Promise<unknown> {
+  throw new Error("Driver license upload not implemented");
+}
+
+/** Stub: not implemented. Used by DriverOnboardingPage. */
+export async function swapDriverLicenseFrontBack(_submissionId: number): Promise<unknown> {
+  throw new Error("Swap driver license front/back not implemented");
+}
+
+/** Create onboarding invite link (admin). Returns link and optional email_sent/email_error. */
+export type OnboardingInviteLinkRequest = { email?: string | null; phone?: string | null };
+export type OnboardingInviteLinkResponse = {
+  application_id: number;
+  token: string;
+  link: string;
+  email_sent: boolean;
+  email_error?: string | null;
+};
+export async function createOnboardingInviteLink(params: OnboardingInviteLinkRequest): Promise<OnboardingInviteLinkResponse> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/onboarding/invite-link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: params.email ?? undefined, phone: params.phone ?? undefined }),
+  });
+  return handle<OnboardingInviteLinkResponse>(res);
+}
+
 // ---- Types ----
 export type PayPeriod = {
   id: number;
@@ -889,7 +921,18 @@ export type DriverOnboardingCreateResponse = {
   missing_required_documents: string[];
 };
 
+/** Person record returned on approve (matches backend PersonOut). */
+export type DriverOnboardingPersonOut = {
+  id: number;
+  tenant_id: number;
+  onboarding_status: string;
+  first_name: string;
+  last_name: string;
+  phone?: string | null;
+  email?: string | null;
+};
+
 export type DriverOnboardingApproveResponse = {
   submission: DriverOnboardingSubmission;
-  driver: Driver;
+  person: DriverOnboardingPersonOut;
 };

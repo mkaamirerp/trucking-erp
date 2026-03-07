@@ -44,6 +44,7 @@ from app.models.platform import (
     PlatformOnboardingPayload,
     ReservedSlug,
 )
+from app.models.platform_admin import PlatformAdmin
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem

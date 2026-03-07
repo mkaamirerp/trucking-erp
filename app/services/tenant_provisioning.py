@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.db_url import to_async_pg_url
 from app.models.platform import PlatformTenant, PlatformUser
 from app.services.tenant_schema_validation import validate_tenant_schema_strict
 
@@ -37,13 +38,13 @@ async def backfill_tenant_creator_person(tenant_slug: str, platform_user_id: str
             return False
         tenant_id = int(tenant.id)
     raw_admin_url = settings.postgres_admin_url or settings.database_url
-    admin_url = _ensure_asyncpg_url(raw_admin_url)
+    admin_url = to_async_pg_url(raw_admin_url)
     parsed = urlparse(admin_url)
     app_user = settings.tenant_db_app_user or parsed.username
     app_pass = settings.tenant_db_app_password or parsed.password
     if not app_user or not app_pass:
         return False
-    tenant_db_url = _ensure_asyncpg_url(
+    tenant_db_url = to_async_pg_url(
         _build_tenant_db_url(admin_url, tenant.db_name, app_user, app_pass)
     )
     await _seed_tenant_creator(
@@ -68,7 +69,7 @@ async def provision_tenant_db(
     creator_email: Optional[str] = None,
 ) -> PlatformTenant:
     raw_admin_url = settings.postgres_admin_url or settings.database_url
-    admin_url = _ensure_asyncpg_url(raw_admin_url)
+    admin_url = to_async_pg_url(raw_admin_url)
     if not admin_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -178,7 +179,7 @@ async def _seed_tenant_creator(
     email: str,
 ) -> None:
     """Insert creator as people + person_roles (OWNER) in tenant DB. Idempotent: skip if person exists for platform_user_id."""
-    engine = create_async_engine(_ensure_asyncpg_url(tenant_db_url))
+    engine = create_async_engine(to_async_pg_url(tenant_db_url))
     async with engine.begin() as conn:
         # Idempotent: if people row already exists for this tenant + platform_user_id, skip
         existing = await conn.execute(
@@ -219,7 +220,7 @@ async def _seed_tenant_creator(
 
 
 async def _create_database_if_not_exists(admin_url: str, db_name: str) -> None:
-    engine = create_async_engine(_ensure_asyncpg_url(admin_url), isolation_level="AUTOCOMMIT")
+    engine = create_async_engine(to_async_pg_url(admin_url), isolation_level="AUTOCOMMIT")
     async with engine.connect() as conn:
         try:
             await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
@@ -263,17 +264,3 @@ def _build_tenant_db_url(admin_url: str, db_name: str, user: str, password: str)
     if parsed.port:
         netloc = f"{netloc}:{parsed.port}"
     return urlunsplit((parsed.scheme, netloc, f"/{db_name}", parsed.query, parsed.fragment))
-
-
-def _ensure_asyncpg_url(url: Union[str, bytes]) -> str:
-    if url is None:
-        return ""
-    if isinstance(url, (bytes, bytearray, memoryview)):
-        url = bytes(url).decode("utf-8", errors="strict")
-
-    parsed = urlsplit(url)
-    scheme = parsed.scheme
-    if scheme in {"postgres", "postgresql"}:
-        scheme = f"{scheme}+asyncpg"
-        return urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
-    return url

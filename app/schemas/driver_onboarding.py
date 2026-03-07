@@ -1,3 +1,6 @@
+# ACTIVE_ONBOARDING_2026Q1
+# This module is the current source-of-truth for driver onboarding and review work.
+
 from __future__ import annotations
 
 from datetime import date, datetime

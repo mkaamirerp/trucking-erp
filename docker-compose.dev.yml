@@ -1,23 +1,20 @@
 # Dev-only overrides. Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 # Prod: image-only, no host mounts. Dev: host mounts allowed here only.
 #
-# 502 Bad Gateway: API may not be starting (e.g. start_api_with_ssm.sh needs AWS SSM).
-# With this override, API runs uvicorn directly using .env from the repo (no SSM).
-# Ensure .env exists with at least DATABASE_URL (and JWT_SECRET, etc.).
+# In dev, API still uses AWS SSM via start_api_with_ssm.sh, but with SSM_ENV=dev.
 
 services:
   truckerp-api:
     ports:
       - "8000:8000"
     environment:
-      TOOLS_DEV_PASSWORD: devtools123
-      TOOLS_DEV_SECRET: devtools-secret-123
+      SSM_ENV: dev
     volumes:
       # Mount repo so code changes apply on container restart (no image rebuild).
       # Python and site-packages remain from the image.
       - .:/app
-    # Run uvicorn directly; load .env from repo so no AWS SSM required in dev.
-    command: ["/bin/sh", "-c", "set -a; [ -f /app/.env ] && . /app/.env; set +a; exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["/bin/sh", "-lc", "/app/scripts/start_api_with_ssm.sh"]
+
   truckerp-nginx:
     volumes:
       - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro

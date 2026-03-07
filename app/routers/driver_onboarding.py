@@ -1,3 +1,6 @@
+# ACTIVE_ONBOARDING_2026Q1
+# This module is the current source-of-truth for driver onboarding and review work.
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -261,7 +264,16 @@ async def approve_submission(
     await db.commit()
     await db.refresh(submission)
     await db.refresh(person)
-    return {"submission": submission, "person": PersonOut.model_validate(person)}
+    person_out = PersonOut(
+        id=person.id,
+        tenant_id=person.tenant_id,
+        onboarding_status="APPROVED",
+        first_name=person.first_name,
+        last_name=person.last_name,
+        phone=person.phone,
+        email=person.email,
+    )
+    return {"submission": submission, "person": person_out}
 
 
 @router.post("/submissions/{submission_id}/reject", response_model=DriverOnboardingSubmissionOut)

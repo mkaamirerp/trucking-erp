@@ -29,6 +29,7 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
     "/api/v1/public",
     "/api/v1/auth/logout",  # no tenant/token needed; just clear cookies
     "/api/v1/auth/reset-password",
+    "/api/v1/auth/signup/plan-options",
     "/api/v1/tools/unlock",  # dev-only tools unlock (no tenant)
     "/api/v1/tools/ping",  # dev-only tools ping (no tenant)
     # /api/v1/tools/db/* intentionally not allowed — requires tenant context

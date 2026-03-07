@@ -10,6 +10,7 @@ class SlugAvailabilityResponse(BaseModel):
     available: bool
     slug: str
     suggestions: list[str] | None = None
+    error: Optional[str] = None
 
 
 # ---- Single-step signup (no OTP). Creates workspace, provisions DB, logs user in. ----

@@ -1,3 +1,7 @@
+# LEGACY_ONBOARDING_2026Q1
+# This module belongs to the old existing-driver flow (Driver + DriverDocument).
+# It is NOT the source for new driver application onboarding or review work.
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status

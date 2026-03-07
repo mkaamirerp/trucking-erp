@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -11,6 +12,7 @@ from app.routers.health import router as health_router
 from app.routers.drivers import router as drivers_router
 from app.routers.driver_phones import router as driver_phones_router
 from app.routers.driver_documents import router as driver_documents_router
+from app.routers.admin_onboarding import router as admin_onboarding_router
 from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
 from app.routers.platform_tenants import router as platform_tenants_router
@@ -28,8 +30,28 @@ from app.routers.dev_tools import router as dev_tools_router
 from app.routers.dev_tools_db import router as dev_tools_db_router
 from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
+def _startup_banner() -> None:
+    parsed = urlparse(settings.database_url)
+    platform_host = parsed.hostname or "(no hostname)"
+    env = getattr(settings, "environment", "?")
+    base = getattr(settings, "base_domain", "?")
+    logger.info(
+        "TruckERP starting | Environment: %s | Platform DB: %s | Tenant routing: enabled | Base domain: %s",
+        env,
+        platform_host,
+        base,
+    )
+
+
 app = FastAPI(title=settings.app_name, version="0.1.0")
 logger = logging.getLogger("trucking_erp")
+
+
+@app.on_event("startup")
+def _log_startup():
+    _startup_banner()
+
+
 app.add_middleware(
     TenantContextMiddleware,
     allow_paths=DEFAULT_ALLOW_PATHS,
@@ -43,6 +65,7 @@ app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")
 app.include_router(driver_documents_router, prefix="/api/v1")
+app.include_router(admin_onboarding_router)
 app.include_router(driver_onboarding_router)
 app.include_router(onboarding_router)
 app.include_router(employees_router)

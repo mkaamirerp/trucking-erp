@@ -1,4 +1,26 @@
+from urllib.parse import urlparse
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _validate_database_url(url: str, name: str) -> None:
+    if not url:
+        raise RuntimeError(f"{name} is empty")
+
+    parsed = urlparse(url)
+
+    if not parsed.hostname:
+        raise RuntimeError(
+            f"{name} has no hostname. Bad URL: {url}\n"
+            "Example expected: postgresql://user:pass@host:5432/db"
+        )
+
+    if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+        raise RuntimeError(
+            f"{name} points to localhost which is forbidden in Docker runtime.\n"
+            f"URL: {url}"
+        )
+
 
 class Settings(BaseSettings):
     app_name: str = "Trucking ERP API"
@@ -26,3 +48,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
+
+_validate_database_url(settings.database_url, "DATABASE_URL")
+if getattr(settings, "postgres_admin_url", None):
+    _validate_database_url(settings.postgres_admin_url, "POSTGRES_ADMIN_URL")
