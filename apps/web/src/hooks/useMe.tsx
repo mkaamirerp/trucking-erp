@@ -20,7 +20,7 @@ type MeContextValue = {
 
 const MeContext = createContext<MeContextValue>({ me: null, loading: true, error: null });
 
-const PUBLIC_PATHS = ["/", "/signup", "/login", "/forgot-password", "/reset-password", "/company-setup", "/account-setup"];
+const PUBLIC_PATHS = ["/", "/signup", "/login", "/forgot-password", "/reset-password", "/accept-invite", "/company-setup", "/account-setup", "/onboarding"];
 
 export function MeProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -38,3 +38,6 @@ export function hasRole(me: MeResponse | null, role: string) {
   const target = role.toUpperCase();
   return (me.roles || []).map((r) => r.toUpperCase()).includes(target);
 }
+
+/** Temporary: centralized in auth/roles. Replace with RBAC later. */
+export { isTenantAdmin, hasFullAccess } from "../auth/roles";

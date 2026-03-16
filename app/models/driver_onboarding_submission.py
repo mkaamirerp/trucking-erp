@@ -1,5 +1,6 @@
 # ACTIVE_ONBOARDING_2026Q1
-# This module is the current source-of-truth for driver onboarding and review work.
+# Legacy compatibility model only. PersonApplication is now the canonical onboarding
+# intake/review path; keep this model until the legacy flow is fully retired.
 
 from __future__ import annotations
 

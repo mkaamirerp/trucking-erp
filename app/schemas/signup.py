@@ -133,6 +133,8 @@ class CompanyAddress(BaseModel):
 class CompanySetupRequest(BaseModel):
     legal_name: constr(min_length=1, max_length=255)
     address: CompanyAddress
+    company_phone: Optional[str] = None
+    company_email: Optional[str] = None
     usdot_number: Optional[str] = None
     mc_number: Optional[str] = None
     cvor_number: Optional[str] = None

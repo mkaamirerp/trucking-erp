@@ -54,6 +54,8 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(user_id)))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if getattr(user, "status", "ACTIVE") != "ACTIVE":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
     tenant = await db.scalar(
         select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == int(tenant_id))

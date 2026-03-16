@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import Layout from "./components/Layout";
 import PayPeriodsPage from "./pages/PayPeriodsPage";
 import PayRunsPage from "./pages/PayRunsPage";
@@ -17,9 +17,24 @@ import LoadDetailPage from "./pages/LoadDetailPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
+import OnboardingApplicantPage from "./pages/OnboardingApplicantPage";
 import ToolsDiagnosticsPage from "./pages/ToolsDiagnosticsPage";
+import AdminLayout from "./components/AdminLayout";
+import AdminCompanyProfilePage from "./pages/AdminCompanyProfilePage";
+import AdminUsersPage from "./pages/AdminUsersPage";
+import AdminRolesPage from "./pages/AdminRolesPage";
+import AdminPlaceholderPage from "./pages/AdminPlaceholderPage";
+import AcceptInvitePage from "./pages/AcceptInvitePage";
+import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
+import AdminRouteGuard from "./components/AdminRouteGuard";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
+import { OPS } from "./routes";
+
+function RedirectDriverOnboardingDetail() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/operations/driver-onboarding-review/${id ?? ""}`} replace />;
+}
 
 function App() {
   const { me, loading, error } = useMe();
@@ -29,7 +44,8 @@ function App() {
     /^\/dashboard/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
-    /^\/admin\/driver-onboarding/.test(location.pathname);
+    /^\/operations/.test(location.pathname) ||
+    /^\/admin/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
     location.pathname.startsWith(accountSetupPath) || location.pathname.startsWith("/company-setup");
@@ -72,6 +88,8 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
+      <Route path="/onboarding" element={<OnboardingApplicantPage />} />
       <Route path="/company-setup" element={<CompanySetupPage />} />
       <Route path="/account-setup" element={<CompanySetupPage />} />
       <Route
@@ -146,22 +164,31 @@ function App() {
           </Layout>
         }
       />
+      <Route path="/operations/driver-onboarding-review" element={<Layout><DriverOnboardingAdminListPage /></Layout>} />
+      <Route path="/operations/driver-onboarding-review/:id" element={<Layout><DriverOnboardingAdminDetailPage /></Layout>} />
+      {/* Redirect legacy /admin/driver-onboarding to operations namespace */}
+      <Route path="/admin/driver-onboarding" element={<Navigate to={OPS.DRIVER_ONBOARDING_REVIEW} replace />} />
+      <Route path="/admin/driver-onboarding/:id" element={<RedirectDriverOnboardingDetail />} />
+      {/* Tenant Admin (config) shell — company profile, users, settings. Role-gated. */}
       <Route
-        path="/admin/driver-onboarding"
+        path="/admin"
         element={
-          <Layout>
-            <DriverOnboardingAdminListPage />
-          </Layout>
+          <AdminRouteGuard>
+            <AdminLayout />
+          </AdminRouteGuard>
         }
-      />
-      <Route
-        path="/admin/driver-onboarding/:id"
-        element={
-          <Layout>
-            <DriverOnboardingAdminDetailPage />
-          </Layout>
-        }
-      />
+      >
+        <Route index element={<Navigate to="/admin/company-profile" replace />} />
+        <Route path="company-profile" element={<AdminCompanyProfilePage />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="roles" element={<AdminRolesPage />} />
+        <Route path="payroll" element={<AdminPlaceholderPage title="Payroll Settings" description="Payroll configuration and defaults." />} />
+        <Route path="integrations/smtp" element={<AdminIntegrationsPage />} />
+        <Route path="integrations/eld" element={<AdminIntegrationsPage />} />
+        <Route path="integrations/fuel" element={<AdminIntegrationsPage />} />
+        <Route path="onboarding" element={<AdminPlaceholderPage title="Onboarding Settings" description="Onboarding workflow and invite defaults." />} />
+        <Route path="documents" element={<AdminPlaceholderPage title="Document Rules" description="Required documents and expiry rules." />} />
+      </Route>
       <Route path="/tools/diagnostics" element={<ToolsDiagnosticsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -868,6 +868,7 @@ async def company_setup_prefill(request: Request, db: AsyncSession = Depends(get
         "company_legal_name": p.get("company_legal_name") or tenant.name,
         "country": country,
         "owner_email": p.get("email"),
+        "owner_phone": p.get("phone"),
         "address": addr,
     }
     return SetupPrefillResponse(
@@ -926,6 +927,16 @@ async def company_setup(payload: CompanySetupRequest, request: Request, db: Asyn
     existing_profile = await db.scalar(
         select(PlatformCompanyProfile).where(PlatformCompanyProfile.tenant_id == tenant_id)
     )
+    # Resolve company_phone / company_email: request first, then onboarding payload
+    company_phone = (payload.company_phone or "").strip() or None
+    company_email = (payload.company_email or "").strip() or None
+    if onboarding and onboarding.payload_json and (not company_phone or not company_email):
+        pj = onboarding.payload_json
+        if not company_phone:
+            company_phone = (pj.get("phone") or "").strip() or None
+        if not company_email:
+            company_email = (pj.get("email") or "").strip().lower() or None
+
     if existing_profile:
         profile = existing_profile
         profile.legal_name = payload.legal_name
@@ -934,6 +945,8 @@ async def company_setup(payload: CompanySetupRequest, request: Request, db: Asyn
         profile.address_region = payload.address.region
         profile.address_postal = payload.address.postal
         profile.address_country = payload.address.country
+        profile.company_phone = company_phone
+        profile.company_email = company_email
         profile.usdot_number = payload.usdot_number
         profile.mc_number = payload.mc_number
         profile.cvor_number = payload.cvor_number
@@ -951,6 +964,8 @@ async def company_setup(payload: CompanySetupRequest, request: Request, db: Asyn
             address_region=payload.address.region,
             address_postal=payload.address.postal,
             address_country=payload.address.country,
+            company_phone=company_phone,
+            company_email=company_email,
             usdot_number=payload.usdot_number,
             mc_number=payload.mc_number,
             cvor_number=payload.cvor_number,

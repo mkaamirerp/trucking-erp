@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -13,6 +13,7 @@ from app.models.base import Base
 class Person(Base):
     __tablename__ = "people"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_people_tenant_id_id"),
         Index("ix_people_tenant_id", "tenant_id"),
         Index("ix_people_tenant_id_email", "tenant_id", "email"),
     )
@@ -56,15 +57,19 @@ class Person(Base):
 class PersonRole(Base):
     __tablename__ = "person_roles"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "person_id"],
+            ["people.tenant_id", "people.id"],
+            name="fk_person_roles_tenant_person_to_people",
+            ondelete="CASCADE",
+        ),
         Index("ix_person_roles_tenant_id", "tenant_id"),
         Index("ix_person_roles_person_id", "person_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    person_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    person_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     role_code: Mapped[str] = mapped_column(String(50), nullable=False)
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
@@ -82,15 +87,19 @@ class PersonRole(Base):
 class DriverProfile(Base):
     __tablename__ = "driver_profiles"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "person_id"],
+            ["people.tenant_id", "people.id"],
+            name="fk_driver_profiles_tenant_person_to_people",
+            ondelete="CASCADE",
+        ),
         Index("ix_driver_profiles_tenant_id", "tenant_id"),
         Index("ix_driver_profiles_person_id", "person_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    person_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    person_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     license_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     license_region: Mapped[str | None] = mapped_column(String(100), nullable=True)
     license_expiry: Mapped[date | None] = mapped_column(Date, nullable=True)

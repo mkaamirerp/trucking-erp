@@ -15,7 +15,8 @@ RUN python -m pip wheel --wheel-dir /wheels -r requirements.txt
 FROM python:3.13-slim-bookworm AS prod
 WORKDIR /app
 
-# Runtime libs: libpq5, curl, jq, ca-certificates
+# Runtime libs and migration wrapper tooling: libpq5, curl, jq, ca-certificates,
+# postgresql-client for psql preflight checks, and git for repo drift proof.
 # Workaround for CI/sandbox: allow insecure repos if apt GPG verification fails.
 RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         -o Acquire::AllowInsecureRepositories=true \
@@ -24,6 +25,8 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         libpq5 \
         curl \
         jq \
+        git \
+        postgresql-client \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

@@ -1,4 +1,4 @@
-from sqlalchemy import String, Date, Boolean, DateTime, ForeignKey, Integer, func
+from sqlalchemy import BigInteger, Date, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -6,6 +6,15 @@ from app.models.base import Base
 
 class Driver(Base):
     __tablename__ = "drivers"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "person_id"],
+            ["people.tenant_id", "people.id"],
+            name="fk_drivers_tenant_person_to_people",
+            ondelete="SET NULL",
+        ),
+        Index("ix_drivers_person_id", "person_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
@@ -31,6 +40,7 @@ class Driver(Base):
     license_class: Mapped[str | None] = mapped_column(String(50), nullable=True)
     license_issue_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     license_expiry_date: Mapped[Date | None] = mapped_column(Date, nullable=True, index=True)
+    person_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

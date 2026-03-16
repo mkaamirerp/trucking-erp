@@ -129,8 +129,9 @@ class PlatformUser(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -242,6 +243,8 @@ class PlatformCompanyProfile(Base):
     address_region: Mapped[str] = mapped_column(String(100), nullable=False)
     address_postal: Mapped[str] = mapped_column(String(20), nullable=False)
     address_country: Mapped[str] = mapped_column(String(2), nullable=False)
+    company_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    company_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     usdot_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     mc_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cvor_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -272,3 +275,17 @@ class OnboardingTokenLookup(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+
+
+class UserInvite(Base):
+    """Tenant-admin invite: token for new/invited users to set password and activate membership."""
+    __tablename__ = "user_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    inviter_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("platform_users.id", ondelete="SET NULL"), nullable=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

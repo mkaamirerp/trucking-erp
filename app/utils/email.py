@@ -256,6 +256,31 @@ async def send_password_reset_email(
     await send_email(to=to, subject=subject, body=body)
 
 
+async def send_user_invite_email(
+    *,
+    to: str,
+    workspace_name: str,
+    workspace_slug: str,
+    invite_link: str,
+    expires_hours: int = 24,
+) -> None:
+    """Send invite email when tenant admin invites a user to join workspace."""
+    subject = f"You've been invited to join {workspace_name}"
+    body_lines = [
+        "Hi,",
+        "",
+        f"You've been invited to join {workspace_name} on TruckERP.",
+        "",
+        "Click the link below to set your password and get started (this link expires in {} hours):".format(expires_hours),
+        "",
+        invite_link,
+        "",
+        "If you didn't expect this invite, you can ignore this email.",
+    ]
+    body = "\n".join(body_lines)
+    await send_email(to=to, subject=subject, body=body)
+
+
 async def send_signup_welcome_email(
     *,
     to: str,

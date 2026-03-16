@@ -8,17 +8,20 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.models.application_access_token import ApplicationAccessToken
-from app.models.person_application import PersonApplication
-from app.models.platform import OnboardingTokenLookup
+from app.models.person_application import APPLICATION_TYPES, PersonApplication
+from app.models.platform import OnboardingTokenLookup, PlatformTenant
 from app.schemas.driver_onboarding import DriverOnboardingStatus
+from app.deps.admin import is_tenant_admin
 from app.utils.email import send_onboarding_invite_email
 
 logger = logging.getLogger(__name__)
@@ -26,21 +29,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin/onboarding", tags=["Admin Onboarding"])
 
 
-def _is_admin(user: CurrentUser) -> bool:
-    role = (user.role or "").upper()
-    return role in {"OWNER", "ADMIN", "TENANT_ADMIN"}
-
-
 class InviteLinkRequest(BaseModel):
-    """At least one of email or phone required (who to send the link to)."""
+    """At least one of email or phone required. application_type required (controls form/workflow)."""
     email: str | None = None
     phone: str | None = None
+    application_type: str = "DRIVER"
 
     @model_validator(mode="after")
     def require_email_or_phone(self):
         if not (self.email or self.phone):
             raise ValueError("Provide at least one of email or phone.")
         return self
+
+    @field_validator("application_type")
+    @classmethod
+    def validate_application_type(cls, v: str) -> str:
+        val = (v or "DRIVER").strip().upper()
+        if val not in APPLICATION_TYPES:
+            raise ValueError(
+                f"application_type must be one of: {', '.join(sorted(APPLICATION_TYPES))}"
+            )
+        return val
 
 
 class InviteLinkResponse(BaseModel):
@@ -60,17 +69,38 @@ async def create_invite_link(
     db: AsyncSession = Depends(get_tenant_db),
     platform_db: AsyncSession = Depends(get_db),
 ):
-    if not _is_admin(current_user):
+    if not is_tenant_admin(current_user.role):
         raise HTTPException(status_code=403, detail="Admin role required")
 
-    # Create person_application as DRAFT; IN_PROGRESS starts when applicant submits (later)
+    tenant = await platform_db.scalar(
+        select(PlatformTenant)
+        .options(selectinload(PlatformTenant.company_profile))
+        .where(PlatformTenant.id == tenant_id)
+    )
+    tenant_country = (
+        (tenant.company_profile.address_country if tenant and tenant.company_profile else None)
+        or (tenant.country_code if tenant else None)
+        or "US"
+    )
+    tenant_region = tenant.company_profile.address_region if tenant and tenant.company_profile else None
+
+    application_type = body.application_type
+    requested_role_code = application_type  # MVP: same as application_type
+
+    # Create person_application as DRAFT; application_type controls form, requested_role_code used on approval
     app = PersonApplication(
         tenant_id=tenant_id,
+        application_type=application_type,
+        requested_role_code=requested_role_code,
         status=DriverOnboardingStatus.DRAFT.value,
         source="invite_link",
         email=(body.email or "").strip() or None,
         phone=(body.phone or "").strip() or None,
-        intake_payload={"step": "dl_upload"},
+        intake_payload={
+            "step": "dl_upload" if application_type == "DRIVER" else "common",
+            "form_country_default": tenant_country,
+            "form_region_default": tenant_region,
+        },
     )
     db.add(app)
     await db.flush()

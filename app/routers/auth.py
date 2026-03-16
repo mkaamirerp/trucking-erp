@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.utils.jwt_auth import TokenType, create_access_token, create_refresh_token, decode_token
 from app.core.config import settings
 from app.deps.auth import get_current_user, CurrentUser
-from app.models.platform import PlatformTenant, PlatformTenantMember, PlatformUser
+from app.models.platform import PlatformTenant, PlatformTenantMember, PlatformUser, TenantMembership, UserInvite
 from app.routers.me import _account_setup_missing
 from app.core.database import get_db
 from app.utils.password import verify_password, hash_password
@@ -53,7 +53,7 @@ def _workspace_url(request: Request, slug: str, path_suffix: str = "/dashboard")
 
 
 @router.post("/refresh")
-async def refresh(request: Request, response: Response):
+async def refresh(request: Request, response: Response, db=Depends(get_db)):
     token = request.cookies.get("refresh_token")
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
@@ -64,6 +64,20 @@ async def refresh(request: Request, response: Response):
     roles = payload.get("roles") or []
     if not user_id or not tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    # Re-validate user and membership status (block deactivated users from refreshing)
+    user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(user_id)))
+    if not user or getattr(user, "status", "ACTIVE") != "ACTIVE":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+    tm = await db.scalar(
+        select(TenantMembership).where(
+            TenantMembership.user_id == user.id,
+            TenantMembership.tenant_id == int(tenant_id),
+            TenantMembership.status == "active",
+        ).limit(1)
+    )
+    if not tm:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
     access = create_access_token(user_id=user_id, tenant_id=tenant_id, tenant_slug=tenant_slug, roles=roles)
     new_refresh = create_refresh_token(user_id=user_id, tenant_id=tenant_id, tenant_slug=tenant_slug, roles=roles)
@@ -124,8 +138,9 @@ async def auth_me(current: CurrentUser = Depends(get_current_user), db=Depends(g
     return {
         "user_id": current.user.id,
         "email": current.user.email,
-        "first_name": current.user.first_name,
-        "last_name": current.user.last_name,
+        "username": getattr(current.user, "username", None) or None,
+        "first_name": current.user.first_name or None,
+        "last_name": current.user.last_name or None,
         "tenant_id": tenant.id,
         "tenant_slug": tenant.slug,
         "tenant_name": tenant.name,
@@ -229,6 +244,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=12, max_length=256)
 
 
+class AcceptInviteRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=12, max_length=256)
+
+
 @router.post("/reset-password")
 async def reset_password(payload: ResetPasswordRequest, db=Depends(get_db)):
     """Set a new password using the token from the reset email."""
@@ -269,6 +289,69 @@ async def reset_password(payload: ResetPasswordRequest, db=Depends(get_db)):
         ) from e
 
 
+@router.post("/accept-invite")
+async def accept_invite(
+    payload: AcceptInviteRequest,
+    request: Request,
+    response: Response,
+    tenant_id: int = Depends(require_tenant),
+    db=Depends(get_db),
+):
+    """Set password and activate membership using invite token from email."""
+    token_hash = _hash_reset_token(payload.token)
+    now = datetime.now(timezone.utc)
+    invite = await db.scalar(
+        select(UserInvite).where(
+            UserInvite.token_hash == token_hash,
+            UserInvite.expires_at > now,
+            UserInvite.consumed_at.is_(None),
+            UserInvite.tenant_id == tenant_id,
+        ).limit(1)
+    )
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired invite link. Ask your admin to send a new invite.",
+        )
+    user = await db.get(PlatformUser, invite.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.session_version = int(getattr(user, "session_version", 1)) + 1
+    invite.consumed_at = now
+
+    tm = await db.scalar(
+        select(TenantMembership).where(
+            TenantMembership.user_id == user.id,
+            TenantMembership.tenant_id == tenant_id,
+        ).limit(1)
+    )
+    if tm:
+        tm.status = "active"
+
+    await db.commit()
+
+    tenant = await db.scalar(
+        select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
+    )
+    if tenant:
+        membership = await db.scalar(
+            select(PlatformTenantMember).where(
+                PlatformTenantMember.platform_user_id == user.id,
+                PlatformTenantMember.tenant_id == tenant_id,
+            ).limit(1)
+        )
+        roles = [membership.role] if membership and membership.role else []
+        access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
+        refresh = create_refresh_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
+        response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
+        response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+
+    workspace_url = _workspace_url(request, tenant.slug, "/dashboard") if tenant else None
+    return {"ok": True, "message": "Welcome! You can now sign in.", "workspace_url": workspace_url}
+
+
 @router.post("/login")
 async def login(
     payload: LoginRequest,
@@ -290,6 +373,26 @@ async def login(
     if not membership:
         # Same message as wrong credentials so we don't reveal account exists elsewhere
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    # Enforce user account status (ACTIVE = can log in)
+    if getattr(user, "status", "ACTIVE") != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated. Contact your workspace admin or support.",
+        )
+
+    # Enforce membership gate status (active = can access)
+    tm = await db.scalar(
+        select(TenantMembership).where(
+            TenantMembership.user_id == user.id,
+            TenantMembership.tenant_id == tenant_id,
+        ).limit(1)
+    )
+    if not tm or (tm.status or "").lower() != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access to this workspace is suspended. Contact your admin.",
+        )
 
     if not user.password_hash:
         raise HTTPException(

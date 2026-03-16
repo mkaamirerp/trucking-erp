@@ -54,7 +54,9 @@ export function fetchPublic(input: RequestInfo | URL, init?: RequestInit) {
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || res.statusText);
+    const err = new Error(text || res.statusText);
+    (err as any).status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -297,6 +299,8 @@ export async function companySetup(payload: CompanySetupRequest) {
 export type SetupTenantPayload = {
   legal_name?: string;
   address?: { street: string; city: string; region: string; postal: string; country: string };
+  company_phone?: string;
+  company_email?: string;
   dot_number?: string;
   mc_number?: string;
   cvor_number?: string;
@@ -318,6 +322,8 @@ export async function setupTenant(payload: SetupTenantPayload) {
       postal: "TBD",
       country: c as "US" | "CA",
     },
+    company_phone: payload.company_phone || undefined,
+    company_email: payload.company_email || undefined,
     usdot_number: payload.dot_number || undefined,
     mc_number: payload.mc_number || undefined,
     cvor_number: payload.cvor_number || undefined,
@@ -573,6 +579,268 @@ export async function rejectDriverOnboardingSubmission(id: number, rejection_rea
   return handle<DriverOnboardingSubmission>(res);
 }
 
+/** Applicant (invite-link token) flow: no session required. */
+export type PersonApplicationRejectRequest = {
+  rejection_reason: string;
+};
+
+export type PersonApplicationListItem = {
+  id: number;
+  tenant_id: number;
+  status: string;
+  application_type?: string;
+  requested_role_code?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  submitted_at?: string | null;
+  source?: string | null;
+  created_at: string;
+};
+
+export type ApplicantApplication = {
+  id: number;
+  tenant_id: number;
+  person_id?: number | null;
+  status: string;
+  source?: string | null;
+  application_type?: string;
+  requested_role_code?: string;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: number | null;
+  approved_at?: string | null;
+  approved_by_user_id?: number | null;
+  rejection_reason?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address_street?: string | null;
+  address_city?: string | null;
+  address_region?: string | null;
+  address_postal?: string | null;
+  address_country?: string | null;
+  driver_license_number?: string | null;
+  license_region?: string | null;
+  license_expiry?: string | null;
+  notes?: string | null;
+  submitted_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  intake_payload?: Record<string, unknown> | null;
+};
+
+/** Used by OnboardingApplicantPage (same shape as ApplicantApplication). */
+export type PersonApplication = ApplicantApplication;
+
+export type ApplicantApplicationUpdatePayload = {
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  email?: string;
+  address_street?: string;
+  address_city?: string;
+  address_region?: string;
+  address_postal?: string;
+  address_country?: string;
+  driver_license_number?: string;
+  license_region?: string;
+  license_expiry?: string;
+  notes?: string;
+  submit?: boolean;
+};
+
+export async function getApplicantApplication(token: string): Promise<ApplicantApplication> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application`, window.location.origin);
+  url.searchParams.set("token", token);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<ApplicantApplication>(res);
+}
+
+export async function listPersonApplicationsForAdmin(params: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<PersonApplicationListItem[]> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applications`, window.location.origin);
+  if (params.status) url.searchParams.set("status", params.status);
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
+  if (params.offset) url.searchParams.set("offset", String(params.offset));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PersonApplicationListItem[]>(res);
+}
+
+export async function getPersonApplicationForAdmin(id: number): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/applications/${id}`);
+  return handle<ApplicantApplication>(res);
+}
+
+/** Fetch application file (DL or document) for admin review. Returns object URL for preview. */
+export async function getAdminApplicationFileUrl(applicationId: number, fileId: string): Promise<string> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applications/${applicationId}/file`, window.location.origin);
+  url.searchParams.set("file_id", fileId);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  if (!res.ok) throw new Error("File not found");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function approvePersonApplicationForAdmin(id: number): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/applications/${id}/approve`, {
+    method: "POST",
+  });
+  return handle<ApplicantApplication>(res);
+}
+
+export async function rejectPersonApplicationForAdmin(
+  id: number,
+  payload: PersonApplicationRejectRequest,
+): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/applications/${id}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<ApplicantApplication>(res);
+}
+
+/** Get person application by invite token (used by OnboardingApplicantPage). */
+export async function getPersonApplicationByOnboardingToken(token: string): Promise<PersonApplication> {
+  return getApplicantApplication(token);
+}
+
+/** Get person application by id and token (token is enough; appId unused). */
+export async function getPersonApplication(_appId: number, token: string): Promise<PersonApplication> {
+  return getApplicantApplication(token);
+}
+
+export async function updateApplicantApplication(
+  token: string,
+  payload: ApplicantApplicationUpdatePayload
+): Promise<ApplicantApplication> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application`, window.location.origin);
+  url.searchParams.set("token", token);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<ApplicantApplication>(res);
+}
+
+/** Save intake payload (step progress); used by OnboardingApplicantPage. */
+export async function savePersonApplicationIntake(params: {
+  appId: number;
+  onboardingToken: string;
+  intakePayload: Record<string, unknown>;
+}): Promise<PersonApplication> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/intake`, window.location.origin);
+  url.searchParams.set("token", params.onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intake_payload: params.intakePayload, submit: false }),
+  });
+  return handle<PersonApplication>(res);
+}
+
+/** Submit application with final intake payload; used by OnboardingApplicantPage. */
+export async function submitPersonApplication(params: {
+  appId: number;
+  onboardingToken: string;
+  intakePayload: Record<string, unknown>;
+}): Promise<PersonApplication> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/intake`, window.location.origin);
+  url.searchParams.set("token", params.onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intake_payload: params.intakePayload, submit: true }),
+  });
+  return handle<PersonApplication>(res);
+}
+
+export async function resetPersonApplicationDraft(params: {
+  appId: number;
+  onboardingToken: string;
+}): Promise<PersonApplication> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/reset`, window.location.origin);
+  url.searchParams.set("token", params.onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+  });
+  return handle<PersonApplication>(res);
+}
+
+/** Upload DL file (front or back) for applicant; returns updated application with intake_payload. */
+export async function uploadPersonApplicationDlFile(params: {
+  appId: number;
+  onboardingToken: string;
+  docType: string;
+  file: File;
+}): Promise<{ file_id?: string; intake_payload?: Record<string, unknown>; license_extract_status?: string; sanitized_file_id?: string }> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/dl-upload`, window.location.origin);
+  url.searchParams.set("token", params.onboardingToken);
+  const form = new FormData();
+  form.append("doc_type", params.docType);
+  form.append("file", params.file);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+    body: form,
+  });
+  const data = await handle<ApplicantApplication>(res);
+  const fileMeta = (data.intake_payload as any)?.files?.[params.docType];
+  const processedMeta = (data.intake_payload as any)?.files?.[`${params.docType}_PROCESSED`];
+  const fileId = fileMeta?.file_id ?? fileMeta?.storage_key;
+  const sanitizedFileId =
+    fileMeta?.enh_file_id ??
+    processedMeta?.enh_file_id ??
+    processedMeta?.file_id ??
+    processedMeta?.storage_key ??
+    fileId;
+  return {
+    file_id: fileId,
+    intake_payload: data.intake_payload as Record<string, unknown>,
+    license_extract_status: (data.intake_payload as any)?.license_extract_status,
+    sanitized_file_id: sanitizedFileId,
+  };
+}
+
+/** Fetch applicant file (e.g. DL image) and return object URL for preview. */
+export async function getPersonApplicationFileThumbnail(params: {
+  appId: number;
+  fileId: string;
+  onboardingToken: string;
+}): Promise<string> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/file`, window.location.origin);
+  url.searchParams.set("token", params.onboardingToken);
+  url.searchParams.set("file_id", params.fileId);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  if (!res.ok) throw new Error("File not found");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+/** Upload step-4 document (DOT medical, MVR, etc.) for applicant. Returns updated application. */
+export async function uploadPersonApplicationDocument(params: {
+  appId: number;
+  onboardingToken: string;
+  docType: string;
+  file: File;
+}): Promise<PersonApplication> {
+  const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/document-upload`, window.location.origin);
+  url.searchParams.set("token", params.onboardingToken);
+  const form = new FormData();
+  form.append("doc_type", params.docType);
+  form.append("file", params.file);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+    body: form,
+  });
+  return handle<PersonApplication>(res);
+}
+
 /** Stub: not implemented. Used by DriverOnboardingPage. */
 export async function uploadDriverLicense(
   _submissionId: number,
@@ -588,7 +856,11 @@ export async function swapDriverLicenseFrontBack(_submissionId: number): Promise
 }
 
 /** Create onboarding invite link (admin). Returns link and optional email_sent/email_error. */
-export type OnboardingInviteLinkRequest = { email?: string | null; phone?: string | null };
+export type OnboardingInviteLinkRequest = {
+  email?: string | null;
+  phone?: string | null;
+  application_type: string;
+};
 export type OnboardingInviteLinkResponse = {
   application_id: number;
   token: string;
@@ -596,11 +868,113 @@ export type OnboardingInviteLinkResponse = {
   email_sent: boolean;
   email_error?: string | null;
 };
+/** Tenant admin: company profile. Includes completeness and fallback signals for document safety. */
+export type CompanyProfile = {
+  tenant_name: string;
+  slug: string;
+  timezone: string;
+  base_currency: string;
+  country_code: string | null;
+  legal_name: string | null;
+  street: string | null;
+  city: string | null;
+  region: string | null;
+  postal: string | null;
+  country: string | null;
+  company_phone: string | null;
+  company_email: string | null;
+  usdot_number: string | null;
+  mc_number: string | null;
+  cvor_number: string | null;
+  operator_license: string | null;
+  hst_number: string | null;
+  has_w9_file: boolean;
+  setup_completed_at: string | null;
+  has_business_address: boolean;
+  has_company_phone: boolean;
+  has_company_email: boolean;
+  is_document_contact_complete: boolean;
+  company_phone_is_fallback: boolean;
+  company_email_is_fallback: boolean;
+  address_is_fallback: boolean;
+};
+
+export async function getCompanyProfile(): Promise<CompanyProfile> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/company-profile`);
+  return handle<CompanyProfile>(res);
+}
+
+// ---- Tenant admin: users (list, invite, suspend, reactivate, send-password-reset) ----
+
+export type UserMember = {
+  user_id: string;
+  username: string;
+  email: string;
+  phone: string | null;
+  access_level: string;  // READ_ONLY | FULL_ACCESS
+  membership_status: string;
+  joined_at: string;
+};
+
+export async function listTenantUsers(): Promise<UserMember[]> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users`);
+  return handle<UserMember[]>(res);
+}
+
+export type InviteUserPayload = {
+  username: string;
+  email: string;
+  phone?: string | null;
+  access_level?: string;  // READ_ONLY | FULL_ACCESS
+};
+
+export async function inviteTenantUser(payload: InviteUserPayload): Promise<{ ok: boolean; email: string; status: string; message: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/invite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ ok: boolean; email: string; status: string; message: string }>(res);
+}
+
+export async function suspendTenantUser(userId: string): Promise<{ ok: boolean; status: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/suspend`, {
+    method: "POST",
+  });
+  return handle<{ ok: boolean; status: string }>(res);
+}
+
+export async function reactivateTenantUser(userId: string): Promise<{ ok: boolean; status: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/reactivate`, {
+    method: "POST",
+  });
+  return handle<{ ok: boolean; status: string }>(res);
+}
+
+// Tenant-admin password reset removed: password management remains platform-side.
+
+export async function acceptInvite(payload: { token: string; new_password: string }): Promise<{
+  ok: boolean;
+  message: string;
+  workspace_url?: string;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/auth/accept-invite`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ ok: boolean; message: string; workspace_url?: string }>(res);
+}
+
 export async function createOnboardingInviteLink(params: OnboardingInviteLinkRequest): Promise<OnboardingInviteLinkResponse> {
   const res = await fetchWithTenant(`${API_BASE}/admin/onboarding/invite-link`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: params.email ?? undefined, phone: params.phone ?? undefined }),
+    body: JSON.stringify({
+      email: params.email ?? undefined,
+      phone: params.phone ?? undefined,
+      application_type: params.application_type || "DRIVER",
+    }),
   });
   return handle<OnboardingInviteLinkResponse>(res);
 }
@@ -766,6 +1140,8 @@ export type CompanySetupRequest = {
     postal: string;
     country: string;
   };
+  company_phone?: string;
+  company_email?: string;
   usdot_number?: string;
   mc_number?: string;
   cvor_number?: string;

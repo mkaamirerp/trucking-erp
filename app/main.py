@@ -28,6 +28,7 @@ from app.routers.loads import router as loads_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.dev_tools import router as dev_tools_router
 from app.routers.dev_tools_db import router as dev_tools_db_router
+from app.routers.tenant_admin import router as tenant_admin_router
 from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
 
 def _startup_banner() -> None:
@@ -79,6 +80,7 @@ app.include_router(loads_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(dev_tools_router)
 app.include_router(dev_tools_db_router)
+app.include_router(tenant_admin_router)
 
 # Static assets and dashboard UI (reference layout: sidebar, KPIs, drivers, loads, alerts, chat)
 _static_dir = Path(__file__).resolve().parent / "static"

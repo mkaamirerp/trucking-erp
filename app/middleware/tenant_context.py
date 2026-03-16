@@ -43,12 +43,16 @@ TENANT_SLUG_HEADER = "X-Tenant-Slug"
 # Subdomains that must NOT be treated as tenant slugs (main, api, app)
 RESERVED_SUBDOMAINS: Set[str] = {"www", "api", "app"}
 
-# Paths that resolve tenant but skip membership gate (unauthenticated: login, forgot/reset password)
+# Paths that resolve tenant but skip membership gate (unauthenticated: login, forgot/reset password, accept-invite)
 PUBLIC_AUTH_PATHS: Set[str] = {
     "/api/v1/auth/login",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
+    "/api/v1/auth/accept-invite",
 }
+
+# Prefix for applicant (invite-link token) routes: resolve tenant but skip membership (auth is token in query)
+APPLICANT_ROUTE_PREFIX = "/api/v1/driver-onboarding/applicant/"
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -264,6 +268,16 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     logger.info(
                         "tenant_context tenant_resolved membership_skipped_public_auth path=%s tenant_id=%s request_id=%s",
                         path_normalized,
+                        int(row.id),
+                        request.headers.get(REQUEST_ID_HEADER, ""),
+                    )
+                    return int(row.id)
+
+                # Applicant (invite-link token) routes: resolve tenant but skip membership; auth is token in query
+                if path.startswith(APPLICANT_ROUTE_PREFIX):
+                    logger.info(
+                        "tenant_context tenant_resolved membership_skipped_applicant path=%s tenant_id=%s request_id=%s",
+                        path[:80],
                         int(row.id),
                         request.headers.get(REQUEST_ID_HEADER, ""),
                     )
