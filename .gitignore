@@ -83,3 +83,5 @@ alembic_tenant/versions.BAK.*/
 
 .cursor-plugin/
 artifacts/
+.env
+.venv/
