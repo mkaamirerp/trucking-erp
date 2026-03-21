@@ -43,7 +43,6 @@ def validate_tenant_schema(tenant_db_url: str) -> list[str]:
 
         # ---- Required tables ----
         required_tables = {
-            "tenants",
             "people",
             "person_roles",
             "driver_profiles",

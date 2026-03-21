@@ -13,7 +13,7 @@ class DriverDocumentFile(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, nullable=False, index=True
     )
 
     driver_document_id: Mapped[int] = mapped_column(

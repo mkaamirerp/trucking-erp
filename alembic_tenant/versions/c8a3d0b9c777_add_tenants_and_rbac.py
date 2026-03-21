@@ -349,68 +349,6 @@ def clone_tenant_roles_from_templates(conn, tenant_id: int) -> None:
             )
 
 
-def ensure_users_table() -> None:
-    """Ensure a users table exists before creating FKs to it."""
-    conn = op.get_bind()
-    inspector = sa.inspect(conn)
-    table_names = set(inspector.get_table_names(schema="public"))
-    if "users" not in table_names:
-        op.create_table(
-            "users",
-            sa.Column("id", sa.Integer(), nullable=False),
-            sa.Column("email", sa.String(length=255), nullable=False),
-            sa.Column("first_name", sa.String(length=100), nullable=True),
-            sa.Column("last_name", sa.String(length=100), nullable=True),
-            sa.Column("phone", sa.String(length=50), nullable=True),
-            sa.Column("password_hash", sa.String(length=255), nullable=True),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-            sa.Column("is_email_verified", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-            sa.Column("scope", sa.String(length=20), nullable=False, server_default=sa.text("'tenant'")),
-            sa.Column("tenant_id", sa.Integer(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("email", name="uq_users_email"),
-            sa.ForeignKeyConstraint(
-                ["tenant_id"],
-                ["public.tenants.id"],
-                name="fk_users_tenant_id",
-                ondelete="SET NULL",
-            ),
-            schema="public",
-        )
-        op.create_index("ix_users_tenant_id", "users", ["tenant_id"], unique=False, schema="public")
-        return
-
-    existing_columns = {col["name"] for col in inspector.get_columns("users", schema="public")}
-    if "scope" not in existing_columns:
-        op.add_column(
-            "users",
-            sa.Column("scope", sa.String(length=20), nullable=True, server_default=sa.text("'tenant'")),
-            schema="public",
-        )
-    if "tenant_id" not in existing_columns:
-        op.add_column("users", sa.Column("tenant_id", sa.Integer(), nullable=True), schema="public")
-        existing_columns.add("tenant_id")
-
-    indexes = {idx["name"] for idx in inspector.get_indexes("users", schema="public")}
-    if "ix_users_tenant_id" not in indexes and "tenant_id" in existing_columns:
-        op.create_index("ix_users_tenant_id", "users", ["tenant_id"], unique=False, schema="public")
-
-    fk_names = {fk["name"] for fk in inspector.get_foreign_keys("users", schema="public")}
-    if "fk_users_tenant_id" not in fk_names and "tenant_id" in existing_columns:
-        op.create_foreign_key(
-            "fk_users_tenant_id",
-            "users",
-            "tenants",
-            local_cols=["tenant_id"],
-            remote_cols=["id"],
-            ondelete="SET NULL",
-            source_schema="public",
-            referent_schema="public",
-        )
-
-
 def ensure_trucks_table() -> None:
     """Ensure a trucks table exists before tenant FK/column alterations."""
     conn = op.get_bind()
@@ -426,7 +364,6 @@ def ensure_trucks_table() -> None:
             sa.Column("tenant_id", sa.Integer(), nullable=True),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("plate_number", name="uq_trucks_plate_number"),
-            sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], name="fk_trucks_tenant_id", ondelete="CASCADE"),
             schema="public",
         )
         op.create_index("ix_trucks_plate_number", "trucks", ["plate_number"], unique=True, schema="public")
@@ -441,42 +378,11 @@ def ensure_trucks_table() -> None:
     if "ix_trucks_tenant_id" not in indexes:
         op.create_index("ix_trucks_tenant_id", "trucks", ["tenant_id"], unique=False, schema="public")
 
-    fk_names = {fk["name"] for fk in inspector.get_foreign_keys("trucks", schema="public")}
-    if "fk_trucks_tenant_id" not in fk_names:
-        op.create_foreign_key(
-            "fk_trucks_tenant_id",
-            "trucks",
-            "tenants",
-            local_cols=["tenant_id"],
-            remote_cols=["id"],
-            source_schema="public",
-            referent_schema="public",
-            ondelete="CASCADE",
-        )
-
 
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names(schema="public"))
-
-    # Tenants may already exist in legacy datasets; make creation idempotent.
-    if "tenants" not in tables:
-        op.create_table(
-            "tenants",
-            sa.Column("id", sa.Integer(), nullable=False),
-            sa.Column("name", sa.String(length=150), nullable=False),
-            sa.Column("slug", sa.String(length=150), nullable=False),
-            sa.Column("status", sa.String(length=30), nullable=False, server_default=sa.text("'active'")),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("slug", name="uq_tenants_slug"),
-            schema="public",
-        )
-    indexes = {idx["name"] for idx in inspector.get_indexes("tenants", schema="public")}
-    if "ix_tenants_slug" not in indexes:
-        op.create_index("ix_tenants_slug", "tenants", ["slug"], unique=False, schema="public")
 
     # Permissions table
     if "permissions" not in tables:
@@ -493,7 +399,7 @@ def upgrade() -> None:
     if "ix_permissions_key" not in indexes:
         op.create_index("ix_permissions_key", "permissions", ["key"], unique=True, schema="public")
 
-    # Roles table
+    # Roles table (tenant_id is plain Integer, no FK to tenants)
     if "roles" not in tables:
         op.create_table(
             "roles",
@@ -503,7 +409,6 @@ def upgrade() -> None:
             sa.Column("tenant_id", sa.Integer(), nullable=True),
             sa.Column("is_system", sa.Boolean(), nullable=False, server_default=sa.text("false")),
             sa.Column("description", sa.String(length=255), nullable=True),
-            sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("tenant_id", "name", name="uq_roles_tenant_name"),
             schema="public",
@@ -516,18 +421,6 @@ def upgrade() -> None:
             op.add_column("roles", sa.Column("tenant_id", sa.Integer(), nullable=True), schema="public")
         if "is_system" not in existing_columns:
             op.add_column("roles", sa.Column("is_system", sa.Boolean(), nullable=False, server_default=sa.text("false")), schema="public")
-    fk_names = {fk["name"] for fk in inspector.get_foreign_keys("roles", schema="public")}
-    if "roles" in tables and "fk_roles_tenant_id" not in fk_names:
-        op.create_foreign_key(
-            "fk_roles_tenant_id",
-            "roles",
-            "tenants",
-            local_cols=["tenant_id"],
-            remote_cols=["id"],
-            source_schema="public",
-            referent_schema="public",
-            ondelete="CASCADE",
-        )
 
     # Role permissions
     if "role_permissions" not in tables:
@@ -551,37 +444,7 @@ def upgrade() -> None:
     if "ix_role_permissions_perm_id" not in indexes and "permission_id" in existing_columns:
         op.create_index("ix_role_permissions_perm_id", "role_permissions", ["permission_id"], unique=False, schema="public")
 
-    ensure_users_table()
     ensure_trucks_table()
-
-    if "user_roles" not in tables:
-        op.create_table(
-            "user_roles",
-            sa.Column("user_id", sa.Integer(), nullable=False),
-            sa.Column("role_id", sa.Integer(), nullable=False),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.ForeignKeyConstraint(
-                ["role_id"],
-                ["public.roles.id"],
-                ondelete="CASCADE",
-            ),
-            sa.ForeignKeyConstraint(
-                ["user_id"],
-                ["public.users.id"],
-                ondelete="CASCADE",
-            ),
-            sa.PrimaryKeyConstraint("user_id", "role_id"),
-            sa.UniqueConstraint("user_id", "role_id", name="uq_user_roles_user_role"),
-            schema="public",
-        )
-        tables.add("user_roles")
-    inspector = sa.inspect(op.get_bind())
-    existing_columns = {col["name"] for col in inspector.get_columns("user_roles", schema="public")}
-    indexes = {idx["name"] for idx in inspector.get_indexes("user_roles", schema="public")}
-    if "ix_user_roles_user_id" not in indexes and "user_id" in existing_columns:
-        op.create_index("ix_user_roles_user_id", "user_roles", ["user_id"], unique=False, schema="public")
-    if "ix_user_roles_role_id" not in indexes and "role_id" in existing_columns:
-        op.create_index("ix_user_roles_role_id", "user_roles", ["role_id"], unique=False, schema="public")
 
     if "audit_log" not in tables:
         op.create_table(
@@ -596,16 +459,6 @@ def upgrade() -> None:
             sa.Column("ip", sa.String(length=45), nullable=True),
             sa.Column("user_agent", sa.Text(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.ForeignKeyConstraint(
-                ["actor_user_id"],
-                ["public.users.id"],
-                ondelete="SET NULL",
-            ),
-            sa.ForeignKeyConstraint(
-                ["tenant_id"],
-                ["public.tenants.id"],
-                ondelete="SET NULL",
-            ),
             sa.PrimaryKeyConstraint("id"),
             schema="public",
         )
@@ -640,19 +493,6 @@ def upgrade() -> None:
         indexes = {idx["name"] for idx in inspector.get_indexes(table_name, schema="public")}
         if f"ix_{table_name}_tenant_id" not in indexes:
             op.create_index(f"ix_{table_name}_tenant_id", table_name, ["tenant_id"], unique=False, schema="public")
-        fk_names = {fk["name"] for fk in inspector.get_foreign_keys(table_name, schema="public")}
-        fk_name = f"fk_{table_name}_tenant_id"
-        if fk_name not in fk_names:
-            op.create_foreign_key(
-                fk_name,
-                table_name,
-                "tenants",
-                local_cols=["tenant_id"],
-                remote_cols=["id"],
-                source_schema="public",
-                referent_schema="public",
-                ondelete="CASCADE",
-            )
 
     # ---- Data backfill + seeds ----
     conn = op.get_bind()
@@ -661,61 +501,25 @@ def upgrade() -> None:
     for role_def in ROLE_DEFS:
         seed_role(conn, permission_lookup, role_def)
 
-    tenant_id = conn.execute(
-        sa.text(
-            "INSERT INTO tenants (name, slug, status) VALUES (:name, :slug, 'active') "
-            "ON CONFLICT (slug) DO UPDATE SET status = EXCLUDED.status, name = EXCLUDED.name "
-            "RETURNING id"
-        ),
-        {"name": "Demo Fleet", "slug": "demo-fleet"},
-    ).scalar_one()
-
+    tenant_id = 1
     clone_tenant_roles_from_templates(conn, tenant_id)
 
-    # Backfill existing data into the default tenant
-    conn.execute(sa.text("UPDATE users SET scope = 'tenant' WHERE scope IS NULL"))
-    conn.execute(sa.text("UPDATE users SET tenant_id = :tid WHERE tenant_id IS NULL"), {"tid": tenant_id})
-
+    # Backfill tenant_id for tenant-owned tables
     for table in ("drivers", "driver_phones", "driver_documents", "driver_document_files", "trucks"):
         conn.execute(sa.text(f"UPDATE {table} SET tenant_id = :tid WHERE tenant_id IS NULL"), {"tid": tenant_id})
-
-    # Ensure at least one tenant super admin
-    super_admin_role_id = conn.execute(
-        sa.text("SELECT id FROM roles WHERE tenant_id = :tid AND name = 'TENANT_SUPER_ADMIN'"), {"tid": tenant_id}
-    ).scalar_one()
-    user_ids = [row.id for row in conn.execute(sa.text("SELECT id FROM users WHERE tenant_id = :tid"), {"tid": tenant_id})]
-    for uid in user_ids:
-        conn.execute(
-            sa.text(
-                "INSERT INTO user_roles (user_id, role_id) VALUES (:uid, :rid) "
-                "ON CONFLICT (user_id, role_id) DO NOTHING"
-            ),
-            {"uid": uid, "rid": super_admin_role_id},
-        )
 
     # Tighten nullability for tenant-owned tables
     for table_name in ("drivers", "driver_phones", "driver_documents", "driver_document_files", "trucks"):
         op.alter_column(table_name, "tenant_id", existing_type=sa.Integer(), nullable=False)
 
-    check_constraints = {ck["name"] for ck in inspector.get_check_constraints("users", schema="public")}
-    if "ck_users_scope_tenant_match" not in check_constraints:
-        op.create_check_constraint(
-            "ck_users_scope_tenant_match",
-            "users",
-            "(scope = 'platform' AND tenant_id IS NULL) OR (scope = 'tenant' AND tenant_id IS NOT NULL)",
-        )
-    op.alter_column("users", "scope", existing_type=sa.String(length=20), nullable=False, server_default=None)
-
 
 def downgrade() -> None:
-    op.drop_constraint("ck_users_scope_tenant_match", "users", type_="check")
-    op.drop_constraint("fk_users_tenant_id", "users", type_="foreignkey")
-    op.drop_index("ix_users_tenant_id", table_name="users")
-    op.drop_column("users", "tenant_id")
-    op.drop_column("users", "scope")
-
+    inspector = sa.inspect(op.get_bind())
     for table_name in ("driver_document_files", "driver_documents", "driver_phones", "drivers", "trucks"):
-        op.drop_constraint(f"fk_{table_name}_tenant_id", table_name, type_="foreignkey")
+        fk_names = {fk["name"] for fk in inspector.get_foreign_keys(table_name, schema="public")}
+        fk_name = f"fk_{table_name}_tenant_id"
+        if fk_name in fk_names:
+            op.drop_constraint(fk_name, table_name, type_="foreignkey")
         op.drop_index(f"ix_{table_name}_tenant_id", table_name=table_name)
         op.drop_column(table_name, "tenant_id")
 
@@ -726,10 +530,6 @@ def downgrade() -> None:
     op.drop_index("ix_audit_log_tenant_id", table_name="audit_log")
     op.drop_table("audit_log")
 
-    op.drop_index("ix_user_roles_role_id", table_name="user_roles")
-    op.drop_index("ix_user_roles_user_id", table_name="user_roles")
-    op.drop_table("user_roles")
-
     op.drop_index("ix_role_permissions_perm_id", table_name="role_permissions")
     op.drop_index("ix_role_permissions_role_id", table_name="role_permissions")
     op.drop_table("role_permissions")
@@ -737,6 +537,3 @@ def downgrade() -> None:
     op.drop_table("roles")
     op.drop_index("ix_permissions_key", table_name="permissions")
     op.drop_table("permissions")
-
-    op.drop_index("ix_tenants_slug", table_name="tenants")
-    op.drop_table("tenants")

@@ -157,7 +157,7 @@ async def driver_summary(
         select(func.count()).where(
             Load.tenant_id == tenant_id,
             Load.driver_id == driver_id,
-            Load.status.in_(["assigned", "picked_up"]),
+            Load.status.in_(["assigned", "dispatched", "arrived_pickup", "in_transit", "arrived_delivery"]),
         )
     )
     upcoming = await db.execute(
@@ -165,7 +165,7 @@ async def driver_summary(
         .where(
             Load.tenant_id == tenant_id,
             Load.driver_id == driver_id,
-            Load.status != "cancelled",
+            ~Load.status.in_(["delivered", "issue_hold"]),
             Load.pickup_date >= today,
         )
         .order_by(Load.pickup_date.asc())

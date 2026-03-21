@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
-from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate
+from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadNoteCreate, LoadNoteOut
 from app.services import loads as loads_service
 
 router = APIRouter(prefix="/loads", tags=["loads"])
@@ -33,6 +33,8 @@ async def list_loads(
     status: Optional[List[str]] = Query(None),
     driver_id: int | None = Query(None),
     broker_id: int | None = Query(None),
+    truck_id: int | None = Query(None),
+    trailer_id: int | None = Query(None),
     pickup_start: date | None = Query(None),
     pickup_end: date | None = Query(None),
     page: int = Query(1, ge=1),
@@ -44,6 +46,8 @@ async def list_loads(
         statuses=status,
         driver_id=driver_id,
         broker_id=broker_id,
+        truck_id=truck_id,
+        trailer_id=trailer_id,
         pickup_start=pickup_start,
         pickup_end=pickup_end,
         page=page,
@@ -66,7 +70,7 @@ async def get_load(
     return load
 
 
-@router.put("/{load_id}", response_model=LoadResponse)
+@router.patch("/{load_id}", response_model=LoadResponse)
 async def update_load(
     load_id: int,
     payload: LoadUpdate,
@@ -75,6 +79,31 @@ async def update_load(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     return await loads_service.update_load(db, tenant_id, load_id, payload)
+
+
+@router.get("/{load_id}/notes", response_model=list)
+async def list_load_notes(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    notes = await loads_service.list_load_notes(db, tenant_id, load_id)
+    return [LoadNoteOut.model_validate(n) for n in notes]
+
+
+@router.post("/{load_id}/notes", response_model=LoadNoteOut, status_code=status.HTTP_201_CREATED)
+async def add_load_note(
+    load_id: int,
+    payload: LoadNoteCreate,
+    tenant_id: int = Depends(require_tenant),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    note = await loads_service.add_load_note(
+        db, tenant_id, load_id, payload.body, author_user_id=getattr(user, "user_id", None)
+    )
+    return LoadNoteOut.model_validate(note)
 
 
 @router.delete("/{load_id}", status_code=status.HTTP_204_NO_CONTENT)

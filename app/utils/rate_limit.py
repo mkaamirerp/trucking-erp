@@ -52,6 +52,10 @@ resend_otp_per_ip = SlidingWindowLimiter(max_requests=5, window_seconds=900)   #
 verify_otp_per_identity = SlidingWindowLimiter(max_requests=20, window_seconds=900)  # 20 per 15 min
 resend_otp_per_identity = SlidingWindowLimiter(max_requests=3, window_seconds=300)     # 3 per 5 min
 
+# Forgot-password: per IP and per email to prevent abuse
+forgot_password_per_ip = SlidingWindowLimiter(max_requests=5, window_seconds=900)      # 5 per 15 min per IP
+forgot_password_per_email = SlidingWindowLimiter(max_requests=3, window_seconds=3600)  # 3 per hour per email
+
 
 def _client_ip(request: Request) -> str:
     return (request.client.host if request.client else "unknown") or "unknown"
@@ -99,4 +103,15 @@ def check_resend_otp_identity_limit(signup_id: str | None, email: str) -> None:
     key = _identity_key(signup_id, email)
     if not resend_otp_per_identity.allow(f"resend_id:{key}"):
         from fastapi import HTTPException
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+async def rate_limit_forgot_password(request: Request, email: str) -> None:
+    """Check forgot-password rate limits (per IP + per email). Call after parsing body."""
+    from fastapi import HTTPException
+    ip = _client_ip(request)
+    if not forgot_password_per_ip.allow(f"forgot_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    key = _email_hash(email)
+    if not forgot_password_per_email.allow(f"forgot_email:{key}"):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")

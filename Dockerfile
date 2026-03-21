@@ -30,7 +30,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir awscli
+RUN python -m pip install --no-cache-dir "awscli>=1.44.58"
 # Base runtime deps
 RUN python -m pip install --no-cache-dir uvicorn fastapi sqlalchemy asyncpg psutil pydantic-settings alembic
 

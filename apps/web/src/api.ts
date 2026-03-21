@@ -20,6 +20,9 @@ function currentSlugFromPath(): string | null {
     "drivers",
     "api",
     "dashboard",
+    "dispatch",
+    "fleet",
+    "loads",
     "company-setup",
     "account-setup",
     "driver-onboarding",
@@ -482,6 +485,8 @@ export async function listLoads(params: {
   status?: string[];
   driver_id?: number;
   broker_id?: number;
+  truck_id?: number;
+  trailer_id?: number;
   pickup_start?: string;
   pickup_end?: string;
   page?: number;
@@ -491,6 +496,8 @@ export async function listLoads(params: {
   if (params.status) params.status.forEach((s) => url.searchParams.append("status", s));
   if (params.driver_id) url.searchParams.set("driver_id", String(params.driver_id));
   if (params.broker_id) url.searchParams.set("broker_id", String(params.broker_id));
+  if (params.truck_id) url.searchParams.set("truck_id", String(params.truck_id));
+  if (params.trailer_id) url.searchParams.set("trailer_id", String(params.trailer_id));
   if (params.pickup_start) url.searchParams.set("pickup_start", params.pickup_start);
   if (params.pickup_end) url.searchParams.set("pickup_end", params.pickup_end);
   if (params.page) url.searchParams.set("page", String(params.page));
@@ -504,12 +511,214 @@ export async function getLoad(id: number) {
   return handle<Load>(res);
 }
 
+export async function createLoad(payload: Partial<Load>) {
+  const res = await fetchWithTenant(`${API_BASE}/loads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Load>(res);
+}
+
+export async function updateLoad(id: number, payload: Partial<Load>) {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Load>(res);
+}
+
+export type DispatchBoard = Record<string, Load[]>;
+
+export async function getDispatchBoard(search?: string) {
+  const url = new URL(`${API_BASE}/dispatch/board`, window.location.origin);
+  if (search) url.searchParams.set("search", search);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<DispatchBoard>(res);
+}
+
+export type LoadNote = {
+  id: number;
+  body: string;
+  author_user_id?: string | null;
+  created_at: string;
+};
+
+export async function getLoadNotes(loadId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/notes`);
+  return handle<LoadNote[]>(res);
+}
+
+export async function addLoadNote(loadId: number, body: string) {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+  return handle<LoadNote>(res);
+}
+
 export async function listBrokers(params: { page?: number; size?: number } = {}) {
   const url = new URL(`${API_BASE}/brokers`, window.location.origin);
   if (params.page) url.searchParams.set("page", String(params.page));
   if (params.size) url.searchParams.set("size", String(params.size));
   const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
   return handle<PagedResponse<Broker>>(res);
+}
+
+export type Truck = {
+  id: number;
+  unit_number: string;
+  vin: string;
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  plate_number?: string | null;
+  status?: string;
+  ownership_type?: string;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+};
+export async function listTrucks(params: { page?: number; size?: number; status?: string[] } = {}) {
+  const url = new URL(`${API_BASE}/trucks`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.status) params.status.forEach((s) => url.searchParams.append("status", s));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<Truck>>(res);
+}
+
+export async function getTruck(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${id}`);
+  return handle<Truck>(res);
+}
+
+export type TruckCreatePayload = {
+  unit_number: string;
+  vin: string;
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  color?: string | null;
+  plate_number?: string | null;
+  plate_region?: string | null;
+  ownership_type?: string;
+  owner_person_id?: number | null;
+  purchase_date?: string | null;
+  purchase_price?: number | null;
+  engine_make?: string | null;
+  engine_model?: string | null;
+  engine_serial?: string | null;
+  horsepower?: number | null;
+  fuel_type?: string | null;
+  transmission?: string | null;
+  num_axles?: number | null;
+  gvwr_lbs?: number | null;
+  odometer_at_purchase?: number | null;
+  current_odometer?: number | null;
+  odometer_last_updated?: string | null;
+  insurance_carrier?: string | null;
+  insurance_policy_number?: string | null;
+  insurance_expiry?: string | null;
+  status?: string;
+  notes?: string | null;
+  [key: string]: unknown;
+};
+export async function createTruck(payload: TruckCreatePayload) {
+  const res = await fetchWithTenant(`${API_BASE}/trucks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Truck>(res);
+}
+
+export type TruckUpdatePayload = Partial<TruckCreatePayload>;
+export async function updateTruck(id: number, payload: TruckUpdatePayload) {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Truck>(res);
+}
+
+export type Trailer = {
+  id: number;
+  unit_number: string;
+  vin?: string | null;
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  trailer_type?: string | null;
+  plate_number?: string | null;
+  status?: string;
+  ownership_type?: string;
+  length_ft?: number | null;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+};
+export async function listTrailers(params: { page?: number; size?: number; status?: string[] } = {}) {
+  const url = new URL(`${API_BASE}/trailers`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.status) params.status.forEach((s) => url.searchParams.append("status", s));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<Trailer>>(res);
+}
+
+export async function getTrailer(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/trailers/${id}`);
+  return handle<Trailer>(res);
+}
+
+export type TrailerCreatePayload = {
+  unit_number: string;
+  vin?: string | null;
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  plate_number?: string | null;
+  plate_region?: string | null;
+  trailer_type?: string;
+  length_ft?: number | null;
+  num_axles?: number | null;
+  gvwr_lbs?: number | null;
+  door_type?: string | null;
+  reefer_make?: string | null;
+  reefer_model?: string | null;
+  reefer_serial?: string | null;
+  ownership_type?: string;
+  owner_person_id?: number | null;
+  purchase_date?: string | null;
+  purchase_price?: number | null;
+  insurance_carrier?: string | null;
+  insurance_policy_number?: string | null;
+  insurance_expiry?: string | null;
+  status?: string;
+  notes?: string | null;
+  [key: string]: unknown;
+};
+export async function createTrailer(payload: TrailerCreatePayload) {
+  const res = await fetchWithTenant(`${API_BASE}/trailers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Trailer>(res);
+}
+
+export type TrailerUpdatePayload = Partial<TrailerCreatePayload>;
+export async function updateTrailer(id: number, payload: TrailerUpdatePayload) {
+  const res = await fetchWithTenant(`${API_BASE}/trailers/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Trailer>(res);
 }
 
 export async function getDriverSummary(id: number) {
@@ -1198,15 +1407,23 @@ export type Load = {
   load_number: string;
   broker_id?: number | null;
   driver_id?: number | null;
+  truck_id?: number | null;
+  trailer_id?: number | null;
   pickup_date?: string | null;
   delivery_date?: string | null;
+  pickup_time?: string | null;
+  delivery_time?: string | null;
   pickup_location?: string | null;
   delivery_location?: string | null;
+  equipment_type?: string | null;
   rate?: number | null;
+  customer_rate?: number | null;
   miles?: number | null;
   status: string;
   broker?: Broker | null;
   driver?: { id: number; first_name: string; last_name: string } | null;
+  truck?: { id: number; unit_number: string } | null;
+  trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
   created_at?: string | null;
   updated_at?: string | null;
 };

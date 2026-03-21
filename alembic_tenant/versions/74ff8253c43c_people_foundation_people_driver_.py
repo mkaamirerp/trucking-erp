@@ -30,7 +30,7 @@ def upgrade() -> None:
         op.create_table(
             "people",
             sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-            sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("tenant_id", sa.Integer(), nullable=False),
             sa.Column("onboarding_status", sa.String(20), nullable=False, server_default=sa.text("'DRAFT'")),
             sa.Column("first_name", sa.String(100), nullable=False),
             sa.Column("last_name", sa.String(100), nullable=False),
@@ -56,7 +56,7 @@ def upgrade() -> None:
         op.create_table(
             "person_roles",
             sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-            sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("tenant_id", sa.Integer(), nullable=False),
             sa.Column("person_id", sa.BigInteger(), sa.ForeignKey("people.id", ondelete="CASCADE"), nullable=False),
             sa.Column("role_code", sa.Text(), nullable=False),
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("false")),

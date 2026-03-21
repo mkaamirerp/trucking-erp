@@ -32,6 +32,7 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
     "/api/v1/auth/signup/plan-options",
     "/api/v1/tools/unlock",  # dev-only tools unlock (no tenant)
     "/api/v1/tools/ping",  # dev-only tools ping (no tenant)
+    "/api/v1/tools/send-test-email",  # dev-only SMTP test (no tenant)
     # /api/v1/tools/db/* intentionally not allowed — requires tenant context
 }
 
@@ -168,8 +169,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
         # Single-source-of-truth: host (authoritative for browser) → headers (match/override) → JWT (fallback for internal)
         try:
-            tenant_id = await self._resolve_tenant_from_request(request, path, jwt_tenant_id)
+            tenant_id, tenant_slug = await self._resolve_tenant_from_request(request, path, jwt_tenant_id)
             request.state.tenant_id = tenant_id
+            request.state.tenant_slug = tenant_slug
         except HTTPException as exc:
             response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
             set_request_id(response)
@@ -183,10 +185,10 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
     async def _resolve_tenant_from_request(
         self, request: Request, path: str, jwt_tenant_id: Optional[int]
-    ) -> int:
+    ) -> tuple[int, str]:
         """
         Resolve tenant in order: host subdomain (authoritative for browser) → headers → JWT (fallback for internal).
-        Returns tenant_id (int) or raises HTTPException.
+        Returns (tenant_id, tenant_slug) or raises HTTPException.
         """
         slug_from_host = self._slug_from_host(request)
         raw_tid = request.headers.get(TENANT_ID_HEADER)
@@ -254,7 +256,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
                 # Dev tools DB: only require tenant to exist; skip ACTIVE/READY and membership
                 if path.startswith("/api/v1/tools/db/"):
-                    return int(row.id)
+                    return (int(row.id), row.slug)
 
                 if row.status != "ACTIVE" or row.db_status != "READY":
                     raise HTTPException(
@@ -271,7 +273,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                         int(row.id),
                         request.headers.get(REQUEST_ID_HEADER, ""),
                     )
-                    return int(row.id)
+                    return (int(row.id), row.slug)
 
                 # Applicant (invite-link token) routes: resolve tenant but skip membership; auth is token in query
                 if path.startswith(APPLICANT_ROUTE_PREFIX):
@@ -281,7 +283,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                         int(row.id),
                         request.headers.get(REQUEST_ID_HEADER, ""),
                     )
-                    return int(row.id)
+                    return (int(row.id), row.slug)
 
                 # Membership gate: user must have active membership (do not trust client headers for user_id)
                 user_id = getattr(request.state, "user_id", None)
@@ -302,7 +304,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="User does not have access to this tenant",
                     )
-                return int(row.id)
+                return (int(row.id), row.slug)
         except HTTPException:
             raise
         except SQLAlchemyError as exc:

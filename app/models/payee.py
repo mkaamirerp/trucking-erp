@@ -45,9 +45,7 @@ class Payee(Base):
     __tablename__ = "payees"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payee_type: Mapped[PayeeType] = mapped_column(SAEnum(PayeeType, name="payee_type", native_enum=True), nullable=False)
     worker_type: Mapped[WorkerType] = mapped_column(SAEnum(WorkerType, name="worker_type", native_enum=True), nullable=False)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -66,43 +64,11 @@ class Payee(Base):
     )
 
 
-class Employee(Base):
-    __tablename__ = "employees"
-    __table_args__ = (UniqueConstraint("tenant_id", "employee_number", name="uq_employee_number"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    payee_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("payees.id", ondelete="RESTRICT"), nullable=False, unique=True
-    )
-    employee_number: Mapped[str] = mapped_column(Text, nullable=False)
-    hire_date: Mapped[date] = mapped_column(Date, nullable=False)
-    termination_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    employment_type: Mapped[str] = mapped_column(Text, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, server_default="now()"
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=datetime.utcnow, server_default="now()"
-    )
-
-    @property
-    def employee_code(self) -> str:
-        # Legacy alias surfaced in API responses
-        return self.employee_number
-
-
 class CompensationProfile(Base):
     __tablename__ = "compensation_profiles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payee_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("payees.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -148,7 +114,7 @@ class TenantMileagePolicy(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, unique=True
+        Integer, nullable=False, unique=True
     )
     default_mile_source: Mapped[MileSource] = mapped_column(
         SAEnum(MileSource, name="mile_source", native_enum=True),
@@ -176,9 +142,7 @@ class ChargeCategory(Base):
     __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_charge_code"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     code: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     default_responsibility: Mapped[Responsibility] = mapped_column(
@@ -201,9 +165,7 @@ class CompProfileChargeRule(Base):
     __tablename__ = "comp_profile_charge_rules"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     compensation_profile_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("compensation_profiles.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -237,9 +199,7 @@ class EscrowAccount(Base):
     __tablename__ = "escrow_accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payee_id: Mapped[int] = mapped_column(Integer, ForeignKey("payees.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     target_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
@@ -259,9 +219,7 @@ class EscrowRule(Base):
     __tablename__ = "escrow_rules"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     escrow_account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("escrow_accounts.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -284,9 +242,7 @@ class EscrowLedgerEntry(Base):
     __tablename__ = "escrow_ledger_entries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     escrow_account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("escrow_accounts.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -306,9 +262,7 @@ class PayeeBalance(Base):
     __tablename__ = "payee_balances"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payee_id: Mapped[int] = mapped_column(Integer, ForeignKey("payees.id", ondelete="CASCADE"), nullable=False, index=True)
     as_of_pay_run_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("pay_runs.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -323,9 +277,7 @@ class PayRunOverride(Base):
     __tablename__ = "pay_run_overrides"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     pay_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False)
     override_type: Mapped[OverrideType] = mapped_column(
         SAEnum(OverrideType, name="override_type", native_enum=True), nullable=False
@@ -343,9 +295,7 @@ class PayDocument(Base):
     __tablename__ = "pay_documents"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     pay_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False)
     payee_id: Mapped[int] = mapped_column(Integer, ForeignKey("payees.id", ondelete="RESTRICT"), nullable=False)
     document_type: Mapped[PayDocumentType] = mapped_column(
@@ -375,9 +325,7 @@ class TenantPayoutRailSetting(Base):
     __table_args__ = (UniqueConstraint("tenant_id", "payout_rail_id", name="uq_tenant_rail"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payout_rail_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("payout_rails.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -392,9 +340,7 @@ class PayeePayoutPreference(Base):
     __tablename__ = "payee_payout_preferences"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payee_id: Mapped[int] = mapped_column(Integer, ForeignKey("payees.id", ondelete="CASCADE"), nullable=False, index=True)
     payout_rail_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("payout_rails.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -414,9 +360,7 @@ class PayRunPayment(Base):
     __tablename__ = "pay_run_payments"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     pay_run_id: Mapped[int] = mapped_column(Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False)
     payee_id: Mapped[int] = mapped_column(Integer, ForeignKey("payees.id", ondelete="RESTRICT"), nullable=False, index=True)
     amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
@@ -439,9 +383,7 @@ class TenantBankConnector(Base):
     __table_args__ = (UniqueConstraint("tenant_id", "provider", name="uq_tenant_provider"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="DISCONNECTED", server_default="DISCONNECTED")
     config_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")

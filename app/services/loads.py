@@ -4,13 +4,15 @@ from datetime import date
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.broker import Broker
 from app.models.driver import Driver
-from app.models.load import Load
+from app.models.load import Load, LoadNote
+from app.models.truck import Truck
+from app.models.trailer import Trailer
 from app.schemas.load import LoadCreate, LoadUpdate, ALLOWED_STATUSES
 from app.utils.pagination import paginate
 
@@ -22,6 +24,16 @@ async def _get_driver(db: AsyncSession, tenant_id: int, driver_id: int) -> Drive
 
 async def _get_broker(db: AsyncSession, tenant_id: int, broker_id: int) -> Broker | None:
     result = await db.execute(select(Broker).where(Broker.id == broker_id, Broker.tenant_id == tenant_id))
+    return result.scalar_one_or_none()
+
+
+async def _get_truck(db: AsyncSession, tenant_id: int, truck_id: int) -> Truck | None:
+    result = await db.execute(select(Truck).where(Truck.id == truck_id, Truck.tenant_id == tenant_id))
+    return result.scalar_one_or_none()
+
+
+async def _get_trailer(db: AsyncSession, tenant_id: int, trailer_id: int) -> Trailer | None:
+    result = await db.execute(select(Trailer).where(Trailer.id == trailer_id, Trailer.tenant_id == tenant_id))
     return result.scalar_one_or_none()
 
 
@@ -41,6 +53,10 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Driver not found")
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
+    if payload.truck_id is not None and not await _get_truck(db, tenant_id, payload.truck_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Truck not found")
+    if payload.trailer_id is not None and not await _get_trailer(db, tenant_id, payload.trailer_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trailer not found")
 
     await _ensure_unique_load_number(db, tenant_id, payload.load_number)
 
@@ -54,7 +70,12 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
 async def get_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | None:
     result = await db.execute(
         select(Load)
-        .options(selectinload(Load.driver), selectinload(Load.broker))
+        .options(
+            selectinload(Load.driver),
+            selectinload(Load.broker),
+            selectinload(Load.truck),
+            selectinload(Load.trailer),
+        )
         .where(Load.id == load_id, Load.tenant_id == tenant_id)
     )
     return result.scalar_one_or_none()
@@ -66,6 +87,8 @@ async def list_loads(
     statuses: Iterable[str] | None = None,
     driver_id: int | None = None,
     broker_id: int | None = None,
+    truck_id: int | None = None,
+    trailer_id: int | None = None,
     pickup_start: date | None = None,
     pickup_end: date | None = None,
     page: int = 1,
@@ -73,7 +96,12 @@ async def list_loads(
 ):
     stmt = (
         select(Load)
-        .options(selectinload(Load.driver), selectinload(Load.broker))
+        .options(
+            selectinload(Load.driver),
+            selectinload(Load.broker),
+            selectinload(Load.truck),
+            selectinload(Load.trailer),
+        )
         .where(Load.tenant_id == tenant_id)
         .order_by(Load.id.desc())
     )
@@ -85,6 +113,10 @@ async def list_loads(
         stmt = stmt.where(Load.driver_id == driver_id)
     if broker_id:
         stmt = stmt.where(Load.broker_id == broker_id)
+    if truck_id:
+        stmt = stmt.where(Load.truck_id == truck_id)
+    if trailer_id:
+        stmt = stmt.where(Load.trailer_id == trailer_id)
     if pickup_start:
         stmt = stmt.where(Load.pickup_date >= pickup_start)
     if pickup_end:
@@ -104,6 +136,14 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
         driver_id = data["driver_id"]
         if driver_id is not None and not await _get_driver(db, tenant_id, driver_id):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Driver not found")
+    if "truck_id" in data:
+        truck_id = data["truck_id"]
+        if truck_id is not None and not await _get_truck(db, tenant_id, truck_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Truck not found")
+    if "trailer_id" in data:
+        trailer_id = data["trailer_id"]
+        if trailer_id is not None and not await _get_trailer(db, tenant_id, trailer_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trailer not found")
 
     if "broker_id" in data:
         broker_id = data["broker_id"]
@@ -128,3 +168,65 @@ async def delete_load(db: AsyncSession, tenant_id: int, load_id: int) -> None:
 
     await db.delete(load)
     await db.commit()
+
+
+async def list_loads_for_board(
+    db: AsyncSession,
+    tenant_id: int,
+    search: str | None = None,
+) -> dict[str, list]:
+    """Return loads grouped by status for dispatch board. No pagination."""
+    stmt = (
+        select(Load)
+        .options(
+            selectinload(Load.driver),
+            selectinload(Load.broker),
+            selectinload(Load.truck),
+            selectinload(Load.trailer),
+        )
+        .where(Load.tenant_id == tenant_id)
+        .order_by(Load.id.desc())
+    )
+    if search and search.strip():
+        q = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Load.load_number.ilike(q),
+                Load.pickup_location.ilike(q),
+                Load.delivery_location.ilike(q),
+            )
+        )
+    result = await db.execute(stmt)
+    loads = list(result.scalars().all())
+
+    grouped: dict[str, list] = {s: [] for s in ALLOWED_STATUSES}
+    for load in loads:
+        s = (load.status or "unassigned").strip().lower()
+        if s in grouped:
+            grouped[s].append(load)
+        else:
+            grouped["unassigned"].append(load)
+    return grouped
+
+
+async def add_load_note(
+    db: AsyncSession, tenant_id: int, load_id: int, body: str, author_user_id: str | None = None
+) -> LoadNote:
+    load = await get_load(db, tenant_id, load_id)
+    if not load:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    note = LoadNote(tenant_id=tenant_id, load_id=load_id, body=body.strip(), author_user_id=author_user_id)
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    return note
+
+
+async def list_load_notes(db: AsyncSession, tenant_id: int, load_id: int) -> list[LoadNote]:
+    load = await get_load(db, tenant_id, load_id)
+    if not load:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    result = await db.execute(
+        select(LoadNote).where(LoadNote.load_id == load_id, LoadNote.tenant_id == tenant_id).order_by(LoadNote.created_at.desc())
+    )
+    return list(result.scalars().all())

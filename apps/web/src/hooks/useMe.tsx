@@ -1,6 +1,7 @@
 import { createContext, ReactNode, useContext } from "react";
 import { useLocation } from "react-router-dom";
 import { useFetch } from "./useFetch";
+import { useAuth } from "../contexts/AuthContext";
 
 export type MeResponse = {
   user_id: number | null;
@@ -24,8 +25,11 @@ const PUBLIC_PATHS = ["/", "/signup", "/login", "/forgot-password", "/reset-pass
 
 export function MeProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const { authReady, isValid, isLoggingOut } = useAuth();
   const isPublicPath = PUBLIC_PATHS.some((p) => p === location.pathname || location.pathname.startsWith(p + "/"));
-  const { data, loading, error } = useFetch<MeResponse>("/api/v1/me", [], isPublicPath ? false : true);
+  // Only fetch /me after auth bootstrap completes and we're authenticated; never during logout
+  const enabled = !isPublicPath && authReady && isValid && !isLoggingOut;
+  const { data, loading, error } = useFetch<MeResponse>("/api/v1/me", [], enabled);
   return <MeContext.Provider value={{ me: data, loading, error }}>{children}</MeContext.Provider>;
 }
 

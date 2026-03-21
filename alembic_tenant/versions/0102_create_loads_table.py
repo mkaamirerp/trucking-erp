@@ -26,7 +26,7 @@ def upgrade() -> None:
     op.create_table(
         "loads",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("tenant_id", sa.Integer, sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("tenant_id", sa.Integer, nullable=False),
         sa.Column("load_number", sa.String(length=50), nullable=False),
         sa.Column("broker_id", sa.Integer, sa.ForeignKey("brokers.id", ondelete="RESTRICT"), nullable=True),
         sa.Column("driver_id", sa.Integer, sa.ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True),

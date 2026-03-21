@@ -26,7 +26,7 @@ def upgrade() -> None:
     op.create_table(
         "brokers",
         sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column("tenant_id", sa.Integer, sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("tenant_id", sa.Integer, nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("mc_number", sa.String(length=100), nullable=True),
         sa.Column("phone", sa.String(length=50), nullable=True),

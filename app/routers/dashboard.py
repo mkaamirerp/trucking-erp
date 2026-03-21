@@ -14,7 +14,7 @@ from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
 from app.models.load import Load
 from app.models.broker import Broker
-from app.schemas.driver import DriverOut
+from app.schemas.driver import DriverOut, DriverListOut, driver_row_to_list_out
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 logger = logging.getLogger(__name__)
@@ -44,8 +44,8 @@ async def dashboard_summary(
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
 
-    active_statuses = ["assigned", "picked_up"]
-    in_transit_status = "picked_up"
+    active_statuses = ["assigned", "dispatched", "arrived_pickup", "in_transit", "arrived_delivery"]
+    in_transit_status = "in_transit"
 
     try:
         active_loads = await db.scalar(
@@ -57,7 +57,7 @@ async def dashboard_summary(
         delayed = await db.scalar(
             select(func.count()).where(
                 Load.tenant_id == tenant_id,
-                Load.status == in_transit_status,
+                Load.status.in_([in_transit_status, "arrived_delivery"]),
                 Load.delivery_date < today,
             )
         )
@@ -177,7 +177,7 @@ async def _seed_demo_impl(tenant_id: int, db: AsyncSession):
         await db.flush()
         drivers.append(driver)
 
-    # Loads: ~24 active (assigned + picked_up), 12 in transit (picked_up), 3 delayed (picked_up, past delivery), revenue ~58200
+    # Loads: ~24 active (assigned + in_transit), 12 in transit, 3 delayed, revenue ~58200
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     load_number = 76200
@@ -190,25 +190,25 @@ async def _seed_demo_impl(tenant_id: int, db: AsyncSession):
         return str(load_number)
 
     for i, drv in enumerate(drivers):
-        # 4–5 loads per driver: mix of picked_up, assigned, delivered
+        # 4–5 loads per driver: mix of in_transit, dispatched, delivered
         for j in range(5):
             pickup_city, pickup_state = CITIES[(i + j) % len(CITIES)]
             delivery_city, delivery_state = CITIES[(i + j + 2) % len(CITIES)]
             pickup_loc = f"{pickup_city}, {pickup_state}"
             delivery_loc = f"{delivery_city}, {delivery_state}"
 
-            # Vary status: first 2 drivers get more picked_up (in transit), some delayed
+            # Vary status: first 2 drivers get more in_transit, some delayed
             if i < 2 and j < 2:
-                status = "picked_up"
+                status = "in_transit"
                 delivery_d = today - timedelta(days=j) if j == 1 else today + timedelta(days=1)
             elif i == 0 and j == 2:
-                status = "picked_up"
+                status = "in_transit"
                 delivery_d = today - timedelta(days=1)  # delayed
             elif i < 4:
-                status = "assigned" if j % 2 == 0 else "picked_up"
+                status = "dispatched" if j % 2 == 0 else "in_transit"
                 delivery_d = today + timedelta(days=j + 1)
             else:
-                status = "delivered" if j >= 3 else ("assigned" if j % 2 == 0 else "picked_up")
+                status = "delivered" if j >= 3 else ("dispatched" if j % 2 == 0 else "in_transit")
                 delivery_d = today + timedelta(days=j) if status != "delivered" else today - timedelta(days=1)
 
             pickup_d = week_start + timedelta(days=(i * 5 + j) % 7)

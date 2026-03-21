@@ -12,7 +12,9 @@ import LoginPage from "./pages/LoginPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
+import FleetPage from "./pages/FleetPage";
 import LoadsListPage from "./pages/LoadsListPage";
+import DispatchPage from "./pages/DispatchPage";
 import LoadDetailPage from "./pages/LoadDetailPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
@@ -27,6 +29,7 @@ import AdminPlaceholderPage from "./pages/AdminPlaceholderPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
 import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
 import AdminRouteGuard from "./components/AdminRouteGuard";
+import { useAuth } from "./contexts/AuthContext";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
 import { OPS } from "./routes";
@@ -37,11 +40,14 @@ function RedirectDriverOnboardingDetail() {
 }
 
 function App() {
+  const { authReady, isValid } = useAuth();
   const { me, loading, error } = useMe();
   const location = useLocation();
   const isAppRoute =
     /^\/payroll\//.test(location.pathname) ||
     /^\/dashboard/.test(location.pathname) ||
+    /^\/dispatch/.test(location.pathname) ||
+    /^\/fleet/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
     /^\/operations/.test(location.pathname) ||
@@ -64,7 +70,8 @@ function App() {
     return <Navigate to="/" replace />;
   }
 
-  if (isAppRoute && loading) {
+  // Wait for auth bootstrap before making auth decisions
+  if (isAppRoute && !authReady) {
     return (
       <div className="flex items-center justify-center min-h-screen text-sm text-gray-700">
         Loading session...
@@ -72,11 +79,25 @@ function App() {
     );
   }
 
-  if (isAppRoute && error) {
+  // Not authenticated -> redirect to login
+  if (isAppRoute && authReady && !isValid) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Authenticated; wait for /me to check requires_account_setup
+  if (isAppRoute && authReady && isValid && loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen text-sm text-gray-700">
+        Loading session...
+      </div>
+    );
+  }
+
+  if (isAppRoute && authReady && isValid && error) {
     return <Navigate to="/login" replace state={{ sessionError: error }} />;
   }
 
-  if (isAppRoute && !loading && !error && me?.requires_account_setup && !onAccountSetupRoute) {
+  if (isAppRoute && authReady && isValid && !loading && !error && me?.requires_account_setup && !onAccountSetupRoute) {
     return <Navigate to={accountSetupPath} replace />;
   }
 
@@ -97,6 +118,18 @@ function App() {
         element={
           <Layout>
             <DashboardPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/dispatch"
+        element={<DispatchPage />}
+      />
+      <Route
+        path="/fleet"
+        element={
+          <Layout>
+            <FleetPage />
           </Layout>
         }
       />

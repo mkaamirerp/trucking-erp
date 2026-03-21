@@ -2,16 +2,28 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import { getTenantSlugFromHost } from "../tenant";
 import { useAuth } from "../contexts/AuthContext";
-import { logoutAndClearTraces } from "../utils/sessionCheck";
 import { useEffect, useState } from "react";
 import { useMe, isTenantAdmin } from "../hooks/useMe";
 import { OPS, ADMIN } from "../routes";
 
+function BoardIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="6" height="6" rx="1" />
+      <rect x="15" y="3" width="6" height="6" rx="1" />
+      <rect x="3" y="15" width="6" height="6" rx="1" />
+      <rect x="15" y="15" width="6" height="6" rx="1" />
+    </svg>
+  );
+}
+
 const operationsLinks = [
   { to: OPS.DASHBOARD, label: "Dashboard", short: "Home", icon: GridIcon },
+  { to: OPS.DISPATCH, label: "Dispatch", short: "Dispatch", icon: BoardIcon },
   { to: OPS.DRIVER_ONBOARDING_REVIEW, label: "Onboarding Review", short: "Review", icon: ReviewIcon },
   { to: OPS.DRIVER_ONBOARDING_APPLICANT, label: "Driver Onboarding", short: "Drivers", icon: UserIcon },
-  { to: OPS.LOADS, label: "Loads", short: "Loads", icon: TruckIcon },
+  { to: OPS.FLEET, label: "Fleet", short: "Fleet", icon: TruckIcon },
+  { to: OPS.LOADS, label: "Loads", short: "Loads", icon: BoxIcon },
   { to: OPS.PAY_RUNS, label: "Pay Runs", short: "Payroll", icon: BoxIcon },
   { to: OPS.PAY_PERIODS, label: "Pay Periods", short: "Cards", icon: CardIcon },
   { to: OPS.DOCUMENTS, label: "Documents", short: "Docs", icon: FolderIcon },
@@ -139,9 +151,8 @@ function NavItem({
 
 export default function SidebarNav() {
   const navigate = useNavigate();
-  const { clearSession } = useAuth();
+  const { logout, isLoggingOut } = useAuth();
   const { me } = useMe();
-  const [loggingOut, setLoggingOut] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const slug = getTenantSlugFromHost() ? "" : "";
   const showAdmin = isTenantAdmin(me?.roles ?? []);
@@ -155,12 +166,9 @@ export default function SidebarNav() {
     window.localStorage.setItem("sidebar-collapsed", String(collapsed));
   }, [collapsed]);
 
-  const handleLogout = () => {
-    if (loggingOut) return;
-    setLoggingOut(true);
-    clearSession();
-    logoutAndClearTraces();
-    setLoggingOut(false);
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    await logout();
     navigate("/login", { replace: true });
   };
 
@@ -224,7 +232,7 @@ export default function SidebarNav() {
         <button
           type="button"
           onClick={handleLogout}
-          disabled={loggingOut}
+          disabled={isLoggingOut}
           title={collapsed ? "Log out" : undefined}
           className={clsx(
             "group flex items-center rounded-2xl border border-transparent text-[#64748b] transition-all hover:border-[#171d2b] hover:bg-[#0f1420] hover:text-[#f87171] disabled:opacity-50",
@@ -236,7 +244,7 @@ export default function SidebarNav() {
           </span>
           {!collapsed && (
             <span className="ml-3">
-              <span className="block text-sm font-semibold text-current">{loggingOut ? "Logging out..." : "Settings"}</span>
+              <span className="block text-sm font-semibold text-current">{isLoggingOut ? "Logging out..." : "Settings"}</span>
               <span className="block text-[11px] text-[#475569]">End session</span>
             </span>
           )}

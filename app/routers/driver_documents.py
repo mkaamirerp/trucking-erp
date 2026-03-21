@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.storage import save_driver_doc_upload_local
+from app.core.storage import save_driver_doc_upload
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
 from app.schemas.driver_documents import (
@@ -15,7 +15,7 @@ from app.schemas.driver_documents import (
     DriverDocumentOut,
     DriverDocumentFileOut,
 )
-from app.deps.tenant import require_tenant
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 
 router = APIRouter(tags=["Driver Documents"])
@@ -136,6 +136,7 @@ async def deactivate_driver_document(
 async def upload_driver_document_file(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_tenant_db),
 ):
@@ -148,7 +149,7 @@ async def upload_driver_document_file(
     if not doc.is_active:
         raise HTTPException(status_code=400, detail="Driver document is inactive")
 
-    stored = await save_driver_doc_upload_local(file)
+    stored = await save_driver_doc_upload(tenant_slug, document_id, file)
 
     doc_file = DriverDocumentFile(
         driver_document_id=document_id,

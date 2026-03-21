@@ -11,19 +11,18 @@ import asyncio
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import (
-    resolve_applicant_dl_path,
-    resolve_applicant_doc_path,
-    save_applicant_dl_upload_local,
-    save_applicant_doc_upload_local,
+    readable_path,
+    save_applicant_dl_upload,
+    save_applicant_doc_upload,
+    serve_file,
 )
 
 from app.deps.auth import CurrentUser, get_current_user
-from app.deps.tenant import require_tenant
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.models.application_access_token import ApplicationAccessToken
 from app.models.driver_onboarding_submission import DriverOnboardingSubmission
@@ -63,21 +62,22 @@ def _merge_field_sources(existing: dict | None, incoming: dict | None) -> dict:
     return merged
 
 
-async def _best_effort_pdf417_extract(intake: dict, storage_key: str | None) -> dict:
+async def _best_effort_pdf417_extract(
+    intake: dict, storage_key: str | None, tenant_slug: str
+) -> dict:
     if not storage_key:
         return intake
 
-    path = resolve_applicant_dl_path(storage_key)
-    if not path.is_file():
-        return intake
-
     try:
-        extracted = await asyncio.wait_for(
-            asyncio.to_thread(extract_pdf417_fields, path),
-            timeout=4.0,
-        )
+        with readable_path(storage_key, "applicant_dl", tenant_slug) as path:
+            if not path.is_file():
+                return intake
+            extracted = await asyncio.wait_for(
+                asyncio.to_thread(extract_pdf417_fields, path),
+                timeout=4.0,
+            )
     except Exception:
-        extracted = {}
+        return intake
 
     if not extracted:
         return intake
@@ -501,6 +501,7 @@ async def upload_applicant_dl(
     doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
     file: UploadFile = File(...),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Upload driver license front or back for applicant (token auth). Stores file and updates intake_payload.files."""
@@ -512,7 +513,7 @@ async def upload_applicant_dl(
             status_code=status.HTTP_409_CONFLICT,
             detail="Application already submitted",
         )
-    stored = await save_applicant_dl_upload_local(file)
+    stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
     intake = dict(app.intake_payload or {})
     files = dict(intake.get("files") or {})
     files[doc_type] = {
@@ -524,7 +525,7 @@ async def upload_applicant_dl(
     }
     intake["files"] = files
     if doc_type == "CDL_BACK":
-        intake = await _best_effort_pdf417_extract(intake, stored.storage_key)
+        intake = await _best_effort_pdf417_extract(intake, stored.storage_key, tenant_slug)
     intake["license_extract_status"] = "SUCCESS"
     intake.pop("license_extract_error", None)
     app.intake_payload = intake
@@ -538,6 +539,7 @@ async def get_applicant_application_file(
     token: str = Query(..., description="Invite link token"),
     file_id: str = Query(..., description="Storage key / file id"),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Serve an uploaded applicant file (DL image or step-4 document) by token and file_id."""
@@ -548,17 +550,13 @@ async def get_applicant_application_file(
     for _side, meta in files.items():
         if _file_meta_matches(meta, file_id):
             storage_key = meta.get("enh_file_id") if meta.get("enh_file_id") == file_id else meta.get("storage_key")
-            path = resolve_applicant_dl_path(storage_key or file_id)
-            if path.is_file():
-                return _file_response(path)
+            return serve_file(storage_key or file_id, "applicant_dl", tenant_slug, meta.get("original_filename"))
     # Step-4 documents
     documents = intake.get("documents") or {}
     for _doc_type, meta in documents.items():
         if _file_meta_matches(meta, file_id):
             storage_key = meta.get("storage_key") or file_id
-            path = resolve_applicant_doc_path(storage_key)
-            if path.is_file():
-                return _file_response(path)
+            return serve_file(storage_key, "applicant_docs", tenant_slug, meta.get("original_filename"))
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
 
 
@@ -574,6 +572,7 @@ async def upload_applicant_document(
     doc_type: str = Form(..., description="Document type key (e.g. dot_medical, mvr)"),
     file: UploadFile = File(...),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Upload a step-4 document (DOT medical, MVR, etc.) for applicant. Persists to storage and intake_payload.documents."""
@@ -585,7 +584,7 @@ async def upload_applicant_document(
             status_code=status.HTTP_409_CONFLICT,
             detail="Application already submitted",
         )
-    stored = await save_applicant_doc_upload_local(file)
+    stored = await save_applicant_doc_upload(tenant_slug, app.id, file)
     intake = dict(app.intake_payload or {})
     documents = dict(intake.get("documents") or {})
     documents[doc_type] = {
@@ -599,18 +598,6 @@ async def upload_applicant_document(
     await db.commit()
     await db.refresh(app)
     return _person_application_to_out(app)
-
-
-def _file_response(path) -> FileResponse:
-    media_type = "application/octet-stream"
-    suf = path.suffix.lower()
-    if suf in (".jpg", ".jpeg",):
-        media_type = "image/jpeg"
-    elif suf == ".png":
-        media_type = "image/png"
-    elif suf == ".pdf":
-        media_type = "application/pdf"
-    return FileResponse(path, media_type=media_type)
 
 
 def _file_meta_matches(meta: dict, file_id: str) -> bool:
@@ -704,6 +691,7 @@ async def get_admin_application_file(
     application_id: int,
     file_id: str = Query(..., description="Storage key / file id"),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
@@ -717,17 +705,13 @@ async def get_admin_application_file(
     for _side, meta in files.items():
         if _file_meta_matches(meta, file_id):
             storage_key = meta.get("enh_file_id") if meta.get("enh_file_id") == file_id else meta.get("storage_key")
-            path = resolve_applicant_dl_path(storage_key or file_id)
-            if path.is_file():
-                return _file_response(path)
+            return serve_file(storage_key or file_id, "applicant_dl", tenant_slug, meta.get("original_filename"))
     # Step-4 documents
     documents = intake.get("documents") or {}
     for _doc_type, meta in documents.items():
         if _file_meta_matches(meta, file_id):
             storage_key = meta.get("storage_key") or file_id
-            path = resolve_applicant_doc_path(storage_key)
-            if path.is_file():
-                return _file_response(path)
+            return serve_file(storage_key, "applicant_docs", tenant_slug, meta.get("original_filename"))
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
 
 

@@ -3,15 +3,15 @@ from app.models.base import Base
 from app.models.driver import Driver
 from app.models.driver_phone import DriverPhone
 from app.models.truck import Truck
+from app.models.trailer import Trailer
+from app.models.fleet_document import FleetDocument
 
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
 from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
-from app.models.tenant import Tenant
 from app.models.payee import (
     Payee,
-    Employee,
     CompensationProfile,
     TenantMileagePolicy,
     ChargeCategory,
@@ -28,9 +28,8 @@ from app.models.payee import (
     PayRunPayment,
     TenantBankConnector,
 )
-from app.models.employee_role import EmployeeRole
 from app.models.broker import Broker
-from app.models.load import Load
+from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
 
 # Platform models (B3 onboarding)
 from app.models.platform import (

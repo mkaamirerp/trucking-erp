@@ -28,9 +28,7 @@ class PayPeriod(Base):
     __tablename__ = "pay_periods"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -49,9 +47,7 @@ class PayRun(Base):
     __tablename__ = "pay_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     pay_period_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("pay_periods.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -94,9 +90,7 @@ class PayRunItem(Base):
     pay_run_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     payee_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("payees.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -122,9 +116,7 @@ class PayProfile(Base):
     __tablename__ = "pay_profiles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     driver_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("drivers.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -152,9 +144,7 @@ class PayEntry(Base):
     __tablename__ = "pay_entries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     pay_period_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("pay_periods.id", ondelete="CASCADE"), nullable=False, index=True
     )

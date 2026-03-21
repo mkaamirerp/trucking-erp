@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.storage import save_company_doc_upload_local
+from app.core.storage import save_company_doc_upload, serve_file
 from app.models.platform import (
     OnboardingStatus,
     OTPPurpose,
@@ -804,7 +804,23 @@ async def upload_w9_document(
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
-    stored = await save_company_doc_upload_local(file)
+    stored = await save_company_doc_upload(tenant.slug, tenant.id, file)
+    payload_row = await db.scalar(
+        select(PlatformOnboardingPayload).where(
+            PlatformOnboardingPayload.tenant_id == tenant.id,
+            PlatformOnboardingPayload.consumed_at.is_(None),
+            PlatformOnboardingPayload.expires_at > datetime.now(timezone.utc),
+        )
+    )
+    profile = await db.scalar(select(PlatformCompanyProfile).where(PlatformCompanyProfile.tenant_id == tenant.id))
+    if payload_row and payload_row.payload_json is not None:
+        updated = dict(payload_row.payload_json)
+        updated["w9_storage_key"] = stored.storage_key
+        payload_row.payload_json = updated
+    elif profile:
+        profile.w9_storage_key = stored.storage_key
+    if payload_row or profile:
+        await db.commit()
     return {
         "storage_key": stored.storage_key,
         "original_filename": stored.original_filename,
@@ -812,6 +828,39 @@ async def upload_w9_document(
         "file_size_bytes": stored.file_size_bytes,
         "sha256": stored.sha256,
     }
+
+
+@router.get("/company-setup/document")
+async def download_company_setup_document(
+    request: Request,
+    storage_key: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a company doc (e.g. W9) by storage_key. Tenant from host (preferred) or X-Tenant-Slug; validates ownership."""
+    from app.deps.tenant import tenant_slug_from_request
+
+    tenant_slug = tenant_slug_from_request(request)
+    if not tenant_slug:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant required: use tenant subdomain or X-Tenant-Slug")
+    if not storage_key.startswith(f"{tenant_slug}/"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Storage key not valid for tenant")
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.slug == tenant_slug))
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    payload_row = await db.scalar(
+        select(PlatformOnboardingPayload).where(
+            PlatformOnboardingPayload.tenant_id == tenant.id,
+            PlatformOnboardingPayload.consumed_at.is_(None),
+            PlatformOnboardingPayload.expires_at > datetime.now(timezone.utc),
+        )
+    )
+    profile = await db.scalar(select(PlatformCompanyProfile).where(PlatformCompanyProfile.tenant_id == tenant.id))
+    in_payload = payload_row and payload_row.payload_json and payload_row.payload_json.get("w9_storage_key") == storage_key
+    in_profile = bool(profile and profile.w9_storage_key == storage_key)
+    has_records = payload_row is not None or profile is not None
+    if has_records and not in_payload and not in_profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found for this tenant")
+    return serve_file(storage_key, "company_docs", tenant_slug=tenant_slug)
 
 
 def _required_remaining_fields_for_country(country: str) -> list[str]:

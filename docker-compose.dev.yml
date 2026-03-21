@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     environment:
       SSM_ENV: dev
+      # STORAGE_PROVIDER: s3
     volumes:
       # Mount repo so code changes apply on container restart (no image rebuild).
       # Python and site-packages remain from the image.

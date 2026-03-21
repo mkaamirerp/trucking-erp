@@ -1,19 +1,24 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from typing import List
-from fastapi.encoders import jsonable_encoder
+"""Legacy fleet list - returns trucks. Use /api/v1/trucks for full CRUD."""
 
-from app.deps.tenant_db import get_tenant_db
+from typing import List
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
+from app.models.truck import Truck
+from app.schemas.truck import TruckResponse
 
 router = APIRouter(prefix="/fleet", tags=["fleet"])
 
-@router.get("", response_model=List[dict])
+
+@router.get("", response_model=List[TruckResponse])
 async def get_fleet(
     db: AsyncSession = Depends(get_tenant_db),
     tenant_id: int = Depends(require_tenant),
 ):
-    result = await db.execute(text("SELECT * FROM trucks"))
-    rows = result.mappings().all()
-    return jsonable_encoder(rows)
+    result = await db.execute(select(Truck).where(Truck.tenant_id == tenant_id).order_by(Truck.id.desc()))
+    trucks = result.scalars().all()
+    return [TruckResponse.model_validate(t) for t in trucks]

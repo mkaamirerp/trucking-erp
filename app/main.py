@@ -17,7 +17,6 @@ from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
 from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.onboarding import router as onboarding_router
-from app.routers.employees import router as employees_router
 from app.routers.meta import router as meta_router
 from app.routers.payroll import router as payroll_router
 from app.routers.pay_runs import router as pay_runs_router
@@ -25,6 +24,9 @@ from app.routers.me import router as me_router
 from app.routers.auth import router as auth_router
 from app.routers.brokers import router as brokers_router
 from app.routers.loads import router as loads_router
+from app.routers.dispatch import router as dispatch_router
+from app.routers.trucks import router as trucks_router
+from app.routers.trailers import router as trailers_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.dev_tools import router as dev_tools_router
 from app.routers.dev_tools_db import router as dev_tools_db_router
@@ -69,7 +71,6 @@ app.include_router(driver_documents_router, prefix="/api/v1")
 app.include_router(admin_onboarding_router)
 app.include_router(driver_onboarding_router)
 app.include_router(onboarding_router)
-app.include_router(employees_router)
 app.include_router(meta_router)
 app.include_router(payroll_router)
 app.include_router(pay_runs_router)
@@ -77,6 +78,9 @@ app.include_router(me_router)
 app.include_router(auth_router)
 app.include_router(brokers_router, prefix="/api/v1")
 app.include_router(loads_router, prefix="/api/v1")
+app.include_router(dispatch_router, prefix="/api/v1")
+app.include_router(trucks_router, prefix="/api/v1")
+app.include_router(trailers_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(dev_tools_router)
 app.include_router(dev_tools_db_router)

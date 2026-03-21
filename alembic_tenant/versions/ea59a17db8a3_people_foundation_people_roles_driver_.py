@@ -44,7 +44,6 @@ def upgrade() -> None:
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("updated_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
             schema="public",
         )
         op.create_index("ix_people_tenant_id", "people", ["tenant_id"], unique=False, schema="public")
@@ -64,7 +63,6 @@ def upgrade() -> None:
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("updated_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["person_id"], ["people.id"], ondelete="CASCADE"),
             sa.UniqueConstraint("tenant_id", "person_id", "role_code", "is_active", name="uq_person_roles_tenant_person_role_active"),
             schema="public",
@@ -87,7 +85,6 @@ def upgrade() -> None:
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
             sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("updated_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["person_id"], ["people.id"], ondelete="CASCADE"),
             sa.UniqueConstraint("person_id", name="uq_driver_profiles_person_id"),
             schema="public",

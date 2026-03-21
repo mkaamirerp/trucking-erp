@@ -10,7 +10,7 @@ class DriverDocument(Base):
     __tablename__ = "driver_documents"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
     driver_id: Mapped[int] = mapped_column(
         ForeignKey("drivers.id", ondelete="CASCADE"),

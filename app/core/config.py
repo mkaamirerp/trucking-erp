@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     jwt_same_site: str = "lax"
     base_domain: str = "truckerp.me"
 
+    # Storage (S3 or local)
+    storage_provider: str = "local"
+    aws_region: str = "us-east-1"
+    s3_bucket: str = "truckerp-015421055625-us-east-1-an"
+    s3_prefix: str = ""
+    local_storage_dir: str | None = None
+    company_docs_dir: str | None = None
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

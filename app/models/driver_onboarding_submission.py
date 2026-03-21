@@ -25,7 +25,7 @@ class DriverOnboardingSubmission(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        BigInteger, nullable=False, index=True
     )
     created_by_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     person_id: Mapped[int | None] = mapped_column(

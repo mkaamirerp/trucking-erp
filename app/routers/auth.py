@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.utils.password import verify_password, hash_password
 from app.deps.tenant import require_tenant
 from app.utils.email import send_password_reset_email
+from app.utils.rate_limit import rate_limit_forgot_password
 from pydantic import BaseModel, EmailStr, Field
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
@@ -172,19 +173,20 @@ class ForgotPasswordRequest(BaseModel):
 
 @router.post("/forgot-password")
 async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=Depends(get_db)):
-    """Request a password reset email. When on a tenant subdomain, only sends if the user is a member of that tenant. Always returns 200 with a generic message."""
+    """Request a password reset email. Public (no login). Tenant-aware via host subdomain. When on tenant subdomain, only sends if user is member of that tenant. Always returns 200 with generic message (no enumeration)."""
+    ok_msg = {
+        "ok": True,
+        "sent": True,
+        "message": "If an account exists with that email, you will receive a password reset link shortly.",
+    }
     try:
+        await rate_limit_forgot_password(request, payload.email.strip().lower())
         tenant_id = getattr(request.state, "tenant_id", None)
         user: PlatformUser | None = await db.scalar(
             select(PlatformUser).where(PlatformUser.email == payload.email.strip().lower())
         )
         if not user:
-            return {
-                "ok": True,
-                "sent": True,
-                "message": "If an account exists with that email, you will receive a password reset link shortly.",
-            }
-        # On a tenant subdomain: only send reset if user belongs to this tenant
+            return ok_msg
         if tenant_id is not None:
             membership = await db.scalar(
                 select(PlatformTenantMember).where(
@@ -193,12 +195,7 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
                 ).limit(1)
             )
             if not membership:
-                # Don't leak that the email exists in another workspace
-                return {
-                    "ok": True,
-                    "sent": True,
-                    "message": "If an account exists with that email, you will receive a password reset link shortly.",
-                }
+                return ok_msg
         raw_token = secrets.token_urlsafe(32)
         token_hash = _hash_reset_token(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
@@ -212,31 +209,17 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
             base = "https://truckerp.me"
         reset_link = f"{base}/reset-password?token={raw_token}"
         if not bool(settings.secure_cookies):
-            # Dev-only: make reset usable even when SMTP is misconfigured.
             logger.warning("DEV_PASSWORD_RESET_LINK email=%s link=%s", user.email, reset_link)
         try:
             await send_password_reset_email(to=user.email, reset_link=reset_link, expires_minutes=RESET_TOKEN_EXPIRY_MINUTES)
         except Exception as e:
             logger.warning("forgot_password: send_email failed: %s", e)
-        return {
-            "ok": True,
-            "sent": True,
-            "message": "If an account exists with that email, you will receive a password reset link shortly.",
-        }
+        return ok_msg
     except HTTPException:
         raise
-    except SQLAlchemyError as e:
-        logger.exception("forgot_password: database error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Password reset is temporarily unavailable. Please try again in a few minutes.",
-        ) from e
     except Exception as e:
-        logger.exception("forgot_password: unexpected error")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Something went wrong. Please try again later.",
-        ) from e
+        logger.exception("forgot_password: error (returning generic 200): %s", e)
+        return ok_msg
 
 
 class ResetPasswordRequest(BaseModel):

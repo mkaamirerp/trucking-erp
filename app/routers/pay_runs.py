@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.authz import require_tenant_admin
-from app.deps.tenant import require_tenant
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
@@ -26,7 +26,7 @@ from app.models.payee import (
 )
 from app.models.payroll import PayEntry, PayPeriod, PayRun, PayRunItem
 from app.models.enums import SourceType, PayRunStatus, PayoutStatus, WorkerType, PayeeType
-from app.core.storage import resolve_storage_path, DEFAULT_PAY_DOCS_DIR
+from app.core.storage import download_response
 from app.schemas.pay_documents import PayDocumentSummary
 from app.schemas.pay_runs import (
     PayRunCreate,
@@ -438,6 +438,7 @@ async def list_pay_documents(
 async def download_pay_document(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     doc = await db.scalar(
@@ -452,8 +453,4 @@ async def download_pay_document(
     if key.startswith("http://") or key.startswith("https://"):
         return RedirectResponse(key)
 
-    path = resolve_storage_path(key, default_dir=DEFAULT_PAY_DOCS_DIR)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Document file not found")
-
-    return FileResponse(path, media_type="application/pdf", filename=path.name)
+    return download_response(key, module="pay_documents", tenant_slug=tenant_slug, content_type="application/pdf", filename=key.split("/")[-1] if "/" in key else "document.pdf")
