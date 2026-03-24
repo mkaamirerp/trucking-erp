@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+# Exact scheme prefixes (length-sensitive: use len() when slicing, never magic offsets).
+_PG = "postgresql://"
+_PG_ASYNC = "postgresql+asyncpg://"
+_PG_PSYCOPG2 = "postgresql+psycopg2://"
+_POSTGRES = "postgres://"
+
 
 def to_async_pg_url(url: str) -> str:
     """
@@ -11,20 +17,20 @@ def to_async_pg_url(url: str) -> str:
     if not url or not url.strip():
         return url
     u = url.strip()
-    if u.startswith("postgresql+asyncpg://"):
+    if u.startswith(_PG_ASYNC):
         return u
     if u.startswith("postgresql+asyncpg:"):
-        return "postgresql+asyncpg://" + u.split(":", 1)[1].lstrip("/")
-    if u.startswith("postgresql+psycopg2://"):
-        return "postgresql+asyncpg://" + u[19:]
+        return _PG_ASYNC + u.split(":", 1)[1].lstrip("/")
+    if u.startswith(_PG_PSYCOPG2):
+        return _PG_ASYNC + u[len(_PG_PSYCOPG2):]
     if u.startswith("postgresql+psycopg2:"):
-        return "postgresql+asyncpg://" + u.split(":", 1)[1].lstrip("/")
-    if u.startswith("postgresql://"):
-        rest = u[12:].lstrip("/")  # avoid /// when source has postgresql:///...
-        return "postgresql+asyncpg://" + rest
-    if u.startswith("postgres://"):
-        rest = u[10:].lstrip("/")
-        return "postgresql+asyncpg://" + rest
+        return _PG_ASYNC + u.split(":", 1)[1].lstrip("/")
+    if u.startswith(_PG):
+        rest = u[len(_PG):].lstrip("/")
+        return _PG_ASYNC + rest
+    if u.startswith(_POSTGRES):
+        rest = u[len(_POSTGRES):].lstrip("/")
+        return _PG_ASYNC + rest
     return u
 
 
@@ -36,16 +42,16 @@ def to_sync_pg_url(url: str) -> str:
     if not url or not url.strip():
         return url
     u = url.strip()
-    if u.startswith("postgresql://") and "+" not in u.split("://", 1)[0]:
+    if u.startswith(_PG) and "+" not in u.split("://", 1)[0]:
         return u
-    if u.startswith("postgresql+asyncpg://"):
-        return "postgresql://" + u[19:]
+    if u.startswith(_PG_ASYNC):
+        return _PG + u[len(_PG_ASYNC):]
     if u.startswith("postgresql+asyncpg:"):
-        return "postgresql://" + u.split(":", 1)[1].lstrip("/")
-    if u.startswith("postgresql+psycopg2://"):
-        return "postgresql://" + u[19:]
+        return _PG + u.split(":", 1)[1].lstrip("/")
+    if u.startswith(_PG_PSYCOPG2):
+        return _PG + u[len(_PG_PSYCOPG2):]
     if u.startswith("postgresql+psycopg2:"):
-        return "postgresql://" + u.split(":", 1)[1].lstrip("/")
-    if u.startswith("postgres://"):
-        return "postgresql://" + u[10:]
+        return _PG + u.split(":", 1)[1].lstrip("/")
+    if u.startswith(_POSTGRES):
+        return _PG + u[len(_POSTGRES):]
     return u
