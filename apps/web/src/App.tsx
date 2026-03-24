@@ -15,6 +15,7 @@ import DashboardPage from "./pages/DashboardPage";
 import FleetPage from "./pages/FleetPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import DispatchPage from "./pages/DispatchPage";
+import LoadInboxPage from "./pages/LoadInboxPage";
 import LoadDetailPage from "./pages/LoadDetailPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
@@ -28,6 +29,7 @@ import AdminRolesPage from "./pages/AdminRolesPage";
 import AdminPlaceholderPage from "./pages/AdminPlaceholderPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
 import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
+import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminRouteGuard from "./components/AdminRouteGuard";
 import { useAuth } from "./contexts/AuthContext";
 import { useMe } from "./hooks/useMe";
@@ -47,6 +49,7 @@ function App() {
     /^\/payroll\//.test(location.pathname) ||
     /^\/dashboard/.test(location.pathname) ||
     /^\/dispatch/.test(location.pathname) ||
+    /^\/inbox/.test(location.pathname) ||
     /^\/fleet/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
@@ -124,6 +127,14 @@ function App() {
       <Route
         path="/dispatch"
         element={<DispatchPage />}
+      />
+      <Route
+        path="/inbox"
+        element={
+          <Layout>
+            <LoadInboxPage />
+          </Layout>
+        }
       />
       <Route
         path="/fleet"
@@ -216,7 +227,8 @@ function App() {
         <Route path="users" element={<AdminUsersPage />} />
         <Route path="roles" element={<AdminRolesPage />} />
         <Route path="payroll" element={<AdminPlaceholderPage title="Payroll Settings" description="Payroll configuration and defaults." />} />
-        <Route path="integrations/smtp" element={<AdminIntegrationsPage />} />
+        <Route path="settings/email" element={<AdminEmailConfigPage />} />
+        <Route path="integrations/smtp" element={<Navigate to="/admin/settings/email" replace />} />
         <Route path="integrations/eld" element={<AdminIntegrationsPage />} />
         <Route path="integrations/fuel" element={<AdminIntegrationsPage />} />
         <Route path="onboarding" element={<AdminPlaceholderPage title="Onboarding Settings" description="Onboarding workflow and invite defaults." />} />

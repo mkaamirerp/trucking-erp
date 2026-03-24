@@ -28,7 +28,7 @@ from app.models.payee import (
     PayRunPayment,
     TenantBankConnector,
 )
-from app.models.broker import Broker
+from app.models.broker import Broker, BrokerContact
 from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
 
 # Platform models (B3 onboarding)
@@ -44,6 +44,11 @@ from app.models.platform import (
     ReservedSlug,
 )
 from app.models.platform_admin import PlatformAdmin
+from app.models.platform_integration import TenantIntegrationSecret
+from app.models.email_mailbox import TenantEmailMailbox
+from app.models.tenant_email_account import TenantEmailAccount
+from app.models.email_ingestion import EmailThread, EmailMessage
+from app.models.email_attachment import EmailMessageAttachment
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem

@@ -19,6 +19,7 @@ function BoardIcon() {
 
 const operationsLinks = [
   { to: OPS.DASHBOARD, label: "Dashboard", short: "Home", icon: GridIcon },
+  { to: OPS.INBOX, label: "Load Intake", short: "Intake", icon: MailIcon },
   { to: OPS.DISPATCH, label: "Dispatch", short: "Dispatch", icon: BoardIcon },
   { to: OPS.DRIVER_ONBOARDING_REVIEW, label: "Onboarding Review", short: "Review", icon: ReviewIcon },
   { to: OPS.DRIVER_ONBOARDING_APPLICANT, label: "Driver Onboarding", short: "Drivers", icon: UserIcon },
@@ -94,6 +95,15 @@ function ReviewIcon() {
       <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H15l5 5v9.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5Z" />
       <path d="M14 4v6h6" />
       <path d="m9 13 2 2 4-4" />
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M4 7l8 6 8-6" />
     </svg>
   );
 }

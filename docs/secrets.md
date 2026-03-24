@@ -21,7 +21,7 @@ This project uses a **fail-closed, SSM-only** secret management system. The Post
 
 All secrets are stored under these SSM paths:
 
-- `/truckerp/prod/platform/` – Platform-level secrets (DATABASE_URL, POSTGRES_ADMIN_URL, POSTGRES_PASSWORD, JWT_SECRET, etc.)
+- `/truckerp/prod/platform/` – Platform-level secrets (DATABASE_URL, POSTGRES_ADMIN_URL, POSTGRES_PASSWORD, JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, etc.)
 - `/truckerp/prod/shared/` – Shared secrets (SMTP, external API keys, etc.)
 
 ### Required Parameters
@@ -94,6 +94,26 @@ This ensures:
    - Add it to the `required_vars` array in `scripts/start_api_with_ssm.sh`
 
 3. Restart the API container (it will fetch and validate the new parameter)
+
+### Gmail OAuth (optional)
+
+For the tenant Gmail Connect flow, add these to `/truckerp/<env>/platform/` (use `prod` or `dev` per SSM_ENV):
+
+```bash
+aws ssm put-parameter \
+  --name "/truckerp/prod/platform/GOOGLE_CLIENT_ID" \
+  --value "YOUR_CLIENT_ID.apps.googleusercontent.com" \
+  --type SecureString \
+  --overwrite
+
+aws ssm put-parameter \
+  --name "/truckerp/prod/platform/GOOGLE_CLIENT_SECRET" \
+  --value "YOUR_CLIENT_SECRET" \
+  --type SecureString \
+  --overwrite
+```
+
+Restart the API after adding. See `docs/GMAIL_OAUTH_SETUP.md` for Google Cloud Console setup.
 
 ## Troubleshooting
 

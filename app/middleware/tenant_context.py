@@ -157,6 +157,32 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 log("token_invalid", level="warning")
                 return response
 
+        # Test bypass: when TEST_BYPASS_AUTH=1 and X-Tenant-ID or X-Tenant-Slug present, skip JWT/membership (integration tests only)
+        if os.environ.get("TEST_BYPASS_AUTH") == "1":
+            raw_tid = request.headers.get(TENANT_ID_HEADER)
+            raw_slug = request.headers.get(TENANT_SLUG_HEADER)
+            if raw_tid is not None or (raw_slug and raw_slug.strip()):
+                try:
+                    async with AsyncSessionLocal() as session:
+                        if raw_tid is not None:
+                            row = await session.scalar(
+                                select(PlatformTenant).where(PlatformTenant.id == int(raw_tid)).limit(1)
+                            )
+                        else:
+                            row = await session.scalar(
+                                select(PlatformTenant).where(PlatformTenant.slug == raw_slug.strip().lower()).limit(1)
+                            )
+                    if row and row.status == "ACTIVE" and row.db_status == "READY":
+                        request.state.tenant_id = int(row.id)
+                        request.state.tenant_slug = row.slug
+                        request.state.user_id = "test-bypass-user"
+                        response = await call_next(request)
+                        set_request_id(response)
+                        log("test_bypass", tenant_id=request.state.tenant_id)
+                        return response
+                except (ValueError, SQLAlchemyError):
+                    pass
+
         # Forgot-password from main domain (no tenant): allow through without tenant_id
         if path.rstrip("/") == "/api/v1/auth/forgot-password":
             slug_from_host = self._slug_from_host(request)
@@ -195,48 +221,58 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         raw_slug = request.headers.get(TENANT_SLUG_HEADER)
         has_header = raw_tid is not None or raw_slug is not None
 
-        # Resolve to (tenant_id or slug) for DB lookup: header overrides host; host next; then JWT
+        # Resolve to (tenant_id or slug) for DB lookup: state (callback) > header > host > JWT
         tenant_id_from_request: Optional[int] = None
         tenant_slug_from_request: Optional[str] = None
 
-        if has_header:
-            if raw_tid is not None:
-                try:
-                    tenant_id_from_request = int(raw_tid)
-                except ValueError:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid tenant header: X-Tenant-ID must be int",
-                    )
-            elif raw_slug:
-                s = raw_slug.strip()
-                if not s:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid tenant header: X-Tenant-Slug is empty",
-                    )
-                tenant_slug_from_request = s
-        elif slug_from_host:
-            tenant_slug_from_request = slug_from_host
-        elif jwt_tenant_id is not None:
-            tenant_id_from_request = int(jwt_tenant_id)
-        else:
-            # Dev tools DB: allow default tenant so you can inspect DB from main domain (no subdomain)
-            default_tid = os.environ.get("TOOLS_DEFAULT_TENANT_ID")
-            default_slug = os.environ.get("TOOLS_DEFAULT_TENANT_SLUG")
-            if path.startswith("/api/v1/tools/db/") and (default_tid or default_slug):
-                if default_tid:
+        # Gmail OAuth callback: tenant from signed state (platform URL has no subdomain)
+        if path.rstrip("/") == "/api/v1/admin/email-config/gmail/callback":
+            state = request.query_params.get("state")
+            if state:
+                from app.services.gmail_oauth import parse_state
+                parsed = parse_state(state)
+                if parsed:
+                    tenant_id_from_request, tenant_slug_from_request = parsed
+
+        if tenant_id_from_request is None and tenant_slug_from_request is None:
+            if has_header:
+                if raw_tid is not None:
                     try:
-                        tenant_id_from_request = int(default_tid)
+                        tenant_id_from_request = int(raw_tid)
                     except ValueError:
-                        tenant_id_from_request = None
-                if tenant_id_from_request is None and default_slug:
-                    tenant_slug_from_request = default_slug.strip()
-            if tenant_id_from_request is None and tenant_slug_from_request is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Tenant context required: use tenant subdomain (e.g. demo.truckerp.me) or X-Tenant-Slug / X-Tenant-ID header",
-                )
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid tenant header: X-Tenant-ID must be int",
+                        )
+                elif raw_slug:
+                    s = raw_slug.strip()
+                    if not s:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Invalid tenant header: X-Tenant-Slug is empty",
+                        )
+                    tenant_slug_from_request = s
+            elif slug_from_host:
+                tenant_slug_from_request = slug_from_host
+            elif jwt_tenant_id is not None:
+                tenant_id_from_request = int(jwt_tenant_id)
+            else:
+                # Dev tools DB: allow default tenant so you can inspect DB from main domain (no subdomain)
+                default_tid = os.environ.get("TOOLS_DEFAULT_TENANT_ID")
+                default_slug = os.environ.get("TOOLS_DEFAULT_TENANT_SLUG")
+                if path.startswith("/api/v1/tools/db/") and (default_tid or default_slug):
+                    if default_tid:
+                        try:
+                            tenant_id_from_request = int(default_tid)
+                        except ValueError:
+                            tenant_id_from_request = None
+                    if tenant_id_from_request is None and default_slug:
+                        tenant_slug_from_request = default_slug.strip()
+                if tenant_id_from_request is None and tenant_slug_from_request is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Tenant context required: use tenant subdomain (e.g. demo.truckerp.me) or X-Tenant-Slug / X-Tenant-ID header",
+                    )
 
         # Lookup in platform tenant registry and enforce membership gate
         try:

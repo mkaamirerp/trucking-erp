@@ -2,6 +2,8 @@
 # Environment
 # =========================
 .env
+**/client_secret*.json
+.google_oauth.local
 .env.*
 *.env
 

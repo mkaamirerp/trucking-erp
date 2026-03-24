@@ -4,15 +4,16 @@ import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
+from sqlalchemy.orm import selectinload
 from app.models.driver import Driver
-from app.models.load import Load
+from app.models.load import Load, LoadStop
 from app.models.broker import Broker
 from app.schemas.driver import DriverOut, DriverListOut, driver_row_to_list_out
 
@@ -54,31 +55,34 @@ async def dashboard_summary(
         in_transit = await db.scalar(
             select(func.count()).where(Load.tenant_id == tenant_id, Load.status == in_transit_status)
         )
+        # Delayed: in_transit/arrived_delivery with latest DROP appointment_date < today
+        drop_max = select(LoadStop.load_id, func.max(LoadStop.appointment_date).label("max_d")).where(
+            LoadStop.tenant_id == tenant_id,
+            LoadStop.stop_type == "DROP",
+            LoadStop.appointment_date.isnot(None),
+        ).group_by(LoadStop.load_id).subquery()
         delayed = await db.scalar(
-            select(func.count()).where(
+            select(func.count()).select_from(Load)
+            .join(drop_max, Load.id == drop_max.c.load_id)
+            .where(
                 Load.tenant_id == tenant_id,
                 Load.status.in_([in_transit_status, "arrived_delivery"]),
-                Load.delivery_date < today,
+                drop_max.c.max_d < today,
             )
         )
         delivered_today = await db.scalar(
-            select(func.count()).where(
-                Load.tenant_id == tenant_id,
-                Load.status == "delivered",
-                Load.delivery_date == today,
-            )
+            select(func.count()).select_from(Load)
+            .join(LoadStop, and_(Load.id == LoadStop.load_id, LoadStop.stop_type == "DROP", LoadStop.appointment_date == today))
+            .where(Load.tenant_id == tenant_id, Load.status == "delivered")
         )
+        pickup_in_week = select(Load.id).join(
+            LoadStop, and_(Load.id == LoadStop.load_id, LoadStop.stop_type == "PICKUP", LoadStop.appointment_date >= week_start)
+        ).where(Load.tenant_id == tenant_id)
         miles_this_week = await db.scalar(
-            select(func.coalesce(func.sum(Load.miles), 0)).where(
-                Load.tenant_id == tenant_id,
-                Load.pickup_date >= week_start,
-            )
+            select(func.coalesce(func.sum(Load.miles), 0)).where(Load.tenant_id == tenant_id, Load.id.in_(pickup_in_week))
         )
         revenue_this_week = await db.scalar(
-            select(func.coalesce(func.sum(Load.rate), 0)).where(
-                Load.tenant_id == tenant_id,
-                Load.pickup_date >= week_start,
-            )
+            select(func.coalesce(func.sum(Load.rate), 0)).where(Load.tenant_id == tenant_id, Load.id.in_(pickup_in_week))
         )
         drivers_total = await db.scalar(
             select(func.count()).where(Driver.tenant_id == tenant_id, Driver.is_active == True)
@@ -222,21 +226,41 @@ async def _seed_demo_impl(tenant_id: int, db: AsyncSession):
                 load_number=next_load_number(),
                 broker_id=broker.id,
                 driver_id=drv.id,
-                pickup_date=pickup_d,
-                delivery_date=delivery_d,
-                pickup_location=pickup_loc,
-                delivery_location=delivery_loc,
                 rate=rate,
                 miles=miles,
                 status=status,
             )
             db.add(load)
+            await db.flush()
+
+            pu = LoadStop(
+                tenant_id=tenant_id,
+                load_id=load.id,
+                stop_type="PICKUP",
+                sequence=0,
+                facility_name=pickup_loc,
+                city=pickup_city,
+                state_or_province=pickup_state,
+                appointment_date=pickup_d,
+            )
+            dl = LoadStop(
+                tenant_id=tenant_id,
+                load_id=load.id,
+                stop_type="DROP",
+                sequence=1,
+                facility_name=delivery_loc,
+                city=delivery_city,
+                state_or_province=delivery_state,
+                appointment_date=delivery_d,
+            )
+            db.add(pu)
+            db.add(dl)
 
     # Adjust one load rate so revenue_this_week ≈ 58200
     await db.flush()
     if total_revenue < target_revenue:
         last_load = await db.scalar(select(Load).where(Load.tenant_id == tenant_id).order_by(Load.id.desc()).limit(1))
-        if last_load and last_load.pickup_date >= week_start:
+        if last_load:
             last_load.rate = (last_load.rate or 0) + (target_revenue - total_revenue)
 
     await db.commit()

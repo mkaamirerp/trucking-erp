@@ -3,14 +3,15 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
-from sqlalchemy import select, or_, func
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.deps.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 from app.models.driver import Driver
-from app.models.load import Load
+from app.models.load import Load, LoadStop
 from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate, DriverListOut, driver_row_to_list_out
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -139,18 +140,21 @@ async def driver_summary(
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
 
+    pickup_in_week = select(Load.id).join(
+        LoadStop, and_(Load.id == LoadStop.load_id, LoadStop.stop_type == "PICKUP", LoadStop.appointment_date >= week_start)
+    ).where(Load.tenant_id == tenant_id, Load.driver_id == driver_id)
     miles_week = await db.scalar(
         select(func.coalesce(func.sum(Load.miles), 0)).where(
             Load.tenant_id == tenant_id,
             Load.driver_id == driver_id,
-            Load.pickup_date >= week_start,
+            Load.id.in_(pickup_in_week),
         )
     )
     revenue_week = await db.scalar(
         select(func.coalesce(func.sum(Load.rate), 0)).where(
             Load.tenant_id == tenant_id,
             Load.driver_id == driver_id,
-            Load.pickup_date >= week_start,
+            Load.id.in_(pickup_in_week),
         )
     )
     active_loads = await db.scalar(
@@ -160,17 +164,43 @@ async def driver_summary(
             Load.status.in_(["assigned", "dispatched", "arrived_pickup", "in_transit", "arrived_delivery"]),
         )
     )
-    upcoming = await db.execute(
+    first_pu = select(Load.id, func.min(LoadStop.appointment_date).label("pu_date")).select_from(Load).join(
+        LoadStop, and_(Load.id == LoadStop.load_id, LoadStop.stop_type == "PICKUP")
+    ).where(
+        Load.tenant_id == tenant_id,
+        Load.driver_id == driver_id,
+        ~Load.status.in_(["delivered", "issue_hold"]),
+    ).group_by(Load.id).subquery()
+    upcoming_stmt = (
         select(Load)
-        .where(
-            Load.tenant_id == tenant_id,
-            Load.driver_id == driver_id,
-            ~Load.status.in_(["delivered", "issue_hold"]),
-            Load.pickup_date >= today,
-        )
-        .order_by(Load.pickup_date.asc())
+        .options(selectinload(Load.stops))
+        .join(first_pu, Load.id == first_pu.c.id)
+        .where(first_pu.c.pu_date >= today)
+        .order_by(first_pu.c.pu_date.asc())
         .limit(10)
     )
+    upcoming_result = await db.execute(upcoming_stmt)
+    upcoming_loads = list(upcoming_result.scalars().unique().all())
+
+    def _pickup_display(load):
+        pu = next((s for s in load.stops if s.stop_type.upper() == "PICKUP"), None)
+        return pu.appointment_date if pu else None
+
+    def _delivery_display(load):
+        dr = next((s for s in reversed(load.stops) if s.stop_type.upper() == "DROP"), None)
+        return dr.appointment_date if dr else None
+
+    def _pickup_loc(load):
+        pu = next((s for s in load.stops if s.stop_type.upper() == "PICKUP"), None)
+        if pu and (pu.facility_name or pu.city):
+            return pu.facility_name or f"{pu.city or ''}, {pu.state_or_province or ''}".strip(", ")
+        return None
+
+    def _delivery_loc(load):
+        dr = next((s for s in reversed(load.stops) if s.stop_type.upper() == "DROP"), None)
+        if dr and (dr.facility_name or dr.city):
+            return dr.facility_name or f"{dr.city or ''}, {dr.state_or_province or ''}".strip(", ")
+        return None
 
     driver_data = {
         "id": driver.id,
@@ -180,7 +210,7 @@ async def driver_summary(
         "email": driver.email,
         "license_number": driver.license_number,
         "license_expiry": driver.license_expiry_date,
-        "notes": None,  # placeholder; extend when notes field exists
+        "notes": None,
         "is_active": driver.is_active,
     }
 
@@ -188,13 +218,13 @@ async def driver_summary(
         {
             "id": l.id,
             "load_number": l.load_number,
-            "pickup_date": l.pickup_date,
-            "delivery_date": l.delivery_date,
-            "pickup_location": l.pickup_location,
-            "delivery_location": l.delivery_location,
+            "pickup_date": _pickup_display(l),
+            "delivery_date": _delivery_display(l),
+            "pickup_location": _pickup_loc(l),
+            "delivery_location": _delivery_loc(l),
             "status": l.status,
         }
-        for l in upcoming.scalars().all()
+        for l in upcoming_loads
     ]
 
     return {

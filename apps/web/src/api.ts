@@ -489,6 +489,7 @@ export async function listLoads(params: {
   trailer_id?: number;
   pickup_start?: string;
   pickup_end?: string;
+  search?: string;
   page?: number;
   size?: number;
 } = {}) {
@@ -500,6 +501,7 @@ export async function listLoads(params: {
   if (params.trailer_id) url.searchParams.set("trailer_id", String(params.trailer_id));
   if (params.pickup_start) url.searchParams.set("pickup_start", params.pickup_start);
   if (params.pickup_end) url.searchParams.set("pickup_end", params.pickup_end);
+  if (params.search && params.search.trim()) url.searchParams.set("search", params.search.trim());
   if (params.page) url.searchParams.set("page", String(params.page));
   if (params.size) url.searchParams.set("size", String(params.size));
   const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
@@ -1160,6 +1162,204 @@ export async function reactivateTenantUser(userId: string): Promise<{ ok: boolea
   return handle<{ ok: boolean; status: string }>(res);
 }
 
+// ---- Tenant admin: email config (primary mailbox) ----
+
+export type EmailConfig = {
+  id: number;
+  tenant_id: number;
+  email_address: string;
+  display_name: string | null;
+  mailbox_type: string;
+  provider_name: string | null;
+  connection_mode: string;
+  is_primary: boolean;
+  is_active: boolean;
+  inbound_enabled: boolean;
+  outbound_enabled: boolean;
+  status: string;
+  imap_host: string | null;
+  imap_port: number | null;
+  imap_username: string | null;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_username: string | null;
+  use_ssl: boolean | null;
+  use_tls: boolean | null;
+  oauth_provider: string | null;
+  oauth_account_email: string | null;
+  last_tested_at: string | null;
+  last_test_status: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmailConfigUpdatePayload = {
+  email_address: string;
+  display_name?: string | null;
+  mailbox_type?: string;
+  provider_name?: string | null;
+  connection_mode?: string;
+  inbound_enabled?: boolean;
+  outbound_enabled?: boolean;
+  imap_host?: string | null;
+  imap_port?: number | null;
+  imap_username?: string | null;
+  imap_password?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number | null;
+  smtp_username?: string | null;
+  smtp_password?: string | null;
+  use_ssl?: boolean | null;
+  use_tls?: boolean | null;
+  oauth_provider?: string | null;
+  oauth_account_email?: string | null;
+  oauth_access_token?: string | null;
+  oauth_refresh_token?: string | null;
+};
+
+export type InboxThreadListItem = {
+  id: number;
+  provider: string;
+  subject: string | null;
+  participants_json: unknown;
+  snippet: string | null;
+  last_message_at: string | null;
+  message_count: number;
+  unread_count: number;
+  linked_load_id: number | null;
+  intake_bucket: string;
+  confidence_level: string | null;
+  confidence_score: number | null;
+  routing_reason: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  linked_load_number?: string | null;
+  linked_broker_name?: string | null;
+  pickup_delivery_summary?: string | null;
+};
+
+export type InboxThreadDetail = InboxThreadListItem;
+
+export type InboxMessageItem = {
+  id: number;
+  thread_id: number;
+  provider: string;
+  external_message_id: string;
+  external_thread_id: string;
+  direction: string | null;
+  from_email: string | null;
+  to_json: unknown;
+  cc_json: unknown;
+  bcc_json: unknown;
+  subject: string | null;
+  sent_at: string | null;
+  received_at: string | null;
+  snippet: string | null;
+  body_text: string | null;
+  body_html: string | null;
+  has_attachments: boolean;
+  extraction_status: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InboxThreadListResponse = {
+  items: InboxThreadListItem[];
+  page: number;
+  size: number;
+  total: number;
+};
+
+export async function getPrimaryEmailConfig(): Promise<EmailConfig | null> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(typeof data?.detail === "string" ? data.detail : "Failed to load email config");
+  return data as EmailConfig | null;
+}
+
+export async function updatePrimaryEmailConfig(payload: EmailConfigUpdatePayload): Promise<EmailConfig> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<EmailConfig>(res);
+}
+
+export async function testPrimaryEmailConfig(): Promise<{ ok: boolean; status: string; message?: string; last_tested_at?: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary/test`, { method: "POST" });
+  return handle<{ ok: boolean; status: string; message?: string; last_tested_at?: string }>(res);
+}
+
+export async function disconnectPrimaryEmailConfig(): Promise<{ ok: boolean; message: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary/disconnect`, { method: "POST" });
+  return handle<{ ok: boolean; message: string }>(res);
+}
+
+export async function listEmailThreads(params?: {
+  status?: string;
+  provider?: string;
+  intake_bucket?: string;
+  page?: number;
+  size?: number;
+}): Promise<InboxThreadListResponse> {
+  const usp = new URLSearchParams();
+  if (params?.status) usp.set("status", params.status);
+  if (params?.provider) usp.set("provider", params.provider);
+  if (params?.intake_bucket) usp.set("intake_bucket", params.intake_bucket);
+  if (params?.page) usp.set("page", String(params.page));
+  if (params?.size) usp.set("size", String(params.size));
+  const q = usp.toString();
+  const res = await fetchWithTenant(`${API_BASE}/email-threads${q ? `?${q}` : ""}`);
+  return handle<InboxThreadListResponse>(res);
+}
+
+export async function getEmailThread(threadId: number): Promise<InboxThreadDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}`);
+  return handle<InboxThreadDetail>(res);
+}
+
+export async function getEmailThreadMessages(threadId: number): Promise<InboxMessageItem[]> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/messages`);
+  return handle<InboxMessageItem[]>(res);
+}
+
+export async function disregardEmailThread(threadId: number): Promise<InboxThreadDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/disregard`, { method: "POST" });
+  return handle<InboxThreadDetail>(res);
+}
+
+export type EmailThreadActionLoadSummary = {
+  id: number;
+  load_number: string;
+  status: string;
+};
+
+export type EmailThreadDraftOrLinkResult = {
+  thread: InboxThreadDetail;
+  load: EmailThreadActionLoadSummary;
+};
+
+export async function createDraftLoadFromEmailThread(threadId: number): Promise<EmailThreadDraftOrLinkResult> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/create-draft-load`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return handle<EmailThreadDraftOrLinkResult>(res);
+}
+
+export async function linkLoadToEmailThread(threadId: number, loadId: number): Promise<EmailThreadDraftOrLinkResult> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/link-load`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ load_id: loadId }),
+  });
+  return handle<EmailThreadDraftOrLinkResult>(res);
+}
+
 // Tenant-admin password reset removed: password management remains platform-side.
 
 export async function acceptInvite(payload: { token: string; new_password: string }): Promise<{
@@ -1405,6 +1605,8 @@ export type Broker = {
 export type Load = {
   id: number;
   load_number: string;
+  broker_load_reference?: string | null;
+  broker_name_snapshot?: string | null;
   broker_id?: number | null;
   driver_id?: number | null;
   truck_id?: number | null;

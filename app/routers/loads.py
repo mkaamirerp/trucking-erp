@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,7 +21,8 @@ async def create_load(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    return await loads_service.create_load(db, tenant_id, payload)
+    load = await loads_service.create_load(db, tenant_id, payload)
+    return LoadResponse.model_validate(load)
 
 
 @router.get("", response_model=dict)
@@ -35,8 +35,7 @@ async def list_loads(
     broker_id: int | None = Query(None),
     truck_id: int | None = Query(None),
     trailer_id: int | None = Query(None),
-    pickup_start: date | None = Query(None),
-    pickup_end: date | None = Query(None),
+    search: str | None = Query(None, max_length=120),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=200),
 ):
@@ -48,8 +47,7 @@ async def list_loads(
         broker_id=broker_id,
         truck_id=truck_id,
         trailer_id=trailer_id,
-        pickup_start=pickup_start,
-        pickup_end=pickup_end,
+        search=search,
         page=page,
         size=size,
     )
@@ -58,7 +56,7 @@ async def list_loads(
 
 
 @router.get("/{load_id}", response_model=LoadResponse)
-async def get_load(
+async def get_load_detail(
     load_id: int,
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
@@ -67,7 +65,7 @@ async def get_load(
     load = await loads_service.get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
-    return load
+    return LoadResponse.model_validate(load)
 
 
 @router.patch("/{load_id}", response_model=LoadResponse)
@@ -78,7 +76,19 @@ async def update_load(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    return await loads_service.update_load(db, tenant_id, load_id, payload)
+    load = await loads_service.update_load(db, tenant_id, load_id, payload)
+    return LoadResponse.model_validate(load)
+
+
+@router.post("/{load_id}/mark-ready", response_model=LoadResponse)
+async def mark_load_ready(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    load = await loads_service.mark_load_ready(db, tenant_id, load_id)
+    return LoadResponse.model_validate(load)
 
 
 @router.get("/{load_id}/notes", response_model=list)

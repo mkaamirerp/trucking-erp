@@ -14,6 +14,31 @@ from app.models.platform import PlatformTenant
 _ENGINE_CACHE: Dict[str, object] = {}
 
 
+async def open_tenant_session_by_id(tenant_id: int) -> AsyncGenerator[AsyncSession, None]:
+    """Open tenant DB session by tenant_id. Use when request.state.tenant_id is not yet set (e.g. OAuth callback)."""
+    async with AsyncSessionLocal() as platform_db:
+        tenant = await platform_db.scalar(
+            select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)).limit(1)
+        )
+    if not tenant or tenant.status != "ACTIVE" or tenant.db_status != "READY":
+        raise HTTPException(status_code=403, detail="Tenant inactive or not found")
+    if not tenant.db_name:
+        raise HTTPException(status_code=403, detail="Tenant DB not provisioned")
+    template = getattr(settings, "postgres_admin_url", None) or settings.database_url
+    if not template:
+        raise HTTPException(status_code=503, detail="DB config missing")
+    tenant_url = _swap_db(to_async_pg_url(template), tenant.db_name)
+    if "localhost" in tenant_url or "127.0.0.1" in tenant_url:
+        raise RuntimeError(f"Tenant DB URL resolved to localhost: {tenant_url}")
+    engine = _ENGINE_CACHE.get(tenant_url)
+    if engine is None:
+        engine = create_async_engine(tenant_url, pool_pre_ping=True)
+        _ENGINE_CACHE[tenant_url] = engine
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with SessionLocal() as session:
+        yield session
+
+
 def _swap_db(url: str, db_name: str) -> str:
     """
     Swap the database name portion of a URL, keeping scheme/creds/host/port intact.

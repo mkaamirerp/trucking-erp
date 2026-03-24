@@ -29,8 +29,27 @@ export function MeProvider({ children }: { children: ReactNode }) {
   const isPublicPath = PUBLIC_PATHS.some((p) => p === location.pathname || location.pathname.startsWith(p + "/"));
   // Only fetch /me after auth bootstrap completes and we're authenticated; never during logout
   const enabled = !isPublicPath && authReady && isValid && !isLoggingOut;
-  const { data, loading, error } = useFetch<MeResponse>("/api/v1/me", [], enabled);
-  return <MeContext.Provider value={{ me: data, loading, error }}>{children}</MeContext.Provider>;
+  // Use auth/me (authoritative DB-backed role) so AdminRouteGuard sees correct roles on hard refresh
+  const { data, loading, error } = useFetch<Record<string, unknown>>("/api/v1/auth/me", [], enabled);
+  // Normalize auth/me response (role) to MeResponse (roles array)
+  const me: MeResponse | null = data
+    ? {
+        user_id: (data.user_id as number) ?? null,
+        tenant_id: (data.tenant_id as number) ?? 0,
+        roles: Array.isArray(data.roles)
+          ? (data.roles as string[])
+          : data.role
+            ? [String(data.role)]
+            : [],
+        requires_account_setup: data.requires_account_setup as boolean | undefined,
+        account_setup_missing: (data.account_setup_missing as string[] | undefined) ?? undefined,
+        country_code: (data.country_code as string | null) ?? undefined,
+        tenant_slug: (data.tenant_slug as string | null) ?? undefined,
+      }
+    : null;
+  // While disabled (auth not ready), report loading so guards don't redirect on me=null
+  const effectiveLoading = !enabled || loading;
+  return <MeContext.Provider value={{ me, loading: effectiveLoading, error }}>{children}</MeContext.Provider>;
 }
 
 export function useMe() {

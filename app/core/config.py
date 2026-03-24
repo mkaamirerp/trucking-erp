@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     jwt_same_site: str = "lax"
     base_domain: str = "truckerp.me"
 
+    # Integration secrets (email mailbox OAuth/IMAP credentials in platform DB)
+    integration_secret_encryption_key: str | None = None
+
+    # Google OAuth for Gmail (fixed platform callback; no wildcard redirect URIs)
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    gmail_oauth_callback_url: str | None = None  # e.g. https://truckerp.me/api/v1/admin/email-config/gmail/callback
+    gmail_oauth_return_path: str = "/admin/settings/email"  # frontend path for post-OAuth redirect
+
     # Storage (S3 or local)
     storage_provider: str = "local"
     aws_region: str = "us-east-1"

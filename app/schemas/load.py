@@ -1,35 +1,98 @@
-"""Load schemas with dispatch status model (LOCKED)."""
+"""Load schemas. V1: draft, ready; operational: unassigned, assigned, dispatched, etc."""
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.broker import BrokerContactOut
+
 DISPATCH_STATUSES = {
+    "draft", "ready",
     "unassigned", "assigned", "dispatched", "arrived_pickup", "in_transit",
     "arrived_delivery", "delivered", "issue_hold",
 }
 ALLOWED_STATUSES = DISPATCH_STATUSES
 
 
+# --- LoadStop ---
+
+class LoadStopBase(BaseModel):
+    stop_type: str = Field(..., max_length=20)
+    sequence: int = Field(default=0, ge=0)
+    facility_name: Optional[str] = Field(default=None, max_length=255)
+    street: Optional[str] = Field(default=None, max_length=255)
+    city: Optional[str] = Field(default=None, max_length=100)
+    state_or_province: Optional[str] = Field(default=None, max_length=50)
+    postal_code: Optional[str] = Field(default=None, max_length=20)
+    country: Optional[str] = Field(default=None, max_length=2)
+    reference_number: Optional[str] = Field(default=None, max_length=100)
+    appointment_type: Optional[str] = Field(default=None, max_length=50)
+    appointment_date: Optional[date] = None
+    appointment_time_text: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = None
+    commodity_notes: Optional[str] = None
+
+
+class LoadStopCreate(LoadStopBase):
+    pass
+
+
+class LoadStopUpdate(BaseModel):
+    stop_type: Optional[str] = Field(default=None, max_length=20)
+    sequence: Optional[int] = Field(default=None, ge=0)
+    facility_name: Optional[str] = Field(default=None, max_length=255)
+    street: Optional[str] = Field(default=None, max_length=255)
+    city: Optional[str] = Field(default=None, max_length=100)
+    state_or_province: Optional[str] = Field(default=None, max_length=50)
+    postal_code: Optional[str] = Field(default=None, max_length=20)
+    country: Optional[str] = Field(default=None, max_length=2)
+    reference_number: Optional[str] = Field(default=None, max_length=100)
+    appointment_type: Optional[str] = Field(default=None, max_length=50)
+    appointment_date: Optional[date] = None
+    appointment_time_text: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = None
+    commodity_notes: Optional[str] = None
+
+
+class LoadStopOut(LoadStopBase):
+    id: int
+    load_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Load ---
+
 class LoadBase(BaseModel):
-    load_number: str = Field(..., max_length=50)
+    load_number: Optional[str] = Field(default=None, max_length=50)
     broker_id: Optional[int] = None
+    broker_contact_id: Optional[int] = None
+    broker_name_snapshot: Optional[str] = Field(default=None, max_length=255)
+    broker_contact_name_snapshot: Optional[str] = Field(default=None, max_length=255)
+    broker_contact_phone_snapshot: Optional[str] = Field(default=None, max_length=50)
+    broker_contact_extension_snapshot: Optional[str] = Field(default=None, max_length=20)
+    broker_contact_email_snapshot: Optional[str] = Field(default=None, max_length=255)
+    broker_load_reference: Optional[str] = Field(default=None, max_length=100)
     driver_id: Optional[int] = None
     truck_id: Optional[int] = None
     trailer_id: Optional[int] = None
-    pickup_date: Optional[date] = None
-    delivery_date: Optional[date] = None
-    pickup_time: Optional[datetime] = None
-    delivery_time: Optional[datetime] = None
-    pickup_location: Optional[str] = Field(default=None, max_length=255)
-    delivery_location: Optional[str] = Field(default=None, max_length=255)
+    mode: Optional[str] = Field(default=None, max_length=50)
     equipment_type: Optional[str] = Field(default=None, max_length=50)
+    trailer_type: Optional[str] = Field(default=None, max_length=50)
+    trailer_size: Optional[str] = Field(default=None, max_length=20)
+    commodity: Optional[str] = Field(default=None, max_length=255)
+    estimated_weight: Optional[int] = Field(default=None, ge=0)
+    hazmat_flag: Optional[bool] = False
+    temperature_requirement: Optional[str] = Field(default=None, max_length=50)
+    pallet_case_count: Optional[str] = Field(default=None, max_length=50)
+    internal_notes: Optional[str] = None
     rate: Optional[float] = Field(default=None, ge=0)
     customer_rate: Optional[float] = Field(default=None, ge=0)
     miles: Optional[int] = Field(default=None, ge=0)
-    status: str = Field(default="unassigned", max_length=32)
+    status: str = Field(default="draft", max_length=32)
 
     @field_validator("status")
     @classmethod
@@ -41,26 +104,37 @@ class LoadBase(BaseModel):
 
 
 class LoadCreate(LoadBase):
-    pass
+    stops: Optional[Sequence[LoadStopCreate]] = None
 
 
 class LoadUpdate(BaseModel):
     load_number: Optional[str] = Field(default=None, max_length=50)
     broker_id: Optional[int] = None
+    broker_contact_id: Optional[int] = None
+    broker_name_snapshot: Optional[str] = Field(default=None, max_length=255)
+    broker_contact_name_snapshot: Optional[str] = Field(default=None, max_length=255)
+    broker_contact_phone_snapshot: Optional[str] = Field(default=None, max_length=50)
+    broker_contact_extension_snapshot: Optional[str] = Field(default=None, max_length=20)
+    broker_contact_email_snapshot: Optional[str] = Field(default=None, max_length=255)
+    broker_load_reference: Optional[str] = Field(default=None, max_length=100)
     driver_id: Optional[int] = None
     truck_id: Optional[int] = None
     trailer_id: Optional[int] = None
-    pickup_date: Optional[date] = None
-    delivery_date: Optional[date] = None
-    pickup_time: Optional[datetime] = None
-    delivery_time: Optional[datetime] = None
-    pickup_location: Optional[str] = Field(default=None, max_length=255)
-    delivery_location: Optional[str] = Field(default=None, max_length=255)
+    mode: Optional[str] = Field(default=None, max_length=50)
     equipment_type: Optional[str] = Field(default=None, max_length=50)
+    trailer_type: Optional[str] = Field(default=None, max_length=50)
+    trailer_size: Optional[str] = Field(default=None, max_length=20)
+    commodity: Optional[str] = Field(default=None, max_length=255)
+    estimated_weight: Optional[int] = Field(default=None, ge=0)
+    hazmat_flag: Optional[bool] = None
+    temperature_requirement: Optional[str] = Field(default=None, max_length=50)
+    pallet_case_count: Optional[str] = Field(default=None, max_length=50)
+    internal_notes: Optional[str] = None
     rate: Optional[float] = Field(default=None, ge=0)
     customer_rate: Optional[float] = Field(default=None, ge=0)
     miles: Optional[int] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, max_length=32)
+    stops: Optional[Sequence[LoadStopCreate]] = None
 
     @field_validator("status")
     @classmethod
@@ -115,8 +189,10 @@ class LoadResponse(LoadBase):
     id: int
     driver: Optional[NestedDriver] = None
     broker: Optional[NestedBroker] = None
+    broker_contact: Optional[BrokerContactOut] = None
     truck: Optional[NestedTruck] = None
     trailer: Optional[NestedTrailer] = None
+    stops: Optional[list[LoadStopOut]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
