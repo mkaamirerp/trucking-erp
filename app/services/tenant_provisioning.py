@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from fastapi import HTTPException, status
@@ -125,7 +125,7 @@ async def provision_tenant_db(
     tenant.db_user = app_user
     await db.flush()
 
-    tenant_db_url = _ensure_asyncpg_url(_build_tenant_db_url(admin_url, db_name, app_user, app_pass))
+    tenant_db_url = to_async_pg_url(_build_tenant_db_url(admin_url, db_name, app_user, app_pass))
 
     try:
         await _create_database_if_not_exists(admin_url, db_name)
