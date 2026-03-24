@@ -70,12 +70,14 @@ Then retest.
 From now on, **always** use `scripts/db_run.sh` for migrations:
 
 ```bash
-# Platform migrations
-./scripts/db_run.sh 'alembic -c alembic.ini upgrade head'
+# Platform DB (control plane) — alembic_platform.ini (same config the API runs at startup)
+./scripts/db_run.sh 'alembic -c alembic_platform.ini upgrade head'
 
-# Tenant migrations (example for tenant_demo)
+# Tenant DB (per-tenant database) — alembic_tenant.ini; example URL for tenant_demo
 ./scripts/db_run.sh 'ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" alembic -c alembic_tenant.ini upgrade head'
 ```
+
+**Legacy:** Root `alembic.ini` / `alembic/versions/` is not the routine platform path. Use it only if a recovery document explicitly tells you to. Normal platform work: `alembic_platform.ini`.
 
 ## What Changed
 
@@ -98,7 +100,7 @@ From now on, **always** use `scripts/db_run.sh` for migrations:
 - [ ] SSM parameter exists and has Len > 0
 - [ ] API container restarts successfully (no FATAL errors)
 - [ ] `./scripts/db_run.sh 'PGPASSWORD="${POSTGRES_PASSWORD}" psql ...'` returns `?column? | 1`
-- [ ] Platform migrations work: `./scripts/db_run.sh 'alembic -c alembic.ini upgrade head'`
+- [ ] Platform migrations work: `./scripts/db_run.sh 'alembic -c alembic_platform.ini upgrade head'`
 - [ ] Tenant migrations work: `./scripts/db_run.sh 'ALEMBIC_TENANT_DATABASE_URL="..." alembic -c alembic_tenant.ini upgrade head'`
 
 ## The Rule (Remember Forever)
