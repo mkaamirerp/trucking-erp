@@ -147,6 +147,28 @@ export async function checkSlugAvailability(slug: string) {
   return handle<SlugAvailabilityResponse>(res);
 }
 
+export async function checkSignupEmailAvailability(email: string) {
+  const url = new URL(`${PUBLIC_API_BASE}/check-signup-email`, window.location.origin);
+  url.searchParams.set("email", email.trim());
+  const res = await fetchPublic(url.toString().replace(window.location.origin, ""));
+  if (res.status === 400) {
+    const text = await res.text();
+    throw new Error(text || "Invalid email");
+  }
+  return handle<SignupFieldAvailabilityResponse>(res);
+}
+
+export async function checkSignupPhoneAvailability(phone: string) {
+  const url = new URL(`${PUBLIC_API_BASE}/check-signup-phone`, window.location.origin);
+  url.searchParams.set("phone", phone);
+  const res = await fetchPublic(url.toString().replace(window.location.origin, ""));
+  if (res.status === 400) {
+    const text = await res.text();
+    throw new Error(text || "Invalid phone");
+  }
+  return handle<SignupFieldAvailabilityResponse>(res);
+}
+
 export async function signup(payload: SignupPayload) {
   // Send form payload with only key renames for backend: slug → workspace_slug, company_name → company_legal_name. Pass address through as the form sends it.
   const body = {
@@ -1488,6 +1510,11 @@ export type SlugAvailabilityResponse = {
   available: boolean;
   slug: string;
   suggestions?: string[] | null;
+};
+
+export type SignupFieldAvailabilityResponse = {
+  available: boolean;
+  normalized: string;
 };
 
 export type SignupAddress = {

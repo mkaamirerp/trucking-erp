@@ -13,6 +13,13 @@ class SlugAvailabilityResponse(BaseModel):
     error: Optional[str] = None
 
 
+class SignupFieldAvailabilityResponse(BaseModel):
+    """Public pre-submit signup checks. Intentionally reveals whether email/phone are already registered (UX)."""
+
+    available: bool
+    normalized: str
+
+
 # ---- Single-step signup (no OTP). Creates workspace, provisions DB, logs user in. ----
 # Strict input rules: names required & trimmed, email RFC-valid, phone 7–15 digits, password min 12 (NIST).
 

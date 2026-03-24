@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, File, UploadFile, Response
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -35,6 +35,7 @@ from app.schemas.signup import (
     SignupRequest,
     SignupResponse,
     SlugAvailabilityResponse,
+    SignupFieldAvailabilityResponse,
     SetupPrefillResponse,
     ResendOTPRequest,
     VerifyOTPRequest,
@@ -161,6 +162,36 @@ async def check_slug_availability(slug: str, db: AsyncSession = Depends(get_db))
             suggestions=None,
             error="temporary_check_failure",
         )
+
+
+@router.get("/check-signup-email", response_model=SignupFieldAvailabilityResponse)
+async def check_signup_email_availability(email: str, db: AsyncSession = Depends(get_db)):
+    """
+    Pre-submit UX: reports whether the email is already registered.
+    Does not change POST /signup anti-enumeration behavior.
+    """
+    email_lower = (email or "").strip().lower()
+    if not email_lower or "@" not in email_lower or len(email_lower) > 255:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email")
+    existing = await db.scalar(select(PlatformUser.id).where(PlatformUser.email == email_lower))
+    return SignupFieldAvailabilityResponse(available=existing is None, normalized=email_lower)
+
+
+@router.get("/check-signup-phone", response_model=SignupFieldAvailabilityResponse)
+async def check_signup_phone_availability(phone: str, db: AsyncSession = Depends(get_db)):
+    """
+    Pre-submit UX: reports whether the normalized phone digits are already used on a platform account.
+    Comparison matches signup storage: digits-only equality against existing platform_users.phone.
+    """
+    digits = _normalize_phone_digits(phone or "")
+    if len(digits) < 7 or len(digits) > 15:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid phone")
+    normalized_phone = func.nullif(
+        func.regexp_replace(func.coalesce(PlatformUser.phone, ""), "[^0-9]", "", "g"),
+        "",
+    )
+    existing = await db.scalar(select(PlatformUser.id).where(normalized_phone == digits))
+    return SignupFieldAvailabilityResponse(available=existing is None, normalized=digits)
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
