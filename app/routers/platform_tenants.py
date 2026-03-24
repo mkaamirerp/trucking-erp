@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import re
-from pathlib import Path
 from datetime import datetime, timezone
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db_url import to_async_pg_url
 
@@ -18,6 +15,11 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.platform import PlatformTenant
 from app.schemas.platform import PlatformTenantOut
+from app.services.tenant_provisioning import (
+    _build_tenant_db_url,
+    _create_database_if_not_exists,
+    _run_tenant_migrations,
+)
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform-tenants"])
 logger = logging.getLogger(__name__)
@@ -194,52 +196,13 @@ async def retry_provision(tenant_id: int, db: AsyncSession = Depends(get_db), _:
     return await provision_tenant(tenant_id, db)
 
 
-# ---- helpers ----
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-async def _create_database_if_not_exists(admin_url: str, db_name: str) -> None:
-    engine = create_async_engine(to_async_pg_url(admin_url), isolation_level="AUTOCOMMIT")
-    async with engine.connect() as conn:
-        try:
-            await conn.execute(text(f'CREATE DATABASE "{db_name}"'))
-        except Exception as exc:
-            # If DB already exists, continue; otherwise re-raise
-            if "already exists" not in str(exc):
-                raise
-    await engine.dispose()
-
-
-async def _run_tenant_migrations(tenant_db_url: str, target_rev: str) -> None:
-    # Run alembic upgrade for tenant schema only (targeting configured tenant head)
-    # MUST set ALEMBIC_TENANT_DATABASE_URL explicitly so tenant env.py connects to the
-    # correct tenant DB. If unset or pointing at platform DB, you get "Can't locate revision"
-    # (e.g. a9f1b2c3d4e5 is platform-only, not in alembic_tenant/versions).
-    env = os.environ.copy()
-    env["ALEMBIC_TENANT_DATABASE_URL"] = tenant_db_url
-    env["DATABASE_URL"] = tenant_db_url  # backward compat if referenced
-    env["TENANT_DATABASE_URL"] = tenant_db_url
-    cmd = ["python", "-m", "alembic", "-c", "alembic_tenant.ini", "upgrade", target_rev]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, cwd=str(PROJECT_ROOT), env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(f"Alembic failed: {stderr.decode().strip() or stdout.decode().strip()}")
+# ---- helpers (router-local; DB URL / migrate / create DB shared with signup via tenant_provisioning) ----
 
 
 def _sanitize_db_name(slug: str) -> str:
     name = slug.lower().replace("-", "_")
     name = re.sub(r"[^a-z0-9_]", "", name)
     return name[:50]
-
-
-def _build_tenant_db_url(admin_url: str, db_name: str, user: str, password: str) -> str:
-    parsed = urlparse(admin_url)
-    host = parsed.hostname or "localhost"
-    port = f":{parsed.port}" if parsed.port else ""
-    netloc = f"{user}:{password}@{host}{port}"
-    return urlunparse(parsed._replace(netloc=netloc, path=f"/{db_name}"))
 
 
 def _provision_response(tenant: PlatformTenant) -> dict:
