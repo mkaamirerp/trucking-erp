@@ -7,18 +7,39 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import selectinload
-from app.utils.jwt_auth import TokenType, create_access_token, create_refresh_token, decode_token
+from app.utils.jwt_auth import TokenType, create_access_token, create_refresh_token, decode_token, extract_sv
 from app.core.config import settings
-from app.deps.auth import get_current_user, CurrentUser
-from app.models.platform import PlatformTenant, PlatformTenantMember, PlatformUser, TenantMembership, UserInvite
+from app.deps.auth import get_current_user, CurrentUser, get_current_platform_user
+from app.deps.tenant_db import open_tenant_session_by_id
+from app.models.platform import (
+    PlatformTenant,
+    PlatformTenantMember,
+    PlatformUser,
+    TenantMembership,
+    TenantStatus,
+    UserInvite,
+    PlatformTenantUserMap,
+)
+from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember
 from app.routers.me import _account_setup_missing
 from app.core.database import get_db
+from app.utils.auth_identity import normalize_auth_email
 from app.utils.password import verify_password, hash_password
 from app.deps.tenant import require_tenant
+from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
+from app.services.tenant_auth_dual_write import (
+    apply_password_and_session_version_platform_primary,
+    apply_password_and_session_version_tenant_primary,
+    mirror_reset_tokens_to_platform,
+    mirror_reset_tokens_to_tenant,
+)
 from app.utils.email import send_password_reset_email
-from app.utils.rate_limit import rate_limit_forgot_password
+from app.utils.rate_limit import check_create_workspace_rate_limits, rate_limit_forgot_password
+from app.utils.slug import is_slug_available
+from app.schemas.signup import CreateWorkspaceRequest, VerifyOTPResponse, _normalize_phone_digits
+from app.services.workspace_bootstrap import provision_new_workspace_for_platform_user
 from pydantic import BaseModel, EmailStr, Field
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
@@ -65,23 +86,72 @@ async def refresh(request: Request, response: Response, db=Depends(get_db)):
     roles = payload.get("roles") or []
     if not user_id or not tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    sv = extract_sv(payload)
+    if sv is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
-    # Re-validate user and membership status (block deactivated users from refreshing)
-    user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(user_id)))
-    if not user or getattr(user, "status", "ACTIVE") != "ACTIVE":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
-    tm = await db.scalar(
-        select(TenantMembership).where(
-            TenantMembership.user_id == user.id,
-            TenantMembership.tenant_id == int(tenant_id),
-            TenantMembership.status == "active",
-        ).limit(1)
-    )
-    if not tm:
+    tenant_row = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)))
+    if not tenant_row:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 
-    access = create_access_token(user_id=user_id, tenant_id=tenant_id, tenant_slug=tenant_slug, roles=roles)
-    new_refresh = create_refresh_token(user_id=user_id, tenant_id=tenant_id, tenant_slug=tenant_slug, roles=roles)
+    mode = getattr(tenant_row, "tenant_auth_mode", None) or "platform"
+
+    if tenant_uses_tenant_db_auth(mode):
+        try:
+            tu_id = int(str(user_id))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        async for tdb in open_tenant_session_by_id(int(tenant_id)):
+            tu = await tdb.scalar(
+                select(TenantUser).where(TenantUser.tenant_id == int(tenant_id), TenantUser.id == tu_id)
+            )
+            if not tu or (tu.status or "").upper() != "ACTIVE":
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+            if int(getattr(tu, "session_version", 1) or 1) != int(sv):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+            twm = await tdb.scalar(
+                select(TenantWorkspaceMember).where(
+                    TenantWorkspaceMember.tenant_id == int(tenant_id),
+                    TenantWorkspaceMember.tenant_user_id == tu_id,
+                    TenantWorkspaceMember.status == "active",
+                )
+            )
+            if not twm:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+            if twm.role:
+                roles = [twm.role]
+            sub = tu.id
+            sv_out = int(tu.session_version)
+            break
+
+        access = create_access_token(
+            user_id=sub, tenant_id=int(tenant_id), tenant_slug=tenant_slug, roles=roles, sv=sv_out
+        )
+        new_refresh = create_refresh_token(
+            user_id=sub, tenant_id=int(tenant_id), tenant_slug=tenant_slug, roles=roles, sv=sv_out
+        )
+    else:
+        user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(user_id)))
+        if not user or getattr(user, "status", "ACTIVE") != "ACTIVE":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        if int(getattr(user, "session_version", 1) or 1) != int(sv):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        tm = await db.scalar(
+            select(TenantMembership).where(
+                TenantMembership.user_id == user.id,
+                TenantMembership.tenant_id == int(tenant_id),
+                TenantMembership.status == "active",
+            ).limit(1)
+        )
+        if not tm:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        sv_out = int(user.session_version)
+        access = create_access_token(
+            user_id=user.id, tenant_id=tenant_id, tenant_slug=tenant_slug, roles=roles, sv=sv_out
+        )
+        new_refresh = create_refresh_token(
+            user_id=user.id, tenant_id=tenant_id, tenant_slug=tenant_slug, roles=roles, sv=sv_out
+        )
 
     response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
     response.set_cookie("refresh_token", new_refresh, **_cookie_params(TokenType.REFRESH))
@@ -136,7 +206,7 @@ async def auth_me(current: CurrentUser = Depends(get_current_user), db=Depends(g
                 "country": p.address_country,
             },
         }
-    return {
+    out = {
         "user_id": current.user.id,
         "email": current.user.email,
         "username": getattr(current.user, "username", None) or None,
@@ -151,7 +221,11 @@ async def auth_me(current: CurrentUser = Depends(get_current_user), db=Depends(g
         "account_setup_missing": missing_fields,
         "country_code": country,
         "company_profile": company_profile,
+        "tenant_auth_mode": getattr(tenant, "tenant_auth_mode", None) or "platform",
     }
+    if current.tenant_user is not None:
+        out["tenant_local_user_id"] = int(current.tenant_user.id)
+    return out
 
 
 class LoginRequest(BaseModel):
@@ -180,28 +254,107 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
         "message": "If an account exists with that email, you will receive a password reset link shortly.",
     }
     try:
-        await rate_limit_forgot_password(request, payload.email.strip().lower())
+        email_norm = normalize_auth_email(payload.email)
+        await rate_limit_forgot_password(request, email_norm)
         tenant_id = getattr(request.state, "tenant_id", None)
-        user: PlatformUser | None = await db.scalar(
-            select(PlatformUser).where(PlatformUser.email == payload.email.strip().lower())
-        )
-        if not user:
-            return ok_msg
+        tenant_row = None
         if tenant_id is not None:
-            membership = await db.scalar(
-                select(PlatformTenantMember).where(
-                    PlatformTenantMember.platform_user_id == user.id,
-                    PlatformTenantMember.tenant_id == tenant_id,
-                ).limit(1)
-            )
-            if not membership:
-                return ok_msg
+            tenant_row = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)))
+
         raw_token = secrets.token_urlsafe(32)
         token_hash = _hash_reset_token(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
-        user.password_reset_token_hash = token_hash
-        user.password_reset_expires_at = expires_at
-        await db.commit()
+        user: PlatformUser | None = None
+
+        if (
+            tenant_row
+            and tenant_id is not None
+            and tenant_uses_tenant_db_auth(getattr(tenant_row, "tenant_auth_mode", None))
+        ):
+            async for tdb in open_tenant_session_by_id(int(tenant_id)):
+                tu = await tdb.scalar(
+                    select(TenantUser).where(
+                        TenantUser.tenant_id == int(tenant_id),
+                        TenantUser.email_norm == email_norm,
+                    )
+                )
+                if not tu:
+                    return ok_msg
+                twm_any = await tdb.scalar(
+                    select(TenantWorkspaceMember).where(
+                        TenantWorkspaceMember.tenant_id == int(tenant_id),
+                        TenantWorkspaceMember.tenant_user_id == tu.id,
+                    )
+                )
+                if not twm_any:
+                    return ok_msg
+                tu.password_reset_token_hash = token_hash
+                tu.password_reset_expires_at = expires_at
+                await tdb.commit()
+                pmap = await db.scalar(
+                    select(PlatformTenantUserMap).where(
+                        PlatformTenantUserMap.tenant_id == int(tenant_id),
+                        PlatformTenantUserMap.tenant_user_id == int(tu.id),
+                    )
+                )
+                if not pmap:
+                    logger.critical(
+                        "forgot_password missing map tenant_id=%s tenant_user_id=%s",
+                        tenant_id,
+                        tu.id,
+                    )
+                    raise RuntimeError("dual_write_missing_map")
+                await mirror_reset_tokens_to_platform(
+                    platform_db=db,
+                    platform_user_id=str(pmap.platform_user_id),
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+                user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(pmap.platform_user_id)))
+                break
+        else:
+            user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_norm))
+            if not user:
+                return ok_msg
+            if tenant_id is not None:
+                membership = await db.scalar(
+                    select(PlatformTenantMember).where(
+                        PlatformTenantMember.platform_user_id == user.id,
+                        PlatformTenantMember.tenant_id == tenant_id,
+                    ).limit(1)
+                )
+                if not membership:
+                    return ok_msg
+            user.password_reset_token_hash = token_hash
+            user.password_reset_expires_at = expires_at
+            await db.commit()
+            if tenant_id is not None:
+                pmap2 = await db.scalar(
+                    select(PlatformTenantUserMap).where(
+                        PlatformTenantUserMap.tenant_id == int(tenant_id),
+                        PlatformTenantUserMap.platform_user_id == str(user.id),
+                    )
+                )
+                if pmap2:
+                    try:
+                        async for tdb in open_tenant_session_by_id(int(tenant_id)):
+                            await mirror_reset_tokens_to_tenant(
+                                tenant_db=tdb,
+                                tenant_id=int(tenant_id),
+                                tenant_user_id=int(pmap2.tenant_user_id),
+                                token_hash=token_hash,
+                                expires_at=expires_at,
+                            )
+                    except Exception:
+                        logger.critical(
+                            "forgot_password dual_write tenant failed platform_user_id=%s",
+                            user.id,
+                        )
+                        raise
+
+        if not user:
+            return ok_msg
+
         base = (payload.reset_base_url or "").strip().rstrip("/")
         if not base and settings.base_domain:
             base = f"https://{settings.base_domain}"
@@ -233,11 +386,41 @@ class AcceptInviteRequest(BaseModel):
 
 
 @router.post("/reset-password")
-async def reset_password(payload: ResetPasswordRequest, db=Depends(get_db)):
+async def reset_password(payload: ResetPasswordRequest, request: Request, db=Depends(get_db)):
     """Set a new password using the token from the reset email."""
     try:
         token_hash = _hash_reset_token(payload.token)
         now = datetime.now(timezone.utc)
+        tenant_id = getattr(request.state, "tenant_id", None)
+        tenant_row = None
+        if tenant_id is not None:
+            tenant_row = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)))
+
+        if (
+            tenant_row
+            and tenant_id is not None
+            and tenant_uses_tenant_db_auth(getattr(tenant_row, "tenant_auth_mode", None))
+        ):
+            async for tdb in open_tenant_session_by_id(int(tenant_id)):
+                tu = await tdb.scalar(
+                    select(TenantUser).where(
+                        TenantUser.tenant_id == int(tenant_id),
+                        TenantUser.password_reset_token_hash == token_hash,
+                        TenantUser.password_reset_expires_at > now,
+                    )
+                )
+                if tu:
+                    await apply_password_and_session_version_tenant_primary(
+                        platform_db=db,
+                        tenant_db=tdb,
+                        tenant_id=int(tenant_id),
+                        tenant_user=tu,
+                        new_password_plain=payload.new_password,
+                        bump_session=True,
+                    )
+                    return {"ok": True, "message": "Your password has been reset. You can now sign in."}
+                break
+
         user: PlatformUser | None = await db.scalar(
             select(PlatformUser).where(
                 PlatformUser.password_reset_token_hash == token_hash,
@@ -249,12 +432,26 @@ async def reset_password(payload: ResetPasswordRequest, db=Depends(get_db)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired reset link. Please request a new password reset.",
             )
-        user.password_hash = hash_password(payload.new_password)
-        # Invalidate existing sessions (token refresh should re-check session_version).
-        user.session_version = int(getattr(user, "session_version", 1)) + 1
-        user.password_reset_token_hash = None
-        user.password_reset_expires_at = None
-        await db.commit()
+        mode = getattr(tenant_row, "tenant_auth_mode", None) or "platform" if tenant_row else "platform"
+        tid = int(tenant_id) if tenant_id is not None else None
+        if tid is not None:
+            async for tdb in open_tenant_session_by_id(tid):
+                await apply_password_and_session_version_platform_primary(
+                    platform_db=db,
+                    tenant_db=tdb,
+                    tenant_id=tid,
+                    platform_user=user,
+                    tenant_auth_mode=mode,
+                    new_password_plain=payload.new_password,
+                    bump_session=True,
+                )
+                break
+        else:
+            user.password_hash = hash_password(payload.new_password)
+            user.session_version = int(getattr(user, "session_version", 1)) + 1
+            user.password_reset_token_hash = None
+            user.password_reset_expires_at = None
+            await db.commit()
         return {"ok": True, "message": "Your password has been reset. You can now sign in."}
     except HTTPException:
         raise
@@ -283,6 +480,99 @@ async def accept_invite(
     """Set password and activate membership using invite token from email."""
     token_hash = _hash_reset_token(payload.token)
     now = datetime.now(timezone.utc)
+    tenant = await db.scalar(
+        select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
+    )
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+
+    if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        async for tdb in open_tenant_session_by_id(int(tenant_id)):
+            tinv = await tdb.scalar(
+                select(TenantUserInvite).where(
+                    TenantUserInvite.token_hash == token_hash,
+                    TenantUserInvite.tenant_id == int(tenant_id),
+                    TenantUserInvite.expires_at > now,
+                    TenantUserInvite.consumed_at.is_(None),
+                )
+            )
+            if not tinv:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired invite link. Ask your admin to send a new invite.",
+                )
+            tu = await tdb.scalar(
+                select(TenantUser).where(
+                    TenantUser.tenant_id == int(tenant_id), TenantUser.id == tinv.tenant_user_id
+                )
+            )
+            if not tu:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
+            tinv.consumed_at = now
+            twm = await tdb.scalar(
+                select(TenantWorkspaceMember).where(
+                    TenantWorkspaceMember.tenant_id == int(tenant_id),
+                    TenantWorkspaceMember.tenant_user_id == tu.id,
+                )
+            )
+            if not twm:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
+            twm.status = "active"
+            await tdb.flush()
+            await apply_password_and_session_version_tenant_primary(
+                platform_db=db,
+                tenant_db=tdb,
+                tenant_id=int(tenant_id),
+                tenant_user=tu,
+                new_password_plain=payload.new_password,
+                bump_session=True,
+            )
+            await tdb.refresh(tu)
+            pmap = await db.scalar(
+                select(PlatformTenantUserMap).where(
+                    PlatformTenantUserMap.tenant_id == int(tenant_id),
+                    PlatformTenantUserMap.tenant_user_id == tu.id,
+                )
+            )
+            if not pmap:
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Account mapping incomplete")
+            user = await db.get(PlatformUser, pmap.platform_user_id)
+            if not user:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
+            pinv = await db.scalar(
+                select(UserInvite).where(
+                    UserInvite.token_hash == token_hash,
+                    UserInvite.tenant_id == int(tenant_id),
+                    UserInvite.consumed_at.is_(None),
+                )
+            )
+            if pinv:
+                pinv.consumed_at = now
+            tm = await db.scalar(
+                select(TenantMembership).where(
+                    TenantMembership.user_id == user.id,
+                    TenantMembership.tenant_id == int(tenant_id),
+                )
+            )
+            if tm:
+                tm.status = "active"
+            await db.commit()
+            roles = [twm.role] if twm and twm.role else []
+            sv_out = int(tu.session_version)
+            sub = tu.id
+            break
+
+        access = create_access_token(
+            user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
+        )
+        refresh = create_refresh_token(
+            user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
+        )
+        response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
+        response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+        workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
+        return {"ok": True, "message": "Welcome! You can now sign in.", "workspace_url": workspace_url}
+
     invite = await db.scalar(
         select(UserInvite).where(
             UserInvite.token_hash == token_hash,
@@ -300,10 +590,7 @@ async def accept_invite(
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
 
-    user.password_hash = hash_password(payload.new_password)
-    user.session_version = int(getattr(user, "session_version", 1)) + 1
     invite.consumed_at = now
-
     tm = await db.scalar(
         select(TenantMembership).where(
             TenantMembership.user_id == user.id,
@@ -312,26 +599,39 @@ async def accept_invite(
     )
     if tm:
         tm.status = "active"
-
     await db.commit()
+    user = await db.get(PlatformUser, invite.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
 
-    tenant = await db.scalar(
-        select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
-    )
-    if tenant:
-        membership = await db.scalar(
-            select(PlatformTenantMember).where(
-                PlatformTenantMember.platform_user_id == user.id,
-                PlatformTenantMember.tenant_id == tenant_id,
-            ).limit(1)
+    mode = getattr(tenant, "tenant_auth_mode", None) or "platform"
+    async for tdb in open_tenant_session_by_id(int(tenant_id)):
+        await apply_password_and_session_version_platform_primary(
+            platform_db=db,
+            tenant_db=tdb,
+            tenant_id=int(tenant_id),
+            platform_user=user,
+            tenant_auth_mode=mode,
+            new_password_plain=payload.new_password,
+            bump_session=True,
         )
-        roles = [membership.role] if membership and membership.role else []
-        access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
-        refresh = create_refresh_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
-        response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
-        response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+        break
 
-    workspace_url = _workspace_url(request, tenant.slug, "/dashboard") if tenant else None
+    membership = await db.scalar(
+        select(PlatformTenantMember).where(
+            PlatformTenantMember.platform_user_id == user.id,
+            PlatformTenantMember.tenant_id == tenant_id,
+        ).limit(1)
+    )
+    roles = [membership.role] if membership and membership.role else []
+    user = await db.scalar(select(PlatformUser).where(PlatformUser.id == user.id))
+    sv_out = int(getattr(user, "session_version", 1) or 1)
+    access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out)
+    refresh = create_refresh_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out)
+    response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
+    response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+
+    workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
     return {"ok": True, "message": "Welcome! You can now sign in.", "workspace_url": workspace_url}
 
 
@@ -343,8 +643,94 @@ async def login(
     tenant_id: int = Depends(require_tenant),
     db=Depends(get_db),
 ):
-    email_lower = payload.email.strip().lower()
-    user: PlatformUser | None = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_lower))
+    email_norm = normalize_auth_email(payload.email)
+    tenant: PlatformTenant | None = await db.scalar(
+        select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
+    )
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    if tenant.status != "ACTIVE" or tenant.db_status != "READY":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
+
+    if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        async for tdb in open_tenant_session_by_id(int(tenant_id)):
+            tu = await tdb.scalar(
+                select(TenantUser).where(
+                    TenantUser.tenant_id == int(tenant_id),
+                    TenantUser.email_norm == email_norm,
+                )
+            )
+            if not tu:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+            if (tu.status or "").upper() != "ACTIVE":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account is deactivated. Contact your workspace admin or support.",
+                )
+            twm = await tdb.scalar(
+                select(TenantWorkspaceMember).where(
+                    TenantWorkspaceMember.tenant_id == int(tenant_id),
+                    TenantWorkspaceMember.tenant_user_id == tu.id,
+                    TenantWorkspaceMember.status == "active",
+                )
+            )
+            if not twm:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+            if not tu.password_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Password not set for this account. Use 'Forgot password' to set one.",
+                )
+            if not verify_password(payload.password, tu.password_hash):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+            pmap = await db.scalar(
+                select(PlatformTenantUserMap).where(
+                    PlatformTenantUserMap.tenant_id == int(tenant_id),
+                    PlatformTenantUserMap.tenant_user_id == tu.id,
+                )
+            )
+            if not pmap:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Account mapping incomplete; contact support.",
+                )
+            user: PlatformUser | None = await db.scalar(
+                select(PlatformUser).where(PlatformUser.id == str(pmap.platform_user_id))
+            )
+            if not user or getattr(user, "status", "ACTIVE") != "ACTIVE":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account is deactivated. Contact your workspace admin or support.",
+                )
+            tm = await db.scalar(
+                select(TenantMembership).where(
+                    TenantMembership.user_id == user.id,
+                    TenantMembership.tenant_id == tenant_id,
+                ).limit(1)
+            )
+            if not tm or (tm.status or "").lower() != "active":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access to this workspace is suspended. Contact your admin.",
+                )
+            roles = [twm.role] if twm.role else []
+            sv_out = int(getattr(tu, "session_version", 1) or 1)
+            sub = tu.id
+            break
+
+        access = create_access_token(
+            user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
+        )
+        refresh = create_refresh_token(
+            user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
+        )
+        response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
+        response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+        workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
+        return {"ok": True, "workspace_url": workspace_url, "access_token": access, "refresh_token": refresh}
+
+    user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_norm))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
@@ -354,17 +740,14 @@ async def login(
         )
     )
     if not membership:
-        # Same message as wrong credentials so we don't reveal account exists elsewhere
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    # Enforce user account status (ACTIVE = can log in)
     if getattr(user, "status", "ACTIVE") != "ACTIVE":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated. Contact your workspace admin or support.",
         )
 
-    # Enforce membership gate status (active = can access)
     tm = await db.scalar(
         select(TenantMembership).where(
             TenantMembership.user_id == user.id,
@@ -385,20 +768,106 @@ async def login(
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    tenant: PlatformTenant | None = await db.scalar(
-        select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
-    )
-    if not tenant:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
-    if tenant.status != "ACTIVE" or tenant.db_status != "READY":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
-
     roles = [membership.role] if membership.role else []
-    access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
-    refresh = create_refresh_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles)
+    sv_out = int(getattr(user, "session_version", 1) or 1)
+    access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out)
+    refresh = create_refresh_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out)
 
     response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
     response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
 
     workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
     return {"ok": True, "workspace_url": workspace_url, "access_token": access, "refresh_token": refresh}
+
+
+@router.post("/workspaces", response_model=VerifyOTPResponse)
+async def create_workspace(
+    payload: CreateWorkspaceRequest,
+    request: Request,
+    response: Response,
+    user: PlatformUser = Depends(get_current_platform_user),
+    db=Depends(get_db),
+):
+    """
+    Authenticated user creates an additional workspace (new platform tenant + provision + seed).
+    Uses platform DB + provisioning only; does not read or mutate other tenants' business data.
+    """
+    check_create_workspace_rate_limits(request, str(user.id))
+
+    normalized_slug = payload.workspace_slug
+    if not await is_slug_available(db, normalized_slug):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug is not available")
+
+    user.first_name = payload.first_name.strip()
+    user.last_name = payload.last_name.strip()
+    digits = _normalize_phone_digits(payload.phone)
+    if digits:
+        user.phone = f"+{digits}"
+
+    now = datetime.now(timezone.utc)
+    country = payload.address.country.strip().upper()
+    try:
+        tenant, membership = await provision_new_workspace_for_platform_user(
+            db,
+            user=user,
+            normalized_slug=normalized_slug,
+            tenant_display_name=payload.company_legal_name.strip(),
+            country_code=country,
+            creator_first_name=payload.first_name.strip(),
+            creator_last_name=payload.last_name.strip(),
+            now=now,
+            onboarding_draft=None,
+        )
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.exception("create_workspace integrity_error user_id=%s slug=%s", user.id, normalized_slug)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not create workspace. Try a different slug.",
+        ) from None
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("create_workspace failed user_id=%s", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Workspace creation failed",
+        ) from exc
+
+    requires_company_setup = tenant.status == TenantStatus.PENDING_SETUP.value
+    workspace_url = _workspace_url(
+        request,
+        tenant.slug,
+        "/company-setup" if requires_company_setup else "/",
+    )
+
+    await db.refresh(user)
+    sv_tok = int(getattr(user, "session_version", 1) or 1)
+    access = create_access_token(
+        user_id=user.id,
+        tenant_id=int(tenant.id),
+        tenant_slug=tenant.slug,
+        roles=[membership.role],
+        sv=sv_tok,
+    )
+    refresh = create_refresh_token(
+        user_id=user.id,
+        tenant_id=int(tenant.id),
+        tenant_slug=tenant.slug,
+        roles=[membership.role],
+        sv=sv_tok,
+    )
+    response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
+    response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+
+    return VerifyOTPResponse(
+        message="Workspace created.",
+        verified=True,
+        requires_company_setup=requires_company_setup,
+        workspace_url=workspace_url,
+        tenant_id=int(tenant.id),
+        slug=tenant.slug,
+    )

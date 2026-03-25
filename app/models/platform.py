@@ -84,6 +84,8 @@ class PlatformTenant(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    # tenant: JWT sub = tenant_users.id; platform: legacy platform_users.id (UUID). Per-tenant cutover only.
+    tenant_auth_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="platform", server_default="platform")
 
     members = relationship("PlatformTenantMember", back_populates="tenant", cascade="all, delete-orphan")
     subscriptions = relationship("PlatformSubscription", back_populates="tenant", cascade="all, delete-orphan")
@@ -275,6 +277,24 @@ class OnboardingTokenLookup(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+
+
+class PlatformTenantUserMap(Base):
+    """Maps platform_users.id to tenant_users.id per workspace for dual-write and rollback."""
+
+    __tablename__ = "platform_tenant_user_map"
+    __table_args__ = (
+        UniqueConstraint("platform_user_id", "tenant_id", name="uq_ptum_platform_tenant"),
+        UniqueConstraint("tenant_id", "tenant_user_id", name="uq_ptum_tenant_tuser"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform_user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class UserInvite(Base):

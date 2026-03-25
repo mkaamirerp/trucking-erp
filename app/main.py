@@ -33,7 +33,7 @@ from app.routers.dev_tools_db import router as dev_tools_db_router
 from app.routers.tenant_admin import router as tenant_admin_router
 from app.routers.admin_email_config import router as admin_email_config_router
 from app.routers.email_threads import router as email_threads_router
-from app.middleware.tenant_context import DEFAULT_ALLOW_PATHS, TenantContextMiddleware
+from app.middleware.tenant_context import TenantContextMiddleware, tenant_middleware_allow_paths
 
 def _startup_banner() -> None:
     parsed = urlparse(settings.database_url)
@@ -59,7 +59,7 @@ def _log_startup():
 
 app.add_middleware(
     TenantContextMiddleware,
-    allow_paths=DEFAULT_ALLOW_PATHS,
+    allow_paths=tenant_middleware_allow_paths(),
 )
 
 # API routers
@@ -84,8 +84,10 @@ app.include_router(dispatch_router, prefix="/api/v1")
 app.include_router(trucks_router, prefix="/api/v1")
 app.include_router(trailers_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
-app.include_router(dev_tools_router)
-app.include_router(dev_tools_db_router)
+# Dev-only: password + cookie auth; no tenant RBAC. Omitted in production/staging (routes do not exist → 404).
+if settings.allows_dev_tenant_resolution_shortcuts():
+    app.include_router(dev_tools_router)
+    app.include_router(dev_tools_db_router)
 app.include_router(tenant_admin_router)
 app.include_router(admin_email_config_router)
 app.include_router(email_threads_router, prefix="/api/v1")

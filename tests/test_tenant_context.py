@@ -27,7 +27,7 @@ class DummyApp:
 
 def test_resolve_tenant_blocks_when_not_ready():
     middleware = TenantContextMiddleware(DummyApp())
-    request = _make_request({"X-Tenant-ID": "123"})
+    request = _make_request({"host": "foo.truckerp.me"})
 
     tenant_row = SimpleNamespace(id=123, status="PROVISIONING", db_status="NOT_PROVISIONED")
 
@@ -39,7 +39,7 @@ def test_resolve_tenant_blocks_when_not_ready():
             session_factory.return_value = session
 
             try:
-                await middleware._resolve_tenant_from_request(request, None)
+                await middleware._resolve_tenant_from_request(request, "/api/v1/drivers", None)
             except HTTPException as exc:
                 assert exc.status_code == 403
                 assert exc.detail == "Tenant not ready"

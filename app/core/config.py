@@ -26,6 +26,21 @@ class Settings(BaseSettings):
     app_name: str = "Trucking ERP API"
     environment: str = "dev"
 
+    def is_production(self) -> bool:
+        return (self.environment or "").lower() in ("production", "prod", "prd")
+
+    def allows_dev_tenant_resolution_shortcuts(self) -> bool:
+        """
+        JWT-without-subdomain tenant resolution, TOOLS_DEFAULT_TENANT_*, and TEST_BYPASS_AUTH
+        are allowed only in dev-like environments — never production or staging.
+        """
+        if self.is_production():
+            return False
+        e = (self.environment or "").lower()
+        if e in ("staging", "stage", "stg", "preprod"):
+            return False
+        return True
+
     # Canonical DB URL (loaded from .env as DATABASE_URL)
     database_url: str
     # Privileged Postgres URL to create tenant DBs; falls back to database_url if unset
@@ -44,6 +59,9 @@ class Settings(BaseSettings):
     secure_cookies: bool = False
     jwt_same_site: str = "lax"
     base_domain: str = "truckerp.me"
+
+    # Platform control-plane API (/api/v1/platform/*). Required in production/staging when set; enforced when set in dev.
+    platform_admin_api_key: str | None = None
 
     # Integration secrets (email mailbox OAuth/IMAP credentials in platform DB)
     integration_secret_encryption_key: str | None = None

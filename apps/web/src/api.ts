@@ -1,48 +1,9 @@
-import { getTenantSlugFromHost } from "./tenant";
 const API_BASE = import.meta.env.VITE_API_BASE || "/api/v1";
-const DEFAULT_TENANT_ID = import.meta.env.VITE_TENANT_ID || "1";
 const PUBLIC_API_BASE = import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1/public";
 
-function currentSlugFromPath(): string | null {
-  if (typeof window === "undefined") return null;
-  const slug = getTenantSlugFromHost();
-  if (slug) return slug;
-  // fallback to path-based for dev/local if needed
-  const segments = window.location.pathname.split("/").filter(Boolean);
-  if (!segments.length) return null;
-  const candidate = segments[0];
-  const reserved = new Set([
-    "signup",
-    "login",
-    "forgot-password",
-    "reset-password",
-    "payroll",
-    "drivers",
-    "api",
-    "dashboard",
-    "dispatch",
-    "fleet",
-    "loads",
-    "company-setup",
-    "account-setup",
-    "driver-onboarding",
-    "admin",
-  ]);
-  if (reserved.has(candidate)) return null;
-  if (!/^[a-z0-9][a-z0-9-]{1,62}$/i.test(candidate)) return null;
-  return candidate;
-}
-
+/** Tenant is resolved server-side from the request Host (workspace subdomain). Do not send X-Tenant-* from the browser. */
 function withTenantHeaders(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers as HeadersInit | undefined);
-  if (!headers.has("X-Tenant-ID") && !headers.has("X-Tenant-Slug")) {
-    const slug = currentSlugFromPath();
-    if (slug) {
-      headers.set("X-Tenant-Slug", slug);
-    } else {
-      headers.set("X-Tenant-ID", DEFAULT_TENANT_ID);
-    }
-  }
   return { ...init, headers, credentials: "include" };
 }
 
@@ -204,6 +165,46 @@ export async function signup(payload: SignupPayload) {
   return handle<SignupResponse>(res);
 }
 
+export type CreateWorkspacePayload = {
+  workspace_slug: string;
+  company_legal_name: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  address: SignupAddress;
+};
+
+/** Authenticated: new tenant from platform (cookies / JWT). No tenant header required. */
+export async function createWorkspace(payload: CreateWorkspacePayload) {
+  const res = await fetchPublic(`${API_BASE}/auth/workspaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Could not create workspace";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string | Array<{ msg?: string }> }) : null;
+      if (json?.detail) {
+        message = Array.isArray(json.detail)
+          ? (json.detail as Array<{ msg?: string }>).map((d) => d?.msg ?? "").filter(Boolean).join(". ") || message
+          : String(json.detail);
+      }
+    } catch {
+      /* use default */
+    }
+    throw new Error(message);
+  }
+  return handle<
+    VerifyOtpResponse & {
+      verified?: boolean;
+      tenant_id?: number;
+      slug?: string;
+    }
+  >(res);
+}
+
 export async function verifyOtp(payload: VerifyOtpRequest) {
   const res = await fetchPublic(`${PUBLIC_API_BASE}/verify-otp`, {
     method: "POST",
@@ -234,11 +235,12 @@ export async function verifyOtp(payload: VerifyOtpRequest) {
   } as VerifyOtpResponse;
 }
 
-export async function resendOtp(payload: { email: string; attempt_id?: string; slug?: string }) {
+export async function resendOtp(payload: { email: string; signup_id?: string | null; attempt_id?: string; slug?: string }) {
+  const signupId = payload.signup_id ?? payload.attempt_id ?? undefined;
   const res = await fetchPublic(`${PUBLIC_API_BASE}/resend-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: payload.email }),
+    body: JSON.stringify({ email: payload.email, signup_id: signupId || undefined }),
   });
   return handle<{ ok: boolean; message: string; debug_otp?: string | null }>(res);
 }
@@ -287,13 +289,24 @@ export async function retryProvisioning(payload: { attempt_id: string }) {
   return handle<{ company_setup_url?: string }>(res);
 }
 
-export async function cancelSignup(payload: { attempt_id: string }) {
+export async function cancelSignup(payload: { signup_id?: string; attempt_id?: string }) {
+  const signup_id = payload.signup_id ?? payload.attempt_id;
   const res = await fetchPublic(`${PUBLIC_API_BASE}/cancel-signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ signup_id: signup_id || undefined, attempt_id: payload.attempt_id }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text || "Cancel failed";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) message = String(json.detail);
+    } catch {
+      /* keep raw */
+    }
+    throw new Error(message);
+  }
 }
 
 export type SetupPrefillResponse = {
@@ -387,6 +400,8 @@ export async function getAuthMe() {
   const res = await fetchWithTenant(`${API_BASE}/auth/me`);
   return handle<{
     user_id: number | string;
+    tenant_local_user_id?: number | null;
+    tenant_auth_mode?: string | null;
     email: string;
     first_name: string;
     last_name: string;
@@ -1161,13 +1176,25 @@ export type InviteUserPayload = {
   access_level?: string;  // READ_ONLY | FULL_ACCESS
 };
 
-export async function inviteTenantUser(payload: InviteUserPayload): Promise<{ ok: boolean; email: string; status: string; message: string }> {
+export async function inviteTenantUser(payload: InviteUserPayload): Promise<{
+  ok: boolean;
+  email: string;
+  status: string;
+  message: string;
+  email_sent?: boolean;
+}> {
   const res = await fetchWithTenant(`${API_BASE}/admin/users/invite`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return handle<{ ok: boolean; email: string; status: string; message: string }>(res);
+  return handle<{
+    ok: boolean;
+    email: string;
+    status: string;
+    message: string;
+    email_sent?: boolean;
+  }>(res);
 }
 
 export async function suspendTenantUser(userId: string): Promise<{ ok: boolean; status: string }> {
@@ -1182,6 +1209,25 @@ export async function reactivateTenantUser(userId: string): Promise<{ ok: boolea
     method: "POST",
   });
   return handle<{ ok: boolean; status: string }>(res);
+}
+
+export async function resendTenantUserInvite(userId: string): Promise<{
+  ok: boolean;
+  email: string;
+  message: string;
+  email_sent?: boolean;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/resend-invite`, {
+    method: "POST",
+  });
+  return handle<{ ok: boolean; email: string; message: string; email_sent?: boolean }>(res);
+}
+
+export async function removeTenantUserFromWorkspace(userId: string): Promise<{ ok: boolean; message: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+  return handle<{ ok: boolean; message: string }>(res);
 }
 
 // ---- Tenant admin: email config (primary mailbox) ----
@@ -1543,6 +1589,8 @@ export type SignupPayload = {
 
 export type SignupResponse = {
   success: boolean;
+  requires_otp?: boolean;
+  signup_id?: string | null;
   tenant_slug?: string;
   redirect_url?: string;
   message?: string;
@@ -1550,11 +1598,14 @@ export type SignupResponse = {
   tenant_id?: number;
   email?: string;
   debug_otp?: string | null;
+  code?: string;
+  next_step?: string;
 };
 
 export type VerifyOtpRequest = {
   email: string;
   otp: string;
+  signup_id?: string | null;
 };
 
 export type VerifyOtpResponse = {

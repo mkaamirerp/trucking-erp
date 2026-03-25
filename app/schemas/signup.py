@@ -97,6 +97,49 @@ class SignupResponse(BaseModel):
     signup_id: str | None = None  # UUID (public_id of onboarding payload); passed to verify-otp / resend-otp
     tenant_slug: str | None = None
     redirect_url: str | None = None
+    # When email already has a platform account: client should route to sign-in, then authenticated create-workspace.
+    code: str | None = None
+    next_step: str | None = None
+
+
+class CreateWorkspaceRequest(BaseModel):
+    """Authenticated workspace creation (same person as platform_users; no new platform user row)."""
+
+    workspace_slug: str = Field(..., min_length=3, max_length=63)
+    company_legal_name: str = Field(..., min_length=1, max_length=255)
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    phone: str = Field(..., min_length=1, max_length=30)
+    address: SignupAddress
+
+    @field_validator("workspace_slug")
+    @classmethod
+    def slug_format(cls, v: str):
+        from app.utils.slug import normalize_slug
+
+        normalized = normalize_slug(v)
+        if not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", normalized):
+            raise ValueError("Slug must contain only lowercase letters, numbers, and hyphens")
+        return normalized
+
+    @field_validator("first_name", "last_name", "company_legal_name")
+    @classmethod
+    def trim_non_empty(cls, v: str):
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("Required; cannot be empty or whitespace")
+        return s
+
+    @field_validator("phone")
+    @classmethod
+    def phone_digits_7_15(cls, v: str):
+        s = (v or "").strip()
+        if not s:
+            raise ValueError("Phone is required")
+        digits = _normalize_phone_digits(s)
+        if len(digits) < 7 or len(digits) > 15:
+            raise ValueError("Phone must have 7–15 digits (E.164)")
+        return s
 
 
 class VerifyOTPRequest(BaseModel):
@@ -108,6 +151,17 @@ class VerifyOTPRequest(BaseModel):
 class ResendOTPRequest(BaseModel):
     email: EmailStr
     signup_id: str | None = None  # UUID preferred lookup key
+
+
+class CancelSignupRequest(BaseModel):
+    """Cancel an in-progress email signup (draft only, no tenant yet)."""
+
+    signup_id: str | None = None
+    attempt_id: str | None = None  # legacy SPA field; treated same as signup_id
+
+    def resolved_signup_public_id(self) -> str | None:
+        s = (self.signup_id or self.attempt_id or "").strip()
+        return s or None
 
 
 class VerifyOTPResponse(BaseModel):

@@ -36,7 +36,6 @@ echo "1. Login..."
 LOGIN=$(curl $CURL_OPTS -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -H "Host: ${TENANT}.truckerp.me" \
-  -H "X-Tenant-Slug: $TENANT" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")
 HTTP=$(echo "$LOGIN" | tail -1)
 BODY=$(echo "$LOGIN" | sed '$d')
@@ -54,7 +53,7 @@ fi
 if [ "$PHASE" = "post_connect" ]; then
   echo ""
   echo "4. GET /email-config/primary (connected state)..."
-  PRIMARY=$(curl $CURL_OPTS -H "Host: ${TENANT}.truckerp.me" -H "X-Tenant-Slug: $TENANT" \
+  PRIMARY=$(curl $CURL_OPTS -H "Host: ${TENANT}.truckerp.me" \
     "$BASE_URL/api/v1/admin/email-config/primary" 2>/dev/null)
   echo "   -> $(echo "$PRIMARY" | head -c 200)..."
   [ -n "$PRIMARY" ] && echo "   mailbox_type=$(echo "$PRIMARY" | grep -o '"mailbox_type":"[^"]*"' | cut -d'"' -f4)"
@@ -63,19 +62,18 @@ if [ "$PHASE" = "post_connect" ]; then
 
   echo ""
   echo "5. POST /email-config/primary/test..."
-  TEST=$(curl $CURL_OPTS -X POST -H "Host: ${TENANT}.truckerp.me" -H "X-Tenant-Slug: $TENANT" \
+  TEST=$(curl $CURL_OPTS -X POST -H "Host: ${TENANT}.truckerp.me" \
     "$BASE_URL/api/v1/admin/email-config/primary/test" 2>/dev/null)
   echo "   -> $TEST"
 
   echo ""
   echo "6. POST /email-config/primary/disconnect..."
-  DISC=$(curl $CURL_OPTS -X POST -H "Host: ${TENANT}.truckerp.me" -H "X-Tenant-Slug: $TENANT" \
     "$BASE_URL/api/v1/admin/email-config/primary/disconnect" 2>/dev/null)
   echo "   -> $DISC"
 
   echo ""
   echo "7. GET /primary after disconnect (expect null)..."
-  PRIMARY2=$(curl $CURL_OPTS -H "Host: ${TENANT}.truckerp.me" -H "X-Tenant-Slug: $TENANT" \
+  PRIMARY2=$(curl $CURL_OPTS -H "Host: ${TENANT}.truckerp.me" \
     "$BASE_URL/api/v1/admin/email-config/primary" 2>/dev/null)
   echo "   -> ${PRIMARY2:-null}"
 
@@ -83,7 +81,6 @@ if [ "$PHASE" = "post_connect" ]; then
   echo "8. Reconnect: GET /gmail/authorize..."
   AUTHZ2=$(curl $CURL_OPTS -D - -o /dev/null -w "%{http_code}" \
     -H "Host: ${TENANT}.truckerp.me" \
-    -H "X-Tenant-Slug: $TENANT" \
     "$BASE_URL/api/v1/admin/email-config/gmail/authorize" 2>/dev/null)
   echo "   -> $AUTHZ2 (expect 302 to Google)"
   echo ""
@@ -96,7 +93,6 @@ echo ""
 echo "2. GET /gmail/authorize..."
 RESP=$(curl $CURL_OPTS -D - -o /tmp/proof_body.txt \
   -H "Host: ${TENANT}.truckerp.me" \
-  -H "X-Tenant-Slug: $TENANT" \
   "$BASE_URL/api/v1/admin/email-config/gmail/authorize" 2>/dev/null)
 AUTHZ=$(echo "$RESP" | grep -o "HTTP/[0-9.]* [0-9]*" | tail -1 | awk '{print $2}')
 LOCATION=$(echo "$RESP" | grep -i "^location:" | head -1)

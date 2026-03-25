@@ -13,7 +13,10 @@ from starlette.responses import JSONResponse, Response
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.deps.tenant_db import open_tenant_session_by_id
 from app.models.platform import PlatformTenant, TenantMembership
+from app.models.tenant_auth import TenantWorkspaceMember
+from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.utils.jwt_auth import get_token_from_request, decode_token, TokenType
 
 logger = logging.getLogger(__name__)
@@ -30,16 +33,28 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
     "/api/v1/auth/logout",  # no tenant/token needed; just clear cookies
     "/api/v1/auth/reset-password",
     "/api/v1/auth/signup/plan-options",
-    "/api/v1/tools/unlock",  # dev-only tools unlock (no tenant)
-    "/api/v1/tools/ping",  # dev-only tools ping (no tenant)
-    "/api/v1/tools/send-test-email",  # dev-only SMTP test (no tenant)
+    # /api/v1/tools/*: see tenant_middleware_allow_paths() — only in dev-like envs when routers are mounted
     # /api/v1/tools/db/* intentionally not allowed — requires tenant context
 }
 
-REQUEST_ID_HEADER = "X-Request-ID"
-TENANT_ID_HEADER = "X-Tenant-ID"
-TENANT_SLUG_HEADER = "X-Tenant-Slug"
 
+def tenant_middleware_allow_paths() -> Set[str]:
+    """
+    Paths that skip tenant resolution. Dev-only /api/v1/tools/* (no tenant) is allowlisted only when
+    Settings.allows_dev_tenant_resolution_shortcuts() is true, matching main.py mounting of dev_tools routers.
+    """
+    paths = set(DEFAULT_ALLOW_PATHS)
+    if settings.allows_dev_tenant_resolution_shortcuts():
+        paths.update(
+            {
+                "/api/v1/tools/unlock",
+                "/api/v1/tools/ping",
+                "/api/v1/tools/send-test-email",
+            }
+        )
+    return paths
+
+REQUEST_ID_HEADER = "X-Request-ID"
 
 # Subdomains that must NOT be treated as tenant slugs (main, api, app)
 RESERVED_SUBDOMAINS: Set[str] = {"www", "api", "app"}
@@ -59,9 +74,11 @@ APPLICANT_ROUTE_PREFIX = "/api/v1/driver-onboarding/applicant/"
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
     Enforces tenant context for tenant-scoped routes.
-    Single-source-of-truth order: host/subdomain (authoritative for browser) → headers → JWT (fallback for internal).
-    - Platform routes and allowlist paths do NOT require tenant.
-    - All other /api/v1/* routes resolve tenant and set request.state.tenant_id.
+    Tenant resolution (browser/API): trusted Host subdomain → OAuth signed state (Gmail callback) →
+    dev-only (see Settings.allows_dev_tenant_resolution_shortcuts): JWT tenant_id when Host has no tenant slug,
+    or TOOLS_DEFAULT_* for /tools/db only. Never in production or staging.
+    X-Tenant-ID / X-Tenant-Slug are not used for resolution (browser cannot choose tenant).
+    Platform routes and allowlist paths do NOT require tenant.
     Also adds/propagates X-Request-ID.
     """
 
@@ -157,21 +174,15 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 log("token_invalid", level="warning")
                 return response
 
-        # Test bypass: when TEST_BYPASS_AUTH=1 and X-Tenant-ID or X-Tenant-Slug present, skip JWT/membership (integration tests only)
-        if os.environ.get("TEST_BYPASS_AUTH") == "1":
-            raw_tid = request.headers.get(TENANT_ID_HEADER)
-            raw_slug = request.headers.get(TENANT_SLUG_HEADER)
-            if raw_tid is not None or (raw_slug and raw_slug.strip()):
+        # Test bypass: non-production only; tenant from Host subdomain (same as production); skip JWT/membership
+        if os.environ.get("TEST_BYPASS_AUTH") == "1" and settings.allows_dev_tenant_resolution_shortcuts():
+            bypass_slug = self._slug_from_host(request)
+            if bypass_slug:
                 try:
                     async with AsyncSessionLocal() as session:
-                        if raw_tid is not None:
-                            row = await session.scalar(
-                                select(PlatformTenant).where(PlatformTenant.id == int(raw_tid)).limit(1)
-                            )
-                        else:
-                            row = await session.scalar(
-                                select(PlatformTenant).where(PlatformTenant.slug == raw_slug.strip().lower()).limit(1)
-                            )
+                        row = await session.scalar(
+                            select(PlatformTenant).where(PlatformTenant.slug == bypass_slug.lower()).limit(1)
+                        )
                     if row and row.status == "ACTIVE" and row.db_status == "READY":
                         request.state.tenant_id = int(row.id)
                         request.state.tenant_slug = row.slug
@@ -180,20 +191,34 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                         set_request_id(response)
                         log("test_bypass", tenant_id=request.state.tenant_id)
                         return response
-                except (ValueError, SQLAlchemyError):
+                except SQLAlchemyError:
                     pass
 
         # Forgot-password from main domain (no tenant): allow through without tenant_id
         if path.rstrip("/") == "/api/v1/auth/forgot-password":
             slug_from_host = self._slug_from_host(request)
-            has_tenant_header = request.headers.get(TENANT_ID_HEADER) is not None or request.headers.get(TENANT_SLUG_HEADER) is not None
-            if slug_from_host is None and not has_tenant_header and jwt_tenant_id is None:
+            if slug_from_host is None and jwt_tenant_id is None:
                 response = await call_next(request)
                 set_request_id(response)
                 log("forgot_password_main_domain")
                 return response
 
-        # Single-source-of-truth: host (authoritative for browser) → headers (match/override) → JWT (fallback for internal)
+        # Create workspace: platform JWT only; do not require tenant resolution or membership in an existing tenant.
+        if request.method == "POST" and path.rstrip("/") == "/api/v1/auth/workspaces":
+            user_id = getattr(request.state, "user_id", None)
+            if not user_id:
+                response = JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Not authenticated"},
+                )
+                set_request_id(response)
+                log("workspaces_no_auth", level="warning")
+                return response
+            response = await call_next(request)
+            set_request_id(response)
+            log("workspaces_platform_context")
+            return response
+
         try:
             tenant_id, tenant_slug = await self._resolve_tenant_from_request(request, path, jwt_tenant_id)
             request.state.tenant_id = tenant_id
@@ -213,15 +238,11 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         self, request: Request, path: str, jwt_tenant_id: Optional[int]
     ) -> tuple[int, str]:
         """
-        Resolve tenant in order: host subdomain (authoritative for browser) → headers → JWT (fallback for internal).
-        Returns (tenant_id, tenant_slug) or raises HTTPException.
+        Resolve tenant from Host subdomain, Gmail OAuth state, non-prod JWT fallback, or non-prod tools defaults.
+        Never from X-Tenant-ID / X-Tenant-Slug.
         """
         slug_from_host = self._slug_from_host(request)
-        raw_tid = request.headers.get(TENANT_ID_HEADER)
-        raw_slug = request.headers.get(TENANT_SLUG_HEADER)
-        has_header = raw_tid is not None or raw_slug is not None
 
-        # Resolve to (tenant_id or slug) for DB lookup: state (callback) > header > host > JWT
         tenant_id_from_request: Optional[int] = None
         tenant_slug_from_request: Optional[str] = None
 
@@ -235,32 +256,18 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     tenant_id_from_request, tenant_slug_from_request = parsed
 
         if tenant_id_from_request is None and tenant_slug_from_request is None:
-            if has_header:
-                if raw_tid is not None:
-                    try:
-                        tenant_id_from_request = int(raw_tid)
-                    except ValueError:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Invalid tenant header: X-Tenant-ID must be int",
-                        )
-                elif raw_slug:
-                    s = raw_slug.strip()
-                    if not s:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Invalid tenant header: X-Tenant-Slug is empty",
-                        )
-                    tenant_slug_from_request = s
-            elif slug_from_host:
+            if slug_from_host:
                 tenant_slug_from_request = slug_from_host
-            elif jwt_tenant_id is not None:
+            elif settings.allows_dev_tenant_resolution_shortcuts() and jwt_tenant_id is not None:
                 tenant_id_from_request = int(jwt_tenant_id)
             else:
-                # Dev tools DB: allow default tenant so you can inspect DB from main domain (no subdomain)
                 default_tid = os.environ.get("TOOLS_DEFAULT_TENANT_ID")
                 default_slug = os.environ.get("TOOLS_DEFAULT_TENANT_SLUG")
-                if path.startswith("/api/v1/tools/db/") and (default_tid or default_slug):
+                if (
+                    settings.allows_dev_tenant_resolution_shortcuts()
+                    and path.startswith("/api/v1/tools/db/")
+                    and (default_tid or default_slug)
+                ):
                     if default_tid:
                         try:
                             tenant_id_from_request = int(default_tid)
@@ -271,7 +278,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 if tenant_id_from_request is None and tenant_slug_from_request is None:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Tenant context required: use tenant subdomain (e.g. demo.truckerp.me) or X-Tenant-Slug / X-Tenant-ID header",
+                        detail="Tenant context required: open the app from your workspace subdomain (e.g. https://demo.truckerp.me).",
                     )
 
         # Lookup in platform tenant registry and enforce membership gate
@@ -283,11 +290,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     )
                 else:
                     row = await session.scalar(
-                        select(PlatformTenant).where(PlatformTenant.slug == tenant_slug_from_request).limit(1)
+                        select(PlatformTenant)
+                        .where(PlatformTenant.slug == (tenant_slug_from_request or "").lower())
+                        .limit(1)
                     )
 
                 if not row:
-                    detail = "Tenant not found in registry (check subdomain, X-Tenant-Slug/X-Tenant-ID, or TOOLS_DEFAULT_TENANT_SLUG/ID for dev tools)."
+                    detail = "Tenant not found in registry (check workspace subdomain or provisioning)."
                     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
                 # Dev tools DB: only require tenant to exist; skip ACTIVE/READY and membership
@@ -321,13 +330,39 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     )
                     return (int(row.id), row.slug)
 
-                # Membership gate: user must have active membership (do not trust client headers for user_id)
+                # Membership gate: user must have active workspace access (do not trust client headers for user_id)
                 user_id = getattr(request.state, "user_id", None)
                 if not user_id:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Not authenticated",
                     )
+                mode = getattr(row, "tenant_auth_mode", None) or "platform"
+                if tenant_uses_tenant_db_auth(mode):
+                    try:
+                        tu_sub = int(str(user_id))
+                    except (TypeError, ValueError):
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Invalid session",
+                        ) from None
+                    twm = None
+                    async for tdb in open_tenant_session_by_id(int(row.id)):
+                        twm = await tdb.scalar(
+                            select(TenantWorkspaceMember).where(
+                                TenantWorkspaceMember.tenant_id == int(row.id),
+                                TenantWorkspaceMember.tenant_user_id == tu_sub,
+                                TenantWorkspaceMember.status == "active",
+                            ).limit(1)
+                        )
+                        break
+                    if not twm:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="User does not have access to this tenant",
+                        )
+                    return (int(row.id), row.slug)
+
                 membership = await session.scalar(
                     select(TenantMembership).where(
                         TenantMembership.user_id == user_id,

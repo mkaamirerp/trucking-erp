@@ -8,12 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
+from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.trailer import TrailerCreate, TrailerResponse, TrailerUpdate
 from app.services import trailers as trailers_service
 
-router = APIRouter(prefix="/trailers", tags=["trailers"])
+router = APIRouter(
+    prefix="/trailers",
+    tags=["trailers"],
+    dependencies=[Depends(require_active_tenant)],
+)
 
 
 @router.post("", response_model=TrailerResponse, status_code=status.HTTP_201_CREATED)

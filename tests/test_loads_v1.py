@@ -15,8 +15,8 @@ from app.deps.tenant import require_tenant
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 
-# Auth bypass for API tests: set TEST_BYPASS_AUTH=1; use X-Tenant-ID (demo tenant id may vary per env)
-AUTH_HEADERS = {"Host": "demo.truckerp.me", "X-Tenant-ID": "53"}
+# Auth bypass: TEST_BYPASS_AUTH=1 + tenant subdomain in Host (demo slug must exist in platform DB)
+AUTH_HEADERS = {"host": "demo.truckerp.me"}
 
 
 # --- Schema (no DB) ---
@@ -73,6 +73,8 @@ def override_auth_tenant(test_bypass_env):
     fake_user = MagicMock()
     fake_user.user_id = "test-user-id"
     fake_user.email = "test@example.com"
+    fake_user.tenant_id = 1
+    fake_user.role = "TENANT_ADMIN"
     app.dependency_overrides[get_current_user] = lambda: fake_user
 
     def _tenant_from_request(request: Request) -> int:

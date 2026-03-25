@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.deps.auth import get_current_user
+from app.deps.tenant_status import require_active_tenant
 
 logger = logging.getLogger(__name__)
 from app.models.driver import Driver
@@ -16,7 +17,11 @@ from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate, DriverList
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 
-router = APIRouter(prefix="/drivers", tags=["drivers"])
+router = APIRouter(
+    prefix="/drivers",
+    tags=["drivers"],
+    dependencies=[Depends(require_active_tenant)],
+)
 
 @router.post("", response_model=DriverOut, status_code=status.HTTP_201_CREATED)
 async def create_driver(

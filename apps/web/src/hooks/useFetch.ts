@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchWithTenant, refreshSession } from "../api";
 import { authErrorToMessage } from "../utils/authErrorToMessage";
+import { forceWorkspaceRelogin, shouldForceReloginFrom403Body } from "../utils/forceWorkspaceRelogin";
 
 export type FetchState<T> = {
   data: T | null;
@@ -33,6 +34,14 @@ export function useFetch<T>(url: string, deps: unknown[] = [], enabled: boolean 
         }
         if (!res.ok) {
           const text = await res.text();
+          if (res.status === 401) {
+            forceWorkspaceRelogin();
+            return;
+          }
+          if (res.status === 403 && shouldForceReloginFrom403Body(text)) {
+            forceWorkspaceRelogin();
+            return;
+          }
           const message =
             res.status === 401 || res.status === 403
               ? authErrorToMessage(res.status, text || res.statusText)

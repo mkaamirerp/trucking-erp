@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.deps.auth import CurrentUser, get_current_user
+from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.models.application_access_token import ApplicationAccessToken
@@ -26,7 +27,11 @@ from app.utils.email import send_onboarding_invite_email
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/admin/onboarding", tags=["Admin Onboarding"])
+router = APIRouter(
+    prefix="/api/v1/admin/onboarding",
+    tags=["Admin Onboarding"],
+    dependencies=[Depends(require_entitlement("admin_sensitive"))],
+)
 
 
 class InviteLinkRequest(BaseModel):

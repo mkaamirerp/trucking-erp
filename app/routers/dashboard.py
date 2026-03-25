@@ -8,8 +8,10 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.dependencies.authz import require_tenant_admin
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
+from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
 from sqlalchemy.orm import selectinload
 from app.models.driver import Driver
@@ -17,7 +19,11 @@ from app.models.load import Load, LoadStop
 from app.models.broker import Broker
 from app.schemas.driver import DriverOut, DriverListOut, driver_row_to_list_out
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(require_active_tenant)],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -141,7 +147,7 @@ CITIES = [
 ]
 
 
-@router.post("/seed-demo")
+@router.post("/seed-demo", dependencies=[Depends(require_tenant_admin)])
 async def seed_demo(
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),

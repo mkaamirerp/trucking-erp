@@ -56,6 +56,9 @@ resend_otp_per_identity = SlidingWindowLimiter(max_requests=3, window_seconds=30
 forgot_password_per_ip = SlidingWindowLimiter(max_requests=5, window_seconds=900)      # 5 per 15 min per IP
 forgot_password_per_email = SlidingWindowLimiter(max_requests=3, window_seconds=3600)  # 3 per hour per email
 
+create_workspace_per_ip = SlidingWindowLimiter(max_requests=10, window_seconds=3600)  # 10 per hour per IP
+create_workspace_per_user = SlidingWindowLimiter(max_requests=5, window_seconds=86400)  # 5 per day per user
+
 
 def _client_ip(request: Request) -> str:
     return (request.client.host if request.client else "unknown") or "unknown"
@@ -104,6 +107,20 @@ def check_resend_otp_identity_limit(signup_id: str | None, email: str) -> None:
     if not resend_otp_per_identity.allow(f"resend_id:{key}"):
         from fastapi import HTTPException
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+def check_create_workspace_rate_limits(request: Request, platform_user_id: str) -> None:
+    """Raises 429 if authenticated create-workspace limits exceeded."""
+    from fastapi import HTTPException
+
+    ip = _client_ip(request)
+    if not create_workspace_per_ip.allow(f"create_ws_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many workspace creations. Try again later.")
+    if not create_workspace_per_user.allow(f"create_ws_user:{platform_user_id}"):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many workspace creations for this account. Try again later.",
+        )
 
 
 async def rate_limit_forgot_password(request: Request, email: str) -> None:

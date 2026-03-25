@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   checkSlugAvailability,
   checkSignupEmailAvailability,
@@ -33,7 +33,9 @@ type FieldAvailabilityState =
   | { status: "idle" }
   | { status: "checking" }
   | { status: "ok" }
-  | { status: "bad"; message: string };
+  | { status: "bad"; message: string }
+  /** Email already in platform_users — public signup cannot create a second account; use sign-in + Create workspace. */
+  | { status: "taken"; message: string };
 
 function slugify(raw: string) {
   return raw
@@ -84,7 +86,7 @@ function sanitizeProvisionError(raw: string | null | undefined): string | null {
 
 export default function SignupPage() {
   const nav = useNavigate();
-  const { isAuthenticated, session } = useAuth();
+  const { authReady, isAuthenticated, session } = useAuth();
 
   // Step 1 (basic)
   const [workspaceSlug, setWorkspaceSlug] = useState("");
@@ -144,9 +146,12 @@ export default function SignupPage() {
   const slugAvailabilityBlocksSignup =
     slugState.status === "checking" || slugState.status === "bad";
   const emailAvailabilityBlocksSignup =
-    emailAvailState.status === "checking" || emailAvailState.status === "bad";
+    !isAuthenticated &&
+    (emailAvailState.status === "checking" ||
+      emailAvailState.status === "bad" ||
+      emailAvailState.status === "taken");
   const phoneAvailabilityBlocksSignup =
-    phoneAvailState.status === "checking" || phoneAvailState.status === "bad";
+    !isAuthenticated && (phoneAvailState.status === "checking" || phoneAvailState.status === "bad");
 
   const sendOtpDisabled =
     busy ||
@@ -452,10 +457,14 @@ export default function SignupPage() {
     return () => clearTimeout(t);
   }, [normalizedSlug]);
 
-  // Debounced email uniqueness (signup UX only; POST /signup anti-enumeration unchanged)
+  // Debounced email check vs platform signup (UX only). Per-tenant auth allows the same email in different tenant DBs; login is always workspace-scoped.
   useEffect(() => {
     if (step !== "signup") {
       setEmailAvailState({ status: "idle" });
+      return;
+    }
+    if (isAuthenticated) {
+      setEmailAvailState({ status: "ok" });
       return;
     }
     const trimmed = email.trim();
@@ -472,8 +481,9 @@ export default function SignupPage() {
           setEmailAvailState({ status: "ok" });
         } else {
           setEmailAvailState({
-            status: "bad",
-            message: "This email is already being used.",
+            status: "taken",
+            message:
+              "This email already has a TruckERP account. Sign in, then use Create workspace to add another company.",
           });
         }
       } catch {
@@ -484,12 +494,16 @@ export default function SignupPage() {
       }
     }, 450);
     return () => clearTimeout(t);
-  }, [email, step]);
+  }, [email, step, isAuthenticated]);
 
   // Debounced phone uniqueness (digits compared to platform_users.phone)
   useEffect(() => {
     if (step !== "signup") {
       setPhoneAvailState({ status: "idle" });
+      return;
+    }
+    if (isAuthenticated) {
+      setPhoneAvailState({ status: "ok" });
       return;
     }
     if (!isValidPhone(phone)) {
@@ -517,7 +531,7 @@ export default function SignupPage() {
       }
     }, 450);
     return () => clearTimeout(t);
-  }, [phone, step]);
+  }, [phone, step, isAuthenticated]);
 
   const browserRegion = useMemo(() => {
     if (typeof navigator === "undefined") return "";
@@ -626,6 +640,11 @@ export default function SignupPage() {
     e.preventDefault();
     resetMessages();
 
+    if (authReady && isAuthenticated) {
+      nav("/create-workspace");
+      return;
+    }
+
     if (breachCheckStatus === "breached") {
       setServerMsg("This password has been exposed in a data breach. Choose a different one.");
       return;
@@ -653,6 +672,10 @@ export default function SignupPage() {
       return;
     }
     if (emailAvailState.status === "bad") {
+      setServerMsg(emailAvailState.message);
+      return;
+    }
+    if (emailAvailState.status === "taken") {
       setServerMsg(emailAvailState.message);
       return;
     }
@@ -694,9 +717,22 @@ export default function SignupPage() {
         } as any,
         currentKey
       );
+      if ((res as any)?.code === "ACCOUNT_EXISTS" || (res as any)?.next_step === "SIGN_IN") {
+        setServerMsg(
+          "You already have an account with this email. Sign in, then use “Create workspace” on the login page to start a new company.",
+        );
+        return;
+      }
       // Single-step signup: backend creates workspace and returns redirect_url; go there
       if ((res as any)?.redirect_url) {
         window.location.href = (res as any).redirect_url;
+        return;
+      }
+      if ((res as any)?.requires_otp && (res as any)?.signup_id) {
+        setAttemptId(String((res as any).signup_id));
+        setAttemptState("OTP_SENT");
+        setStep("otp");
+        setServerMsg("OTP sent. Please check your email.");
         return;
       }
       // Legacy OTP flow (if backend ever returns attempt_id without redirect_url)
@@ -729,11 +765,10 @@ export default function SignupPage() {
     setBusy(true);
     try {
       const res: any = await verifyOtp({
-        attempt_id: attemptId || undefined,
+        signup_id: attemptId || undefined,
         email: email.trim(),
-        slug: normalizedSlug,
         otp: otp.trim(),
-      } as any);
+      });
 
       if (res?.success) {
         setServerMsg(res?.message || "Verified.");
@@ -779,7 +814,7 @@ export default function SignupPage() {
     setResendBusy(true);
     try {
       const res: any = await resendOtp({
-        attempt_id: attemptId || undefined,
+        signup_id: attemptId || undefined,
         email: email.trim(),
         slug: normalizedSlug,
       });
@@ -915,7 +950,7 @@ export default function SignupPage() {
       return;
     }
     try {
-      await cancelSignup({ attempt_id: attemptId });
+      await cancelSignup({ signup_id: attemptId });
       setAttemptId(null);
       setReservationExpiresAt(null);
       setAttemptState(null);
@@ -941,6 +976,16 @@ export default function SignupPage() {
         </div>
 
         <p className="mt-2 text-sm text-slate-400">Choose a workspace slug (your subdomain) and verify your email.</p>
+
+        {authReady && isAuthenticated && step === "signup" ? (
+          <div className="mt-4 rounded-xl border border-sky-800/60 bg-sky-950/30 p-3 text-sm text-sky-200">
+            You’re already signed in. To add another company, open{" "}
+            <Link to="/create-workspace" className="font-medium text-sky-100 underline">
+              Create workspace
+            </Link>
+            . This form is for brand-new accounts only.
+          </div>
+        ) : null}
 
         {serverMsg ? (
           <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-200">
@@ -1058,7 +1103,11 @@ export default function SignupPage() {
                   setEmail(e.target.value);
                   clearFieldError("email");
                 }}
-                className={inputClass(Boolean(fieldErrors.email) || emailAvailState.status === "bad")}
+                className={inputClass(
+                  Boolean(fieldErrors.email) ||
+                    emailAvailState.status === "bad" ||
+                    emailAvailState.status === "taken",
+                )}
                 placeholder="you@company.com"
                 autoComplete="email"
               />
@@ -1080,6 +1129,19 @@ export default function SignupPage() {
               {!fieldErrors.email && emailAvailState.status === "bad" ? (
                 <p className="mt-1 text-xs text-rose-200" role="alert">
                   {emailAvailState.message}
+                </p>
+              ) : null}
+              {!fieldErrors.email && emailAvailState.status === "taken" ? (
+                <p className="mt-1 text-xs text-amber-200" role="alert">
+                  {emailAvailState.message}{" "}
+                  <Link to="/login" state={{ from: "/create-workspace" }} className="underline font-medium text-amber-100">
+                    Sign in
+                  </Link>
+                  , then open{" "}
+                  <Link to="/create-workspace" className="underline font-medium text-amber-100">
+                    Create workspace
+                  </Link>
+                  .
                 </p>
               ) : null}
             </div>

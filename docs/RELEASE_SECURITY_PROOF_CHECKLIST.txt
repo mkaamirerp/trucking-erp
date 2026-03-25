@@ -1,0 +1,46 @@
+TruckERP — Release security proof (tenant boundary model)
+==========================================================
+Use before tagging a release. Tick each line. Fail = block release.
+
+AUTOMATED (in CI or locally with DATABASE_URL + secrets)
+----------------------------------------------------------
+[ ] pytest tests/test_settings_tenant_shortcuts.py
+[ ] pytest tests/test_cross_tenant_host_enforcement.py (sourced /run/secrets/truckerp.env in container)
+[ ] pytest tests/test_tenant_context.py
+[ ] pytest tests/test_download_security.py
+[ ] pytest tests/test_email_threads_api.py (or full tests/ if feasible)
+
+HOST + TOKEN BOUNDARY (manual or curl)
+--------------------------------------
+[ ] GET /api/v1/drivers with no Host → 400 (tenant required)
+[ ] GET /api/v1/drivers with Host: {workspace}.<BASE_DOMAIN> and X-Tenant-ID: 99999 → tenant from Host only (401/403, not wrong tenant data)
+[ ] Valid session for workspace A + Host workspace B → 403 (token/workspace mismatch or no membership)
+[ ] Login and GET /api/v1/auth/me on same workspace Host → 200
+
+SUSPENDED / INACTIVE WORKSPACE
+------------------------------
+[ ] Platform tenant status not ACTIVE → tenant-scoped routes return 403 (inactive) on require_active_tenant routers
+
+ENTITLEMENTS (subscription gate)
+------------------------------
+[ ] With subscription missing or status not TRIAL_ACTIVE/ACTIVE → 403 on at least one gated route (e.g. GET /api/v1/admin/company-profile or GET /api/v1/email-threads)
+
+PRODUCTION / STAGING SAFETY
+---------------------------
+[ ] ENVIRONMENT is production|staging → TEST_BYPASS_AUTH has no effect; TOOLS_DEFAULT_* / JWT-without-host shortcuts off (allows_dev_tenant_resolution_shortcuts false)
+[ ] GET /api/v1/platform/tenants without X-Platform-Admin-Key → 401 or 503 (key configured); with correct key → 200
+[ ] PLATFORM_ADMIN_API_KEY present in SSM/secrets for staging/prod (503 if missing on strict envs)
+[ ] Dev tools routes absent: GET /api/v1/tools/ping → 404 (routers not mounted; nginx still proxies /api/ to API)
+
+BARE ID / TENANT DB
+-------------------
+[ ] Spot-check: GET /api/v1/loads/{id} with wrong id → 404; no cross-tenant row leakage (tenant DB isolation + tenant_id in queries)
+
+SAME-TENANT HAPPY PATH
+----------------------
+[ ] Core flows on one workspace: login, dashboard summary, one CRUD list, payroll or admin read (as applicable) → 2xx
+
+Notes
+-----
+- Rebuild API image after backend changes; restart nginx if frontend dist changed.
+- Cross-tenant tests need two ACTIVE tenants and demo-style data; may skip in minimal DBs.

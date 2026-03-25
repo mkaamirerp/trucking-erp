@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,13 +15,30 @@ from app.schemas.driver_documents import (
     DriverDocumentOut,
     DriverDocumentFileOut,
 )
+from app.deps.auth import CurrentUser, get_current_user
+from app.deps.admin import has_full_access
+from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 
-router = APIRouter(tags=["Driver Documents"])
+router = APIRouter(tags=["Driver Documents"], dependencies=[Depends(require_entitlement("driver_documents"))])
 
 
-@router.post("/driver-documents", response_model=DriverDocumentOut)
+async def require_full_access_driver_documents(
+    user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Mutations restricted to OWNER/ADMIN-class roles; list/read stays entitlement-only."""
+    if not has_full_access(user.role):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Full access role required to create or modify driver documents",
+        )
+
+
+_DRIVER_DOC_WRITES = [Depends(require_full_access_driver_documents)]
+
+
+@router.post("/driver-documents", response_model=DriverDocumentOut, dependencies=_DRIVER_DOC_WRITES)
 async def create_driver_document(
     payload: DriverDocumentCreate,
     tenant_id: int = Depends(require_tenant),
@@ -47,7 +64,7 @@ async def create_driver_document(
     return doc
 
 
-@router.post("/driver-documents/{driver_id}", response_model=DriverDocumentOut)
+@router.post("/driver-documents/{driver_id}", response_model=DriverDocumentOut, dependencies=_DRIVER_DOC_WRITES)
 async def create_driver_document_for_driver(
     driver_id: int,
     payload: DriverDocumentCreatePath,
@@ -106,7 +123,7 @@ async def list_driver_documents_by_path(
     return await _list_docs_for_driver(db, tenant_id, driver_id, include_inactive)
 
 
-@router.post("/driver-documents/{document_id}/deactivate", response_model=DriverDocumentOut)
+@router.post("/driver-documents/{document_id}/deactivate", response_model=DriverDocumentOut, dependencies=_DRIVER_DOC_WRITES)
 async def deactivate_driver_document(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
@@ -132,7 +149,7 @@ async def deactivate_driver_document(
 
 
 
-@router.post("/driver-documents/{document_id}/files", response_model=DriverDocumentFileOut)
+@router.post("/driver-documents/{document_id}/files", response_model=DriverDocumentFileOut, dependencies=_DRIVER_DOC_WRITES)
 async def upload_driver_document_file(
     document_id: int,
     tenant_id: int = Depends(require_tenant),
@@ -191,7 +208,7 @@ async def list_driver_document_files(
     return list(res.scalars().all())
 
 
-@router.post("/driver-documents/{document_id}/files/{file_id}/deactivate", response_model=DriverDocumentFileOut)
+@router.post("/driver-documents/{document_id}/files/{file_id}/deactivate", response_model=DriverDocumentFileOut, dependencies=_DRIVER_DOC_WRITES)
 async def deactivate_driver_document_file(
     document_id: int,
     file_id: int,

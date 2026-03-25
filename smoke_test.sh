@@ -19,12 +19,9 @@ fi
 
 API="${API:-$BASE_URL/api/v1}"
 
-TENANT_ID="${TENANT_ID:-1}"
-TENANT_ROLES="${TENANT_ROLES:-TENANT_ADMIN}"
-TENANT_HEADER=(
-  -H "X-Tenant-ID: ${TENANT_ID}"
-  -H "X-Tenant-Roles: ${TENANT_ROLES}"
-)
+# Tenant is resolved from Host (workspace subdomain), not X-Tenant-* headers.
+TENANT_SLUG="${TENANT_SLUG:-demo}"
+TENANT_WORKSPACE_HOST=( -H "Host: ${TENANT_SLUG}.truckerp.me" )
 
 # Helpers
 hr() { printf "\n============================================================\n"; }
@@ -186,7 +183,7 @@ ok "Health OK"
 
 # 1b) Tenant header enforcement
 subhr
-echo "1b) Tenant enforcement: drivers without tenant header should fail (400)"
+echo "1b) Tenant enforcement: drivers without workspace Host should fail (400)"
 code_no_tenant="$(http_code "$API/drivers")"
 echo "GET /drivers (no tenant) => HTTP $code_no_tenant"
 [[ "$code_no_tenant" == "400" ]] && ok "Missing tenant rejected" || fail "Expected 400 for missing tenant"
@@ -215,11 +212,10 @@ docker run --rm --network truckerp_net alpine:3.20 sh -lc '
   set -e
   apk add --no-cache curl >/dev/null
   API="http://truckerp-api:8000/api/v1"
-  OK=24
-  BAD=9999
+  SLUG=demo
   fail() { echo "FAIL: $1" >&2; exit 1; }
 
-  R1=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Tenant-ID: $OK" "$API/drivers")
+  R1=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${SLUG}.truckerp.me" "$API/drivers")
   [ "$R1" = "403" ] || fail "[Tenant OK but no auth] expected 403, got $R1"
   echo "[Tenant OK, no auth] /drivers => PASS (403)"
 
@@ -227,7 +223,7 @@ docker run --rm --network truckerp_net alpine:3.20 sh -lc '
   [ "$R2" = "400" ] || fail "[Tenant missing] expected 400, got $R2"
   echo "[Tenant missing] /drivers => PASS (400)"
 
-  R3=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Tenant-ID: $BAD" "$API/drivers")
+  R3=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: zzz-nonexistent-tenant.truckerp.me" "$API/drivers")
   [ "$R3" = "403" ] || fail "[Tenant invalid] expected 403, got $R3"
   echo "[Tenant invalid] /drivers => PASS (403)"
 '

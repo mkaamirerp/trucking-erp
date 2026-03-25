@@ -23,7 +23,7 @@ POSTGRES_NAME="${POSTGRES_NAME:-truckerp-postgres}"
 PLATFORM_DB="${PLATFORM_DB:-trucking_erp}"
 TENANT_DB="${TENANT_DB:-truckerp}"
 ADMIN_DB="${ADMIN_DB:-postgres}"
-TENANT_SLUG="${TENANT_SLUG:-truckerp}"
+TENANT_SLUG="${TENANT_SLUG:-demo}"
 RENDERED_ENV="/run/secrets/truckerp.env"
 VAULT_AGENT_NAME="${VAULT_AGENT_NAME:-truckerp-vault-agent}"
 
@@ -431,30 +431,31 @@ if [[ -n "${API_CID:-}" ]]; then
     section_result FAIL "GET /api/v1/drivers without tenant (expected 400)"
   fi
   
-  # Test 4: Invalid tenant ID → 403
-  if test_endpoint_headers "/api/v1/drivers" "X-Tenant-ID: 99999" "403" "10"; then
-    section_result PASS "Tenant-scoped route returns 403 for invalid tenant"
+  # Test 4: Unknown workspace Host → 403 (tenant not in registry)
+  BASE_DOMAIN="${BASE_DOMAIN:-truckerp.me}"
+  if test_endpoint_headers "/api/v1/drivers" "Host: zzz-nonexistent-tenant.${BASE_DOMAIN}" "403" "10"; then
+    section_result PASS "Tenant-scoped route returns 403 for unknown workspace Host"
   else
-    section_result FAIL "GET /api/v1/drivers with invalid tenant (expected 403)"
+    section_result FAIL "GET /api/v1/drivers with bogus subdomain Host (expected 403)"
   fi
   
-  # Test 5: Valid tenant but no auth → 403 (membership gate)
-  if test_endpoint_headers "/api/v1/drivers" "X-Tenant-ID: 24" "403" "10"; then
-    section_result PASS "Tenant-scoped route returns 403 without auth (membership gate)"
+  # Test 5: Valid workspace Host, no auth → 401 (membership / auth gate)
+  if test_endpoint_headers "/api/v1/drivers" "Host: ${TENANT_SLUG}.${BASE_DOMAIN}" "401" "10"; then
+    section_result PASS "Tenant-scoped route returns 401 without auth (expected)"
   else
-    section_result FAIL "GET /api/v1/drivers with tenant, no auth (expected 403)"
+    section_result FAIL "GET /api/v1/drivers with workspace Host, no auth (expected 401)"
   fi
   
-  # Test 6: Auth login – GET requires tenant (middleware) → 400; POST without tenant → 400
+  # Test 6: Auth login – GET without tenant context → 400; POST JSON without Host → 400
   if test_endpoint "/api/v1/auth/login" "400" "5"; then
     section_result PASS "GET /api/v1/auth/login returns 400 (tenant required)"
   else
     section_result FAIL "GET /api/v1/auth/login (expected 400)"
   fi
   if test_endpoint_post "/api/v1/auth/login" "{}" "" "400" "5"; then
-    section_result PASS "POST /api/v1/auth/login (no tenant) returns 400"
+    section_result PASS "POST /api/v1/auth/login (no tenant Host) returns 400"
   else
-    section_result FAIL "POST /api/v1/auth/login without tenant (expected 400)"
+    section_result FAIL "POST /api/v1/auth/login without tenant Host (expected 400)"
   fi
 fi
 

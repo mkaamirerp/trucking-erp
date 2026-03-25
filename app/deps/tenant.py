@@ -18,12 +18,8 @@ def _slug_from_host(request: Request) -> str | None:
 
 
 def tenant_slug_from_request(request: Request) -> str | None:
-    """Get tenant slug from request. Prefers host (trusted for browser) over header. For public routes."""
-    slug = _slug_from_host(request)
-    if slug:
-        return slug
-    raw = request.headers.get("X-Tenant-Slug")
-    return raw.strip().lower() if raw and raw.strip() else None
+    """Tenant slug from Host subdomain only (trusted). Public routes do not use X-Tenant-Slug."""
+    return _slug_from_host(request)
 
 
 def require_tenant(request: Request) -> int:

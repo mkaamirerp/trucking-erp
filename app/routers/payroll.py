@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.dependencies.authz import require_tenant_admin
+from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant
 from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -34,7 +35,7 @@ from app.schemas.payroll import (
 router = APIRouter(
     prefix="/api/v1/payroll",
     tags=["Payroll"],
-    dependencies=[Depends(require_active_tenant)],
+    dependencies=[Depends(require_active_tenant), Depends(require_entitlement("payroll"))],
 )
 
 logger = logging.getLogger(__name__)

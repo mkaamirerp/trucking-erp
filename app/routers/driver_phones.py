@@ -6,10 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver_phone import DriverPhone
 from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
+from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
+from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
 
-router = APIRouter(prefix="/driver-phones", tags=["Driver Phones"])
+router = APIRouter(
+    prefix="/driver-phones",
+    tags=["Driver Phones"],
+    dependencies=[Depends(require_active_tenant), Depends(get_current_user)],
+)
 
 
 @router.get("", response_model=list[DriverPhoneRead])

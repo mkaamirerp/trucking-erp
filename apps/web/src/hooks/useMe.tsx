@@ -4,7 +4,11 @@ import { useFetch } from "./useFetch";
 import { useAuth } from "../contexts/AuthContext";
 
 export type MeResponse = {
-  user_id: number | null;
+  /** Platform user id (UUID string from API). */
+  user_id: number | string | null;
+  /** Present in tenant_auth_mode=tenant: tenant_users.id for this workspace. */
+  tenant_local_user_id?: number | null;
+  tenant_auth_mode?: string | null;
   tenant_id: number;
   roles: string[];
   requires_account_setup?: boolean;
@@ -21,7 +25,18 @@ type MeContextValue = {
 
 const MeContext = createContext<MeContextValue>({ me: null, loading: true, error: null });
 
-const PUBLIC_PATHS = ["/", "/signup", "/login", "/forgot-password", "/reset-password", "/accept-invite", "/company-setup", "/account-setup", "/onboarding"];
+const PUBLIC_PATHS = [
+  "/",
+  "/signup",
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/accept-invite",
+  "/company-setup",
+  "/account-setup",
+  "/onboarding",
+  "/create-workspace",
+];
 
 export function MeProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -34,7 +49,10 @@ export function MeProvider({ children }: { children: ReactNode }) {
   // Normalize auth/me response (role) to MeResponse (roles array)
   const me: MeResponse | null = data
     ? {
-        user_id: (data.user_id as number) ?? null,
+        user_id: (data.user_id as number | string) ?? null,
+        tenant_local_user_id:
+          data.tenant_local_user_id != null ? Number(data.tenant_local_user_id) : null,
+        tenant_auth_mode: (data.tenant_auth_mode as string | null) ?? undefined,
         tenant_id: (data.tenant_id as number) ?? 0,
         roles: Array.isArray(data.roles)
           ? (data.roles as string[])

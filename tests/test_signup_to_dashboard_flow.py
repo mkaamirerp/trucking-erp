@@ -237,7 +237,7 @@ def test_login_then_me_with_bearer_token(client):
     login_resp = client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": password},
-        headers={"X-Tenant-Slug": tenant_slug},
+        headers={"host": f"{tenant_slug}.truckerp.me"},
     )
     assert login_resp.status_code == 200, login_resp.text
     login_data = login_resp.json()
@@ -249,7 +249,7 @@ def test_login_then_me_with_bearer_token(client):
         "/api/v1/me",
         headers={
             "Authorization": f"Bearer {access_token}",
-            "X-Tenant-Slug": tenant_slug,
+            "host": f"{tenant_slug}.truckerp.me",
         },
     )
     assert me_resp.status_code == 200, me_resp.text

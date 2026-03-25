@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.deps.admin import is_tenant_admin
 from app.deps.auth import CurrentUser, get_current_user
+from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db, open_tenant_session_by_id
 from app.core.database import get_db
@@ -42,7 +43,11 @@ from app.services.gmail_oauth import (
 from app.services.email_ingestion_gmail import sync_gmail_inbox_for_tenant
 from app.utils.encryption import decrypt_secret, encrypt_secret, generate_credential_ref
 
-router = APIRouter(prefix="/api/v1/admin", tags=["Tenant Admin - Email"])
+router = APIRouter(
+    prefix="/api/v1/admin",
+    tags=["Tenant Admin - Email"],
+    dependencies=[Depends(require_entitlement("email_mailbox"))],
+)
 
 
 def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:

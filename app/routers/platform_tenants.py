@@ -25,14 +25,31 @@ router = APIRouter(prefix="/api/v1/platform", tags=["platform-tenants"])
 logger = logging.getLogger(__name__)
 
 
-def require_admin_header(x_platform_admin_key: str | None = Header(None)) -> None:
-    expected = None  # set via env if needed later
+def require_platform_admin_key(
+    x_platform_admin_key: str | None = Header(default=None, alias="X-Platform-Admin-Key"),
+) -> None:
+    """
+    Protects /api/v1/platform/* control-plane routes.
+    Production and staging: PLATFORM_ADMIN_API_KEY must be set and sent in X-Platform-Admin-Key.
+    Dev-like: if key is unset, allow (local tooling); if set, header must match.
+    """
+    expected = settings.platform_admin_api_key
+    strict_env = settings.is_production() or not settings.allows_dev_tenant_resolution_shortcuts()
+    if strict_env:
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Platform admin API disabled: set PLATFORM_ADMIN_API_KEY.",
+            )
+        if not x_platform_admin_key or x_platform_admin_key != expected:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        return
     if expected and x_platform_admin_key != expected:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
 @router.get("/tenants", response_model=list[PlatformTenantOut])
-async def list_tenants(db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
+async def list_tenants(db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
     try:
         rows = (await db.execute(select(PlatformTenant))).scalars().all()
     except Exception as exc:
@@ -44,7 +61,7 @@ async def list_tenants(db: AsyncSession = Depends(get_db), _: None = Depends(req
 
 
 @router.post("/tenants", response_model=PlatformTenantOut)
-async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
+async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
     name = body.get("company_name") or body.get("name")
     slug = body.get("slug")
     if not name:
@@ -68,7 +85,7 @@ async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None 
 
 
 @router.post("/tenants/{tenant_id}/provision")
-async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
+async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
     raw_admin_url = settings.postgres_admin_url or settings.database_url
     logger.info(
         "postgres_admin_url type=%s value=%r database_url_present=%s",
@@ -162,7 +179,7 @@ async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _
 
 
 @router.get("/tenants/{tenant_id}", response_model=PlatformTenantOut)
-async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
+async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
     try:
         tenant = await db.get(PlatformTenant, tenant_id)
     except Exception as exc:
@@ -182,7 +199,7 @@ async def get_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None
 
 
 @router.post("/tenants/{tenant_id}/retry-provision")
-async def retry_provision(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_admin_header)):
+async def retry_provision(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
     # Clear error and reuse provisioning flow
     tenant = await db.get(PlatformTenant, tenant_id)
     if not tenant:
