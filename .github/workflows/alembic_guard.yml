@@ -112,8 +112,9 @@ jobs:
 
       - name: Guard forbid alembic stamp
         run: |
-          if rg -n --hidden --no-ignore-vcs -g '!.github/workflows/*.yml' "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools docs .github 2>/dev/null; then
-            echo "Found alembic stamp usage in repo scripts/docs"
+          # Docs may document recovery commands; enforce only on automation / config paths.
+          if rg -n --hidden --no-ignore-vcs -g '!.github/workflows/*.yml' "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools .github 2>/dev/null; then
+            echo "Found alembic stamp usage in repo scripts/tools/.github"
             exit 1
           fi
           echo "No committed alembic stamp usage found"
