@@ -4,6 +4,13 @@
 # Legacy compatibility only:
 #   DriverOnboardingSubmission routes below remain temporarily for older flows and
 #   must not be treated as the future approval source-of-truth.
+#
+# Tenant policy (enforced in TenantContextMiddleware before handlers):
+#   - Platform tenant must be status ACTIVE and db_status READY, or all routes get 403 "Tenant not ready".
+#   - Applicant invite-token routes (/applicant/*) skip JWT/membership; auth is the token query param.
+#   - Applicant routes also require TRIAL_ACTIVE/ACTIVE subscription (require_tenant_subscription_active).
+#   - Authenticated routes here require membership + JWT like other tenant APIs (middleware).
+#   - Router does not use Depends(require_active_tenant) because middleware already blocks non-ACTIVE tenants.
 
 from __future__ import annotations
 
@@ -43,9 +50,13 @@ from app.schemas.driver_onboarding import (
     PersonOut,
 )
 from app.deps.admin import is_tenant_admin
+from app.deps.entitlements import require_tenant_subscription_active
 from app.services.dl_pdf417 import extract_pdf417_fields
 
 router = APIRouter(prefix="/api/v1/driver-onboarding", tags=["driver-onboarding"])
+
+# Token-based applicant flows: subscription gate matches admin invite (no JWT on these routes).
+_APPLICANT_SUBSCRIPTION = [Depends(require_tenant_subscription_active)]
 
 
 def _utcnow() -> datetime:
@@ -380,7 +391,7 @@ def _person_application_to_out(app: PersonApplication) -> ApplicantApplicationOu
     )
 
 
-@router.get("/applicant/application", response_model=ApplicantApplicationOut)
+@router.get("/applicant/application", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)
 async def get_applicant_application(
     token: str = Query(..., description="Invite link token"),
     tenant_id: int = Depends(require_tenant),
@@ -391,7 +402,7 @@ async def get_applicant_application(
     return _person_application_to_out(app)
 
 
-@router.put("/applicant/application", response_model=ApplicantApplicationOut)
+@router.put("/applicant/application", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)
 async def update_applicant_application(
     payload: ApplicantApplicationUpdate,
     token: str = Query(..., description="Invite link token"),
@@ -433,7 +444,7 @@ async def update_applicant_application(
     return _person_application_to_out(app)
 
 
-@router.post("/applicant/application/intake", response_model=ApplicantApplicationOut)
+@router.post("/applicant/application/intake", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)
 async def save_applicant_intake(
     payload: ApplicantIntakeRequest,
     token: str = Query(..., description="Invite link token"),
@@ -456,7 +467,7 @@ async def save_applicant_intake(
     return _person_application_to_out(app)
 
 
-@router.post("/applicant/application/reset", response_model=ApplicantApplicationOut)
+@router.post("/applicant/application/reset", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)
 async def reset_applicant_application(
     token: str = Query(..., description="Invite link token"),
     tenant_id: int = Depends(require_tenant),
@@ -495,7 +506,7 @@ async def reset_applicant_application(
     return _person_application_to_out(app)
 
 
-@router.post("/applicant/application/dl-upload", response_model=ApplicantApplicationOut)
+@router.post("/applicant/application/dl-upload", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)
 async def upload_applicant_dl(
     token: str = Query(..., description="Invite link token"),
     doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
@@ -534,7 +545,7 @@ async def upload_applicant_dl(
     return _person_application_to_out(app)
 
 
-@router.get("/applicant/application/file")
+@router.get("/applicant/application/file", dependencies=_APPLICANT_SUBSCRIPTION)
 async def get_applicant_application_file(
     token: str = Query(..., description="Invite link token"),
     file_id: str = Query(..., description="Storage key / file id"),
@@ -566,7 +577,7 @@ _ALLOWED_DOC_TYPES = frozenset({
 })
 
 
-@router.post("/applicant/application/document-upload", response_model=ApplicantApplicationOut)
+@router.post("/applicant/application/document-upload", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)
 async def upload_applicant_document(
     token: str = Query(..., description="Invite link token"),
     doc_type: str = Form(..., description="Document type key (e.g. dot_medical, mvr)"),

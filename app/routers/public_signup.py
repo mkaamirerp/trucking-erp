@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.deps.tenant import tenant_slug_from_request
 from app.core.storage import save_company_doc_upload, serve_file
 from app.models.platform import (
     OnboardingStatus,
@@ -19,17 +20,13 @@ from app.models.platform import (
     PlatformOnboardingPayload,
     PlatformOTPToken,
     PlatformSecurityEvent,
-    PlatformSubscription,
     PlatformTenant,
-    PlatformTenantMember,
     PlatformUser,
-    SubscriptionPlan,
-    SubscriptionStatus,
     TenantDBStatus,
-    TenantMembership,
     TenantStatus,
 )
 from app.schemas.signup import (
+    CancelSignupRequest,
     CompanySetupRequest,
     CompanySetupResponse,
     SignupRequest,
@@ -54,9 +51,24 @@ from app.utils.rate_limit import (
 )
 from app.utils.slug import SLUG_REGEX, generate_slug_suggestions, is_slug_available, normalize_slug
 from app.services.tenant_provisioning import provision_tenant_db
+from app.services.workspace_bootstrap import provision_new_workspace_for_platform_user
 
 router = APIRouter(prefix="/api/v1/public", tags=["public-signup"])
 logger = logging.getLogger(__name__)
+
+
+async def _tenant_from_host_for_company_setup(request: Request, db: AsyncSession) -> PlatformTenant:
+    slug = tenant_slug_from_request(request)
+    if not slug:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant required: open company setup from your workspace URL (tenant subdomain).",
+        )
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.slug == slug.lower()))
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    return tenant
+
 
 def _request_host(request: Request) -> str | None:
     host = request.headers.get("host") or request.url.hostname
@@ -266,8 +278,7 @@ async def public_signup(
             select(PlatformUser).where(PlatformUser.email == email_lower)
         )
         if existing_user:
-            # Return the same shape as a normal signup so the caller cannot tell
-            # whether the email is already registered.
+            # Same shape as a normal signup so the caller cannot tell whether the email is already registered.
             logger.info("signup_attempt_duplicate_email email=%s", email_lower)
             return SignupResponse(success=True, requires_otp=True)
 
@@ -540,23 +551,20 @@ async def verify_otp(
         phone_digits = _normalize_phone_digits(phone_raw) if phone_raw else None
         password_hash = p.get("password_hash") or ""
 
-        # ── 4. Create all platform rows (NOT yet committed) ───────────────────
-        context["provisioning_step"] = "create_tenant"
-        tenant = PlatformTenant(
-            name=tenant_name,
-            slug=normalized_slug,
-            status=TenantStatus.PENDING_SETUP.value,
-            db_status=TenantDBStatus.NOT_CREATED.value,
-            country_code=country_code,
+        # ── 4. Platform account must not already exist (defense in depth) ─────
+        existing_platform_user_id = await db.scalar(
+            select(PlatformUser.id).where(PlatformUser.email == email_lower)
         )
-        db.add(tenant)
-        await db.flush()
+        if existing_platform_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "An account with this email already exists. Sign in, then use Create workspace "
+                    "to add a new company."
+                ),
+            )
 
-        draft_row.tenant_id = tenant.id
-        draft_row.status = OnboardingStatus.COMPLETED.value
-        draft_row.updated_at = now
-        await db.flush()
-
+        # ── 5. Create user, tenant, membership, provision DB (one commit) ─────
         context["provisioning_step"] = "create_user"
         user = PlatformUser(
             first_name=first_name,
@@ -570,57 +578,24 @@ async def verify_otp(
         db.add(user)
         await db.flush()
 
-        # Mark OTP consumed + link to newly created user
         otp_row.consumed_at = now
         otp_row.user_id = user.id
 
-        context["provisioning_step"] = "create_membership"
-        membership = PlatformTenantMember(tenant_id=tenant.id, platform_user_id=user.id, role="TENANT_ADMIN")
-        db.add(membership)
-
-        gate = TenantMembership(
-            tenant_id=tenant.id,
-            user_id=user.id,
-            status="pending",
-            is_break_glass_owner=True,
-        )
-        db.add(gate)
-
-        subscription = PlatformSubscription(
-            tenant_id=tenant.id,
-            plan=SubscriptionPlan.TRIAL.value,
-            status=SubscriptionStatus.TRIAL_ACTIVE.value,
-            trial_ends_at=now + timedelta(days=14),
-        )
-        db.add(subscription)
-
-        # ── 5. Provision tenant DB (before final commit) ──────────────────────
-        # Flush so provision_tenant_db can see the tenant row in the same session.
-        await db.flush()
-        context["tenant_id"] = int(tenant.id)
-        context["slug"] = tenant.slug
-        context["provisioning_step"] = "provision_tenant_db"
-
-        tenant = await provision_tenant_db(
-            int(tenant.id),
+        context["provisioning_step"] = "provision_workspace"
+        tenant, membership = await provision_new_workspace_for_platform_user(
             db,
-            activate=True,
-            creator_platform_user_id=user.id,
+            user=user,
+            normalized_slug=normalized_slug,
+            tenant_display_name=tenant_name,
+            country_code=country_code,
             creator_first_name=first_name,
             creator_last_name=last_name,
-            creator_email=user.email,
+            now=now,
+            onboarding_draft=draft_row,
         )
+        context["tenant_id"] = int(tenant.id)
+        context["slug"] = tenant.slug
         context["db_name"] = tenant.db_name
-
-        # Activate membership gate
-        gate_row = await db.scalar(
-            select(TenantMembership).where(
-                TenantMembership.user_id == user.id,
-                TenantMembership.tenant_id == tenant.id,
-            )
-        )
-        if gate_row:
-            gate_row.status = "active"
 
         # ── 6. Single final commit (Option A) ─────────────────────────────────
         await db.commit()
@@ -646,17 +621,20 @@ async def verify_otp(
 
         # ── 9. Issue auth cookies ─────────────────────────────────────────────
         context["provisioning_step"] = "issue_tokens"
+        sv_tok = int(getattr(user, "session_version", 1) or 1)
         access = create_access_token(
             user_id=user.id,
             tenant_id=int(tenant.id),
             tenant_slug=tenant.slug,
             roles=[membership.role],
+            sv=sv_tok,
         )
         refresh = create_refresh_token(
             user_id=user.id,
             tenant_id=int(tenant.id),
             tenant_slug=tenant.slug,
             roles=[membership.role],
+            sv=sv_tok,
         )
         secure = bool(settings.secure_cookies)
         domain = settings.cookie_domain or (f".{settings.base_domain}" if settings.base_domain else None)
@@ -810,30 +788,65 @@ async def resend_otp(
         return {"ok": True, "message": "If a pending signup exists for this email, a new code has been sent."}
 
 
+@router.post("/cancel-signup")
+async def cancel_signup(payload: CancelSignupRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Abandon an in-progress signup: marks the onboarding draft STALE and invalidates pending OTPs.
+    Requires signup_id (UUID from signup response); legacy clients may send attempt_id.
+    """
+    now = datetime.now(timezone.utc)
+    signup_uuid = payload.resolved_signup_public_id()
+    if not signup_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="signup_id is required",
+        )
+
+    draft = await db.scalar(
+        select(PlatformOnboardingPayload).where(PlatformOnboardingPayload.public_id == signup_uuid)
+    )
+    if not draft:
+        return {"ok": True, "message": "Nothing to cancel."}
+
+    if draft.tenant_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This signup already created a workspace; use support if you need to remove it.",
+        )
+
+    if draft.status == OnboardingStatus.COMPLETED.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Signup already completed.",
+        )
+
+    draft.status = OnboardingStatus.STALE.value
+    draft.updated_at = now
+
+    active_tokens = (
+        await db.scalars(
+            select(PlatformOTPToken).where(
+                PlatformOTPToken.onboarding_payload_id == draft.id,
+                PlatformOTPToken.purpose == OTPPurpose.SIGNUP_EMAIL_VERIFY.value,
+                PlatformOTPToken.consumed_at.is_(None),
+                PlatformOTPToken.superseded_at.is_(None),
+            )
+        )
+    ).all()
+    for tok in active_tokens:
+        tok.superseded_at = now
+
+    await db.commit()
+    return {"ok": True, "message": "Signup cancelled."}
+
+
 @router.post("/company-setup/w9-upload")
 async def upload_w9_document(
     request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id_header = request.headers.get("X-Tenant-ID")
-    tenant_slug_header = request.headers.get("X-Tenant-Slug")
-
-    if not tenant_id_header and not tenant_slug_header:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Tenant-ID or X-Tenant-Slug required")
-
-    tenant = None
-    if tenant_id_header:
-        try:
-            tenant_id = int(tenant_id_header)
-        except ValueError:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tenant id")
-        tenant = await db.get(PlatformTenant, tenant_id)
-    elif tenant_slug_header:
-        tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.slug == tenant_slug_header.strip().lower()))
-
-    if not tenant:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    tenant = await _tenant_from_host_for_company_setup(request, db)
 
     stored = await save_company_doc_upload(tenant.slug, tenant.id, file)
     payload_row = await db.scalar(
@@ -867,12 +880,13 @@ async def download_company_setup_document(
     storage_key: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Download a company doc (e.g. W9) by storage_key. Tenant from host (preferred) or X-Tenant-Slug; validates ownership."""
-    from app.deps.tenant import tenant_slug_from_request
-
+    """Download a company doc (e.g. W9) by storage_key. Tenant from Host subdomain only; validates ownership."""
     tenant_slug = tenant_slug_from_request(request)
     if not tenant_slug:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant required: use tenant subdomain or X-Tenant-Slug")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant required: use your workspace subdomain in the URL.",
+        )
     if not storage_key.startswith(f"{tenant_slug}/"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Storage key not valid for tenant")
     tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.slug == tenant_slug))
@@ -886,10 +900,12 @@ async def download_company_setup_document(
         )
     )
     profile = await db.scalar(select(PlatformCompanyProfile).where(PlatformCompanyProfile.tenant_id == tenant.id))
-    in_payload = payload_row and payload_row.payload_json and payload_row.payload_json.get("w9_storage_key") == storage_key
+    in_payload = bool(
+        payload_row and payload_row.payload_json and payload_row.payload_json.get("w9_storage_key") == storage_key
+    )
     in_profile = bool(profile and profile.w9_storage_key == storage_key)
-    has_records = payload_row is not None or profile is not None
-    if has_records and not in_payload and not in_profile:
+    # Require an explicit platform record to reference this key (blocks slug-prefix-only guesses when no setup rows exist).
+    if not in_payload and not in_profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found for this tenant")
     return serve_file(storage_key, "company_docs", tenant_slug=tenant_slug)
 
@@ -908,23 +924,7 @@ def _required_remaining_fields_for_country(country: str) -> list[str]:
 @router.get("/company-setup/prefill", response_model=SetupPrefillResponse)
 async def company_setup_prefill(request: Request, db: AsyncSession = Depends(get_db)):
     """Return prefill from onboarding payload (read-only) + required_remaining_fields. No profile yet."""
-    tenant_id_header = request.headers.get("X-Tenant-ID")
-    tenant_slug_header = request.headers.get("X-Tenant-Slug")
-    if not tenant_id_header and not tenant_slug_header:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Tenant-ID or X-Tenant-Slug required")
-
-    tenant = None
-    if tenant_id_header:
-        try:
-            tenant = await db.get(PlatformTenant, int(tenant_id_header))
-        except ValueError:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tenant id")
-    elif tenant_slug_header:
-        tenant = await db.scalar(
-            select(PlatformTenant).where(PlatformTenant.slug == tenant_slug_header.strip().lower())
-        )
-    if not tenant:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    tenant = await _tenant_from_host_for_company_setup(request, db)
 
     payload_row = await db.scalar(
         select(PlatformOnboardingPayload).where(
@@ -960,28 +960,8 @@ async def company_setup_prefill(request: Request, db: AsyncSession = Depends(get
 
 @router.post("/company-setup", response_model=CompanySetupResponse)
 async def company_setup(payload: CompanySetupRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    # Determine tenant from membership; this assumes authenticated user context is supplied via headers
-    tenant_id_header = request.headers.get("X-Tenant-ID")
-    tenant_slug_header = request.headers.get("X-Tenant-Slug")
-
-    if not tenant_id_header and not tenant_slug_header:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Tenant-ID or X-Tenant-Slug required")
-
-    tenant = None
-    tenant_id = None
-
-    if tenant_id_header:
-        try:
-            tenant_id = int(tenant_id_header)
-        except ValueError:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tenant id")
-        tenant = await db.get(PlatformTenant, tenant_id)
-    elif tenant_slug_header:
-        tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.slug == tenant_slug_header.strip().lower()))
-        tenant_id = tenant.id if tenant else None
-
-    if not tenant:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    tenant = await _tenant_from_host_for_company_setup(request, db)
+    tenant_id = int(tenant.id)
 
     country = (tenant.country_code or payload.address.country or "").upper()
     missing = _account_setup_missing_for_payload(country, payload)

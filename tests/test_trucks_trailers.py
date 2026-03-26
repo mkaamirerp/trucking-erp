@@ -169,7 +169,7 @@ def test_truck_tenant_isolation_list(client) -> None:
     """List trucks must only return trucks for the resolved tenant (via middleware)."""
     resp = client.get(
         "/api/v1/trucks",
-        headers={"Host": "demo.truckerp.me", "X-Tenant-ID": "1"},
+        headers={"host": "demo.truckerp.me"},
     )
     if resp.status_code == 401:
         pytest.skip("Auth required - run with valid session")

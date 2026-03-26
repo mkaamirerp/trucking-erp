@@ -89,13 +89,14 @@ jobs:
 
       - name: Guard platform revisions
         run: |
-          # Check for actual schema operations on tenant tables (exclude permission strings)
-          if rg -n --hidden --no-ignore-vcs "op\.(create_table|drop_table|add_column|drop_column|create_foreign_key|create_index|drop_index|add_constraint|drop_constraint|alter_table|batch_alter_table)\s*\(\s*[\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)" alembic/versions 2>/dev/null; then
+          # Canonical platform DDL lives under alembic_platform/versions (alembic_platform.ini).
+          # Legacy alembic/versions may retain historical tenant-shaped migrations; do not use it for this guard.
+          if rg -n --hidden --no-ignore-vcs "op\.(create_table|drop_table|add_column|drop_column|create_foreign_key|create_index|drop_index|add_constraint|drop_constraint|alter_table|batch_alter_table)\s*\(\s*[\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)" alembic_platform/versions 2>/dev/null; then
             echo "Platform migrations appear to touch tenant business tables"
             exit 1
           fi
           # Check for ForeignKey references to tenant tables
-          if rg -n --hidden --no-ignore-vcs "ForeignKey\s*\([\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)\." alembic/versions 2>/dev/null; then
+          if rg -n --hidden --no-ignore-vcs "ForeignKey\s*\([\"'](drivers|loads|dispatch|payroll|settlements|hos|eld|equipment|trailers)\." alembic_platform/versions 2>/dev/null; then
             echo "Platform migrations appear to reference tenant business tables via ForeignKey"
             exit 1
           fi
@@ -111,8 +112,9 @@ jobs:
 
       - name: Guard forbid alembic stamp
         run: |
-          if rg -n --hidden --no-ignore-vcs -g '!.github/workflows/*.yml' "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools docs .github 2>/dev/null; then
-            echo "Found alembic stamp usage in repo scripts/docs"
+          # Docs may document recovery commands; enforce only on automation / config paths.
+          if rg -n --hidden --no-ignore-vcs -g '!.github/workflows/*.yml' "\balembic\b.*\bstamp\b|\bstamp\b.*\balembic\b" scripts tools .github 2>/dev/null; then
+            echo "Found alembic stamp usage in repo scripts/tools/.github"
             exit 1
           fi
           echo "No committed alembic stamp usage found"

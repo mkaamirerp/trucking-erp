@@ -35,7 +35,6 @@ echo "1. Login as admin..."
 LOGIN=$(curl -sS -c "$COOKIES" -b "$COOKIES" -X POST "$BASE_URL/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -H "Host: ${TENANT}.truckerp.me" \
-  -H "X-Tenant-Slug: $TENANT" \
   -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")
 if echo "$LOGIN" | grep -q "access_token"; then
   echo "   Login OK"
@@ -62,7 +61,7 @@ echo ""
 echo "2. Create DRIVER invite..."
 INVITE_DRIVER=$(_admin_curl -X POST "$BASE_URL/api/v1/admin/onboarding/invite-link" \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-Slug: $TENANT" \
+  -H "Host: ${TENANT}.truckerp.me" \
   -d '{"email":"driver-test@demo.test","application_type":"DRIVER"}')
 APP_DRIVER=$(echo "$INVITE_DRIVER" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('application_id','')); print(d.get('token',''))" 2>/dev/null | tr '\n' ' ')
 APP_DRIVER_ID=$(echo "$APP_DRIVER" | cut -d' ' -f1)
@@ -78,7 +77,7 @@ echo ""
 echo "3. Create DISPATCHER invite..."
 INVITE_DISP=$(_admin_curl -X POST "$BASE_URL/api/v1/admin/onboarding/invite-link" \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-Slug: $TENANT" \
+  -H "Host: ${TENANT}.truckerp.me" \
   -d '{"email":"dispatcher-test@demo.test","application_type":"DISPATCHER"}')
 APP_DISP=$(echo "$INVITE_DISP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('application_id','')); print(d.get('token',''))" 2>/dev/null | tr '\n' ' ')
 APP_DISP_ID=$(echo "$APP_DISP" | cut -d' ' -f1)
@@ -94,7 +93,7 @@ echo ""
 echo "4. Applicant submit DRIVER (token auth, no session)..."
 DRIVER_SUBMIT=$(curl -sS -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/driver-onboarding/applicant/application/intake?token=$TOKEN_DRIVER" \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-Slug: $TENANT" \
+  -H "Host: ${TENANT}.truckerp.me" \
   -d '{"intake_payload":{"first_name":"Driver","last_name":"Test","driver_license_number":"DL123","license_region":"CA","license_expiry":"2028-12-31","step":"complete"},"submit":true}')
 DRIVER_HTTP=$(echo "$DRIVER_SUBMIT" | tail -1)
 echo "   Status: $DRIVER_HTTP"
@@ -108,7 +107,7 @@ echo ""
 echo "5. Applicant submit DISPATCHER..."
 DISP_SUBMIT=$(curl -sS -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/driver-onboarding/applicant/application/intake?token=$TOKEN_DISP" \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-Slug: $TENANT" \
+  -H "Host: ${TENANT}.truckerp.me" \
   -d '{"intake_payload":{"first_name":"Dispatcher","last_name":"Test","step":"common"},"submit":true}')
 DISP_HTTP=$(echo "$DISP_SUBMIT" | tail -1)
 echo "   Status: $DISP_HTTP"
@@ -121,7 +120,7 @@ fi
 echo ""
 echo "6. Admin approve DRIVER application..."
 APPROVE_DRIVER=$(_admin_curl -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/driver-onboarding/applications/$APP_DRIVER_ID/approve" \
-  -H "X-Tenant-Slug: $TENANT")
+  -H "Host: ${TENANT}.truckerp.me")
 APPROVE_DRIVER_HTTP=$(echo "$APPROVE_DRIVER" | tail -1)
 echo "   Status: $APPROVE_DRIVER_HTTP"
 if [ "$APPROVE_DRIVER_HTTP" != "200" ]; then
@@ -133,7 +132,7 @@ fi
 echo ""
 echo "7. Admin approve DISPATCHER application..."
 APPROVE_DISP=$(_admin_curl -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/driver-onboarding/applications/$APP_DISP_ID/approve" \
-  -H "X-Tenant-Slug: $TENANT")
+  -H "Host: ${TENANT}.truckerp.me")
 APPROVE_DISP_HTTP=$(echo "$APPROVE_DISP" | tail -1)
 echo "   Status: $APPROVE_DISP_HTTP"
 if [ "$APPROVE_DISP_HTTP" != "200" ]; then

@@ -15,13 +15,14 @@ from app.core.database import AsyncSessionLocal
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import open_tenant_session_by_id
+from app.deps import entitlements as entitlements_deps
 from app.main import app
 from app.models.email_ingestion import EmailMessage, EmailThread
 from app.models.load import Load
 from app.models.platform import PlatformTenant
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
-AUTH_HEADERS = {"Host": "demo.truckerp.me", "X-Tenant-ID": "53"}
+AUTH_HEADERS = {"host": "demo.truckerp.me"}
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +51,13 @@ def override_auth_tenant(test_bypass_env):
     fake_user.user_id = "test-user-id"
     fake_user.email = "test@example.com"
     fake_user.role = "ADMIN"
+    fake_user.tenant_id = 53
     app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    async def _skip_email_inbox_entitlement() -> None:
+        return None
+
+    app.dependency_overrides[entitlements_deps.require_email_inbox_entitlement] = _skip_email_inbox_entitlement
 
     def _tenant_from_request(request: Request) -> int:
         tid = getattr(request.state, "tenant_id", None)
@@ -60,6 +67,7 @@ def override_auth_tenant(test_bypass_env):
     yield
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(require_tenant, None)
+    app.dependency_overrides.pop(entitlements_deps.require_email_inbox_entitlement, None)
 
 
 async def _cleanup_tenant_rows(tenant_id: int, external_suffix: str) -> None:
@@ -460,7 +468,13 @@ class TestEmailThreadIntakeManualActions:
 
     @pytest.mark.asyncio
     async def test_loads_search_tenant_scoped_for_link(self, client, override_auth_tenant) -> None:
-        """Wrong-tenant load id cannot be linked (404)."""
+        """
+        A load_id that exists only in another tenant DB must not link on tenant 53 (404).
+
+        Each tenant has its own Postgres DB, so SERIAL ids can collide across tenants. Using the other
+        tenant's PK blindly can accidentally match a different load in tenant 53. We allocate a load in
+        the other DB until its id is absent from tenant 53's loads table.
+        """
         async with AsyncSessionLocal() as platform_db:
             tenants = (
                 await platform_db.execute(
@@ -478,19 +492,34 @@ class TestEmailThreadIntakeManualActions:
         await _cleanup_tenant_rows(53, suffix)
         await _cleanup_tenant_rows(other_tenant, suffix)
         thread_id_53: int
-        other_load_id: int
+        other_load_id: int | None = None
         try:
-            async for tenant_db in open_tenant_session_by_id(other_tenant):
-                load = Load(
-                    tenant_id=other_tenant,
-                    load_number=f"OTHER-{suffix}",
-                    status="draft",
-                )
-                tenant_db.add(load)
-                await tenant_db.commit()
-                await tenant_db.refresh(load)
-                other_load_id = load.id
+            async for tenant_db in open_tenant_session_by_id(53):
+                res = await tenant_db.execute(select(Load.id).where(Load.tenant_id == 53))
+                ids_53 = {int(row[0]) for row in res.all()}
                 break
+
+            for attempt in range(80):
+                async for tenant_db in open_tenant_session_by_id(other_tenant):
+                    load = Load(
+                        tenant_id=other_tenant,
+                        load_number=f"OTHER-{suffix}-{attempt}",
+                        status="draft",
+                    )
+                    tenant_db.add(load)
+                    await tenant_db.commit()
+                    await tenant_db.refresh(load)
+                    if load.id not in ids_53:
+                        other_load_id = int(load.id)
+                    else:
+                        await tenant_db.delete(load)
+                        await tenant_db.commit()
+                    break
+                if other_load_id is not None:
+                    break
+
+            if other_load_id is None:
+                pytest.skip("Could not allocate a load PK in other tenant that is absent from tenant 53")
 
             async for tenant_db in open_tenant_session_by_id(53):
                 thread = EmailThread(
@@ -518,7 +547,8 @@ class TestEmailThreadIntakeManualActions:
                 await tenant_db.execute(delete(EmailThread).where(EmailThread.tenant_id == 53, EmailThread.external_thread_id.like(f"%{suffix}%")))
                 await tenant_db.commit()
                 break
-            async for tenant_db in open_tenant_session_by_id(other_tenant):
-                await tenant_db.execute(delete(Load).where(Load.id == other_load_id, Load.tenant_id == other_tenant))
-                await tenant_db.commit()
-                break
+            if other_load_id is not None:
+                async for tenant_db in open_tenant_session_by_id(other_tenant):
+                    await tenant_db.execute(delete(Load).where(Load.id == other_load_id, Load.tenant_id == other_tenant))
+                    await tenant_db.commit()
+                    break

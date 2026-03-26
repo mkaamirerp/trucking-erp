@@ -28,8 +28,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
-
-      - name: Guard: tenant safety script must exist
+      - name: "Guard: tenant safety script must exist"
         run: |
           test -f scripts/ci_tenant_safety.sh
 

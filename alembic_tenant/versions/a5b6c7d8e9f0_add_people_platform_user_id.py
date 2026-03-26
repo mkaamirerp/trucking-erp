@@ -4,7 +4,7 @@ Revision ID: a5b6c7d8e9f0
 Revises: f01a9b2c3d4e
 Create Date: 2026-02-16
 
-platform_user_id matches platform_users.id type (VARCHAR(36)/UUID). Nullable.
+platform_user_id matches control-plane user id type (VARCHAR(36)/UUID). Nullable.
 Unique (tenant_id, platform_user_id) WHERE platform_user_id IS NOT NULL via partial index.
 """
 from __future__ import annotations

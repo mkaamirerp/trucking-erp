@@ -30,6 +30,7 @@ def _encode_token(
     tenant_id: int,
     tenant_slug: str | None,
     roles: list[str] | None,
+    sv: int,
     expires_in: timedelta,
 ) -> str:
     payload: Dict[str, Any] = {
@@ -38,32 +39,49 @@ def _encode_token(
         "tenant_slug": tenant_slug,
         "roles": roles or [],
         "type": token_type,
+        "sv": int(sv),
         "iat": int(_utcnow().timestamp()),
         "exp": int((_utcnow() + expires_in).timestamp()),
     }
     return jwt.encode(payload, _default_secret(), algorithm=settings.jwt_algorithm)
 
 
-def create_access_token(*, user_id: str | int, tenant_id: int, tenant_slug: str | None, roles: list[str] | None) -> str:
+def create_access_token(
+    *, user_id: str | int, tenant_id: int, tenant_slug: str | None, roles: list[str] | None, sv: int
+) -> str:
     return _encode_token(
         token_type=TokenType.ACCESS,
         user_id=user_id,
         tenant_id=tenant_id,
         tenant_slug=tenant_slug,
         roles=roles,
+        sv=sv,
         expires_in=timedelta(minutes=settings.jwt_access_minutes),
     )
 
 
-def create_refresh_token(*, user_id: str | int, tenant_id: int, tenant_slug: str | None, roles: list[str] | None) -> str:
+def create_refresh_token(
+    *, user_id: str | int, tenant_id: int, tenant_slug: str | None, roles: list[str] | None, sv: int
+) -> str:
     return _encode_token(
         token_type=TokenType.REFRESH,
         user_id=user_id,
         tenant_id=tenant_id,
         tenant_slug=tenant_slug,
         roles=roles,
+        sv=sv,
         expires_in=timedelta(days=settings.jwt_refresh_days),
     )
+
+
+def extract_sv(payload: dict) -> int | None:
+    v = payload.get("sv")
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _looks_like_jwt(raw: str) -> bool:

@@ -19,11 +19,11 @@ class TestCompanySetupDocumentTenantIsolation:
     """GET /api/v1/public/company-setup/document must enforce tenant isolation."""
 
     def test_forbidden_when_key_prefix_mismatch(self, client) -> None:
-        """Requesting demo's key with X-Tenant-Slug: acme must return 403."""
+        """Requesting demo's key while Host is another workspace must return 403."""
         storage_key = "demo/company_docs/company/53/abc123.pdf"
         resp = client.get(
             f"/api/v1/public/company-setup/document?storage_key={storage_key}",
-            headers={"X-Tenant-Slug": "acme"},
+            headers={"host": "acme.truckerp.me"},
         )
         assert resp.status_code == 403
         assert "not valid for tenant" in resp.json().get("detail", "").lower()
@@ -46,7 +46,7 @@ class TestPayDocumentTenantIsolation:
         """Requesting a document by ID with wrong tenant context returns 404 (doc not found)."""
         resp = client.get(
             "/api/v1/payroll/documents/99999/download",
-            headers={"X-Tenant-ID": "1", "X-Tenant-Slug": "demo"},
+            headers={"host": "demo.truckerp.me"},
         )
         assert resp.status_code in (404, 422)
 
@@ -60,6 +60,6 @@ class TestApplicantFileTenantIsolation:
         resp = client.get(
             "/api/v1/driver-onboarding/applicant/application/file",
             params={"token": "invalid-token-xyz", "file_id": "any"},
-            headers={"X-Tenant-Slug": "demo"},
+            headers={"host": "demo.truckerp.me"},
         )
         assert resp.status_code == 404

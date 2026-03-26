@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
+from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.email_threads import (
@@ -16,7 +17,11 @@ from app.schemas.email_threads import (
 )
 from app.services import email_threads as email_threads_service
 
-router = APIRouter(prefix="/email-threads", tags=["email_threads"])
+router = APIRouter(
+    prefix="/email-threads",
+    tags=["email_threads"],
+    dependencies=[Depends(require_entitlement("email_inbox"))],
+)
 
 
 @router.get("", response_model=EmailThreadListResponse)

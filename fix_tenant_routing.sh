@@ -74,6 +74,8 @@ echo "============================================================"
 docker run --rm --network truckerp_net alpine:3.20 sh -lc '
   apk add --no-cache curl >/dev/null
   api="http://truckerp-api:8000/api/v1"
+  BASE_DOMAIN="${BASE_DOMAIN:-truckerp.me}"
+  SLUG="${TENANT_SLUG:-demo}"
 
   hit() {
     name="$1"; shift
@@ -85,16 +87,17 @@ docker run --rm --network truckerp_net alpine:3.20 sh -lc '
     echo "$code"
   }
 
-  c1=$(hit "Tenant OK  " -H "X-Tenant-ID: 1" "$api/drivers")
-  c2=$(hit "Tenant miss" "$api/drivers")
-  c3=$(hit "Tenant bad " -H "X-Tenant-ID: 999999" "$api/drivers")
+  # Tenant routing uses Host (workspace subdomain), not X-Tenant-* headers.
+  c1=$(hit "Host OK   " -H "Host: ${SLUG}.${BASE_DOMAIN}" "$api/drivers")
+  c2=$(hit "Host miss " "$api/drivers")
+  c3=$(hit "Host bad  " -H "Host: zzz-nonexistent.${BASE_DOMAIN}" "$api/drivers")
 
   echo
-  [ "$c1" = "200" ] && echo "✅ Tenant 1 => 200" || echo "❌ Tenant 1 expected 200 got $c1"
-  [ "$c2" = "400" ] && echo "✅ Missing header => 400" || echo "❌ Missing header expected 400 got $c2"
-  [ "$c3" = "403" ] && echo "✅ Invalid tenant => 403" || echo "❌ Invalid tenant expected 403 got $c3"
+  [ "$c1" = "401" ] && echo "✅ Workspace Host, no auth => 401" || echo "❌ Expected 401 got $c1"
+  [ "$c2" = "400" ] && echo "✅ Missing workspace Host => 400" || echo "❌ Missing Host expected 400 got $c2"
+  [ "$c3" = "403" ] && echo "✅ Unknown workspace => 403" || echo "❌ Unknown workspace expected 403 got $c3"
 
-  [ "$c1" = "200" ] && [ "$c2" = "400" ] && [ "$c3" = "403" ]
+  [ "$c1" = "401" ] && [ "$c2" = "400" ] && [ "$c3" = "403" ]
 ' || {
   echo
   echo "============================================================"

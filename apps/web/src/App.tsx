@@ -28,6 +28,7 @@ import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminRolesPage from "./pages/AdminRolesPage";
 import AdminPlaceholderPage from "./pages/AdminPlaceholderPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
+import CreateWorkspacePage from "./pages/CreateWorkspacePage";
 import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminRouteGuard from "./components/AdminRouteGuard";
@@ -110,6 +111,7 @@ function App() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/signup/*" element={<SignupPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/create-workspace" element={<CreateWorkspacePage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />

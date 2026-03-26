@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,21 +23,31 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.deps.admin import access_level_to_role, has_full_access, is_tenant_admin, role_to_access_level
 from app.deps.auth import CurrentUser, get_current_user
+from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import open_tenant_session_by_id
 from app.models.platform import (
     PlatformCompanyProfile,
     PlatformTenant,
     PlatformTenantMember,
+    PlatformTenantUserMap,
     PlatformUser,
     TenantMembership,
     UserInvite,
 )
+from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember
+from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
+from app.utils.auth_identity import normalize_auth_email
 from app.utils.email import send_user_invite_email
 from app.utils.password import hash_password
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/admin", tags=["Tenant Admin"])
+router = APIRouter(
+    prefix="/api/v1/admin",
+    tags=["Tenant Admin"],
+    dependencies=[Depends(require_entitlement("admin_sensitive"))],
+)
 
 
 class CompanyProfileOut(BaseModel):
@@ -235,6 +245,114 @@ def _hash_token(token: str) -> str:
 INVITE_EXPIRY_HOURS = 24
 
 
+async def _perform_invite_resend(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    tenant: PlatformTenant,
+    user: PlatformUser,
+    inviter_user_id: str,
+    request: Request,
+) -> dict:
+    """Invalidate unconsumed invites for this user+tenant, create a new token, send email, commit."""
+    now = datetime.now(timezone.utc)
+    stale_invites = (
+        await db.scalars(
+            select(UserInvite).where(
+                UserInvite.user_id == user.id,
+                UserInvite.tenant_id == tenant_id,
+                UserInvite.consumed_at.is_(None),
+            )
+        )
+    ).all()
+    for inv in stale_invites:
+        inv.consumed_at = now
+    await db.flush()
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = _hash_token(raw_token)
+    expires_at = now + timedelta(hours=INVITE_EXPIRY_HOURS)
+
+    if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        pmap_u = await db.scalar(
+            select(PlatformTenantUserMap).where(
+                PlatformTenantUserMap.tenant_id == int(tenant_id),
+                PlatformTenantUserMap.platform_user_id == str(user.id),
+            )
+        )
+        if pmap_u:
+            async for tdb in open_tenant_session_by_id(int(tenant_id)):
+                _ti_res = await tdb.execute(
+                    select(TenantUserInvite).where(
+                        TenantUserInvite.tenant_id == int(tenant_id),
+                        TenantUserInvite.tenant_user_id == int(pmap_u.tenant_user_id),
+                        TenantUserInvite.consumed_at.is_(None),
+                    )
+                )
+                stale_ti = list(_ti_res.scalars().all())
+                for ti in stale_ti:
+                    ti.consumed_at = now
+                await tdb.flush()
+                imap = await db.scalar(
+                    select(PlatformTenantUserMap).where(
+                        PlatformTenantUserMap.tenant_id == int(tenant_id),
+                        PlatformTenantUserMap.platform_user_id == str(inviter_user_id),
+                    )
+                )
+                inviter_tid = imap.tenant_user_id if imap else None
+                tinv = TenantUserInvite(
+                    tenant_id=int(tenant_id),
+                    token_hash=token_hash,
+                    tenant_user_id=int(pmap_u.tenant_user_id),
+                    inviter_tenant_user_id=inviter_tid,
+                    expires_at=expires_at,
+                )
+                tdb.add(tinv)
+                await tdb.commit()
+                break
+
+    invite = UserInvite(
+        token_hash=token_hash,
+        user_id=user.id,
+        tenant_id=tenant_id,
+        inviter_user_id=inviter_user_id,
+        expires_at=expires_at,
+    )
+    db.add(invite)
+
+    base = settings.base_domain or request.url.hostname or "truckerp.me"
+    scheme = request.url.scheme or "https"
+    invite_link = f"{scheme}://{tenant.slug}.{base}/accept-invite?token={raw_token}"
+
+    email_sent = True
+    try:
+        await send_user_invite_email(
+            to=user.email,
+            workspace_name=tenant.name,
+            workspace_slug=tenant.slug,
+            invite_link=invite_link,
+            expires_hours=INVITE_EXPIRY_HOURS,
+        )
+    except Exception as e:
+        logger.warning("invite resend: send_email failed: %s", e)
+        email_sent = False
+        if not getattr(settings, "secure_cookies", True):
+            logger.warning("invite resend: DEV invite_link email=%s link=%s", user.email, invite_link)
+
+    await db.commit()
+    return {
+        "ok": True,
+        "email": user.email,
+        "status": "invited",
+        "message": (
+            "Invite email sent again."
+            if email_sent
+            else "Invite renewed but email failed to send. Configure SMTP (Admin → Integrations) or copy the link from server logs."
+        ),
+        "email_sent": email_sent,
+    }
+
+
 class UserMemberOut(BaseModel):
     """Approved temporary shape: username, email, phone, access_level (READ_ONLY|FULL_ACCESS)."""
     user_id: str
@@ -311,26 +429,52 @@ async def invite_user(
             detail="Full access required to invite users. Your role has read-only access.",
         )
 
-    email_lower = payload.email.strip().lower()
+    email_norm = normalize_auth_email(payload.email)
     role = access_level_to_role(payload.access_level)
 
     tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tenant_id))
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_lower))
-    existing_member = await db.scalar(
+    user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_norm))
+    existing_ptm = await db.scalar(
         select(PlatformTenantMember).where(
             PlatformTenantMember.tenant_id == tenant_id,
             PlatformTenantMember.platform_user_id == user.id,
         ).limit(1)
     ) if user else None
 
-    if existing_member:
-        raise HTTPException(status_code=400, detail="User is already a member of this workspace")
+    if existing_ptm:
+        tm_row = await db.scalar(
+            select(TenantMembership).where(
+                TenantMembership.user_id == user.id,
+                TenantMembership.tenant_id == tenant_id,
+            ).limit(1)
+        )
+        mstatus = (tm_row.status if tm_row else "").strip().lower()
+        if mstatus == "active":
+            raise HTTPException(status_code=400, detail="User is already a member of this workspace")
+        if mstatus == "invited":
+            # Pending invite: allow resend (invalidate old tokens, new email).
+            if existing_ptm.role != role:
+                existing_ptm.role = role
+                await db.flush()
+            return await _perform_invite_resend(
+                db,
+                tenant_id=tenant_id,
+                tenant=tenant,
+                user=user,
+                inviter_user_id=current_user.user.id,
+                request=request,
+            )
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"User already has access in this workspace (status: {tm_row.status or 'unknown'}).",
+        )
 
     if not user:
-        username_val = (payload.username or "").strip() or email_lower
+        username_val = (payload.username or "").strip() or email_norm
         # Case-insensitive uniqueness: check before insert
         existing_username = await db.scalar(
             select(PlatformUser.id).where(
@@ -341,7 +485,7 @@ async def invite_user(
         if existing_username:
             raise HTTPException(status_code=400, detail="Username already taken")
         user = PlatformUser(
-            email=email_lower,
+            email=email_norm,
             username=username_val,
             first_name=None,
             last_name=None,
@@ -372,6 +516,54 @@ async def invite_user(
     raw_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(raw_token)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=INVITE_EXPIRY_HOURS)
+
+    if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        imap = await db.scalar(
+            select(PlatformTenantUserMap).where(
+                PlatformTenantUserMap.tenant_id == int(tenant_id),
+                PlatformTenantUserMap.platform_user_id == str(current_user.user.id),
+            )
+        )
+        inviter_tid = imap.tenant_user_id if imap else None
+        tenant_uid: int | None = None
+        async for tdb in open_tenant_session_by_id(int(tenant_id)):
+            tu = TenantUser(
+                tenant_id=int(tenant_id),
+                email_norm=email_norm,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                password_hash=None,
+                status="ACTIVE",
+            )
+            tdb.add(tu)
+            await tdb.flush()
+            twm = TenantWorkspaceMember(
+                tenant_id=int(tenant_id),
+                tenant_user_id=tu.id,
+                status="invited",
+                role=role,
+            )
+            tdb.add(twm)
+            tinv = TenantUserInvite(
+                tenant_id=int(tenant_id),
+                token_hash=token_hash,
+                tenant_user_id=tu.id,
+                inviter_tenant_user_id=inviter_tid,
+                expires_at=expires_at,
+            )
+            tdb.add(tinv)
+            await tdb.commit()
+            tenant_uid = int(tu.id)
+            break
+        db.add(
+            PlatformTenantUserMap(
+                platform_user_id=str(user.id),
+                tenant_id=int(tenant_id),
+                tenant_user_id=int(tenant_uid),
+            )
+        )
+        await db.flush()
+
     invite = UserInvite(
         token_hash=token_hash,
         user_id=user.id,
@@ -385,6 +577,7 @@ async def invite_user(
     scheme = request.url.scheme or "https"
     invite_link = f"{scheme}://{tenant.slug}.{base}/accept-invite?token={raw_token}"
 
+    email_sent = True
     try:
         await send_user_invite_email(
             to=user.email,
@@ -395,9 +588,22 @@ async def invite_user(
         )
     except Exception as e:
         logger.warning("invite_user: send_email failed: %s", e)
+        email_sent = False
+        if not getattr(settings, "secure_cookies", True):
+            logger.warning("invite_user: DEV invite_link email=%s link=%s", user.email, invite_link)
 
     await db.commit()
-    return {"ok": True, "email": user.email, "status": "invited", "message": "Invite sent"}
+    return {
+        "ok": True,
+        "email": user.email,
+        "status": "invited",
+        "message": (
+            "Invite sent"
+            if email_sent
+            else "Invite created but email failed to send. Configure SMTP or check server logs."
+        ),
+        "email_sent": email_sent,
+    }
 
 
 @router.post("/users/{user_id}/suspend")
@@ -425,6 +631,26 @@ async def suspend_user(
     if not tm:
         raise HTTPException(status_code=404, detail="User not found in this workspace")
     tm.status = "suspended"
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)))
+    if tenant and tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        pmap = await db.scalar(
+            select(PlatformTenantUserMap).where(
+                PlatformTenantUserMap.tenant_id == int(tenant_id),
+                PlatformTenantUserMap.platform_user_id == str(user_id),
+            )
+        )
+        if pmap:
+            async for tdb in open_tenant_session_by_id(int(tenant_id)):
+                twm = await tdb.scalar(
+                    select(TenantWorkspaceMember).where(
+                        TenantWorkspaceMember.tenant_id == int(tenant_id),
+                        TenantWorkspaceMember.tenant_user_id == int(pmap.tenant_user_id),
+                    )
+                )
+                if twm:
+                    twm.status = "suspended"
+                await tdb.commit()
+                break
     await db.commit()
     return {"ok": True, "status": "suspended"}
 
@@ -452,8 +678,145 @@ async def reactivate_user(
     if not tm:
         raise HTTPException(status_code=404, detail="User not found in this workspace")
     tm.status = "active"
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)))
+    if tenant and tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        pmap = await db.scalar(
+            select(PlatformTenantUserMap).where(
+                PlatformTenantUserMap.tenant_id == int(tenant_id),
+                PlatformTenantUserMap.platform_user_id == str(user_id),
+            )
+        )
+        if pmap:
+            async for tdb in open_tenant_session_by_id(int(tenant_id)):
+                twm = await tdb.scalar(
+                    select(TenantWorkspaceMember).where(
+                        TenantWorkspaceMember.tenant_id == int(tenant_id),
+                        TenantWorkspaceMember.tenant_user_id == int(pmap.tenant_user_id),
+                    )
+                )
+                if twm:
+                    twm.status = "active"
+                await tdb.commit()
+                break
     await db.commit()
     return {"ok": True, "status": "active"}
+
+
+@router.post("/users/{user_id}/resend-invite")
+async def resend_invite_for_user(
+    user_id: str,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resend invite email for a user stuck in *invited* status. FULL_ACCESS required."""
+    if not has_full_access(current_user.role):
+        raise HTTPException(
+            status_code=403,
+            detail="Full access required to resend invites.",
+        )
+    if user_id == current_user.user.id:
+        raise HTTPException(status_code=400, detail="Cannot resend invite to yourself")
+
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    user = await db.get(PlatformUser, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ptm = await db.scalar(
+        select(PlatformTenantMember).where(
+            PlatformTenantMember.tenant_id == tenant_id,
+            PlatformTenantMember.platform_user_id == user_id,
+        ).limit(1)
+    )
+    if not ptm:
+        raise HTTPException(status_code=404, detail="User is not in this workspace")
+
+    tm = await db.scalar(
+        select(TenantMembership).where(
+            TenantMembership.user_id == user_id,
+            TenantMembership.tenant_id == tenant_id,
+        ).limit(1)
+    )
+    if not tm or (tm.status or "").strip().lower() != "invited":
+        raise HTTPException(
+            status_code=400,
+            detail="Resend is only for users who have not finished accepting their invite yet.",
+        )
+
+    return await _perform_invite_resend(
+        db,
+        tenant_id=tenant_id,
+        tenant=tenant,
+        user=user,
+        inviter_user_id=current_user.user.id,
+        request=request,
+    )
+
+
+@router.delete("/users/{user_id}")
+async def remove_user_from_workspace(
+    user_id: str,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Remove a user from this workspace (membership + pending invites).
+    If they have no other workspace memberships, delete the platform user so they can be invited fresh.
+    FULL_ACCESS required. Cannot remove yourself.
+    """
+    if not has_full_access(current_user.role):
+        raise HTTPException(
+            status_code=403,
+            detail="Full access required to remove users.",
+        )
+    if user_id == current_user.user.id:
+        raise HTTPException(status_code=400, detail="Cannot remove yourself from the workspace")
+
+    ptm = await db.scalar(
+        select(PlatformTenantMember).where(
+            PlatformTenantMember.tenant_id == tenant_id,
+            PlatformTenantMember.platform_user_id == user_id,
+        ).limit(1)
+    )
+    if not ptm:
+        raise HTTPException(status_code=404, detail="User not found in this workspace")
+
+    await db.execute(
+        delete(UserInvite).where(
+            UserInvite.user_id == user_id,
+            UserInvite.tenant_id == tenant_id,
+        )
+    )
+    await db.execute(
+        delete(TenantMembership).where(
+            TenantMembership.user_id == user_id,
+            TenantMembership.tenant_id == tenant_id,
+        )
+    )
+    await db.execute(
+        delete(PlatformTenantMember).where(
+            PlatformTenantMember.platform_user_id == user_id,
+            PlatformTenantMember.tenant_id == tenant_id,
+        )
+    )
+    await db.flush()
+
+    other_memberships = await db.scalar(
+        select(func.count()).select_from(PlatformTenantMember).where(PlatformTenantMember.platform_user_id == user_id)
+    )
+    if other_memberships == 0:
+        orphan = await db.get(PlatformUser, user_id)
+        if orphan:
+            await db.delete(orphan)
+
+    await db.commit()
+    return {"ok": True, "message": "User removed from this workspace"}
 
 
 # Tenant-admin password reset removed: password management remains platform-side.

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
+from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.onboarding import (
@@ -19,7 +20,11 @@ from app.schemas.onboarding import (
     DriverLicenseConfirmResponse,
 )
 
-router = APIRouter(prefix="/api/v1/onboarding", tags=["Onboarding"])
+router = APIRouter(
+    prefix="/api/v1/onboarding",
+    tags=["Onboarding"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.post("/driver-license/ocr", response_model=DriverLicenseOCRResponse)

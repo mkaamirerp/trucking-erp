@@ -51,6 +51,9 @@ CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", 
 
 # --- DEV TOOLBELT STAGE (debug utilities, non-prod) ---
 FROM prod AS dev
+COPY requirements-dev.txt /app/requirements-dev.txt
+RUN python -m pip install --no-cache-dir -r /app/requirements-dev.txt \
+    && python -m pytest --version
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     jq \

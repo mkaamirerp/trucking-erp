@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Request, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.models.platform import PlatformCompanyProfile, PlatformTenant
-from app.deps.tenant import require_tenant
+from app.deps.auth import CurrentUser, get_current_user
 
 router = APIRouter(prefix="/api/v1", tags=["Auth"])
 
@@ -56,34 +56,15 @@ def _account_setup_missing(tenant: PlatformTenant | None) -> tuple[bool, list[st
 
 @router.get("/me")
 async def get_me(
-    request: Request,
-    x_tenant_roles: str | None = Header(None),
-    x_user_id: str | None = Header(None),
-    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
     db=Depends(get_db),
 ) -> dict:
-    roles = []
-    user_id: int | None = None
-    # Prefer values set by middleware (JWT)
-    if hasattr(request.state, "roles"):
-        roles = [r.upper() for r in getattr(request.state, "roles") or []]
-    elif x_tenant_roles:
-        roles = [r.strip().upper() for r in (x_tenant_roles or "").split(",") if r.strip()]
-
-    if hasattr(request.state, "user_id"):
-        try:
-            # UUIDs allowed; keep as string if not int
-            user_id = int(getattr(request.state, "user_id"))
-        except (TypeError, ValueError):
-            user_id = getattr(request.state, "user_id")
-    elif x_user_id:
-        try:
-            user_id = int(x_user_id)
-        except ValueError:
-            user_id = x_user_id
-
-    if user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    tenant_id = user.tenant_id
+    roles = [user.role.upper()] if user.role else []
+    try:
+        user_id: int | str = int(user.user_id)
+    except (TypeError, ValueError):
+        user_id = user.user_id
 
     tenant: PlatformTenant | None = await db.scalar(
         select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
