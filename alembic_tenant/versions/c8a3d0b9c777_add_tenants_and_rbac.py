@@ -1,6 +1,6 @@
 """Add tenants + RBAC tables and seed defaults
 
-Revision ID: c8a3d0b9c777
+Revision ID: tc8a3d0b9c777
 Revises: 5b013e5ac73d
 Create Date: 2025-12-31 00:00:00.000000
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "c8a3d0b9c777"
+revision: str = "tc8a3d0b9c777"
 down_revision: Union[str, Sequence[str], None] = "5b013e5ac73d"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

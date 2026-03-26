@@ -1,7 +1,7 @@
 """Add global driver license fields
 
 Revision ID: 2f3c3c4a0b1a
-Revises: c8a3d0b9c777
+Revises: tc8a3d0b9c777
 Create Date: 2025-12-31 06:20:00.000000
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "2f3c3c4a0b1a"
-down_revision: Union[str, Sequence[str], None] = "c8a3d0b9c777"
+down_revision: Union[str, Sequence[str], None] = "tc8a3d0b9c777"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
