@@ -15,7 +15,6 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.deps.tenant_db import open_tenant_session_by_id
 from app.models.platform import PlatformTenant, TenantMembership
-from app.models.tenant_auth import TenantWorkspaceMember
 from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.utils.jwt_auth import get_token_from_request, decode_token, TokenType
 
@@ -339,28 +338,16 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     )
                 mode = getattr(row, "tenant_auth_mode", None) or "platform"
                 if tenant_uses_tenant_db_auth(mode):
+                    # JWT `sub` is tenant_users.id; TenantWorkspaceMember + session parity are enforced in
+                    # get_current_user (same tenant DB session as credential lookup). Avoid a second tenant
+                    # session here that can race or drift from deps.
                     try:
-                        tu_sub = int(str(user_id))
+                        int(str(user_id))
                     except (TypeError, ValueError):
                         raise HTTPException(
                             status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Invalid session",
                         ) from None
-                    twm = None
-                    async for tdb in open_tenant_session_by_id(int(row.id)):
-                        twm = await tdb.scalar(
-                            select(TenantWorkspaceMember).where(
-                                TenantWorkspaceMember.tenant_id == int(row.id),
-                                TenantWorkspaceMember.tenant_user_id == tu_sub,
-                                TenantWorkspaceMember.status == "active",
-                            ).limit(1)
-                        )
-                        break
-                    if not twm:
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail="User does not have access to this tenant",
-                        )
                     return (int(row.id), row.slug)
 
                 membership = await session.scalar(

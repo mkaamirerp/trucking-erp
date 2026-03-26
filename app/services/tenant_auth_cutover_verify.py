@@ -47,8 +47,26 @@ async def collect_tenant_auth_cutover_errors(tenant_id: int) -> list[str]:
         )
 
     async for tdb in open_tenant_session_by_id(int(tenant_id)):
-        n_tu = int((await tdb.scalar(select(func.count()).select_from(TenantUser))) or 0)
-        n_twm = int((await tdb.scalar(select(func.count()).select_from(TenantWorkspaceMember))) or 0)
+        n_tu = int(
+            (
+                await tdb.scalar(
+                    select(func.count())
+                    .select_from(TenantUser)
+                    .where(TenantUser.tenant_id == int(tenant_id))
+                )
+            )
+            or 0
+        )
+        n_twm = int(
+            (
+                await tdb.scalar(
+                    select(func.count())
+                    .select_from(TenantWorkspaceMember)
+                    .where(TenantWorkspaceMember.tenant_id == int(tenant_id))
+                )
+            )
+            or 0
+        )
         break
 
     if n_map != n_ptm:

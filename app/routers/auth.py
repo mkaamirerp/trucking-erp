@@ -34,6 +34,7 @@ from app.services.tenant_auth_dual_write import (
     apply_password_and_session_version_tenant_primary,
     mirror_reset_tokens_to_platform,
     mirror_reset_tokens_to_tenant,
+    mirror_tenant_user_credentials_to_platform,
 )
 from app.utils.email import send_password_reset_email
 from app.utils.rate_limit import check_create_workspace_rate_limits, rate_limit_forgot_password
@@ -101,6 +102,9 @@ async def refresh(request: Request, response: Response, db=Depends(get_db)):
             tu_id = int(str(user_id))
         except (TypeError, ValueError):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+        sub: int | None = None
+        sv_out: int | None = None
+        roles_for_tokens: list = []
         async for tdb in open_tenant_session_by_id(int(tenant_id)):
             tu = await tdb.scalar(
                 select(TenantUser).where(TenantUser.tenant_id == int(tenant_id), TenantUser.id == tu_id)
@@ -118,17 +122,18 @@ async def refresh(request: Request, response: Response, db=Depends(get_db)):
             )
             if not twm:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
-            if twm.role:
-                roles = [twm.role]
+            roles_for_tokens = [twm.role] if twm.role else []
             sub = tu.id
             sv_out = int(tu.session_version)
             break
 
+        if sub is None or sv_out is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
         access = create_access_token(
-            user_id=sub, tenant_id=int(tenant_id), tenant_slug=tenant_slug, roles=roles, sv=sv_out
+            user_id=sub, tenant_id=int(tenant_id), tenant_slug=tenant_slug, roles=roles_for_tokens, sv=sv_out
         )
         new_refresh = create_refresh_token(
-            user_id=sub, tenant_id=int(tenant_id), tenant_slug=tenant_slug, roles=roles, sv=sv_out
+            user_id=sub, tenant_id=int(tenant_id), tenant_slug=tenant_slug, roles=roles_for_tokens, sv=sv_out
         )
     else:
         user = await db.scalar(select(PlatformUser).where(PlatformUser.id == str(user_id)))
@@ -487,6 +492,9 @@ async def accept_invite(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
     if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        sub: int | None = None
+        sv_out: int | None = None
+        roles: list = []
         async for tdb in open_tenant_session_by_id(int(tenant_id)):
             tinv = await tdb.scalar(
                 select(TenantUserInvite).where(
@@ -508,7 +516,6 @@ async def accept_invite(
             )
             if not tu:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
-            tinv.consumed_at = now
             twm = await tdb.scalar(
                 select(TenantWorkspaceMember).where(
                     TenantWorkspaceMember.tenant_id == int(tenant_id),
@@ -517,8 +524,6 @@ async def accept_invite(
             )
             if not twm:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
-            twm.status = "active"
-            await tdb.flush()
             await apply_password_and_session_version_tenant_primary(
                 platform_db=db,
                 tenant_db=tdb,
@@ -526,8 +531,19 @@ async def accept_invite(
                 tenant_user=tu,
                 new_password_plain=payload.new_password,
                 bump_session=True,
+                defer_tenant_commit=True,
             )
+            tinv.consumed_at = now
+            twm.status = "active"
+            await tdb.commit()
             await tdb.refresh(tu)
+            await mirror_tenant_user_credentials_to_platform(
+                platform_db=db,
+                tenant_id=int(tenant_id),
+                tenant_user=tu,
+                mirror_password=True,
+                mirror_session=True,
+            )
             pmap = await db.scalar(
                 select(PlatformTenantUserMap).where(
                     PlatformTenantUserMap.tenant_id == int(tenant_id),
@@ -562,6 +578,11 @@ async def accept_invite(
             sub = tu.id
             break
 
+        if sub is None or sv_out is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Invite acceptance could not be completed. Please try again or contact support.",
+            )
         access = create_access_token(
             user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
         )
@@ -599,10 +620,6 @@ async def accept_invite(
     )
     if tm:
         tm.status = "active"
-    await db.commit()
-    user = await db.get(PlatformUser, invite.user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite")
 
     mode = getattr(tenant, "tenant_auth_mode", None) or "platform"
     async for tdb in open_tenant_session_by_id(int(tenant_id)):
@@ -653,6 +670,9 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
 
     if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+        sub: int | None = None
+        sv_out: int | None = None
+        roles: list = []
         async for tdb in open_tenant_session_by_id(int(tenant_id)):
             tu = await tdb.scalar(
                 select(TenantUser).where(
@@ -719,6 +739,8 @@ async def login(
             sub = tu.id
             break
 
+        if sub is None or sv_out is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
         access = create_access_token(
             user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
         )

@@ -19,28 +19,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def apply_password_and_session_version_tenant_primary(
+async def mirror_tenant_user_credentials_to_platform(
     *,
     platform_db: AsyncSession,
-    tenant_db: AsyncSession,
     tenant_id: int,
     tenant_user: TenantUser,
-    new_password_plain: str | None = None,
-    bump_session: bool = True,
+    mirror_password: bool = True,
+    mirror_session: bool = True,
 ) -> None:
-    """
-    Update tenant_user then mirror to platform_users via map. Any failure after tenant commit
-    raises — caller should treat as reconciliation-required.
-    """
-    if new_password_plain:
-        tenant_user.password_hash = hash_password(new_password_plain)
-        tenant_user.password_reset_token_hash = None
-        tenant_user.password_reset_expires_at = None
-    if bump_session:
-        tenant_user.session_version = int(getattr(tenant_user, "session_version", 1) or 1) + 1
-    await tenant_db.commit()
-    await tenant_db.refresh(tenant_user)
-
+    """After tenant_users row is committed, copy credential fields to platform_users via map."""
     pmap = await platform_db.scalar(
         select(PlatformTenantUserMap).where(
             PlatformTenantUserMap.tenant_id == int(tenant_id),
@@ -61,13 +48,51 @@ async def apply_password_and_session_version_tenant_primary(
         logger.critical(msg)
         raise RuntimeError(msg)
 
-    if new_password_plain:
+    if mirror_password:
         puser.password_hash = tenant_user.password_hash
-    if bump_session:
+    if mirror_session:
         puser.session_version = int(tenant_user.session_version)
     puser.password_reset_token_hash = tenant_user.password_reset_token_hash
     puser.password_reset_expires_at = tenant_user.password_reset_expires_at
     await platform_db.commit()
+
+
+async def apply_password_and_session_version_tenant_primary(
+    *,
+    platform_db: AsyncSession,
+    tenant_db: AsyncSession,
+    tenant_id: int,
+    tenant_user: TenantUser,
+    new_password_plain: str | None = None,
+    bump_session: bool = True,
+    defer_tenant_commit: bool = False,
+) -> None:
+    """
+    Update tenant_user then mirror to platform_users via map. Any failure after tenant commit
+    raises — caller should treat as reconciliation-required.
+
+    When defer_tenant_commit=True, only mutates objects in tenant_db; caller must commit tenant,
+    refresh tenant_user, then call mirror_tenant_user_credentials_to_platform (e.g. to bundle
+    invite consumption + password in one tenant transaction).
+    """
+    if new_password_plain:
+        tenant_user.password_hash = hash_password(new_password_plain)
+        tenant_user.password_reset_token_hash = None
+        tenant_user.password_reset_expires_at = None
+    if bump_session:
+        tenant_user.session_version = int(getattr(tenant_user, "session_version", 1) or 1) + 1
+    if defer_tenant_commit:
+        return
+    await tenant_db.commit()
+    await tenant_db.refresh(tenant_user)
+
+    await mirror_tenant_user_credentials_to_platform(
+        platform_db=platform_db,
+        tenant_id=tenant_id,
+        tenant_user=tenant_user,
+        mirror_password=bool(new_password_plain),
+        mirror_session=bump_session,
+    )
 
 
 async def apply_password_and_session_version_platform_primary(

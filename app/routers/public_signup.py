@@ -278,14 +278,9 @@ async def public_signup(
             select(PlatformUser).where(PlatformUser.email == email_lower)
         )
         if existing_user:
-            # Identity lives in platform_users only; wrong entry path — client should sign in, then create workspace.
+            # Same shape as a normal signup so the caller cannot tell whether the email is already registered.
             logger.info("signup_attempt_duplicate_email email=%s", email_lower)
-            return SignupResponse(
-                success=True,
-                requires_otp=False,
-                code="ACCOUNT_EXISTS",
-                next_step="SIGN_IN",
-            )
+            return SignupResponse(success=True, requires_otp=True)
 
         available = await is_slug_available(db, normalized_slug)
         if not available:
