@@ -4,17 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
-from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.broker import BrokerCreate, BrokerResponse, BrokerUpdate
 from app.services import brokers as brokers_service
 
-router = APIRouter(
-    prefix="/brokers",
-    tags=["brokers"],
-    dependencies=[Depends(require_active_tenant)],
-)
+router = APIRouter(prefix="/brokers", tags=["brokers"])
 
 
 @router.post("", response_model=BrokerResponse, status_code=status.HTTP_201_CREATED)

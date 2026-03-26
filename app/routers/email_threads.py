@@ -7,7 +7,6 @@ from app.deps.auth import get_current_user
 from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
-from app.deps.tenant_status import require_active_tenant
 from app.schemas.email_threads import (
     EmailMessageOut,
     EmailThreadActionLoadOut,
@@ -21,7 +20,7 @@ from app.services import email_threads as email_threads_service
 router = APIRouter(
     prefix="/email-threads",
     tags=["email_threads"],
-    dependencies=[Depends(require_active_tenant), Depends(require_entitlement("email_inbox"))],
+    dependencies=[Depends(require_entitlement("email_inbox"))],
 )
 
 

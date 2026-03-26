@@ -12,7 +12,6 @@ from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
-from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.onboarding import (
     DriverLicenseOCRRequest,
@@ -24,7 +23,7 @@ from app.schemas.onboarding import (
 router = APIRouter(
     prefix="/api/v1/onboarding",
     tags=["Onboarding"],
-    dependencies=[Depends(require_active_tenant), Depends(get_current_user)],
+    dependencies=[Depends(get_current_user)],
 )
 
 

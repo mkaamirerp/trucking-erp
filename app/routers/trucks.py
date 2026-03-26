@@ -8,17 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
-from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.truck import TruckCreate, TruckResponse, TruckUpdate
 from app.services import trucks as trucks_service
 
-router = APIRouter(
-    prefix="/trucks",
-    tags=["trucks"],
-    dependencies=[Depends(require_active_tenant)],
-)
+router = APIRouter(prefix="/trucks", tags=["trucks"])
 
 
 @router.post("", response_model=TruckResponse, status_code=status.HTTP_201_CREATED)

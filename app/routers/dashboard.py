@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.authz import require_tenant_admin
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
-from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant_db import get_tenant_db
 from sqlalchemy.orm import selectinload
 from app.models.driver import Driver
@@ -19,11 +18,7 @@ from app.models.load import Load, LoadStop
 from app.models.broker import Broker
 from app.schemas.driver import DriverOut, DriverListOut, driver_row_to_list_out
 
-router = APIRouter(
-    prefix="/dashboard",
-    tags=["dashboard"],
-    dependencies=[Depends(require_active_tenant)],
-)
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 logger = logging.getLogger(__name__)
 
 

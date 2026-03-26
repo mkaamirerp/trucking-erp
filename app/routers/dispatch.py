@@ -7,17 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
-from app.deps.tenant_status import require_active_tenant
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load import LoadResponse
 from app.services import loads as loads_service
 
-router = APIRouter(
-    prefix="/dispatch",
-    tags=["dispatch"],
-    dependencies=[Depends(require_active_tenant)],
-)
+router = APIRouter(prefix="/dispatch", tags=["dispatch"])
 
 
 @router.get("/board", response_model=dict)
