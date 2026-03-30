@@ -485,22 +485,44 @@ export async function logout() {
   return true;
 }
 
-export async function login(payload: { email: string; password: string }) {
+/** Backend signals Turnstile must be satisfied before password check (after failed-attempt streak). */
+export class LoginVerificationRequiredError extends Error {
+  override readonly name = "LoginVerificationRequiredError";
+  constructor() {
+    super("Additional verification required.");
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+const LOGIN_VERIFICATION_DETAIL = "Additional verification required.";
+
+function throwLoginHttpError(status: number, message: string): never {
+  const err = new Error(message) as Error & { status?: number };
+  err.status = status;
+  throw err;
+}
+
+export async function login(payload: { email: string; password: string; turnstile_token?: string | null }) {
+  const body: Record<string, string> = { email: payload.email, password: payload.password };
+  if (payload.turnstile_token) body.turnstile_token = payload.turnstile_token;
   const res = await fetchWithTenant(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text();
     let message = "Invalid email or password";
     try {
       const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (res.status === 403 && json?.detail === LOGIN_VERIFICATION_DETAIL) {
+        throw new LoginVerificationRequiredError();
+      }
       if (json?.detail) message = json.detail;
-    } catch {
-      /* use default */
+    } catch (e) {
+      if (e instanceof LoginVerificationRequiredError) throw e;
     }
-    throw new Error(message);
+    throwLoginHttpError(res.status, message);
   }
   return handle<{ ok: boolean; workspace_url?: string }>(res);
 }
