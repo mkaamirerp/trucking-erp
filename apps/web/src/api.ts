@@ -494,6 +494,17 @@ export class LoginVerificationRequiredError extends Error {
   }
 }
 
+/** Backend requires email OTP step-up after password; body includes login_challenge_id only (with detail). */
+export class LoginStepUpRequiredError extends Error {
+  override readonly name = "LoginStepUpRequiredError";
+  readonly loginChallengeId: string;
+  constructor(loginChallengeId: string) {
+    super("Additional verification required.");
+    this.loginChallengeId = loginChallengeId;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 const LOGIN_VERIFICATION_DETAIL = "Additional verification required.";
 
 function throwLoginHttpError(status: number, message: string): never {
@@ -502,9 +513,15 @@ function throwLoginHttpError(status: number, message: string): never {
   throw err;
 }
 
-export async function login(payload: { email: string; password: string; turnstile_token?: string | null }) {
+export async function login(payload: {
+  email: string;
+  password: string;
+  turnstile_token?: string | null;
+  login_challenge_id?: string | null;
+}) {
   const body: Record<string, string> = { email: payload.email, password: payload.password };
   if (payload.turnstile_token) body.turnstile_token = payload.turnstile_token;
+  if (payload.login_challenge_id) body.login_challenge_id = payload.login_challenge_id;
   const res = await fetchWithTenant(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -514,17 +531,62 @@ export async function login(payload: { email: string; password: string; turnstil
     const text = await res.text();
     let message = "Invalid email or password";
     try {
-      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      const json = text ? (JSON.parse(text) as { detail?: string; login_challenge_id?: string }) : null;
       if (res.status === 403 && json?.detail === LOGIN_VERIFICATION_DETAIL) {
+        const cid = json.login_challenge_id;
+        if (typeof cid === "string" && cid.length === 36) {
+          throw new LoginStepUpRequiredError(cid);
+        }
         throw new LoginVerificationRequiredError();
       }
       if (json?.detail) message = json.detail;
     } catch (e) {
       if (e instanceof LoginVerificationRequiredError) throw e;
+      if (e instanceof LoginStepUpRequiredError) throw e;
     }
     throwLoginHttpError(res.status, message);
   }
   return handle<{ ok: boolean; workspace_url?: string }>(res);
+}
+
+export async function loginStepUpIssue(payload: { login_challenge_id: string }) {
+  const res = await fetchWithTenant(`${API_BASE}/auth/login-step-up/issue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Something went wrong. Please try again.";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) message = json.detail;
+    } catch {
+      /* use default */
+    }
+    throwLoginHttpError(res.status, message);
+  }
+  return handle<{ ok: boolean; message?: string }>(res);
+}
+
+export async function loginStepUpVerify(payload: { login_challenge_id: string; otp: string }) {
+  const res = await fetchWithTenant(`${API_BASE}/auth/login-step-up/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ login_challenge_id: payload.login_challenge_id, otp: payload.otp.trim() }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Invalid email or password";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) message = json.detail;
+    } catch {
+      /* use default */
+    }
+    throwLoginHttpError(res.status, message);
+  }
+  return handle<{ ok: boolean }>(res);
 }
 
 /** Request password reset email (no tenant required). */
