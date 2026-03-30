@@ -17,6 +17,7 @@ from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
 from app.routers.workspace_intake import router as workspace_intake_router
 from app.routers.platform_tenants import router as platform_tenants_router
+from app.routers.platform_diagnostics import router as platform_diagnostics_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.meta import router as meta_router
 from app.routers.payroll import router as payroll_router
@@ -69,6 +70,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(public_signup_router)
 app.include_router(workspace_intake_router, prefix="/api/v1/public")
 app.include_router(platform_tenants_router)
+app.include_router(platform_diagnostics_router)
 app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")

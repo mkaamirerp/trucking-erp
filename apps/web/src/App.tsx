@@ -37,6 +37,12 @@ import { useAuth } from "./contexts/AuthContext";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
 import { OPS } from "./routes";
+import PlatformApexGate from "./components/PlatformApexGate";
+import PlatformShellLayout from "./components/PlatformShellLayout";
+import PlatformHomePage from "./pages/PlatformHomePage";
+import PlatformTenantsPage from "./pages/PlatformTenantsPage";
+import PlatformTenantDetailPage from "./pages/PlatformTenantDetailPage";
+import PlatformLoginFailuresPage from "./pages/PlatformLoginFailuresPage";
 
 function RedirectDriverOnboardingDetail() {
   const { id } = useParams<{ id: string }>();
@@ -241,6 +247,19 @@ function App() {
         <Route path="documents" element={<AdminPlaceholderPage title="Document Rules" description="Required documents and expiry rules." />} />
       </Route>
       <Route path="/tools/diagnostics" element={<ToolsDiagnosticsPage />} />
+      <Route
+        path="/platform"
+        element={
+          <PlatformApexGate>
+            <PlatformShellLayout />
+          </PlatformApexGate>
+        }
+      >
+        <Route index element={<PlatformHomePage />} />
+        <Route path="tenants" element={<PlatformTenantsPage />} />
+        <Route path="tenants/:id" element={<PlatformTenantDetailPage />} />
+        <Route path="login-failures" element={<PlatformLoginFailuresPage />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
