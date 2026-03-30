@@ -77,6 +77,17 @@ def email_thread_to_out(thread: Any, *, linked_load: Load | None = None) -> Emai
     )
 
 
+class EmailAttachmentOut(BaseModel):
+    id: int
+    filename: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    is_inline: bool = False
+    download_status: str = "metadata_only"
+    external_attachment_id: str
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EmailMessageOut(BaseModel):
     id: int
     thread_id: int
@@ -98,6 +109,7 @@ class EmailMessageOut(BaseModel):
     extraction_status: str | None = None
     created_at: datetime
     updated_at: datetime
+    attachments: list[EmailAttachmentOut] = []
     model_config = ConfigDict(from_attributes=True)
 
 

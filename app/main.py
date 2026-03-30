@@ -15,6 +15,7 @@ from app.routers.driver_documents import router as driver_documents_router
 from app.routers.admin_onboarding import router as admin_onboarding_router
 from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
+from app.routers.workspace_intake import router as workspace_intake_router
 from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.meta import router as meta_router
@@ -33,6 +34,7 @@ from app.routers.dev_tools_db import router as dev_tools_db_router
 from app.routers.tenant_admin import router as tenant_admin_router
 from app.routers.admin_email_config import router as admin_email_config_router
 from app.routers.email_threads import router as email_threads_router
+from app.routers.gmail_pubsub import router as gmail_pubsub_router
 from app.middleware.tenant_context import TenantContextMiddleware, tenant_middleware_allow_paths
 
 def _startup_banner() -> None:
@@ -65,6 +67,7 @@ app.add_middleware(
 # API routers
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(public_signup_router)
+app.include_router(workspace_intake_router, prefix="/api/v1/public")
 app.include_router(platform_tenants_router)
 app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
@@ -91,6 +94,7 @@ if settings.allows_dev_tenant_resolution_shortcuts():
 app.include_router(tenant_admin_router)
 app.include_router(admin_email_config_router)
 app.include_router(email_threads_router, prefix="/api/v1")
+app.include_router(gmail_pubsub_router, prefix="/api/v1")
 
 # Static assets and dashboard UI (reference layout: sidebar, KPIs, drivers, loads, alerts, chat)
 _static_dir = Path(__file__).resolve().parent / "static"

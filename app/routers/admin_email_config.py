@@ -13,9 +13,11 @@ V1 Gmail callback: tenant_email_accounts is the authoritative write target.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +28,7 @@ from app.deps.auth import CurrentUser, get_current_user
 from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db, open_tenant_session_by_id
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.models.email_mailbox import TenantEmailMailbox
 from app.models.platform_integration import TenantIntegrationSecret
 from app.models.tenant_email_account import TenantEmailAccount
@@ -40,7 +42,12 @@ from app.services.gmail_oauth import (
     parse_state,
     refresh_access_token,
 )
-from app.services.email_ingestion_gmail import sync_gmail_inbox_for_tenant
+from app.services.email_ingestion_gmail import bootstrap_gmail_history_cursor, sync_gmail_inbox_for_tenant
+from app.services.gmail_mailbox_platform_index import (
+    delete_gmail_mailbox_mappings_for_tenant,
+    upsert_gmail_mailbox_tenant_mapping,
+)
+from app.services.gmail_watch import register_or_renew_gmail_watch_for_tenant, stop_gmail_watch_for_tenant
 from app.utils.encryption import decrypt_secret, encrypt_secret, generate_credential_ref
 
 router = APIRouter(
@@ -49,9 +56,15 @@ router = APIRouter(
     dependencies=[Depends(require_entitlement("email_mailbox"))],
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
     """Map tenant_email_accounts (Gmail OAuth) to EmailConfigOut."""
+    now = datetime.now(timezone.utc)
+    exp = acc.gmail_watch_expiration_at
+    watch_active = bool(exp and exp > now)
+    cursor_present = bool(acc.gmail_history_id and str(acc.gmail_history_id).strip())
     return EmailConfigOut(
         id=acc.id,
         tenant_id=acc.tenant_id,
@@ -79,6 +92,11 @@ def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
         last_test_status=None,
         last_error_code=None,
         last_error_message=acc.last_error,
+        last_inbound_sync_at=acc.last_sync_at,
+        gmail_history_cursor_present=cursor_present,
+        gmail_watch_active=watch_active,
+        gmail_watch_expires_at=acc.gmail_watch_expiration_at,
+        last_gmail_webhook_at=acc.last_gmail_webhook_at,
         created_at=acc.created_at,
         updated_at=acc.updated_at,
     )
@@ -112,6 +130,11 @@ def _mailbox_to_out(m: TenantEmailMailbox) -> EmailConfigOut:
         last_test_status=m.last_test_status,
         last_error_code=m.last_error_code,
         last_error_message=m.last_error_message,
+        last_inbound_sync_at=m.last_sync_at,
+        gmail_history_cursor_present=None,
+        gmail_watch_active=None,
+        gmail_watch_expires_at=None,
+        last_gmail_webhook_at=None,
         created_at=m.created_at,
         updated_at=m.updated_at,
     )
@@ -227,6 +250,8 @@ async def gmail_callback(
     refresh_token = tokens.get("refresh_token")
 
     # Open tenant DB only after tenant_id is validated (no dependency-order side effects)
+    push_mailbox: str | None = None
+
     async for tenant_db in open_tenant_session_by_id(int(tid)):
         # Reconnect: Google may not return refresh_token; keep existing if present
         existing = await tenant_db.scalar(
@@ -299,8 +324,24 @@ async def gmail_callback(
                 provider_account_id=provider_account_id,
             )
             tenant_db.add(acc)
+        push_mailbox = identity_email or (existing.email_address if existing else None)
         await tenant_db.commit()
-        return RedirectResponse(url=f"{return_url}?gmail=connected", status_code=302)
+        break
+
+    if push_mailbox:
+        async with AsyncSessionLocal() as pdb:
+            await upsert_gmail_mailbox_tenant_mapping(pdb, tenant_id=int(tid), gmail_address=push_mailbox)
+            await pdb.commit()
+
+    async for tenant_db in open_tenant_session_by_id(int(tid)):
+        try:
+            await bootstrap_gmail_history_cursor(tenant_db, int(tid))
+            await tenant_db.commit()
+        except Exception as exc:
+            logger.warning("gmail history cursor bootstrap failed: %s", exc)
+        break
+
+    return RedirectResponse(url=f"{return_url}?gmail=connected", status_code=302)
 
 
 @router.post("/email-config/primary/disconnect")
@@ -341,7 +382,10 @@ async def disconnect_primary_email_config(
         .limit(1)
     )
     if gmail_acc:
+        await delete_gmail_mailbox_mappings_for_tenant(platform_db, tenant_id=tenant_id)
+        await stop_gmail_watch_for_tenant(tenant_db, tenant_id)
         tenant_db.delete(gmail_acc)
+        await platform_db.commit()
         await tenant_db.commit()
         return {"ok": True, "message": "Mailbox disconnected"}
 
@@ -636,6 +680,92 @@ async def test_primary_email_config(
     )
 
 
+@router.post("/email-config/gmail/register-watch")
+async def gmail_register_watch(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+):
+    """Register or replace Gmail users.watch for this tenant (requires GMAIL_PUBSUB_TOPIC_NAME)."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    topic = getattr(settings, "gmail_pubsub_topic_name", None)
+    if not topic or not str(topic).strip():
+        raise HTTPException(
+            status_code=503,
+            detail="GMAIL_PUBSUB_TOPIC_NAME is not configured (e.g. projects/PROJECT/topics/TOPIC).",
+        )
+    try:
+        return await register_or_renew_gmail_watch_for_tenant(tenant_db, tenant_id, topic_name=str(topic).strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except httpx.HTTPStatusError as e:
+        detail_txt = (e.response.text or "")[:240]
+        try:
+            acc = await tenant_db.scalar(
+                select(TenantEmailAccount)
+                .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
+                .limit(1)
+            )
+            if acc:
+                acc.last_error = f"watch_failed: {e.response.status_code} {detail_txt}"
+                await tenant_db.commit()
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail="Gmail users.watch rejected") from e
+
+
+@router.post("/email-config/gmail/renew-watch")
+async def gmail_renew_watch(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+    force: bool = Query(False, description="If true, call users.watch even if expiration is still far ahead"),
+):
+    """Renew Gmail watch before expiration (default: only if within gmail_watch_renew_within_hours)."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    topic = getattr(settings, "gmail_pubsub_topic_name", None)
+    if not topic or not str(topic).strip():
+        raise HTTPException(status_code=503, detail="GMAIL_PUBSUB_TOPIC_NAME is not configured")
+    acc = await tenant_db.scalar(
+        select(TenantEmailAccount)
+        .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
+        .limit(1)
+    )
+    if not acc:
+        raise HTTPException(status_code=404, detail="No Gmail account connected")
+    now = datetime.now(timezone.utc)
+    within = max(1, int(getattr(settings, "gmail_watch_renew_within_hours", 48)))
+    threshold = now + timedelta(hours=within)
+    exp = acc.gmail_watch_expiration_at
+    if not force and exp and exp > threshold:
+        return {
+            "ok": True,
+            "skipped": "not_due",
+            "gmail_watch_expires_at": exp.isoformat(),
+            "renew_within_hours": within,
+        }
+    try:
+        return await register_or_renew_gmail_watch_for_tenant(tenant_db, tenant_id, topic_name=str(topic).strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except httpx.HTTPStatusError as e:
+        detail_txt = (e.response.text or "")[:240]
+        try:
+            acc2 = await tenant_db.scalar(
+                select(TenantEmailAccount)
+                .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
+                .limit(1)
+            )
+            if acc2:
+                acc2.last_error = f"watch_failed: {e.response.status_code} {detail_txt}"
+                await tenant_db.commit()
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail="Gmail users.watch rejected") from e
+
+
 @router.post("/email-config/gmail/sync-now")
 async def gmail_sync_now(
     tenant_id: int = Depends(require_tenant),
@@ -643,13 +773,22 @@ async def gmail_sync_now(
     tenant_db: AsyncSession = Depends(get_tenant_db),
     max_threads: int = 30,
 ):
-    """Manual/on-demand Gmail ingestion for current tenant. No scheduler/webhook in this slice."""
+    """
+    Secondary / operator Gmail delta sync (History API only) — same code path as Pub/Sub push.
+    Production ingestion must work without calling this; keep for break-glass and troubleshooting.
+    """
     if not is_tenant_admin(current_user.role):
         raise HTTPException(status_code=403, detail="Admin role required")
     if max_threads < 1 or max_threads > 200:
         raise HTTPException(status_code=400, detail="max_threads must be between 1 and 200")
     try:
         result = await sync_gmail_inbox_for_tenant(tenant_db, tenant_id=tenant_id, max_threads=max_threads)
+        acc_row = await tenant_db.scalar(
+            select(TenantEmailAccount)
+            .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
+            .limit(1)
+        )
+        last_sync = acc_row.last_sync_at.isoformat() if acc_row and acc_row.last_sync_at else None
         return {
             "ok": True,
             "tenant_id": result.tenant_id,
@@ -658,6 +797,8 @@ async def gmail_sync_now(
             "threads_upserted": result.threads_upserted,
             "messages_upserted": result.messages_upserted,
             "attachments_upserted": result.attachments_upserted,
+            "history_pages": result.history_pages,
+            "last_sync_at": last_sync,
         }
     except Exception as e:
         # Keep error concise and tenant-scoped diagnostics on account row where possible.

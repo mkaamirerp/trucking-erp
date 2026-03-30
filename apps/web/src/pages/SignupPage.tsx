@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import {
   checkSlugAvailability,
   checkSignupEmailAvailability,
@@ -12,6 +12,8 @@ import {
   changeSignupSlug,
   retryProvisioning,
   cancelSignup,
+  consumeWorkspaceIntakeToken,
+  getWorkspaceIntakeSession,
 } from "../api";
 import { COUNTRIES } from "../data/countries";
 import { useAuth } from "../contexts/AuthContext";
@@ -84,9 +86,20 @@ function sanitizeProvisionError(raw: string | null | undefined): string | null {
   return "Setup failed. Please retry.";
 }
 
-export default function SignupPage() {
+export type SignupPageProps = {
+  /**
+   * True when this page is rendered at /create-workspace for anonymous visitors (landing CTA).
+   * Tenant-subdomain visitors are redirected to apex /create-workspace instead of /signup.
+   */
+  publicWorkspaceEntry?: boolean;
+};
+
+export default function SignupPage({ publicWorkspaceEntry = false }: SignupPageProps = {}) {
   const nav = useNavigate();
   const { authReady, isAuthenticated, session } = useAuth();
+  const [intakeGateReady, setIntakeGateReady] = useState(!publicWorkspaceEntry);
+  const [intakeGateBlocked, setIntakeGateBlocked] = useState(false);
+  const [selectedPackageCode, setSelectedPackageCode] = useState<string | null>(null);
 
   // Step 1 (basic)
   const [workspaceSlug, setWorkspaceSlug] = useState("");
@@ -140,6 +153,13 @@ export default function SignupPage() {
   const [breachCheckStatus, setBreachCheckStatus] = useState<"idle" | "checking" | "breached" | "ok">("idle");
 
   const normalizedSlug = useMemo(() => slugify(workspaceSlug), [workspaceSlug]);
+  /** Both fields filled but differ — confirm exists to catch typos; surface it live, not only on submit. */
+  const emailConfirmMismatch = useMemo(() => {
+    const e = email.trim();
+    const c = confirmEmail.trim();
+    if (!e || !c) return false;
+    return e.toLowerCase() !== c.toLowerCase();
+  }, [email, confirmEmail]);
   const isOtpEntryAllowed = !attemptState || attemptState === "OTP_SENT";
   const passwordValidation = useMemo(() => getPasswordValidation(password), [password]);
   const passwordsMatch = passwordValidation.trimmed === confirmPassword.trim();
@@ -147,7 +167,8 @@ export default function SignupPage() {
     slugState.status === "checking" || slugState.status === "bad";
   const emailAvailabilityBlocksSignup =
     !isAuthenticated &&
-    (emailAvailState.status === "checking" ||
+    (emailConfirmMismatch ||
+      emailAvailState.status === "checking" ||
       emailAvailState.status === "bad" ||
       emailAvailState.status === "taken");
   const phoneAvailabilityBlocksSignup =
@@ -200,7 +221,8 @@ export default function SignupPage() {
   useEffect(() => {
     const tenantSlug = getTenantSlugFromHost();
     if (!tenantSlug) return;
-    const target = new URL("https://truckerp.me/signup");
+    const path = publicWorkspaceEntry ? "create-workspace" : "signup";
+    const target = new URL(`https://truckerp.me/${path}`);
     const current = new URL(window.location.href);
     current.searchParams.forEach((value, key) => {
       target.searchParams.set(key, value);
@@ -209,7 +231,77 @@ export default function SignupPage() {
     if (target.toString() !== current.toString()) {
       window.location.replace(target.toString());
     }
-  }, []);
+  }, [publicWorkspaceEntry]);
+
+  useEffect(() => {
+    if (!publicWorkspaceEntry) {
+      setIntakeGateReady(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get("intake_token");
+        if (token) {
+          try {
+            const data = await consumeWorkspaceIntakeToken(token);
+            if (cancelled) return;
+            setFirstName(data.first_name);
+            setLastName(data.last_name);
+            setEmail(data.email);
+            setConfirmEmail(data.email);
+            setPhone(data.phone_number);
+            setSelectedPackageCode(data.selected_package_code);
+            nav("/create-workspace", { replace: true });
+            setIntakeGateReady(true);
+            setIntakeGateBlocked(false);
+            return;
+          } catch {
+            if (cancelled) return;
+            const sess = await getWorkspaceIntakeSession();
+            if (sess) {
+              setFirstName(sess.first_name);
+              setLastName(sess.last_name);
+              setEmail(sess.email);
+              setConfirmEmail(sess.email);
+              setPhone(sess.phone_number);
+              setSelectedPackageCode(sess.selected_package_code);
+              nav("/create-workspace", { replace: true });
+              setIntakeGateReady(true);
+              setIntakeGateBlocked(false);
+              return;
+            }
+            setIntakeGateBlocked(true);
+            setIntakeGateReady(true);
+            return;
+          }
+        }
+        const sess = await getWorkspaceIntakeSession();
+        if (cancelled) return;
+        if (sess) {
+          setFirstName(sess.first_name);
+          setLastName(sess.last_name);
+          setEmail(sess.email);
+          setConfirmEmail(sess.email);
+          setPhone(sess.phone_number);
+          setSelectedPackageCode(sess.selected_package_code);
+          setIntakeGateBlocked(false);
+        } else {
+          setIntakeGateBlocked(true);
+        }
+        setIntakeGateReady(true);
+      } catch {
+        if (!cancelled) {
+          setIntakeGateBlocked(true);
+          setIntakeGateReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [publicWorkspaceEntry, nav]);
 
   useEffect(() => {
     try {
@@ -246,6 +338,7 @@ export default function SignupPage() {
       if (draft?.acceptTerms != null) setAcceptTerms(draft.acceptTerms);
       if (draft?.isOwnerOrAdmin != null) setIsOwnerOrAdmin(draft.isOwnerOrAdmin);
       if (draft?.plan) setPlan(draft.plan);
+      if (draft?.selectedPackageCode) setSelectedPackageCode(draft.selectedPackageCode);
       if (draft?.attemptId) setAttemptId(draft.attemptId);
       if (draft?.idempotencyKey) setIdempotencyKey(draft.idempotencyKey);
       if (draft?.reservationExpiresAt) setReservationExpiresAt(draft.reservationExpiresAt);
@@ -281,6 +374,7 @@ export default function SignupPage() {
       acceptTerms,
       isOwnerOrAdmin,
       plan,
+      selectedPackageCode,
       attemptId,
       idempotencyKey,
       reservationExpiresAt,
@@ -308,6 +402,7 @@ export default function SignupPage() {
     acceptTerms,
     isOwnerOrAdmin,
     plan,
+    selectedPackageCode,
     attemptId,
     idempotencyKey,
     reservationExpiresAt,
@@ -592,7 +687,7 @@ export default function SignupPage() {
     if (!email.trim()) errors.email = "Please enter your email.";
     else if (!isValidEmailFormat(email)) errors.email = "Enter a valid email (e.g. you@company.com).";
     if (!confirmEmail.trim()) errors.confirmEmail = "Please confirm your email.";
-    if (email.trim() && confirmEmail.trim() && email.trim() !== confirmEmail.trim()) {
+    if (email.trim() && confirmEmail.trim() && email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase()) {
       errors.email = "Emails do not match.";
       errors.confirmEmail = "Emails do not match.";
     }
@@ -641,7 +736,7 @@ export default function SignupPage() {
     resetMessages();
 
     if (authReady && isAuthenticated) {
-      nav("/create-workspace");
+      nav("/add-workspace");
       return;
     }
 
@@ -962,6 +1057,45 @@ export default function SignupPage() {
     }
   }
 
+  if (publicWorkspaceEntry && authReady && isAuthenticated) {
+    return <Navigate to="/add-workspace" replace />;
+  }
+
+  if (publicWorkspaceEntry && !intakeGateReady) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
+        <div className="flex items-center gap-3 text-slate-300 text-sm">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-indigo-400" />
+          Verifying your invite…
+        </div>
+      </div>
+    );
+  }
+
+  if (publicWorkspaceEntry && intakeGateBlocked) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center space-y-4">
+          <h1 className="text-xl font-bold">Link required</h1>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Open your workspace signup from the email we sent, or request a new link to continue.
+          </p>
+          <Link
+            to="/workspace-intake"
+            className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:opacity-95"
+          >
+            Request a new link
+          </Link>
+          <div>
+            <Link to="/" className="text-sm text-slate-500 hover:text-slate-300">
+              Back to home
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/40 p-8">
@@ -969,6 +1103,9 @@ export default function SignupPage() {
           <div>
             <div className="text-sm font-semibold text-slate-400">TruckERP</div>
             <h1 className="text-2xl font-bold tracking-tight">Create your workspace</h1>
+            {selectedPackageCode ? (
+              <p className="mt-1 text-xs text-slate-500">Package: {selectedPackageCode}</p>
+            ) : null}
           </div>
           <button className="text-sm text-slate-400 hover:text-slate-200" onClick={() => nav("/")} type="button">
             Back to home
@@ -980,8 +1117,8 @@ export default function SignupPage() {
         {authReady && isAuthenticated && step === "signup" ? (
           <div className="mt-4 rounded-xl border border-sky-800/60 bg-sky-950/30 p-3 text-sm text-sky-200">
             You’re already signed in. To add another company, open{" "}
-            <Link to="/create-workspace" className="font-medium text-sky-100 underline">
-              Create workspace
+            <Link to="/add-workspace" className="font-medium text-sky-100 underline">
+              Add workspace
             </Link>
             . This form is for brand-new accounts only.
           </div>
@@ -1102,9 +1239,11 @@ export default function SignupPage() {
                 onChange={(e) => {
                   setEmail(e.target.value);
                   clearFieldError("email");
+                  clearFieldError("confirmEmail");
                 }}
                 className={inputClass(
                   Boolean(fieldErrors.email) ||
+                    emailConfirmMismatch ||
                     emailAvailState.status === "bad" ||
                     emailAvailState.status === "taken",
                 )}
@@ -1115,31 +1254,35 @@ export default function SignupPage() {
                 <p className="mt-1 text-xs text-rose-200" role="alert">
                   {fieldErrors.email}
                 </p>
+              ) : emailConfirmMismatch ? (
+                <p className="mt-1 text-xs text-rose-200" role="alert">
+                  Emails do not match — use the same address as in &quot;Confirm email&quot; below.
+                </p>
               ) : null}
-              {!fieldErrors.email && emailAvailState.status === "checking" ? (
+              {!fieldErrors.email && !emailConfirmMismatch && emailAvailState.status === "checking" ? (
                 <p className="mt-1 text-xs text-slate-400" role="status">
                   Checking email…
                 </p>
               ) : null}
-              {!fieldErrors.email && emailAvailState.status === "ok" ? (
+              {!fieldErrors.email && !emailConfirmMismatch && emailAvailState.status === "ok" ? (
                 <p className="mt-1 text-xs text-emerald-400" role="status">
                   Email is available.
                 </p>
               ) : null}
-              {!fieldErrors.email && emailAvailState.status === "bad" ? (
+              {!fieldErrors.email && !emailConfirmMismatch && emailAvailState.status === "bad" ? (
                 <p className="mt-1 text-xs text-rose-200" role="alert">
                   {emailAvailState.message}
                 </p>
               ) : null}
-              {!fieldErrors.email && emailAvailState.status === "taken" ? (
+              {!fieldErrors.email && !emailConfirmMismatch && emailAvailState.status === "taken" ? (
                 <p className="mt-1 text-xs text-amber-200" role="alert">
                   {emailAvailState.message}{" "}
-                  <Link to="/login" state={{ from: "/create-workspace" }} className="underline font-medium text-amber-100">
+                  <Link to="/login" state={{ from: "/add-workspace" }} className="underline font-medium text-amber-100">
                     Sign in
                   </Link>
                   , then open{" "}
-                  <Link to="/create-workspace" className="underline font-medium text-amber-100">
-                    Create workspace
+                  <Link to="/add-workspace" className="underline font-medium text-amber-100">
+                    Add workspace
                   </Link>
                   .
                 </p>
@@ -1153,11 +1296,21 @@ export default function SignupPage() {
                 onChange={(e) => {
                   setConfirmEmail(e.target.value);
                   clearFieldError("confirmEmail");
+                  clearFieldError("email");
                 }}
-                className={inputClass(Boolean(fieldErrors.confirmEmail))}
-                placeholder="you@company.com"
+                className={inputClass(Boolean(fieldErrors.confirmEmail) || emailConfirmMismatch)}
+                placeholder="Re-enter the same email"
                 autoComplete="email"
               />
+              {fieldErrors.confirmEmail ? (
+                <p className="mt-1 text-xs text-rose-200" role="alert">
+                  {fieldErrors.confirmEmail}
+                </p>
+              ) : emailConfirmMismatch ? (
+                <p className="mt-1 text-xs text-rose-200" role="alert">
+                  Must match the email field above.
+                </p>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -53,7 +53,9 @@ naming/
 writing/
 storage/
 web/
-scripts/
+# Ignore repo-root scripts/ except versioned maintenance entrypoints (pattern "scripts/" also matched app/scripts/).
+/scripts/*
+!/scripts/prune_platform_login_failure_events.sh
 
 # Vault/runtime rendered secrets
 runtime/rendered/

@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     gmail_oauth_callback_url: str | None = None  # e.g. https://truckerp.me/api/v1/admin/email-config/gmail/callback
     gmail_oauth_return_path: str = "/admin/settings/email"  # frontend path for post-OAuth redirect
+    # Pub/Sub → POST /api/v1/webhooks/gmail/pubsub
+    # OIDC: set to the exact push URL configured as the subscription audience (HTTPS).
+    gmail_pubsub_push_audience: str | None = None
+    # Optional second factor: header X-TruckERP-Gmail-Push-Token must also match when set.
+    gmail_pubsub_push_token: str | None = None
+    # Full topic resource: projects/PROJECT_ID/topics/TOPIC (Gmail users.watch topicName).
+    gmail_pubsub_topic_name: str | None = None
+    # Renew watches when expiring within this many hours (renewal script / renew endpoint).
+    gmail_watch_renew_within_hours: int = 48
 
     # Storage (S3 or local)
     storage_provider: str = "local"

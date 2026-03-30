@@ -51,6 +51,7 @@ services:
       - truckerp-api
     volumes:
       - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infra/nginx/error-pages:/usr/share/nginx/error-pages:ro
       - letsencrypt:/etc/letsencrypt
       - certbot_www:/var/www/certbot
     networks:

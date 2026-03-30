@@ -52,6 +52,7 @@ from app.utils.rate_limit import (
 from app.utils.slug import SLUG_REGEX, generate_slug_suggestions, is_slug_available, normalize_slug
 from app.services.tenant_provisioning import provision_tenant_db
 from app.services.workspace_bootstrap import provision_new_workspace_for_platform_user
+from app.services.workspace_intake import intake_selected_package_for_signup
 
 router = APIRouter(prefix="/api/v1/public", tags=["public-signup"])
 logger = logging.getLogger(__name__)
@@ -303,25 +304,29 @@ async def public_signup(
 
         # ── create new draft payload ──────────────────────────────────────────
         expires_at = now + timedelta(days=7)
+        intake_package = await intake_selected_package_for_signup(request, db, email_lower, now)
+        payload_json: dict = {
+            "workspace_slug": normalized_slug,
+            "email": email_lower,
+            "first_name": (payload.first_name or "").strip(),
+            "last_name": (payload.last_name or "").strip(),
+            "phone": payload.phone.strip() if payload.phone else None,
+            "company_legal_name": payload.company_legal_name.strip(),
+            "password_hash": hash_password(payload.password),
+            "address": {
+                "street": payload.address.street.strip(),
+                "city": payload.address.city.strip(),
+                "region": payload.address.region.strip(),
+                "postal": payload.address.postal.strip(),
+                "country": payload.address.country.strip().upper(),
+            },
+        }
+        if intake_package:
+            payload_json["selected_package_code"] = intake_package
         onboarding = PlatformOnboardingPayload(
             tenant_id=None,
             status=OnboardingStatus.PENDING.value,
-            payload_json={
-                "workspace_slug": normalized_slug,
-                "email": email_lower,
-                "first_name": (payload.first_name or "").strip(),
-                "last_name": (payload.last_name or "").strip(),
-                "phone": payload.phone.strip() if payload.phone else None,
-                "company_legal_name": payload.company_legal_name.strip(),
-                "password_hash": hash_password(payload.password),
-                "address": {
-                    "street": payload.address.street.strip(),
-                    "city": payload.address.city.strip(),
-                    "region": payload.address.region.strip(),
-                    "postal": payload.address.postal.strip(),
-                    "country": payload.address.country.strip().upper(),
-                },
-            },
+            payload_json=payload_json,
             expires_at=expires_at,
             consumed_at=None,
         )

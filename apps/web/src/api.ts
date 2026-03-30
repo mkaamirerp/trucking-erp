@@ -130,6 +130,62 @@ export async function checkSignupPhoneAvailability(phone: string) {
   return handle<SignupFieldAvailabilityResponse>(res);
 }
 
+export type WorkspaceIntakeSession = {
+  selected_package_code: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string;
+};
+
+export type WorkspaceIntakeConsumeResult = WorkspaceIntakeSession & { ok?: boolean };
+
+export async function submitWorkspaceIntake(payload: {
+  first_name: string;
+  last_name: string;
+  email: string;
+  confirm_email: string;
+  phone_number: string;
+  selected_package_code: string;
+}) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/workspace-intake`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ ok: boolean; message?: string }>(res);
+}
+
+export async function consumeWorkspaceIntakeToken(intake_token: string) {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/workspace-intake/consume`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intake_token }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = "Invalid or expired link";
+    try {
+      const json = text ? (JSON.parse(text) as { detail?: string }) : null;
+      if (json?.detail) message = String(json.detail);
+    } catch {
+      /* use default */
+    }
+    throw new Error(message);
+  }
+  return handle<WorkspaceIntakeConsumeResult>(res);
+}
+
+export async function getWorkspaceIntakeSession(): Promise<WorkspaceIntakeSession | null> {
+  const res = await fetchPublic(`${PUBLIC_API_BASE}/workspace-intake/session`);
+  if (res.status === 401) return null;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Session check failed");
+  }
+  return handle<WorkspaceIntakeSession>(res);
+}
+
 export async function signup(payload: SignupPayload) {
   // Send form payload with only key renames for backend: slug → workspace_slug, company_name → company_legal_name. Pass address through as the form sends it.
   const body = {
@@ -1259,6 +1315,12 @@ export type EmailConfig = {
   last_test_status: string | null;
   last_error_code: string | null;
   last_error_message: string | null;
+  /** Gmail: last time delta ingestion ran successfully (ISO). */
+  last_inbound_sync_at?: string | null;
+  gmail_history_cursor_present?: boolean | null;
+  gmail_watch_active?: boolean | null;
+  gmail_watch_expires_at?: string | null;
+  last_gmail_webhook_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1311,6 +1373,16 @@ export type InboxThreadListItem = {
 
 export type InboxThreadDetail = InboxThreadListItem;
 
+export type InboxMessageAttachmentItem = {
+  id: number;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  is_inline: boolean;
+  download_status: string;
+  external_attachment_id: string;
+};
+
 export type InboxMessageItem = {
   id: number;
   thread_id: number;
@@ -1332,6 +1404,7 @@ export type InboxMessageItem = {
   extraction_status: string | null;
   created_at: string;
   updated_at: string;
+  attachments?: InboxMessageAttachmentItem[];
 };
 
 export type InboxThreadListResponse = {
@@ -1367,6 +1440,62 @@ export async function disconnectPrimaryEmailConfig(): Promise<{ ok: boolean; mes
   return handle<{ ok: boolean; message: string }>(res);
 }
 
+export async function registerGmailWatch(): Promise<{
+  ok: boolean;
+  historyId?: string | null;
+  gmail_watch_expires_at?: string | null;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/gmail/register-watch`, { method: "POST" });
+  return handle(res);
+}
+
+export async function renewGmailWatch(force = false): Promise<{
+  ok: boolean;
+  skipped?: string;
+  gmail_watch_expires_at?: string | null;
+  renew_within_hours?: number;
+  historyId?: string | null;
+}> {
+  const q = force ? "?force=true" : "";
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/gmail/renew-watch${q}`, { method: "POST" });
+  return handle(res);
+}
+
+export async function syncGmailNow(maxThreads = 30): Promise<{
+  ok: boolean;
+  tenant_id: number;
+  provider: string;
+  threads_scanned: number;
+  threads_upserted: number;
+  messages_upserted: number;
+  attachments_upserted: number;
+  history_pages?: number;
+  last_sync_at?: string | null;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/gmail/sync-now?max_threads=${maxThreads}`, {
+    method: "POST",
+  });
+  return handle(res);
+}
+
+/** Same delta sync as Pub/Sub push; `email_inbox` entitlement. Fallback only — production uses Gmail push. */
+export async function pullGmailDeltaFromInbox(maxThreads = 30): Promise<{
+  ok: boolean;
+  tenant_id: number;
+  provider: string;
+  threads_scanned: number;
+  threads_upserted: number;
+  messages_upserted: number;
+  attachments_upserted: number;
+  history_pages?: number;
+  last_sync_at?: string | null;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/gmail/pull-delta?max_threads=${maxThreads}`, {
+    method: "POST",
+  });
+  return handle(res);
+}
+
 export async function listEmailThreads(params?: {
   status?: string;
   provider?: string;
@@ -1397,6 +1526,11 @@ export async function getEmailThreadMessages(threadId: number): Promise<InboxMes
 
 export async function disregardEmailThread(threadId: number): Promise<InboxThreadDetail> {
   const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/disregard`, { method: "POST" });
+  return handle<InboxThreadDetail>(res);
+}
+
+export async function recomputeEmailThreadIntake(threadId: number): Promise<InboxThreadDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/recompute-intake`, { method: "POST" });
   return handle<InboxThreadDetail>(res);
 }
 

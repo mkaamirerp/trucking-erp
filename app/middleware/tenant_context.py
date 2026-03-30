@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 import logging
-from typing import Callable, Iterable, Optional, Set
+from typing import Callable, FrozenSet, Iterable, Optional, Set
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
@@ -29,6 +29,7 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
     "/api/v1/healthz",
     "/healthz",
     "/api/v1/public",
+    "/api/v1/webhooks/gmail/pubsub",
     "/api/v1/auth/logout",  # no tenant/token needed; just clear cookies
     "/api/v1/auth/reset-password",
     "/api/v1/auth/signup/plan-options",
@@ -68,6 +69,13 @@ PUBLIC_AUTH_PATHS: Set[str] = {
 
 # Prefix for applicant (invite-link token) routes: resolve tenant but skip membership (auth is token in query)
 APPLICANT_ROUTE_PREFIX = "/api/v1/driver-onboarding/applicant/"
+
+# Apex/marketing host has no tenant subdomain; session probes must still work. Tenant id comes only from the
+# signed JWT issued at login (not from client headers), same trust model as subdomain requests.
+JWT_TENANT_FALLBACK_PATHS: FrozenSet[str] = frozenset({
+    "/api/v1/auth/me",
+    "/api/v1/auth/refresh",
+})
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
@@ -202,6 +210,15 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 log("forgot_password_main_domain")
                 return response
 
+        # Login from marketing apex (no subdomain): tenant is chosen in the handler from email + memberships.
+        if request.method == "POST" and path.rstrip("/") == "/api/v1/auth/login":
+            slug_from_host = self._slug_from_host(request)
+            if slug_from_host is None and jwt_tenant_id is None:
+                response = await call_next(request)
+                set_request_id(response)
+                log("login_main_domain")
+                return response
+
         # Create workspace: platform JWT only; do not require tenant resolution or membership in an existing tenant.
         if request.method == "POST" and path.rstrip("/") == "/api/v1/auth/workspaces":
             user_id = getattr(request.state, "user_id", None)
@@ -257,28 +274,32 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         if tenant_id_from_request is None and tenant_slug_from_request is None:
             if slug_from_host:
                 tenant_slug_from_request = slug_from_host
-            elif settings.allows_dev_tenant_resolution_shortcuts() and jwt_tenant_id is not None:
-                tenant_id_from_request = int(jwt_tenant_id)
             else:
-                default_tid = os.environ.get("TOOLS_DEFAULT_TENANT_ID")
-                default_slug = os.environ.get("TOOLS_DEFAULT_TENANT_SLUG")
-                if (
-                    settings.allows_dev_tenant_resolution_shortcuts()
-                    and path.startswith("/api/v1/tools/db/")
-                    and (default_tid or default_slug)
-                ):
-                    if default_tid:
-                        try:
-                            tenant_id_from_request = int(default_tid)
-                        except ValueError:
-                            tenant_id_from_request = None
-                    if tenant_id_from_request is None and default_slug:
-                        tenant_slug_from_request = default_slug.strip()
-                if tenant_id_from_request is None and tenant_slug_from_request is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Tenant context required: open the app from your workspace subdomain (e.g. https://demo.truckerp.me).",
-                    )
+                path_norm = path.rstrip("/")
+                if jwt_tenant_id is not None and path_norm in JWT_TENANT_FALLBACK_PATHS:
+                    tenant_id_from_request = int(jwt_tenant_id)
+                elif settings.allows_dev_tenant_resolution_shortcuts() and jwt_tenant_id is not None:
+                    tenant_id_from_request = int(jwt_tenant_id)
+                else:
+                    default_tid = os.environ.get("TOOLS_DEFAULT_TENANT_ID")
+                    default_slug = os.environ.get("TOOLS_DEFAULT_TENANT_SLUG")
+                    if (
+                        settings.allows_dev_tenant_resolution_shortcuts()
+                        and path.startswith("/api/v1/tools/db/")
+                        and (default_tid or default_slug)
+                    ):
+                        if default_tid:
+                            try:
+                                tenant_id_from_request = int(default_tid)
+                            except ValueError:
+                                tenant_id_from_request = None
+                        if tenant_id_from_request is None and default_slug:
+                            tenant_slug_from_request = default_slug.strip()
+                    if tenant_id_from_request is None and tenant_slug_from_request is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Tenant context required: open the app from your workspace subdomain (e.g. https://demo.truckerp.me).",
+                        )
 
         # Lookup in platform tenant registry and enforce membership gate
         try:

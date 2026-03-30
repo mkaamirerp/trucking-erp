@@ -39,6 +39,13 @@ class EmailConfigOut(BaseModel):
     last_test_status: str | None = None
     last_error_code: str | None = None
     last_error_message: str | None = None
+    # Gmail OAuth (tenant_email_accounts): last successful History/delta ingestion run; None for manual IMAP rows.
+    last_inbound_sync_at: datetime | None = None
+    # Gmail operator diagnostics (null / false when mailbox is manual IMAP row).
+    gmail_history_cursor_present: bool | None = None
+    gmail_watch_active: bool | None = None
+    gmail_watch_expires_at: datetime | None = None
+    last_gmail_webhook_at: datetime | None = None
 
     created_at: datetime
     updated_at: datetime

@@ -9,21 +9,29 @@ from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_ingestion import EmailMessage, EmailThread
+from app.models.tenant_email_account import TenantEmailAccount
 from app.models.load import Load
 from app.schemas.email_threads import EmailThreadOut, email_thread_to_out
 from app.services.email_intake_pdf import guess_broker_load_reference
-from app.services.email_intake_routing import _resolve_tql_broker, participants_indicate_tql
+from app.services.email_intake_routing import (
+    _resolve_tql_broker,
+    apply_intake_routing_for_gmail_thread,
+    thread_indicates_tql_affinity,
+)
+from app.services.gmail_oauth import refresh_access_token
+from app.utils.encryption import decrypt_secret
 from app.utils.pagination import paginate
 
 
 def _require_thread_eligible_for_manual_intake(thread: EmailThread) -> None:
     if thread.status != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thread is not active")
-    if thread.intake_bucket != "needs_review":
+    if thread.intake_bucket not in ("needs_review", "background"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Thread must be in needs_review intake bucket for this action",
+            detail="Thread must be in needs_review or background intake bucket for this action",
         )
     if thread.linked_load_id is not None:
         raise HTTPException(
@@ -114,7 +122,7 @@ async def create_draft_load_from_review_thread(
 
     broker_id: int | None = None
     broker_name_snapshot: str | None = None
-    if participants_indicate_tql(thread.participants_json):
+    if thread_indicates_tql_affinity(thread):
         bid, snap = await _resolve_tql_broker(db, tenant_id)
         broker_id = bid
         broker_name_snapshot = snap
@@ -235,6 +243,50 @@ async def list_thread_messages(db: AsyncSession, tenant_id: int, thread_id: int)
         )
     )
     return list(result.scalars().all())
+
+
+async def map_message_attachments(
+    db: AsyncSession, tenant_id: int, message_ids: list[int]
+) -> dict[int, list[EmailMessageAttachment]]:
+    if not message_ids:
+        return {}
+    result = await db.execute(
+        select(EmailMessageAttachment).where(
+            EmailMessageAttachment.tenant_id == tenant_id,
+            EmailMessageAttachment.message_id.in_(message_ids),
+        )
+    )
+    rows = list(result.scalars().all())
+    out: dict[int, list[EmailMessageAttachment]] = {}
+    for r in rows:
+        out.setdefault(r.message_id, []).append(r)
+    return out
+
+
+async def recompute_gmail_intake_for_thread(db: AsyncSession, tenant_id: int, thread_id: int) -> EmailThreadOut:
+    """Re-run apply_intake_routing_for_gmail_thread (e.g. after tightening TQL heuristics). Gmail only."""
+    thread = await get_email_thread(db, tenant_id, thread_id)
+    if thread.provider != "gmail":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Gmail threads support intake recompute")
+    acc = await db.scalar(
+        select(TenantEmailAccount)
+        .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
+        .limit(1)
+    )
+    if not acc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No Gmail account connected for this tenant",
+        )
+    refresh_token = decrypt_secret(acc.refresh_token_encrypted).decode("utf-8")
+    tok = await refresh_access_token(refresh_token)
+    access_token = tok.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not refresh Gmail access token")
+    await apply_intake_routing_for_gmail_thread(db, tenant_id, thread_id, access_token)
+    await db.commit()
+    await db.refresh(thread)
+    return await get_email_thread_out(db, tenant_id, thread_id)
 
 
 async def disregard_thread(db: AsyncSession, tenant_id: int, thread_id: int) -> EmailThreadOut:

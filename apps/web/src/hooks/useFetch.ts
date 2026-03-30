@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { fetchWithTenant, refreshSession } from "../api";
 import { authErrorToMessage } from "../utils/authErrorToMessage";
 import { forceWorkspaceRelogin, shouldForceReloginFrom403Body } from "../utils/forceWorkspaceRelogin";
@@ -16,7 +16,9 @@ export function useFetch<T>(url: string, deps: unknown[] = [], enabled: boolean 
     error: null,
   });
 
-  useEffect(() => {
+  // useLayoutEffect: when `enabled` flips true after being false, set loading before paint so
+  // consumers (e.g. MeProvider -> App route gate) never see one frame with enabled && !loading.
+  useLayoutEffect(() => {
     if (!enabled) {
       setState({ data: null, loading: false, error: null });
       return;

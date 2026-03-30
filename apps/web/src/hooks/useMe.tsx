@@ -1,11 +1,12 @@
-import { createContext, ReactNode, useContext } from "react";
+import { createContext, ReactNode, useContext, useMemo } from "react";
 import { useLocation } from "react-router-dom";
-import { useFetch } from "./useFetch";
 import { useAuth } from "../contexts/AuthContext";
+import type { SessionData } from "../utils/sessionCheck";
 
 export type MeResponse = {
   /** Platform user id (UUID string from API). */
   user_id: number | string | null;
+  email?: string | null;
   /** Present in tenant_auth_mode=tenant: tenant_users.id for this workspace. */
   tenant_local_user_id?: number | null;
   tenant_auth_mode?: string | null;
@@ -25,6 +26,28 @@ type MeContextValue = {
 
 const MeContext = createContext<MeContextValue>({ me: null, loading: true, error: null });
 
+/** Same shape as useFetch+auth/me had; data comes from AuthContext (checkSession already calls /auth/me). */
+function sessionToMe(session: SessionData | null): MeResponse | null {
+  if (!session) return null;
+  return {
+    user_id: session.user_id ?? null,
+    email: session.email,
+    tenant_local_user_id:
+      session.tenant_local_user_id != null ? Number(session.tenant_local_user_id) : null,
+    tenant_auth_mode: session.tenant_auth_mode ?? undefined,
+    tenant_id: session.tenant_id ?? 0,
+    roles: Array.isArray(session.roles)
+      ? session.roles
+      : session.role
+        ? [String(session.role)]
+        : [],
+    requires_account_setup: session.requires_account_setup,
+    account_setup_missing: session.account_setup_missing ?? undefined,
+    country_code: session.country_code ?? undefined,
+    tenant_slug: session.tenant_slug ?? undefined,
+  };
+}
+
 const PUBLIC_PATHS = [
   "/",
   "/signup",
@@ -40,33 +63,13 @@ const PUBLIC_PATHS = [
 
 export function MeProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const { authReady, isValid, isLoggingOut } = useAuth();
+  const { authReady, isValid, isLoggingOut, session } = useAuth();
   const isPublicPath = PUBLIC_PATHS.some((p) => p === location.pathname || location.pathname.startsWith(p + "/"));
-  // Only fetch /me after auth bootstrap completes and we're authenticated; never during logout
+  // Same gate as before; /me payload is session (validateSession -> checkSession -> GET /auth/me only once)
   const enabled = !isPublicPath && authReady && isValid && !isLoggingOut;
-  // Use auth/me (authoritative DB-backed role) so AdminRouteGuard sees correct roles on hard refresh
-  const { data, loading, error } = useFetch<Record<string, unknown>>("/api/v1/auth/me", [], enabled);
-  // Normalize auth/me response (role) to MeResponse (roles array)
-  const me: MeResponse | null = data
-    ? {
-        user_id: (data.user_id as number | string) ?? null,
-        tenant_local_user_id:
-          data.tenant_local_user_id != null ? Number(data.tenant_local_user_id) : null,
-        tenant_auth_mode: (data.tenant_auth_mode as string | null) ?? undefined,
-        tenant_id: (data.tenant_id as number) ?? 0,
-        roles: Array.isArray(data.roles)
-          ? (data.roles as string[])
-          : data.role
-            ? [String(data.role)]
-            : [],
-        requires_account_setup: data.requires_account_setup as boolean | undefined,
-        account_setup_missing: (data.account_setup_missing as string[] | undefined) ?? undefined,
-        country_code: (data.country_code as string | null) ?? undefined,
-        tenant_slug: (data.tenant_slug as string | null) ?? undefined,
-      }
-    : null;
-  // While disabled (auth not ready), report loading so guards don't redirect on me=null
-  const effectiveLoading = !enabled || loading;
+  const me = useMemo(() => (enabled ? sessionToMe(session) : null), [enabled, session]);
+  const error: string | null = null;
+  const effectiveLoading = !enabled || (enabled && session == null);
   return <MeContext.Provider value={{ me, loading: effectiveLoading, error }}>{children}</MeContext.Provider>;
 }
 

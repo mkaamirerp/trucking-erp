@@ -7,6 +7,7 @@ import PayRunDetailPage from "./pages/PayRunDetailPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import LandingPage from "./pages/LandingPage";
 import SignupPage from "./pages/SignupPage";
+import WorkspaceIntakePage from "./pages/WorkspaceIntakePage";
 import CompanySetupPage from "./pages/CompanySetupPage";
 import LoginPage from "./pages/LoginPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -28,7 +29,7 @@ import AdminUsersPage from "./pages/AdminUsersPage";
 import AdminRolesPage from "./pages/AdminRolesPage";
 import AdminPlaceholderPage from "./pages/AdminPlaceholderPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
-import CreateWorkspacePage from "./pages/CreateWorkspacePage";
+import AddWorkspacePage from "./pages/AddWorkspacePage";
 import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminRouteGuard from "./components/AdminRouteGuard";
@@ -46,6 +47,7 @@ function App() {
   const { authReady, isValid } = useAuth();
   const { me, loading, error } = useMe();
   const location = useLocation();
+
   const isAppRoute =
     /^\/payroll\//.test(location.pathname) ||
     /^\/dashboard/.test(location.pathname) ||
@@ -111,7 +113,9 @@ function App() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/signup/*" element={<SignupPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/create-workspace" element={<CreateWorkspacePage />} />
+      <Route path="/workspace-intake" element={<WorkspaceIntakePage />} />
+      <Route path="/create-workspace" element={<SignupPage publicWorkspaceEntry />} />
+      <Route path="/add-workspace" element={<AddWorkspacePage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />

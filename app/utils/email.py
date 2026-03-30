@@ -162,6 +162,23 @@ async def send_otp_email(to: str, otp: str) -> None:
     await send_email(to=to, subject=subject, body=body)
 
 
+async def send_workspace_intake_continue_email(*, to: str, continue_url: str) -> None:
+    """One-time link to open full workspace signup (expires in 24 hours per intake row)."""
+    subject = "Continue creating your TruckERP workspace"
+    body_lines = [
+        "Hi,",
+        "",
+        "Thanks for your interest in TruckERP. Use the link below to continue setting up your workspace.",
+        "This link expires in 24 hours and can only be used once.",
+        "",
+        continue_url,
+        "",
+        "If you did not request this, you can ignore this email.",
+    ]
+    body = "\n".join(body_lines)
+    await send_email(to=to, subject=subject, body=body, category="required")
+
+
 async def send_onboarding_invite_email(*, to: str, invite_link: str) -> None:
     """Sends the driver onboarding invite link to the given email address."""
     subject = "Your driver onboarding link – TruckERP"

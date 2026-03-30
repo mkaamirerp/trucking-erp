@@ -5,7 +5,7 @@ from app.services.email_intake_pdf import (
     guess_broker_load_reference,
     tql_digital_pdf_high_confidence,
 )
-from app.services.email_intake_routing import participants_indicate_tql
+from app.services.email_intake_routing import participants_indicate_tql, subject_or_snippet_indicates_tql
 
 
 def test_tql_high_confidence_requires_keywords_and_length() -> None:
@@ -40,3 +40,9 @@ def test_participants_indicate_tql() -> None:
     assert participants_indicate_tql([{"email": "agent@tql.com"}]) is True
     assert participants_indicate_tql([{"email": "broker@example.com"}]) is False
     assert participants_indicate_tql(None) is False
+
+
+def test_subject_or_snippet_indicates_tql() -> None:
+    assert subject_or_snippet_indicates_tql("Rate con from TQL", None) is True
+    assert subject_or_snippet_indicates_tql("Total Quality Logistics update", "") is True
+    assert subject_or_snippet_indicates_tql("Random freight", None) is False

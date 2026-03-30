@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from urllib.parse import quote
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
 _TQL_EMAIL_MARKERS = ("@tql.com", "@tqltrucks.com", "@tql.net")
+_TQL_SUBJECT_SNIPPET_RE = re.compile(r"\btql\b|total\s+quality\s+logistics", re.IGNORECASE)
 
 
 def participants_indicate_tql(participants_json: dict | list | None) -> bool:
@@ -36,6 +38,18 @@ def participants_indicate_tql(participants_json: dict | list | None) -> bool:
         if any(m in email for m in _TQL_EMAIL_MARKERS):
             return True
     return False
+
+
+def subject_or_snippet_indicates_tql(subject: str | None, snippet: str | None) -> bool:
+    """Heuristic: shipper/broker often puts TQL in subject while From is a generic noreply address."""
+    blob = f"{subject or ''}\n{snippet or ''}"
+    return bool(_TQL_SUBJECT_SNIPPET_RE.search(blob))
+
+
+def thread_indicates_tql_affinity(thread: EmailThread) -> bool:
+    return participants_indicate_tql(thread.participants_json) or subject_or_snippet_indicates_tql(
+        thread.subject, thread.snippet
+    )
 
 
 async def _gmail_download_attachment(access_token: str, gmail_message_id: str, attachment_id: str) -> bytes:
@@ -112,17 +126,17 @@ async def apply_intake_routing_for_gmail_thread(
     if thread.intake_bucket == "new_load":
         return
 
-    tql_parties = participants_indicate_tql(thread.participants_json)
+    tql_affinity = thread_indicates_tql_affinity(thread)
     rows = await _latest_pdf_attachment_rows(db, tenant_id, thread_id)
 
-    if tql_parties and not rows:
+    if tql_affinity and not rows:
         thread.intake_bucket = "needs_review"
         thread.confidence_level = "low"
         thread.confidence_score = 0.25
         thread.routing_reason = "tql_affiliated_no_pdf_attachment"
         return
 
-    if tql_parties and rows:
+    if tql_affinity and rows:
         broker_id, broker_snapshot = await _resolve_tql_broker(db, tenant_id)
         high_ok = False
         gate_reason = "no_pdf_bytes"
@@ -180,5 +194,8 @@ async def apply_intake_routing_for_gmail_thread(
         thread.routing_reason = f"tql_pdf_not_high_confidence:{gate_reason}"
         return
 
-    # Non–TQL threads: no automatic routing in this slice (remain default needs_review).
+    # Non–TQL: keep out of intake queues; stored for history/debug and all-threads views.
+    if thread.intake_bucket == "needs_review" and not thread.linked_load_id and thread.status == "active":
+        thread.intake_bucket = "background"
+        thread.routing_reason = thread.routing_reason or "auto_non_intake_mail_background"
     return

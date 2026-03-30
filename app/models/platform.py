@@ -279,6 +279,26 @@ class OnboardingTokenLookup(Base):
     )
 
 
+class PlatformLoginFailureEvent(Base):
+    """Platform-only audit of tenant login failures (operator diagnostics; not for tenant DB)."""
+
+    __tablename__ = "platform_login_failure_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True
+    )
+    tenant_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_slug: Mapped[str] = mapped_column(String(63), nullable=False)
+    tenant_auth_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    email_fingerprint: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
 class PlatformTenantUserMap(Base):
     """Maps platform_users.id to tenant_users.id per workspace for dual-write and rollback."""
 
@@ -309,3 +329,43 @@ class UserInvite(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class PlatformWorkspaceIntakeRequest(Base):
+    """Minimal public intake before full signup; platform DB only (no tenant access)."""
+
+    __tablename__ = "platform_workspace_intake_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    phone_number: Mapped[str] = mapped_column(String(30), nullable=False)
+    selected_package_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    intake_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    continuation_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    continuation_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    client_ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
+class PlatformGmailMailboxIndex(Base):
+    """Maps normalized Gmail address to platform tenant for Pub/Sub ingestion webhooks (no tenant Host header)."""
+
+    __tablename__ = "platform_gmail_mailbox_index"
+    __table_args__ = (UniqueConstraint("gmail_address_norm", name="uq_platform_gmail_mailbox_index_norm"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    gmail_address_norm: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

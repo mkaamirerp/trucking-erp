@@ -23,6 +23,7 @@ services:
   truckerp-nginx:
     volumes:
       - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infra/nginx/error-pages:/usr/share/nginx/error-pages:ro
       - ./apps/web/dist:/usr/share/nginx/html:ro
       - letsencrypt:/etc/letsencrypt
       - certbot_www:/var/www/certbot

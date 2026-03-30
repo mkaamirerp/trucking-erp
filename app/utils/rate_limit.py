@@ -1,14 +1,15 @@
 """
-In-memory rate limiting for public OTP endpoints (verify-otp, resend-otp).
+In-memory rate limiting for selected public endpoints (verify-otp, resend-otp, forgot-password, login).
 
-Limits are per IP and per identity (signup_id or email-hash) to prevent brute-force
-and enumeration. Uses a simple sliding-window counter; safe for single-instance deployment.
+Limits are per IP and per identity (signup_id or email-hash, or tenant+email-hash for login) to prevent
+brute-force and abuse. Uses a simple sliding-window counter; safe for single-instance deployment.
 For multi-instance, use Redis or similar in front.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from collections import defaultdict
@@ -18,6 +19,13 @@ from fastapi import Request
 def _email_hash(email: str) -> str:
     """Stable hash for rate-limit key; avoids storing raw email."""
     return hashlib.sha256(email.lower().strip().encode("utf-8")).hexdigest()[:16]
+
+
+def _phone_fingerprint_hash(digits: str) -> str:
+    d = re.sub(r"\D", "", digits or "")
+    if not d:
+        return "empty"
+    return hashlib.sha256(d.encode("utf-8")).hexdigest()[:16]
 
 
 class SlidingWindowLimiter:
@@ -58,6 +66,16 @@ forgot_password_per_email = SlidingWindowLimiter(max_requests=3, window_seconds=
 
 create_workspace_per_ip = SlidingWindowLimiter(max_requests=10, window_seconds=3600)  # 10 per hour per IP
 create_workspace_per_user = SlidingWindowLimiter(max_requests=5, window_seconds=86400)  # 5 per day per user
+
+# Login: per IP (same window density as verify_otp per IP) + per workspace identity (tenant + hashed email)
+login_per_ip = SlidingWindowLimiter(max_requests=15, window_seconds=900)  # 15 per 15 min per IP
+login_per_tenant_email = SlidingWindowLimiter(max_requests=10, window_seconds=3600)  # 10 per hour per tenant+email
+
+# Public workspace intake (landing): cheap, abuse-resistant
+workspace_intake_submit_per_ip = SlidingWindowLimiter(max_requests=30, window_seconds=3600)  # per hour
+workspace_intake_submit_per_email = SlidingWindowLimiter(max_requests=5, window_seconds=86400)  # per day
+workspace_intake_submit_per_phone = SlidingWindowLimiter(max_requests=8, window_seconds=86400)  # per day (digits hash)
+workspace_intake_consume_per_ip = SlidingWindowLimiter(max_requests=60, window_seconds=900)  # per 15 min
 
 
 def _client_ip(request: Request) -> str:
@@ -132,3 +150,49 @@ async def rate_limit_forgot_password(request: Request, email: str) -> None:
     key = _email_hash(email)
     if not forgot_password_per_email.allow(f"forgot_email:{key}"):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+async def rate_limit_login_ip(request: Request) -> None:
+    """Per-IP login throttle (POST /auth/login). Safe to call before tenant is known (apex host)."""
+    from fastapi import HTTPException
+
+    ip = _client_ip(request)
+    if not login_per_ip.allow(f"login_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+async def rate_limit_login_tenant_email(request: Request, tenant_id: int, email_norm: str) -> None:
+    """Per-workspace + email fingerprint throttle after tenant_id is known."""
+    from fastapi import HTTPException
+
+    eh = _email_hash(email_norm or "")
+    if not login_per_tenant_email.allow(f"login_tid_mail:{int(tenant_id)}:{eh}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+async def rate_limit_login(request: Request, tenant_id: int, email_norm: str) -> None:
+    """Check login rate limits (per IP + per tenant + email fingerprint)."""
+    await rate_limit_login_ip(request)
+    await rate_limit_login_tenant_email(request, tenant_id, email_norm)
+
+
+async def rate_limit_workspace_intake_submit(request: Request, email_norm: str, phone: str) -> None:
+    from fastapi import HTTPException
+
+    ip = _client_ip(request)
+    if not workspace_intake_submit_per_ip.allow(f"wi_submit_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+    eh = _email_hash(email_norm)
+    if not workspace_intake_submit_per_email.allow(f"wi_submit_email:{eh}"):
+        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+    ph = _phone_fingerprint_hash(phone)
+    if ph != "empty" and not workspace_intake_submit_per_phone.allow(f"wi_submit_phone:{ph}"):
+        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+
+
+async def rate_limit_workspace_intake_consume(request: Request) -> None:
+    from fastapi import HTTPException
+
+    ip = _client_ip(request)
+    if not workspace_intake_consume_per_ip.allow(f"wi_consume_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many requests. Try again later.")

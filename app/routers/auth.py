@@ -37,7 +37,12 @@ from app.services.tenant_auth_dual_write import (
     mirror_tenant_user_credentials_to_platform,
 )
 from app.utils.email import send_password_reset_email
-from app.utils.rate_limit import check_create_workspace_rate_limits, rate_limit_forgot_password
+from app.utils.rate_limit import (
+    check_create_workspace_rate_limits,
+    rate_limit_forgot_password,
+    rate_limit_login_ip,
+    rate_limit_login_tenant_email,
+)
 from app.utils.slug import is_slug_available
 from app.schemas.signup import CreateWorkspaceRequest, VerifyOTPResponse, _normalize_phone_digits
 from app.services.workspace_bootstrap import provision_new_workspace_for_platform_user
@@ -652,15 +657,122 @@ async def accept_invite(
     return {"ok": True, "message": "Welcome! You can now sign in.", "workspace_url": workspace_url}
 
 
+async def _resolve_tenant_id_for_apex_login(db, payload: LoginRequest) -> int:
+    """
+    When the browser is on the marketing host (no workspace subdomain), resolve which tenant this
+    login targets using email + password and platform/tenant credentials (same rules as subdomain login).
+    """
+    email_norm = normalize_auth_email(payload.email)
+    user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_norm))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    if getattr(user, "status", "ACTIVE") != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated. Contact your workspace admin or support.",
+        )
+
+    q = (
+        select(TenantMembership, PlatformTenant)
+        .join(PlatformTenant, PlatformTenant.id == TenantMembership.tenant_id)
+        .where(
+            TenantMembership.user_id == user.id,
+            TenantMembership.status == "active",
+            PlatformTenant.status == "ACTIVE",
+            PlatformTenant.db_status == "READY",
+        )
+        .order_by(PlatformTenant.id)
+    )
+    rows = (await db.execute(q)).all()
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    for _tm, tenant in rows:
+        tid = int(tenant.id)
+        if not tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
+            continue
+        async for tdb in open_tenant_session_by_id(tid):
+            tu = await tdb.scalar(
+                select(TenantUser).where(
+                    TenantUser.tenant_id == tid,
+                    TenantUser.email_norm == email_norm,
+                )
+            )
+            if not tu or (tu.status or "").upper() != "ACTIVE":
+                break
+            twm = await tdb.scalar(
+                select(TenantWorkspaceMember).where(
+                    TenantWorkspaceMember.tenant_id == tid,
+                    TenantWorkspaceMember.tenant_user_id == tu.id,
+                    TenantWorkspaceMember.status == "active",
+                )
+            )
+            if not twm:
+                break
+            if not tu.password_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Password not set for this account. Use 'Forgot password' to set one.",
+                )
+            if not verify_password(payload.password, tu.password_hash):
+                break
+            pmap = await db.scalar(
+                select(PlatformTenantUserMap).where(
+                    PlatformTenantUserMap.tenant_id == tid,
+                    PlatformTenantUserMap.tenant_user_id == tu.id,
+                )
+            )
+            if pmap and str(pmap.platform_user_id) == str(user.id):
+                return tid
+            break
+
+    platform_tenant_ids: list[int] = [
+        int(t.id)
+        for _tm, t in rows
+        if not tenant_uses_tenant_db_auth(getattr(t, "tenant_auth_mode", None))
+    ]
+    if not platform_tenant_ids:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password not set for this account. Use 'Forgot password' to set one.",
+        )
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    if len(platform_tenant_ids) > 1:
+        base = (settings.base_domain or "example.com").lower()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This account is in more than one workspace. Sign in using your company's web address, "
+                f"for example https://your-workspace.{base}/login"
+            ),
+        )
+    return platform_tenant_ids[0]
+
+
 @router.post("/login")
 async def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
-    tenant_id: int = Depends(require_tenant),
     db=Depends(get_db),
 ):
+    await rate_limit_login_ip(request)
     email_norm = normalize_auth_email(payload.email)
+    tenant_id_ctx = getattr(request.state, "tenant_id", None)
+    if tenant_id_ctx is None:
+        tenant_id = await _resolve_tenant_id_for_apex_login(db, payload)
+        request.state.tenant_id = tenant_id
+        t_slug_row = await db.scalar(select(PlatformTenant.slug).where(PlatformTenant.id == int(tenant_id)))
+        if t_slug_row:
+            request.state.tenant_slug = str(t_slug_row)
+    else:
+        tenant_id = int(tenant_id_ctx)
+    await rate_limit_login_tenant_email(request, tenant_id, email_norm)
     tenant: PlatformTenant | None = await db.scalar(
         select(PlatformTenant).options(selectinload(PlatformTenant.company_profile)).where(PlatformTenant.id == tenant_id)
     )
