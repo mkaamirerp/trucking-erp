@@ -46,6 +46,17 @@ from app.utils.rate_limit import (
 from app.utils.slug import is_slug_available
 from app.schemas.signup import CreateWorkspaceRequest, VerifyOTPResponse, _normalize_phone_digits
 from app.services.workspace_bootstrap import provision_new_workspace_for_platform_user
+from app.services.login_failure_audit import (
+    LOGIN_FAIL_APEX_NO_PLATFORM_TENANT,
+    LOGIN_FAIL_NO_PLATFORM_MEMBERSHIP,
+    LOGIN_FAIL_NO_PLATFORM_USER,
+    LOGIN_FAIL_NO_TENANT_USER,
+    LOGIN_FAIL_NO_WORKSPACE_MEMBER,
+    LOGIN_FAIL_TENANT_AUTH_INCOMPLETE,
+    LOGIN_FAIL_VERIFY_PLATFORM_PASSWORD,
+    LOGIN_FAIL_VERIFY_TENANT_PASSWORD,
+    log_and_persist_login_failure,
+)
 from pydantic import BaseModel, EmailStr, Field
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
@@ -657,7 +668,7 @@ async def accept_invite(
     return {"ok": True, "message": "Welcome! You can now sign in.", "workspace_url": workspace_url}
 
 
-async def _resolve_tenant_id_for_apex_login(db, payload: LoginRequest) -> int:
+async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: LoginRequest) -> int:
     """
     When the browser is on the marketing host (no workspace subdomain), resolve which tenant this
     login targets using email + password and platform/tenant credentials (same rules as subdomain login).
@@ -732,6 +743,15 @@ async def _resolve_tenant_id_for_apex_login(db, payload: LoginRequest) -> int:
         if not tenant_uses_tenant_db_auth(getattr(t, "tenant_auth_mode", None))
     ]
     if not platform_tenant_ids:
+        t0 = rows[0][1]
+        await log_and_persist_login_failure(
+            request=request,
+            tenant_id=int(t0.id),
+            tenant_slug=t0.slug,
+            tenant_auth_mode=(getattr(t0, "tenant_auth_mode", None) or "platform"),
+            email_norm=email_norm,
+            reason_code=LOGIN_FAIL_APEX_NO_PLATFORM_TENANT,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     if not user.password_hash:
@@ -740,6 +760,17 @@ async def _resolve_tenant_id_for_apex_login(db, payload: LoginRequest) -> int:
             detail="Password not set for this account. Use 'Forgot password' to set one.",
         )
     if not verify_password(payload.password, user.password_hash):
+        tid = platform_tenant_ids[0]
+        pt = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tid))
+        if pt:
+            await log_and_persist_login_failure(
+                request=request,
+                tenant_id=tid,
+                tenant_slug=pt.slug,
+                tenant_auth_mode=(getattr(pt, "tenant_auth_mode", None) or "platform"),
+                email_norm=email_norm,
+                reason_code=LOGIN_FAIL_VERIFY_PLATFORM_PASSWORD,
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     if len(platform_tenant_ids) > 1:
@@ -765,7 +796,7 @@ async def login(
     email_norm = normalize_auth_email(payload.email)
     tenant_id_ctx = getattr(request.state, "tenant_id", None)
     if tenant_id_ctx is None:
-        tenant_id = await _resolve_tenant_id_for_apex_login(db, payload)
+        tenant_id = await _resolve_tenant_id_for_apex_login(request, db, payload)
         request.state.tenant_id = tenant_id
         t_slug_row = await db.scalar(select(PlatformTenant.slug).where(PlatformTenant.id == int(tenant_id)))
         if t_slug_row:
@@ -793,6 +824,14 @@ async def login(
                 )
             )
             if not tu:
+                await log_and_persist_login_failure(
+                    request=request,
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant.slug,
+                    tenant_auth_mode="tenant",
+                    email_norm=email_norm,
+                    reason_code=LOGIN_FAIL_NO_TENANT_USER,
+                )
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
             if (tu.status or "").upper() != "ACTIVE":
                 raise HTTPException(
@@ -807,6 +846,14 @@ async def login(
                 )
             )
             if not twm:
+                await log_and_persist_login_failure(
+                    request=request,
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant.slug,
+                    tenant_auth_mode="tenant",
+                    email_norm=email_norm,
+                    reason_code=LOGIN_FAIL_NO_WORKSPACE_MEMBER,
+                )
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
             if not tu.password_hash:
                 raise HTTPException(
@@ -814,6 +861,14 @@ async def login(
                     detail="Password not set for this account. Use 'Forgot password' to set one.",
                 )
             if not verify_password(payload.password, tu.password_hash):
+                await log_and_persist_login_failure(
+                    request=request,
+                    tenant_id=tenant_id,
+                    tenant_slug=tenant.slug,
+                    tenant_auth_mode="tenant",
+                    email_norm=email_norm,
+                    reason_code=LOGIN_FAIL_VERIFY_TENANT_PASSWORD,
+                )
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
             pmap = await db.scalar(
@@ -852,6 +907,14 @@ async def login(
             break
 
         if sub is None or sv_out is None:
+            await log_and_persist_login_failure(
+                request=request,
+                tenant_id=tenant_id,
+                tenant_slug=tenant.slug,
+                tenant_auth_mode="tenant",
+                email_norm=email_norm,
+                reason_code=LOGIN_FAIL_TENANT_AUTH_INCOMPLETE,
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
         access = create_access_token(
             user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
@@ -866,6 +929,14 @@ async def login(
 
     user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_norm))
     if not user:
+        await log_and_persist_login_failure(
+            request=request,
+            tenant_id=tenant_id,
+            tenant_slug=tenant.slug,
+            tenant_auth_mode=(getattr(tenant, "tenant_auth_mode", None) or "platform"),
+            email_norm=email_norm,
+            reason_code=LOGIN_FAIL_NO_PLATFORM_USER,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     membership: PlatformTenantMember | None = await db.scalar(
@@ -874,6 +945,14 @@ async def login(
         )
     )
     if not membership:
+        await log_and_persist_login_failure(
+            request=request,
+            tenant_id=tenant_id,
+            tenant_slug=tenant.slug,
+            tenant_auth_mode=(getattr(tenant, "tenant_auth_mode", None) or "platform"),
+            email_norm=email_norm,
+            reason_code=LOGIN_FAIL_NO_PLATFORM_MEMBERSHIP,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     if getattr(user, "status", "ACTIVE") != "ACTIVE":
@@ -900,6 +979,14 @@ async def login(
             detail="Password not set for this account. Use 'Forgot password' to set one.",
         )
     if not verify_password(payload.password, user.password_hash):
+        await log_and_persist_login_failure(
+            request=request,
+            tenant_id=tenant_id,
+            tenant_slug=tenant.slug,
+            tenant_auth_mode=(getattr(tenant, "tenant_auth_mode", None) or "platform"),
+            email_norm=email_norm,
+            reason_code=LOGIN_FAIL_VERIFY_PLATFORM_PASSWORD,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     roles = [membership.role] if membership.role else []
