@@ -71,6 +71,12 @@ create_workspace_per_user = SlidingWindowLimiter(max_requests=5, window_seconds=
 login_per_ip = SlidingWindowLimiter(max_requests=15, window_seconds=900)  # 15 per 15 min per IP
 login_per_tenant_email = SlidingWindowLimiter(max_requests=10, window_seconds=3600)  # 10 per hour per tenant+email
 
+# Login step-up OTP (NOT shared with signup verify/resend limiters; keys are login_step_up_* only)
+login_step_up_issue_per_ip = SlidingWindowLimiter(max_requests=10, window_seconds=900)
+login_step_up_issue_per_tenant_email = SlidingWindowLimiter(max_requests=5, window_seconds=3600)
+login_step_up_verify_per_ip = SlidingWindowLimiter(max_requests=15, window_seconds=900)
+login_step_up_verify_per_tenant_email = SlidingWindowLimiter(max_requests=20, window_seconds=900)
+
 # Public workspace intake (landing): cheap, abuse-resistant
 workspace_intake_submit_per_ip = SlidingWindowLimiter(max_requests=30, window_seconds=3600)  # per hour
 workspace_intake_submit_per_email = SlidingWindowLimiter(max_requests=5, window_seconds=86400)  # per day
@@ -174,6 +180,28 @@ async def rate_limit_login(request: Request, tenant_id: int, email_norm: str) ->
     """Check login rate limits (per IP + per tenant + email fingerprint)."""
     await rate_limit_login_ip(request)
     await rate_limit_login_tenant_email(request, tenant_id, email_norm)
+
+
+async def rate_limit_login_step_up_issue(request: Request, tenant_id: int, email_norm: str) -> None:
+    from fastapi import HTTPException
+
+    ip = _client_ip(request)
+    if not login_step_up_issue_per_ip.allow(f"login_step_up_issue_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    eh = _email_hash(email_norm or "")
+    if not login_step_up_issue_per_tenant_email.allow(f"login_step_up_issue_tid:{int(tenant_id)}:{eh}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+
+async def rate_limit_login_step_up_verify(request: Request, tenant_id: int, email_norm: str) -> None:
+    from fastapi import HTTPException
+
+    ip = _client_ip(request)
+    if not login_step_up_verify_per_ip.allow(f"login_step_up_verify_ip:{ip}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    eh = _email_hash(email_norm or "")
+    if not login_step_up_verify_per_tenant_email.allow(f"login_step_up_verify_tid:{int(tenant_id)}:{eh}"):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
 
 
 async def rate_limit_workspace_intake_submit(request: Request, email_norm: str, phone: str) -> None:

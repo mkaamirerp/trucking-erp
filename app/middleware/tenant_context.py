@@ -65,6 +65,8 @@ PUBLIC_AUTH_PATHS: Set[str] = {
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
     "/api/v1/auth/accept-invite",
+    "/api/v1/auth/login-step-up/issue",
+    "/api/v1/auth/login-step-up/verify",
 }
 
 # Prefix for applicant (invite-link token) routes: resolve tenant but skip membership (auth is token in query)
@@ -217,6 +219,21 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 response = await call_next(request)
                 set_request_id(response)
                 log("login_main_domain")
+                return response
+
+        # Login step-up OTP must use the same workspace host as sign-in (tenant binding at request edge).
+        if request.method == "POST" and path.rstrip("/") in (
+            "/api/v1/auth/login-step-up/issue",
+            "/api/v1/auth/login-step-up/verify",
+        ):
+            slug_from_host = self._slug_from_host(request)
+            if slug_from_host is None and jwt_tenant_id is None:
+                response = JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"detail": "Use your company sign-in URL to continue."},
+                )
+                set_request_id(response)
+                log("login_step_up_requires_workspace_host", level="warning")
                 return response
 
         # Create workspace: platform JWT only; do not require tenant resolution or membership in an existing tenant.

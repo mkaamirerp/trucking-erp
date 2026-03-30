@@ -39,6 +39,7 @@ class SubscriptionStatus(str, Enum):
 
 class OTPPurpose(str, Enum):
     SIGNUP_EMAIL_VERIFY = "signup_email_verify"
+    LOGIN_STEP_UP = "login_step_up"
 
 
 class ReservedSlug(Base):
@@ -202,6 +203,9 @@ class PlatformOTPToken(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     purpose: Mapped[str] = mapped_column(String(50), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     user_id: Mapped[str | None] = mapped_column(ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=True)
     onboarding_payload_id: Mapped[int | None] = mapped_column(
         ForeignKey("platform_onboarding_payloads.id", ondelete="SET NULL"), nullable=True, index=True

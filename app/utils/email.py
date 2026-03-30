@@ -162,6 +162,22 @@ async def send_otp_email(to: str, otp: str) -> None:
     await send_email(to=to, subject=subject, body=body)
 
 
+async def send_otp_email_for_purpose(to: str, otp: str, *, purpose: str) -> None:
+    """
+    Same transport as send_otp_email; only subject/body differ by OTP purpose.
+    Signup copy must stay on send_otp_email — use purpose 'login_step_up' for workspace sign-in step-up.
+    """
+    if purpose == "login_step_up":
+        subject = "Your TruckERP sign-in verification code"
+        body = (
+            f"Your sign-in verification code is: {otp}\n\n"
+            "This code expires in 10 minutes. If you did not try to sign in to this workspace, ignore this email."
+        )
+        await send_email(to=to, subject=subject, body=body, category="required")
+        return
+    await send_otp_email(to, otp)
+
+
 async def send_workspace_intake_continue_email(*, to: str, continue_url: str) -> None:
     """One-time link to open full workspace signup (expires in 24 hours per intake row)."""
     subject = "Continue creating your TruckERP workspace"
