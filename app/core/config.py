@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # When set, POST /auth/login may require a valid site token after repeated password failures.
     turnstile_secret_key: str | None = None
 
-    # When true, POST /auth/login requires a valid login_step_up_proof (from POST /auth/login-step-up/verify).
+    # Emergency/test only: force login step-up for every attempt (bypass armed-streak rule). Product uses per-attempt rule in login_step_up_otp.py.
     login_step_up_otp_required: bool = False
 
     # Platform control-plane API (/api/v1/platform/*). Required in production/staging when set; enforced when set in dev.

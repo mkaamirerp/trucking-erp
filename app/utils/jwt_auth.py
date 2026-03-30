@@ -13,7 +13,6 @@ from app.core.config import settings
 class TokenType:
     ACCESS = "access"
     REFRESH = "refresh"
-    LOGIN_STEP_UP_PROOF = "login_step_up_proof"
 
 
 def _utcnow() -> datetime:
@@ -73,33 +72,6 @@ def create_refresh_token(
         sv=sv,
         expires_in=timedelta(days=settings.jwt_refresh_days),
     )
-
-
-def create_login_step_up_proof_token(*, tenant_id: int, email_norm: str, otp_row_id: int) -> str:
-    """Short-lived proof returned after login step-up OTP verify; must match tenant + email at login."""
-    now = _utcnow()
-    payload: Dict[str, Any] = {
-        "type": TokenType.LOGIN_STEP_UP_PROOF,
-        "tenant_id": int(tenant_id),
-        "email_norm": email_norm,
-        "otp_id": int(otp_row_id),
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=10)).timestamp()),
-    }
-    return jwt.encode(payload, _default_secret(), algorithm=settings.jwt_algorithm)
-
-
-def decode_login_step_up_proof_token(token: str | None) -> dict | None:
-    """Returns payload dict or None if missing/invalid/expired/wrong type."""
-    if not token or not _looks_like_jwt(token):
-        return None
-    try:
-        payload = jwt.decode(token, _default_secret(), algorithms=[settings.jwt_algorithm])
-    except jwt.PyJWTError:
-        return None
-    if payload.get("type") != TokenType.LOGIN_STEP_UP_PROOF:
-        return None
-    return payload
 
 
 def extract_sv(payload: dict) -> int | None:

@@ -197,6 +197,23 @@ class PlatformSubscription(Base):
     tenant = relationship("PlatformTenant", back_populates="subscriptions")
 
 
+class PlatformLoginOtpChallenge(Base):
+    """
+    One server-side login step-up attempt: password verified for tenant+email, OTP pending, then single session issuance.
+    """
+
+    __tablename__ = "platform_login_otp_challenges"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    email_norm: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    password_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    otp_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PlatformOTPToken(Base):
     __tablename__ = "platform_otp_tokens"
 
@@ -205,6 +222,9 @@ class PlatformOTPToken(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     tenant_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    login_challenge_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("platform_login_otp_challenges.id", ondelete="CASCADE"), nullable=True, index=True
     )
     user_id: Mapped[str | None] = mapped_column(ForeignKey("platform_users.id", ondelete="CASCADE"), nullable=True)
     onboarding_payload_id: Mapped[int | None] = mapped_column(

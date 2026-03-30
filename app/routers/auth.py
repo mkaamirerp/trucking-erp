@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.deps.auth import get_current_user, CurrentUser, get_current_platform_user
 from app.deps.tenant_db import open_tenant_session_by_id
 from app.models.platform import (
+    PlatformLoginOtpChallenge,
     PlatformTenant,
     PlatformTenantMember,
     PlatformUser,
@@ -66,36 +67,14 @@ from app.services.login_password_abuse import (
     record_login_password_verify_failure,
 )
 from app.services.login_step_up_otp import (
-    issue_login_step_up_otp,
-    verify_login_step_up_otp,
-    validate_login_step_up_proof,
+    issue_login_step_up_otp_for_challenge,
+    login_step_up_challenge_gate_after_password,
+    verify_login_step_up_otp_for_challenge,
 )
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
-
-
-async def _ensure_login_step_up_proof_or_fail(
-    db: AsyncSession,
-    tenant_id: int,
-    email_norm: str,
-    payload: LoginRequest,
-) -> None:
-    """
-    When login_step_up_otp_required or client sends a proof token, require a valid proof
-    bound to this tenant_id and email (same workspace host context as issue/verify).
-    """
-    proof = (payload.login_step_up_proof or "").strip()
-    if not settings.login_step_up_otp_required and not proof:
-        return
-    if not await validate_login_step_up_proof(
-        db,
-        tenant_id=int(tenant_id),
-        email_norm=email_norm,
-        proof_token=proof or None,
-    ):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
 
 def _cookie_params(token_type: str) -> dict:
@@ -293,15 +272,15 @@ class LoginRequest(BaseModel):
         default=None,
         validation_alias=AliasChoices("turnstile_token", "cf_turnstile_response", "cf-turnstile-response"),
     )
-    login_step_up_proof: str | None = None
+    login_challenge_id: str | None = None
 
 
 class LoginStepUpIssueRequest(BaseModel):
-    email: EmailStr
+    login_challenge_id: str = Field(..., min_length=36, max_length=36)
 
 
 class LoginStepUpVerifyRequest(BaseModel):
-    email: EmailStr
+    login_challenge_id: str = Field(..., min_length=36, max_length=36)
     otp: str = Field(..., min_length=4, max_length=32)
 
 
@@ -797,7 +776,6 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
                 )
             )
             if pmap and str(pmap.platform_user_id) == str(user.id):
-                await clear_login_password_fail_streak(tid, email_norm)
                 return tid
             break
 
@@ -848,7 +826,6 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
                 f"for example https://your-workspace.{base}/login"
             ),
         )
-    await clear_login_password_fail_streak(platform_tenant_ids[0], email_norm)
     return platform_tenant_ids[0]
 
 
@@ -878,8 +855,6 @@ async def login(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
     if tenant.status != "ACTIVE" or tenant.db_status != "READY":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
-
-    await _ensure_login_step_up_proof_or_fail(db, tenant_id, email_norm, payload)
 
     if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
         sub: int | None = None
@@ -972,6 +947,14 @@ async def login(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access to this workspace is suspended. Contact your admin.",
                 )
+            gate = await login_step_up_challenge_gate_after_password(
+                db,
+                tenant_id=tenant_id,
+                email_norm=email_norm,
+                login_challenge_id=payload.login_challenge_id,
+            )
+            if gate is not None:
+                return gate
             roles = [twm.role] if twm.role else []
             sv_out = int(getattr(tu, "session_version", 1) or 1)
             sub = tu.id
@@ -1063,6 +1046,15 @@ async def login(
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
+    gate_pf = await login_step_up_challenge_gate_after_password(
+        db,
+        tenant_id=tenant_id,
+        email_norm=email_norm,
+        login_challenge_id=payload.login_challenge_id,
+    )
+    if gate_pf is not None:
+        return gate_pf
+
     roles = [membership.role] if membership.role else []
     sv_out = int(getattr(user, "session_version", 1) or 1)
     access = create_access_token(user_id=user.id, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out)
@@ -1083,18 +1075,24 @@ async def login_step_up_issue(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Issue login step-up OTP for this workspace (tenant from Host). Anti-enumeration: uniform success body.
+    Issue login step-up OTP for an active login_challenge_id on this workspace Host. Uniform success body.
     """
     tenant_id = getattr(request.state, "tenant_id", None)
     if tenant_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant context required")
-    email_norm = normalize_auth_email(str(payload.email))
-    await rate_limit_login_step_up_issue(request, int(tenant_id), email_norm)
-    await issue_login_step_up_otp(
+    ch = await db.scalar(
+        select(PlatformLoginOtpChallenge).where(
+            PlatformLoginOtpChallenge.id == payload.login_challenge_id.strip(),
+            PlatformLoginOtpChallenge.tenant_id == int(tenant_id),
+        )
+    )
+    email_for_rl = ch.email_norm if ch is not None else payload.login_challenge_id.strip()
+    await rate_limit_login_step_up_issue(request, int(tenant_id), email_for_rl)
+    await issue_login_step_up_otp_for_challenge(
         db=db,
         request=request,
         tenant_id=int(tenant_id),
-        email_raw=str(payload.email),
+        login_challenge_id=payload.login_challenge_id.strip(),
     )
     return {
         "ok": True,
@@ -1108,22 +1106,28 @@ async def login_step_up_verify(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Verify login step-up OTP for this workspace Host context; returns short-lived proof_token for POST /login."""
+    """Verify login step-up OTP for login_challenge_id on this workspace Host."""
     tenant_id = getattr(request.state, "tenant_id", None)
     if tenant_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant context required")
-    email_norm = normalize_auth_email(str(payload.email))
-    await rate_limit_login_step_up_verify(request, int(tenant_id), email_norm)
-    proof = await verify_login_step_up_otp(
+    ch = await db.scalar(
+        select(PlatformLoginOtpChallenge).where(
+            PlatformLoginOtpChallenge.id == payload.login_challenge_id.strip(),
+            PlatformLoginOtpChallenge.tenant_id == int(tenant_id),
+        )
+    )
+    email_for_rl = ch.email_norm if ch is not None else payload.login_challenge_id.strip()
+    await rate_limit_login_step_up_verify(request, int(tenant_id), email_for_rl)
+    ok = await verify_login_step_up_otp_for_challenge(
         db=db,
         request=request,
         tenant_id=int(tenant_id),
-        email_raw=str(payload.email),
+        login_challenge_id=payload.login_challenge_id.strip(),
         otp_code=payload.otp.strip(),
     )
-    if not proof:
+    if not ok:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    return {"ok": True, "proof_token": proof}
+    return {"ok": True}
 
 
 @router.post("/workspaces", response_model=VerifyOTPResponse)
