@@ -52,7 +52,8 @@ transferring/
 naming/
 writing/
 storage/
-web/
+/web/
+apps/web/dist/
 # Ignore repo-root scripts/ except versioned maintenance entrypoints (pattern "scripts/" also matched app/scripts/).
 /scripts/*
 !/scripts/prune_platform_login_failure_events.sh
