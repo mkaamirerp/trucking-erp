@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     jwt_same_site: str = "lax"
     base_domain: str = "truckerp.me"
 
+    # Cloudflare Turnstile (optional). When unset, login human-verification step is skipped (dev).
+    # When set, POST /auth/login may require a valid site token after repeated password failures.
+    turnstile_secret_key: str | None = None
+
     # Platform control-plane API (/api/v1/platform/*). Required in production/staging when set; enforced when set in dev.
     platform_admin_api_key: str | None = None
 

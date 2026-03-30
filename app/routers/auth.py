@@ -57,7 +57,12 @@ from app.services.login_failure_audit import (
     LOGIN_FAIL_VERIFY_TENANT_PASSWORD,
     log_and_persist_login_failure,
 )
-from pydantic import BaseModel, EmailStr, Field
+from app.services.login_password_abuse import (
+    assert_login_human_verification_if_armed,
+    clear_login_password_fail_streak,
+    record_login_password_verify_failure,
+)
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 logger = logging.getLogger(__name__)
@@ -250,8 +255,14 @@ async def auth_me(current: CurrentUser = Depends(get_current_user), db=Depends(g
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     email: EmailStr
     password: str
+    turnstile_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("turnstile_token", "cf_turnstile_response", "cf-turnstile-response"),
+    )
 
 
 def _hash_reset_token(token: str) -> str:
@@ -725,7 +736,19 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Password not set for this account. Use 'Forgot password' to set one.",
                 )
+            await assert_login_human_verification_if_armed(tid, email_norm, payload.turnstile_token)
             if not verify_password(payload.password, tu.password_hash):
+                await record_login_password_verify_failure(tid, email_norm)
+                pt_row = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tid))
+                if pt_row:
+                    await log_and_persist_login_failure(
+                        request=request,
+                        tenant_id=tid,
+                        tenant_slug=pt_row.slug,
+                        tenant_auth_mode=(getattr(pt_row, "tenant_auth_mode", None) or "tenant"),
+                        email_norm=email_norm,
+                        reason_code=LOGIN_FAIL_VERIFY_TENANT_PASSWORD,
+                    )
                 break
             pmap = await db.scalar(
                 select(PlatformTenantUserMap).where(
@@ -734,6 +757,7 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
                 )
             )
             if pmap and str(pmap.platform_user_id) == str(user.id):
+                await clear_login_password_fail_streak(tid, email_norm)
                 return tid
             break
 
@@ -759,13 +783,15 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Password not set for this account. Use 'Forgot password' to set one.",
         )
+    tid_pf = platform_tenant_ids[0]
+    await assert_login_human_verification_if_armed(tid_pf, email_norm, payload.turnstile_token)
     if not verify_password(payload.password, user.password_hash):
-        tid = platform_tenant_ids[0]
-        pt = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tid))
+        await record_login_password_verify_failure(tid_pf, email_norm)
+        pt = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tid_pf))
         if pt:
             await log_and_persist_login_failure(
                 request=request,
-                tenant_id=tid,
+                tenant_id=tid_pf,
                 tenant_slug=pt.slug,
                 tenant_auth_mode=(getattr(pt, "tenant_auth_mode", None) or "platform"),
                 email_norm=email_norm,
@@ -782,6 +808,7 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
                 f"for example https://your-workspace.{base}/login"
             ),
         )
+    await clear_login_password_fail_streak(platform_tenant_ids[0], email_norm)
     return platform_tenant_ids[0]
 
 
@@ -860,7 +887,9 @@ async def login(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Password not set for this account. Use 'Forgot password' to set one.",
                 )
+            await assert_login_human_verification_if_armed(tenant_id, email_norm, payload.turnstile_token)
             if not verify_password(payload.password, tu.password_hash):
+                await record_login_password_verify_failure(tenant_id, email_norm)
                 await log_and_persist_login_failure(
                     request=request,
                     tenant_id=tenant_id,
@@ -916,6 +945,7 @@ async def login(
                 reason_code=LOGIN_FAIL_TENANT_AUTH_INCOMPLETE,
             )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        await clear_login_password_fail_streak(tenant_id, email_norm)
         access = create_access_token(
             user_id=sub, tenant_id=tenant.id, tenant_slug=tenant.slug, roles=roles, sv=sv_out
         )
@@ -978,7 +1008,9 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Password not set for this account. Use 'Forgot password' to set one.",
         )
+    await assert_login_human_verification_if_armed(tenant_id, email_norm, payload.turnstile_token)
     if not verify_password(payload.password, user.password_hash):
+        await record_login_password_verify_failure(tenant_id, email_norm)
         await log_and_persist_login_failure(
             request=request,
             tenant_id=tenant_id,
@@ -997,6 +1029,7 @@ async def login(
     response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
     response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
 
+    await clear_login_password_fail_streak(tenant_id, email_norm)
     workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
     return {"ok": True, "workspace_url": workspace_url, "access_token": access, "refresh_token": refresh}
 

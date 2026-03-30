@@ -279,6 +279,29 @@ class OnboardingTokenLookup(Base):
     )
 
 
+class PlatformLoginPasswordFailStreak(Base):
+    """
+    Platform-only: sliding-window count of consecutive failed password verifications per tenant + email fingerprint.
+    Used to require human verification (Turnstile) before the next password check when armed.
+    """
+
+    __tablename__ = "platform_login_password_fail_streaks"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email_fingerprint", name="uq_plpfs_tenant_fp"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    email_fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    streak_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
 class PlatformLoginFailureEvent(Base):
     """Platform-only audit of tenant login failures (operator diagnostics; not for tenant DB)."""
 
