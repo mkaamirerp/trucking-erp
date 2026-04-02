@@ -27,6 +27,7 @@ export const PLATFORM = {
   TENANTS: "/platform/tenants",
   TENANT_DETAIL: (id: number | string) => `/platform/tenants/${id}`,
   LOGIN_FAILURES: "/platform/login-failures",
+  TESTING_UNLOCK_LOGIN: "/platform/testing/unlock-login",
 } as const;
 
 /** Tenant Admin workspace — company profile, users, settings, etc. */

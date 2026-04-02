@@ -26,26 +26,43 @@ class EmailConfigOut(BaseModel):
     imap_host: str | None = None
     imap_port: int | None = None
     imap_username: str | None = None
+    imap_security: str | None = None
     smtp_host: str | None = None
     smtp_port: int | None = None
     smtp_username: str | None = None
+    reply_to: str | None = None
+    smtp_security: str | None = None
     use_ssl: bool | None = None
     use_tls: bool | None = None
 
     oauth_provider: str | None = None
     oauth_account_email: str | None = None
 
+    connection_status: str | None = None
     last_tested_at: datetime | None = None
     last_test_status: str | None = None
+    last_inbound_test_at: datetime | None = None
+    last_outbound_test_at: datetime | None = None
     last_error_code: str | None = None
     last_error_message: str | None = None
-    # Gmail OAuth (tenant_email_accounts): last successful History/delta ingestion run; None for manual IMAP rows.
     last_inbound_sync_at: datetime | None = None
-    # Gmail operator diagnostics (null / false when mailbox is manual IMAP row).
+    last_sync_status: str | None = None
+    last_sync_error: str | None = None
+    imap_uidvalidity: int | None = None
+    imap_last_seen_uid: int | None = None
     gmail_history_cursor_present: bool | None = None
     gmail_watch_active: bool | None = None
     gmail_watch_expires_at: datetime | None = None
     last_gmail_webhook_at: datetime | None = None
+
+    ms_graph_subscription_id: str | None = None
+    ms_graph_subscription_status: str | None = None
+    ms_graph_subscription_expiration_at: datetime | None = None
+    ms_graph_delta_cursor_present: bool | None = None
+    ms_graph_last_notification_at: datetime | None = None
+    ms_graph_last_delta_sync_at: datetime | None = None
+    ms_graph_last_sync_status: str | None = None
+    ms_graph_last_sync_error: str | None = None
 
     created_at: datetime
     updated_at: datetime
@@ -59,20 +76,27 @@ class EmailConfigUpdate(BaseModel):
 
     email_address: EmailStr
     display_name: str | None = None
-    mailbox_type: str = Field(default="imap", description="gmail, microsoft, imap")
+    reply_to: str | None = Field(default=None, max_length=255)
+    mailbox_type: str = Field(
+        default="other",
+        description="gmail, microsoft365 (OAuth), other (IMAP/SMTP manual)",
+    )
     provider_name: str | None = None
-    connection_mode: str = Field(default="manual", description="manual only; oauth not yet implemented")
+    connection_mode: str = Field(default="manual", description="manual; oauth for Gmail / Microsoft 365 via Connect")
     inbound_enabled: bool = True
     outbound_enabled: bool = True
+    is_primary: bool = True
 
     imap_host: str | None = None
     imap_port: int | None = None
     imap_username: str | None = None
-    imap_password: str | None = Field(default=None, description="Only sent when updating; never returned")
+    imap_password: str | None = Field(default=None, description="Only sent when rotating; never returned")
+    imap_security: str | None = Field(default=None, description="ssl | starttls | none")
     smtp_host: str | None = None
     smtp_port: int | None = None
     smtp_username: str | None = None
-    smtp_password: str | None = Field(default=None, description="Only sent when updating; never returned")
+    smtp_password: str | None = Field(default=None, description="Only sent when rotating; never returned")
+    smtp_security: str | None = Field(default=None, description="ssl | starttls | none")
     use_ssl: bool | None = None
     use_tls: bool | None = None
 
@@ -87,5 +111,6 @@ class EmailConfigTestOut(BaseModel):
 
     ok: bool
     status: str
+    direction: str | None = None
     message: str | None = None
     last_tested_at: str | None = None

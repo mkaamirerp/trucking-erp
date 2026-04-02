@@ -75,5 +75,13 @@ Exits non-zero if verify still fails after sync — **do not** trust rollback un
 
 ## Automated tests (optional)
 
+- **Canonical login smoke** (login hardening + admin unlock — keep small; see `.cursor/rules/login-smoke-suite-canonical.mdc`):
+
+  ```bash
+  docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && python -m pytest tests/test_login_hardening_smoke.py tests/test_admin_sign_in_unlock_smoke.py -q'
+  ```
+
+  If the container does not bind-mount the repo, copy those two files under `/app/tests/` before running.
+
 - **Invite E2E** (`tests/test_tenant_invite_accept_e2e.py`): set `RUN_INVITE_E2E=1` and `INVITE_E2E_*`; tests remove synthetic `invited_*` / `invited_t_*` users afterward.
 - **Drift E2E** (`tests/test_tenant_auth_cutover_drift_e2e.py`): set `RUN_DRIFT_CUTOVER_E2E=1` and `DRIFT_E2E_TENANT_ID`; temporarily corrupts `session_version` on a mapped `tenant_user`, asserts verify fails, then restores.

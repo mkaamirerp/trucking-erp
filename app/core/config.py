@@ -63,9 +63,17 @@ class Settings(BaseSettings):
     # Cloudflare Turnstile (optional). When unset, login human-verification step is skipped (dev).
     # When set, POST /auth/login may require a valid site token after repeated password failures.
     turnstile_secret_key: str | None = None
+    # Public site key (safe for browsers). Set alongside turnstile_secret_key in prod; also exposed via GET /public/tenant/{slug}.
+    turnstile_site_key: str | None = None
 
     # Emergency/test only: force login step-up for every attempt (bypass armed-streak rule). Product uses per-attempt rule in login_step_up_otp.py.
     login_step_up_otp_required: bool = False
+
+    # HMAC secret for httpOnly trk_login_trust cookie (familiar-device UX only). Set in production/staging via SSM (e.g. LOGIN_TRUST_COOKIE_SECRET).
+    # Never use jwt_secret for this in production — see login_trust_cookie.py.
+    login_trust_cookie_secret: str | None = None
+    # Dev-only explicit escape hatch: if True AND login_trust_cookie_secret is empty AND not production/staging, signing uses jwt_secret for local/docker dev.
+    login_trust_cookie_dev_fallback_to_jwt: bool = False
 
     # Platform control-plane API (/api/v1/platform/*). Required in production/staging when set; enforced when set in dev.
     platform_admin_api_key: str | None = None
@@ -87,6 +95,17 @@ class Settings(BaseSettings):
     gmail_pubsub_topic_name: str | None = None
     # Renew watches when expiring within this many hours (renewal script / renew endpoint).
     gmail_watch_renew_within_hours: int = 48
+
+    # Microsoft 365 / Graph (OAuth + webhooks). Optional until configured.
+    microsoft_client_id: str | None = None
+    microsoft_client_secret: str | None = None
+    # Azure AD tenant: "common", "organizations", or a specific tenant GUID
+    microsoft_authority_tenant: str = "common"
+    microsoft_oauth_callback_url: str | None = None  # e.g. https://truckerp.me/api/v1/admin/email-config/microsoft/callback
+    # Public HTTPS URL Graph will call (validation + notifications). Must match subscription notificationUrl.
+    microsoft_webhook_notification_url: str | None = None
+    # HMAC secret for Graph subscription clientState and validation (signs tenant_id). Falls back to jwt_secret if unset.
+    microsoft_webhook_client_state_secret: str | None = None
 
     # Storage (S3 or local)
     storage_provider: str = "local"

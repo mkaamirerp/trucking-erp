@@ -23,10 +23,15 @@ from app.models.platform import (
 from app.models.tenant_auth import TenantUser, TenantWorkspaceMember
 from app.deps.tenant_db import open_tenant_session_by_id
 from app.services.login_failure_audit import email_fingerprint
-from app.services.login_password_abuse import login_password_challenge_armed
+from app.services.login_password_abuse import login_password_otp_step_up_armed
+from app.services.login_unlock_step_up_pending import (
+    clear_login_step_up_pending_after_successful_step_up,
+    login_step_up_pending_after_unlock_exists,
+)
 from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.utils.auth_identity import normalize_auth_email
 from app.utils.email import send_otp_email_for_purpose
+from app.utils.login_trust_cookie import clear_login_trust_cookie
 from app.utils.otp import check_otp, generate_otp, get_otp_expiration, hash_otp
 
 logger = logging.getLogger(__name__)
@@ -37,13 +42,18 @@ CHALLENGE_TTL_MINUTES = 15
 STEP_UP_403_BODY_DETAIL = "Additional verification required."
 
 
-async def login_step_up_otp_required_for_this_attempt(tenant_id: int, email_norm: str) -> bool:
+async def login_step_up_otp_required_for_this_attempt(
+    db: AsyncSession, tenant_id: int, email_norm: str
+) -> bool:
     """
-    Per-attempt step-up: true when password-fail streak is armed for this tenant+email, or test hook login_step_up_otp_required.
+    Per-attempt step-up: true when admin unlock set a one-shot mandate, password-fail streak >= OTP threshold,
+    or test hook login_step_up_otp_required.
     """
     if getattr(settings, "login_step_up_otp_required", False):
         return True
-    return await login_password_challenge_armed(tenant_id, email_norm)
+    if await login_step_up_pending_after_unlock_exists(db, tenant_id, email_norm):
+        return True
+    return await login_password_otp_step_up_armed(tenant_id, email_norm)
 
 
 async def get_or_create_open_login_otp_challenge_after_password(
@@ -92,11 +102,18 @@ async def create_login_otp_challenge_after_password(db: AsyncSession, tenant_id:
     return cid
 
 
-def json_response_login_step_up_required(login_challenge_id: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=403,
-        content={"detail": STEP_UP_403_BODY_DETAIL, "login_challenge_id": login_challenge_id},
-    )
+def json_response_login_step_up_required(
+    login_challenge_id: str,
+    *,
+    after_sign_in_unlock: bool = False,
+) -> JSONResponse:
+    """Require OTP step-up; clear httpOnly device-trust cookie so the browser must re-affirm after MFA."""
+    body: dict = {"detail": STEP_UP_403_BODY_DETAIL, "login_challenge_id": login_challenge_id}
+    if after_sign_in_unlock:
+        body["after_sign_in_unlock"] = True
+    resp = JSONResponse(status_code=403, content=body)
+    clear_login_trust_cookie(resp)
+    return resp
 
 
 async def validate_challenge_ready_for_session(
@@ -158,6 +175,7 @@ async def login_step_up_challenge_gate_after_password(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
         if not await mark_challenge_session_issued(db, lc):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        await clear_login_step_up_pending_after_successful_step_up(db, tenant_id, email_norm)
         logger.info(
             "event=otp_login_step_up_challenge_consumed tenant_id=%s email_fingerprint=%s challenge_id=%s",
             int(tenant_id),
@@ -165,9 +183,10 @@ async def login_step_up_challenge_gate_after_password(
             lc,
         )
         return None
-    if await login_step_up_otp_required_for_this_attempt(tenant_id, email_norm):
+    if await login_step_up_otp_required_for_this_attempt(db, tenant_id, email_norm):
+        after_unlock = await login_step_up_pending_after_unlock_exists(db, tenant_id, email_norm)
         cid = await get_or_create_open_login_otp_challenge_after_password(db, tenant_id, email_norm)
-        return json_response_login_step_up_required(cid)
+        return json_response_login_step_up_required(cid, after_sign_in_unlock=after_unlock)
     return None
 
 

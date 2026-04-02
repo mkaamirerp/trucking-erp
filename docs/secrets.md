@@ -21,7 +21,7 @@ This project uses a **fail-closed, SSM-only** secret management system. The Post
 
 All secrets are stored under these SSM paths:
 
-- `/truckerp/prod/platform/` – Platform-level secrets (DATABASE_URL, POSTGRES_ADMIN_URL, POSTGRES_PASSWORD, JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, etc.)
+- `/truckerp/prod/platform/` – Platform-level secrets (DATABASE_URL, POSTGRES_ADMIN_URL, POSTGRES_PASSWORD, JWT_SECRET, LOGIN_TRUST_COOKIE_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, etc.)
 - `/truckerp/prod/shared/` – Shared secrets (SMTP, external API keys, etc.)
 
 ### Required Parameters
@@ -96,6 +96,32 @@ This ensures:
    - Add it to the `required_vars` array in `scripts/start_api_with_ssm.sh`
 
 3. Restart the API container (it will fetch and validate the new parameter)
+
+### Login trust cookie (trk_login_trust — production / staging)
+
+HMAC secret for the familiar-browser httpOnly cookie. **Separate from `JWT_SECRET`.** Use a long random value (e.g. `openssl rand -hex 32`).
+
+- **SSM parameter name (prod example):** `/truckerp/prod/platform/LOGIN_TRUST_COOKIE_SECRET`
+- **Dev example:** `/truckerp/dev/platform/LOGIN_TRUST_COOKIE_SECRET` (when `SSM_ENV=dev`)
+- **Rendered env key:** `LOGIN_TRUST_COOKIE_SECRET` (last path segment; see `scripts/start_api_with_ssm.sh`)
+
+Put or rotate the parameter, then **restart the API container** so a fresh `/run/secrets/truckerp.env` is built.
+
+```bash
+export LOGIN_TRUST_COOKIE_SECRET="$(openssl rand -hex 32)"
+SSM_ENV=prod ./scripts/ssm_put_login_trust_cookie_secret.sh
+```
+
+If this parameter is missing in production/staging, the trust cookie is disabled (fail closed for that feature only); the API still starts.
+
+### Cloudflare Turnstile (optional — sign-in abuse)
+
+After repeated wrong passwords, the API can require Turnstile **when both** values are set:
+
+- **`TURNSTILE_SECRET_KEY`** — server-side secret (siteverify). SSM SecureString under platform path.
+- **`TURNSTILE_SITE_KEY`** — **public** site key (same value as in the Cloudflare widget). Stored on the API; returned in JSON as `turnstile_site_key` from **`GET /api/v1/public/tenant/{workspace_slug}`** so the login page loads Turnstile at **runtime** (no frontend rebuild required when only this key changes).
+
+If only the secret is set, users can hit a 403 with no widget; API logs warn on startup and on each 403. Set both keys and restart the API.
 
 ### Gmail OAuth (optional)
 

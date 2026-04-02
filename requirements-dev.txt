@@ -1,4 +1,4 @@
-# Developer / CI test dependencies (optional prod image; installed in Dockerfile `dev` stage only).
-# Keep versions aligned with a known-good toolchain (see requirements.lock.txt for pytest when regenerating lock).
+# Pinned test / verification packages (pytest stack). For manual pytest on a prod host, install
+# into a venv; this file does not switch the stack out of production. Align pins with requirements.lock.txt when updating.
 pytest==9.0.2
 pytest-asyncio==1.3.0

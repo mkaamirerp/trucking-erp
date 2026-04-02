@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { PLATFORM } from "../routes";
-import { platformAdminFetch, platformAdminJson, PlatformAdminUnauthorizedError } from "../lib/platformAdminFetch";
+import {
+  getPlatformAdminApiKey,
+  platformAdminFetch,
+  platformAdminJson,
+  PlatformAdminUnauthorizedError,
+} from "../lib/platformAdminFetch";
+import PlatformUnlockLoginForm from "../components/PlatformUnlockLoginForm";
 import { signalPlatformAdminUnauthorized } from "../components/PlatformShellLayout";
 import type { PlatformTenantRow } from "../types/platformAdmin";
 
 export default function PlatformTenantDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const tenantId = id ? parseInt(id, 10) : NaN;
 
   const [row, setRow] = useState<PlatformTenantRow | null>(null);
@@ -24,6 +31,11 @@ export default function PlatformTenantDetailPage() {
     }
     setError(null);
     setLoading(true);
+    if (!getPlatformAdminApiKey().trim()) {
+      setRow(null);
+      setLoading(false);
+      return;
+    }
     try {
       const data = await platformAdminJson<PlatformTenantRow>(`/platform/tenants/${tenantId}`);
       setRow(data);
@@ -44,6 +56,12 @@ export default function PlatformTenantDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!row || location.hash !== "#unlock-sign-in") return;
+    const el = document.getElementById("unlock-sign-in");
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [row, location.hash]);
 
   const runProvision = async () => {
     if (!Number.isFinite(tenantId)) return;
@@ -78,6 +96,10 @@ export default function PlatformTenantDetailPage() {
 
   const runRetryProvision = async () => {
     if (!Number.isFinite(tenantId)) return;
+    if (!getPlatformAdminApiKey().trim()) {
+      signalPlatformAdminUnauthorized();
+      return;
+    }
     setActionMsg(null);
     setActionBusy(true);
     try {
@@ -129,7 +151,24 @@ export default function PlatformTenantDetailPage() {
 
       {!loading && row ? (
         <>
-          <dl className="mt-6 grid gap-3 sm:grid-cols-2 text-sm">
+          {/* First on purpose: operators look for unlock; long metadata grid used to push it below the fold */}
+          <section
+            id="unlock-sign-in"
+            className="mt-6 scroll-mt-24 rounded-lg border-2 border-indigo-500/40 bg-slate-900/70 p-4 shadow-lg shadow-indigo-950/20"
+          >
+            <h2 className="text-lg font-semibold text-white">Unlock user sign-in</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Workspace <code className="text-indigo-200/90">{row.slug}</code> · clears password-fail streak and
+              tenant+email limits for one address (does <strong className="text-slate-300">not</strong> clear IP-wide
+              throttle).
+            </p>
+            <div className="mt-4">
+              <PlatformUnlockLoginForm compact initialTenantSlug={row.slug} lockTenantSlug />
+            </div>
+          </section>
+
+          <h2 className="mt-10 text-sm font-medium uppercase tracking-wide text-slate-500">Tenant metadata</h2>
+          <dl className="mt-3 grid gap-3 sm:grid-cols-2 text-sm">
             {(
               [
                 ["id", String(row.id)],

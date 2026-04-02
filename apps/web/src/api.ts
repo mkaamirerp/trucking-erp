@@ -119,6 +119,29 @@ export async function checkSignupEmailAvailability(email: string) {
   return handle<SignupFieldAvailabilityResponse>(res);
 }
 
+/** Public workspace status (used on subdomain login + routing). Includes Turnstile site key when API is fully configured. */
+export type PublicTenantStatus = {
+  exists: boolean;
+  slug: string;
+  status?: string;
+  db_status?: string;
+  ready?: boolean;
+  reason?: string;
+  turnstile_site_key?: string | null;
+};
+
+export async function getTenantStatus(slug: string): Promise<PublicTenantStatus> {
+  const url = new URL(`${PUBLIC_API_BASE}/tenant/${encodeURIComponent(slug)}`, window.location.origin);
+  const res = await fetchPublic(url.toString().replace(window.location.origin, ""));
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(text || res.statusText) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.json() as Promise<PublicTenantStatus>;
+}
+
 export async function checkSignupPhoneAvailability(phone: string) {
   const url = new URL(`${PUBLIC_API_BASE}/check-signup-phone`, window.location.origin);
   url.searchParams.set("phone", phone);
@@ -498,14 +521,30 @@ export class LoginVerificationRequiredError extends Error {
 export class LoginStepUpRequiredError extends Error {
   override readonly name = "LoginStepUpRequiredError";
   readonly loginChallengeId: string;
-  constructor(loginChallengeId: string) {
+  /** True when admin/platform cleared a sign-in block; next step is email verification. */
+  readonly afterSignInUnlock: boolean;
+  constructor(loginChallengeId: string, afterSignInUnlock = false) {
     super("Additional verification required.");
     this.loginChallengeId = loginChallengeId;
+    this.afterSignInUnlock = afterSignInUnlock;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 const LOGIN_VERIFICATION_DETAIL = "Additional verification required.";
+
+/** POST /auth/login returned 429 with retry_after_seconds (sign-in rate limit). */
+export class LoginRateLimitedError extends Error {
+  override readonly name = "LoginRateLimitedError";
+  readonly retryAfterSeconds: number;
+  readonly retryAt: string;
+  constructor(message: string, retryAfterSeconds: number, retryAt: string) {
+    super(message);
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.retryAt = retryAt;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
 
 function throwLoginHttpError(status: number, message: string): never {
   const err = new Error(message) as Error & { status?: number };
@@ -518,10 +557,14 @@ export async function login(payload: {
   password: string;
   turnstile_token?: string | null;
   login_challenge_id?: string | null;
+  /** If true, API may set device-trust cookie after success. Default: omit (false on server). */
+  trust_this_device?: boolean;
 }) {
-  const body: Record<string, string> = { email: payload.email, password: payload.password };
+  const body: Record<string, string | boolean> = { email: payload.email, password: payload.password };
   if (payload.turnstile_token) body.turnstile_token = payload.turnstile_token;
   if (payload.login_challenge_id) body.login_challenge_id = payload.login_challenge_id;
+  if (payload.trust_this_device === true) body.trust_this_device = true;
+  if (payload.trust_this_device === false) body.trust_this_device = false;
   const res = await fetchWithTenant(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -531,22 +574,35 @@ export async function login(payload: {
     const text = await res.text();
     let message = "Invalid email or password";
     try {
-      const json = text ? (JSON.parse(text) as { detail?: string; login_challenge_id?: string }) : null;
+      const json = text ? (JSON.parse(text) as Record<string, unknown>) : null;
+      if (res.status === 429 && json && typeof json.detail === "object" && json.detail !== null) {
+        const inner = json.detail as Record<string, unknown>;
+        if (typeof inner.retry_after_seconds === "number") {
+          const msg =
+            typeof inner.detail === "string"
+              ? inner.detail
+              : "Too many sign-in attempts. Please wait before trying again.";
+          const retryAt = typeof inner.retry_at === "string" ? inner.retry_at : "";
+          throw new LoginRateLimitedError(msg, Math.max(1, Math.floor(inner.retry_after_seconds)), retryAt);
+        }
+      }
       if (res.status === 403 && json?.detail === LOGIN_VERIFICATION_DETAIL) {
         const cid = json.login_challenge_id;
         if (typeof cid === "string" && cid.length === 36) {
-          throw new LoginStepUpRequiredError(cid);
+          const afterUnlock = json.after_sign_in_unlock === true;
+          throw new LoginStepUpRequiredError(cid, afterUnlock);
         }
         throw new LoginVerificationRequiredError();
       }
-      if (json?.detail) message = json.detail;
+      if (typeof json?.detail === "string") message = json.detail;
     } catch (e) {
       if (e instanceof LoginVerificationRequiredError) throw e;
       if (e instanceof LoginStepUpRequiredError) throw e;
+      if (e instanceof LoginRateLimitedError) throw e;
     }
     throwLoginHttpError(res.status, message);
   }
-  return handle<{ ok: boolean; workspace_url?: string }>(res);
+  return handle<{ ok: boolean; workspace_url?: string; familiar_device?: boolean }>(res);
 }
 
 export async function loginStepUpIssue(payload: { login_challenge_id: string }) {
@@ -1304,9 +1360,25 @@ export type UserMember = {
   joined_at: string;
 };
 
+export type SignInSecurity = {
+  sign_in_status: string;
+  all_clear: boolean;
+  reasons: string[];
+  trigger_sources: string[];
+  timestamps: Record<string, string | null>;
+  restriction_summary: Record<string, unknown>;
+  lock_scope: Record<string, unknown>;
+  note: string;
+};
+
 export async function listTenantUsers(): Promise<UserMember[]> {
   const res = await fetchWithTenant(`${API_BASE}/admin/users`);
   return handle<UserMember[]>(res);
+}
+
+export async function getTenantUserSignInSecurity(userId: string): Promise<SignInSecurity> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/sign-in-security`);
+  return handle<SignInSecurity>(res);
 }
 
 export type InviteUserPayload = {
@@ -1334,6 +1406,25 @@ export async function inviteTenantUser(payload: InviteUserPayload): Promise<{
     status: string;
     message: string;
     email_sent?: boolean;
+  }>(res);
+}
+
+export async function unlockTenantUserSignIn(userId: string): Promise<{
+  ok: boolean;
+  cleared: unknown;
+  state_after: unknown;
+  note: string;
+  operator_message?: string;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/users/${encodeURIComponent(userId)}/unlock-sign-in`, {
+    method: "POST",
+  });
+  return handle<{
+    ok: boolean;
+    cleared: unknown;
+    state_after: unknown;
+    note: string;
+    operator_message?: string;
   }>(res);
 }
 
@@ -1388,19 +1479,29 @@ export type EmailConfig = {
   imap_host: string | null;
   imap_port: number | null;
   imap_username: string | null;
+  imap_security?: string | null;
   smtp_host: string | null;
   smtp_port: number | null;
   smtp_username: string | null;
+  smtp_security?: string | null;
+  reply_to?: string | null;
   use_ssl: boolean | null;
   use_tls: boolean | null;
   oauth_provider: string | null;
   oauth_account_email: string | null;
+  connection_status?: string | null;
   last_tested_at: string | null;
   last_test_status: string | null;
+  last_inbound_test_at?: string | null;
+  last_outbound_test_at?: string | null;
   last_error_code: string | null;
   last_error_message: string | null;
-  /** Gmail: last time delta ingestion ran successfully (ISO). */
+  /** Last successful IMAP sync (Other provider) or Gmail delta (ISO). */
   last_inbound_sync_at?: string | null;
+  last_sync_status?: string | null;
+  last_sync_error?: string | null;
+  imap_uidvalidity?: number | null;
+  imap_last_seen_uid?: number | null;
   gmail_history_cursor_present?: boolean | null;
   gmail_watch_active?: boolean | null;
   gmail_watch_expires_at?: string | null;
@@ -1412,19 +1513,23 @@ export type EmailConfig = {
 export type EmailConfigUpdatePayload = {
   email_address: string;
   display_name?: string | null;
+  reply_to?: string | null;
   mailbox_type?: string;
   provider_name?: string | null;
   connection_mode?: string;
   inbound_enabled?: boolean;
   outbound_enabled?: boolean;
+  is_primary?: boolean;
   imap_host?: string | null;
   imap_port?: number | null;
   imap_username?: string | null;
   imap_password?: string | null;
+  imap_security?: string | null;
   smtp_host?: string | null;
   smtp_port?: number | null;
   smtp_username?: string | null;
   smtp_password?: string | null;
+  smtp_security?: string | null;
   use_ssl?: boolean | null;
   use_tls?: boolean | null;
   oauth_provider?: string | null;
@@ -1514,9 +1619,53 @@ export async function updatePrimaryEmailConfig(payload: EmailConfigUpdatePayload
   return handle<EmailConfig>(res);
 }
 
-export async function testPrimaryEmailConfig(): Promise<{ ok: boolean; status: string; message?: string; last_tested_at?: string }> {
+export async function testPrimaryEmailConfig(): Promise<{
+  ok: boolean;
+  status: string;
+  direction?: string | null;
+  message?: string;
+  last_tested_at?: string;
+}> {
   const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary/test`, { method: "POST" });
-  return handle<{ ok: boolean; status: string; message?: string; last_tested_at?: string }>(res);
+  return handle(res);
+}
+
+export async function testPrimaryEmailInbound(): Promise<{
+  ok: boolean;
+  status: string;
+  direction?: string | null;
+  message?: string;
+  last_tested_at?: string;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary/test-inbound`, { method: "POST" });
+  return handle(res);
+}
+
+export async function testPrimaryEmailOutbound(): Promise<{
+  ok: boolean;
+  status: string;
+  direction?: string | null;
+  message?: string;
+  last_tested_at?: string;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/primary/test-outbound`, { method: "POST" });
+  return handle(res);
+}
+
+export async function syncOtherImapNow(maxMessages = 50): Promise<{
+  ok: boolean;
+  tenant_id: number;
+  provider: string;
+  threads_upserted: number;
+  messages_upserted: number;
+  attachments_upserted: number;
+  uids_fetched: number;
+}> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/admin/email-config/other/sync-now?max_messages=${maxMessages}`,
+    { method: "POST" },
+  );
+  return handle(res);
 }
 
 export async function disconnectPrimaryEmailConfig(): Promise<{ ok: boolean; message: string }> {

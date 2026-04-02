@@ -1,30 +1,45 @@
-"""Gmail inbound ingestion: History API delta sync (no full inbox listing)."""
+"""Gmail inbound ingestion: History API delta sync. Fetch + normalize here; persistence/routing in email_engine."""
 
 from __future__ import annotations
 
 import base64
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import quote
-
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.email_attachment import EmailMessageAttachment
-from app.models.email_ingestion import EmailMessage, EmailThread
 from app.models.tenant_email_account import TenantEmailAccount
-from app.services.email_intake_routing import apply_intake_routing_for_gmail_thread
+from app.services.email_engine.email_ingestion_engine import IngestionContext, ingest_normalized_thread
+from app.services.email_engine.message_normalizer import gmail_full_thread_to_normalized
+from app.services.email_engine.message_normalizer import (
+    attachment_parts_from_gmail_payload as _attachment_parts,
+)
+from app.services.email_engine.message_normalizer import (
+    extract_text_plain_from_gmail_payload as _extract_text_plain,
+)
+from app.services.email_engine.message_normalizer import headers_map as _headers_map
+from app.services.email_engine.message_normalizer import parse_address_list as _parse_address_list
+from app.services.email_engine.message_normalizer import parse_date_header as _parse_date_header
+from app.services.email_engine.message_normalizer import participant_emails as _participant_emails
 from app.services.gmail_oauth import refresh_access_token
 from app.utils.encryption import decrypt_secret
 
-logger = logging.getLogger(__name__)
-
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+# Re-export normalizer helpers for legacy imports (e.g. IMAP path — prefer email_engine.message_normalizer).
+__all__ = [
+    "GmailSyncResult",
+    "GMAIL_API_BASE",
+    "bootstrap_gmail_history_cursor",
+    "sync_gmail_delta_for_tenant",
+    "sync_gmail_inbox_for_tenant",
+    "decode_pubsub_gmail_notification",
+    "_gmail_http_get",
+    "_gmail_get_json",
+]
 
 
 @dataclass
@@ -37,111 +52,6 @@ class GmailSyncResult:
     threads_scanned: int
     history_pages: int = 0
     history_cursor_advanced: bool = False
-
-
-def _parse_date_header(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        dt = parsedate_to_datetime(value)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
-def _headers_map(headers: list[dict[str, Any]] | None) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for h in headers or []:
-        name = str(h.get("name") or "").strip().lower()
-        if not name:
-            continue
-        out[name] = str(h.get("value") or "")
-    return out
-
-
-def _extract_text_plain(payload: dict[str, Any] | None) -> str | None:
-    if not payload:
-        return None
-    mime = (payload.get("mimeType") or "").lower()
-    body = payload.get("body") or {}
-    data = body.get("data")
-    if mime == "text/plain" and isinstance(data, str) and data:
-        try:
-            padded = data + "=" * (-len(data) % 4)
-            return base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8", errors="replace")
-        except Exception:
-            return None
-    for part in payload.get("parts") or []:
-        extracted = _extract_text_plain(part)
-        if extracted:
-            return extracted
-    return None
-
-
-def _parse_address_list(raw: str | None) -> list[dict[str, str]]:
-    if not raw:
-        return []
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    parsed: list[dict[str, str]] = []
-    for p in parts:
-        if "<" in p and ">" in p:
-            name = p.split("<", 1)[0].strip().strip('"')
-            email = p.split("<", 1)[1].split(">", 1)[0].strip()
-            parsed.append({"name": name, "email": email})
-        else:
-            parsed.append({"email": p})
-    return parsed
-
-
-def _attachment_parts(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not payload:
-        return []
-    out: list[dict[str, Any]] = []
-    filename = str(payload.get("filename") or "").strip()
-    body = payload.get("body") or {}
-    attachment_id = str(body.get("attachmentId") or "").strip()
-    if filename and attachment_id:
-        headers = _headers_map(payload.get("headers"))
-        disp = (headers.get("content-disposition") or "").lower()
-        out.append(
-            {
-                "external_attachment_id": attachment_id,
-                "filename": filename,
-                "mime_type": payload.get("mimeType"),
-                "size_bytes": body.get("size"),
-                "is_inline": "inline" in disp and "attachment" not in disp,
-            }
-        )
-    for part in payload.get("parts") or []:
-        out.extend(_attachment_parts(part))
-    return out
-
-
-def _participant_emails(
-    from_email: str | None,
-    to_json: list[dict[str, str]] | None,
-    cc_json: list[dict[str, str]] | None,
-    bcc_json: list[dict[str, str]] | None,
-) -> list[dict[str, str]]:
-    seen: set[str] = set()
-    out: list[dict[str, str]] = []
-
-    def _push(email: str | None) -> None:
-        if not email:
-            return
-        e = email.strip().lower()
-        if not e or e in seen:
-            return
-        seen.add(e)
-        out.append({"email": e})
-
-    _push(from_email)
-    for group in (to_json or [], cc_json or [], bcc_json or []):
-        for addr in group:
-            _push(addr.get("email"))
-    return out
 
 
 async def _gmail_http_get(access_token: str, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
@@ -196,165 +106,14 @@ async def _upsert_full_thread_from_gmail(
     access_token: str,
     ext_thread_id: str,
 ) -> tuple[int, int, int]:
-    """Fetch Gmail thread (format=full) and upsert thread, messages, attachments. Returns counts (msgs, atts, 1 thread)."""
-    td = await _gmail_get_json(access_token, f"/threads/{quote(ext_thread_id, safe='')}", params={"format": "full"})
-    snippet = td.get("snippet")
-    existing_thread = await tenant_db.scalar(
-        select(EmailThread).where(
-            EmailThread.tenant_id == tenant_id,
-            EmailThread.provider == "gmail",
-            EmailThread.external_thread_id == ext_thread_id,
-        )
-    )
-    if not existing_thread:
-        existing_thread = EmailThread(
-            tenant_id=tenant_id,
-            provider="gmail",
-            external_thread_id=ext_thread_id,
-            status="active",
-        )
-        tenant_db.add(existing_thread)
-        await tenant_db.flush()
+    """Fetch Gmail thread (format=full), normalize, run shared ingestion engine."""
+    from app.services.email_providers.gmail_adapter import fetch_thread_full
 
-    msgs = td.get("messages") or []
-    last_message_at: datetime | None = None
-    unread_count = 0
-    subject: str | None = None
-    participants: list[dict[str, str]] = []
-
-    messages_touched = 0
-    attachments_touched = 0
-
-    for gm in msgs:
-        ext_msg_id = str(gm.get("id") or "").strip()
-        if not ext_msg_id:
-            continue
-        payload = gm.get("payload") or {}
-        hdr = _headers_map(payload.get("headers"))
-        from_email = hdr.get("from")
-        to_json = _parse_address_list(hdr.get("to"))
-        cc_json = _parse_address_list(hdr.get("cc"))
-        bcc_json = _parse_address_list(hdr.get("bcc"))
-        msg_subject = hdr.get("subject")
-        sent_at = _parse_date_header(hdr.get("date"))
-        internal_ms = gm.get("internalDate")
-        received_at = None
-        if internal_ms is not None:
-            try:
-                received_at = datetime.fromtimestamp(int(internal_ms) / 1000.0, tz=timezone.utc)
-            except Exception:
-                received_at = None
-        msg_dt = received_at or sent_at
-        if msg_dt and (last_message_at is None or msg_dt > last_message_at):
-            last_message_at = msg_dt
-        if "UNREAD" in (gm.get("labelIds") or []):
-            unread_count += 1
-        if not subject and msg_subject:
-            subject = msg_subject
-        participants = _participant_emails(from_email, to_json, cc_json, bcc_json) or participants
-        body_text = _extract_text_plain(payload)
-        att_parts = _attachment_parts(payload)
-        has_attachments = bool(att_parts)
-
-        existing_msg = await tenant_db.scalar(
-            select(EmailMessage).where(
-                EmailMessage.tenant_id == tenant_id,
-                EmailMessage.provider == "gmail",
-                EmailMessage.external_message_id == ext_msg_id,
-            )
-        )
-        if existing_msg:
-            existing_msg.thread_id = existing_thread.id
-            existing_msg.external_thread_id = ext_thread_id
-            existing_msg.direction = existing_msg.direction or "inbound"
-            existing_msg.from_email = from_email
-            existing_msg.to_json = to_json
-            existing_msg.cc_json = cc_json
-            existing_msg.bcc_json = bcc_json
-            existing_msg.subject = msg_subject
-            existing_msg.sent_at = sent_at
-            existing_msg.received_at = received_at
-            existing_msg.snippet = gm.get("snippet")
-            existing_msg.body_text = body_text
-            existing_msg.has_attachments = has_attachments
-            existing_msg.updated_at = datetime.now(timezone.utc)
-        else:
-            tenant_db.add(
-                EmailMessage(
-                    tenant_id=tenant_id,
-                    thread_id=existing_thread.id,
-                    provider="gmail",
-                    external_message_id=ext_msg_id,
-                    external_thread_id=ext_thread_id,
-                    direction="inbound",
-                    from_email=from_email,
-                    to_json=to_json,
-                    cc_json=cc_json,
-                    bcc_json=bcc_json,
-                    subject=msg_subject,
-                    sent_at=sent_at,
-                    received_at=received_at,
-                    snippet=gm.get("snippet"),
-                    body_text=body_text,
-                    has_attachments=has_attachments,
-                )
-            )
-            await tenant_db.flush()
-            existing_msg = await tenant_db.scalar(
-                select(EmailMessage).where(
-                    EmailMessage.tenant_id == tenant_id,
-                    EmailMessage.provider == "gmail",
-                    EmailMessage.external_message_id == ext_msg_id,
-                )
-            )
-        messages_touched += 1
-
-        for ap in att_parts:
-            if not existing_msg:
-                continue
-            existing_attachment = await tenant_db.scalar(
-                select(EmailMessageAttachment).where(
-                    EmailMessageAttachment.tenant_id == tenant_id,
-                    EmailMessageAttachment.provider == "gmail",
-                    EmailMessageAttachment.message_id == existing_msg.id,
-                    EmailMessageAttachment.external_attachment_id == ap["external_attachment_id"],
-                )
-            )
-            if existing_attachment:
-                existing_attachment.filename = ap.get("filename")
-                existing_attachment.mime_type = ap.get("mime_type")
-                existing_attachment.size_bytes = ap.get("size_bytes")
-                existing_attachment.is_inline = bool(ap.get("is_inline"))
-                existing_attachment.updated_at = datetime.now(timezone.utc)
-            else:
-                tenant_db.add(
-                    EmailMessageAttachment(
-                        tenant_id=tenant_id,
-                        message_id=existing_msg.id,
-                        provider="gmail",
-                        external_attachment_id=ap["external_attachment_id"],
-                        filename=ap.get("filename"),
-                        mime_type=ap.get("mime_type"),
-                        size_bytes=ap.get("size_bytes"),
-                        is_inline=bool(ap.get("is_inline")),
-                        download_status="metadata_only",
-                    )
-                )
-            attachments_touched += 1
-
-    existing_thread.subject = subject
-    existing_thread.participants_json = participants
-    existing_thread.snippet = snippet
-    existing_thread.last_message_at = last_message_at
-    existing_thread.message_count = len(msgs)
-    existing_thread.unread_count = unread_count
-    existing_thread.updated_at = datetime.now(timezone.utc)
-    try:
-        await apply_intake_routing_for_gmail_thread(tenant_db, tenant_id, existing_thread.id, access_token)
-    except Exception as exc:
-        logger.warning("email intake routing skipped: %s", exc)
-
-    return messages_touched, attachments_touched, 1
+    td = await fetch_thread_full(access_token, ext_thread_id)
+    rollup, messages = gmail_full_thread_to_normalized(tenant_id, None, "gmail", td)
+    ctx = IngestionContext(tenant_id=tenant_id, provider="gmail", gmail_access_token=access_token)
+    _thread_row, m, a = await ingest_normalized_thread(tenant_db, ctx, rollup, messages)
+    return m, a, 1
 
 
 async def sync_gmail_delta_for_tenant(tenant_db: AsyncSession, tenant_id: int) -> GmailSyncResult:

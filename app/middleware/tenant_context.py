@@ -30,6 +30,7 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
     "/healthz",
     "/api/v1/public",
     "/api/v1/webhooks/gmail/pubsub",
+    "/api/v1/webhooks/microsoft-graph",
     "/api/v1/auth/logout",  # no tenant/token needed; just clear cookies
     "/api/v1/auth/reset-password",
     "/api/v1/auth/signup/plan-options",

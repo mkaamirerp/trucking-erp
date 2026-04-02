@@ -93,14 +93,30 @@ def _is_tenant_subdomain(host: str | None) -> bool:
     return host.endswith(f".{base_domain}")
 
 
+def _public_sign_in_client_config() -> dict[str, str | None]:
+    """
+    Non-secret values for workspace sign-in UI (Turnstile widget).
+    Expose site key only when server-side secret is also configured.
+    """
+    sec = (settings.turnstile_secret_key or "").strip()
+    site = (getattr(settings, "turnstile_site_key", None) or "").strip()
+    if sec and site:
+        return {"turnstile_site_key": site}
+    return {"turnstile_site_key": None}
+
+
 @router.get("/tenant/{slug}")
 async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
     """
     Public endpoint to check tenant status by slug.
-    
+
     Returns tenant status information without requiring authentication.
     Used by frontend to validate tenant before routing to protected pages.
-    
+
+    **Sign-in:** When Turnstile is fully configured on the API (`TURNSTILE_SECRET_KEY` + `TURNSTILE_SITE_KEY`),
+    the JSON includes `turnstile_site_key` (public widget key) so the SPA can load Turnstile **at runtime**
+    without relying on a frontend build-time env var.
+
     Returns:
     - 200: Tenant exists and is ACTIVE/READY
     - 404: Tenant does not exist
@@ -122,6 +138,7 @@ async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
             "db_status": tenant.db_status,
             "ready": False,
             "reason": "Tenant account is suspended",
+            **_public_sign_in_client_config(),
         }
 
     if tenant.db_status != TenantDBStatus.READY.value:
@@ -132,6 +149,7 @@ async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
             "db_status": tenant.db_status,
             "ready": False,
             "reason": "Tenant database is not ready",
+            **_public_sign_in_client_config(),
         }
 
     # Tenant is ready for app access only when ACTIVE
@@ -141,6 +159,7 @@ async def get_tenant_status(slug: str, db: AsyncSession = Depends(get_db)):
         "status": tenant.status,
         "db_status": tenant.db_status,
         "ready": tenant.status == TenantStatus.ACTIVE.value,
+        **_public_sign_in_client_config(),
     }
 
 

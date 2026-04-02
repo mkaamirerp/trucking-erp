@@ -18,6 +18,7 @@ from app.routers.public_signup import router as public_signup_router
 from app.routers.workspace_intake import router as workspace_intake_router
 from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.platform_diagnostics import router as platform_diagnostics_router
+from app.routers.platform_testing import router as platform_testing_router
 from app.routers.onboarding import router as onboarding_router
 from app.routers.meta import router as meta_router
 from app.routers.payroll import router as payroll_router
@@ -36,6 +37,7 @@ from app.routers.tenant_admin import router as tenant_admin_router
 from app.routers.admin_email_config import router as admin_email_config_router
 from app.routers.email_threads import router as email_threads_router
 from app.routers.gmail_pubsub import router as gmail_pubsub_router
+from app.routers.microsoft_graph_webhook import router as microsoft_graph_webhook_router
 from app.middleware.tenant_context import TenantContextMiddleware, tenant_middleware_allow_paths
 
 def _startup_banner() -> None:
@@ -58,6 +60,17 @@ logger = logging.getLogger("trucking_erp")
 @app.on_event("startup")
 def _log_startup():
     _startup_banner()
+    _sec = (getattr(settings, "turnstile_secret_key", None) or "").strip()
+    _site = (getattr(settings, "turnstile_site_key", None) or "").strip()
+    if _sec and not _site:
+        logger.warning(
+            "Turnstile: TURNSTILE_SECRET_KEY is set but TURNSTILE_SITE_KEY is empty. "
+            "Browsers read the public key from GET /api/v1/public/tenant/{slug} — configure TURNSTILE_SITE_KEY on the API."
+        )
+    if _site and not _sec:
+        logger.warning(
+            "Turnstile: TURNSTILE_SITE_KEY is set but TURNSTILE_SECRET_KEY is empty; login will not arm Turnstile."
+        )
 
 
 app.add_middleware(
@@ -71,6 +84,7 @@ app.include_router(public_signup_router)
 app.include_router(workspace_intake_router, prefix="/api/v1/public")
 app.include_router(platform_tenants_router)
 app.include_router(platform_diagnostics_router)
+app.include_router(platform_testing_router)
 app.include_router(drivers_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")
@@ -97,6 +111,7 @@ app.include_router(tenant_admin_router)
 app.include_router(admin_email_config_router)
 app.include_router(email_threads_router, prefix="/api/v1")
 app.include_router(gmail_pubsub_router, prefix="/api/v1")
+app.include_router(microsoft_graph_webhook_router, prefix="/api/v1")
 
 # Static assets and dashboard UI (reference layout: sidebar, KPIs, drivers, loads, alerts, chat)
 _static_dir = Path(__file__).resolve().parent / "static"

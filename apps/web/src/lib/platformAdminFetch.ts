@@ -12,10 +12,48 @@ export function getPlatformAdminApiKey(): string {
   return sessionStorage.getItem(STORAGE_KEY) || "";
 }
 
+/** Normalize paste from SSM console / email (CRLF, stray whitespace). */
+export function normalizePlatformAdminKeyInput(key: string): string {
+  return key.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, "").trim();
+}
+
+/** Preflight key against GET /platform/tenants (no throw). Use before persisting to sessionStorage. */
+export async function verifyPlatformAdminKeyWithServer(
+  rawKey: string,
+): Promise<{ ok: boolean; status: number; detail?: string }> {
+  const normalized = normalizePlatformAdminKeyInput(rawKey);
+  if (!normalized) {
+    return { ok: false, status: 0, detail: "Key is empty." };
+  }
+  const rel = "/platform/tenants";
+  const url = `${API_BASE}${rel.startsWith("/") ? rel : `/${rel}`}`;
+  const headers = new Headers();
+  headers.set("X-TruckERP-Platform-Admin-Key", normalized);
+  headers.set("X-Platform-Admin-Key", normalized);
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "GET", headers });
+  } catch {
+    return { ok: false, status: 0, detail: "Network error (offline or blocked)." };
+  }
+  if (res.status === 200) {
+    return { ok: true, status: 200 };
+  }
+  let detail: string | undefined;
+  try {
+    const j = (await res.json()) as { detail?: unknown };
+    detail = typeof j.detail === "string" ? j.detail : undefined;
+  } catch {
+    /* ignore */
+  }
+  return { ok: false, status: res.status, detail: detail ?? `HTTP ${res.status}` };
+}
+
 export function setPlatformAdminApiKey(key: string): void {
   if (typeof window === "undefined") return;
-  if (key.trim()) {
-    sessionStorage.setItem(STORAGE_KEY, key.trim());
+  const normalized = normalizePlatformAdminKeyInput(key);
+  if (normalized) {
+    sessionStorage.setItem(STORAGE_KEY, normalized);
   } else {
     sessionStorage.removeItem(STORAGE_KEY);
   }
@@ -51,6 +89,8 @@ export async function platformAdminFetch(path: string, init?: RequestInit): Prom
   const headers = new Headers(init?.headers);
   const key = getPlatformAdminApiKey();
   if (key) {
+    /* Hyphen-only name: some reverse proxies mishandle underscores in client header names. */
+    headers.set("X-TruckERP-Platform-Admin-Key", key);
     headers.set("X-Platform-Admin-Key", key);
   }
   if (init?.body != null && !headers.has("Content-Type") && !(init.body instanceof FormData)) {

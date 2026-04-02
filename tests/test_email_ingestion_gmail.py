@@ -121,7 +121,7 @@ async def test_gmail_delta_sync_upsert_is_idempotent(monkeypatch):
     monkeypatch.setattr(ingest, "refresh_access_token", fake_refresh_access_token)
     monkeypatch.setattr(ingest, "_gmail_http_get", fake_http_get)
     monkeypatch.setattr(ingest, "_gmail_get_json", fake_gmail_get_json)
-    monkeypatch.setattr(ingest, "apply_intake_routing_for_gmail_thread", noop_routing)
+    monkeypatch.setattr("app.services.email_engine.email_ingestion_engine.route_after_ingestion", noop_routing)
 
     async for tenant_db in open_tenant_session_by_id(53):
         await tenant_db.execute(

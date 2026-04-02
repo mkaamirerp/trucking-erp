@@ -303,6 +303,28 @@ class OnboardingTokenLookup(Base):
     )
 
 
+class PlatformLoginUnlockStepUpPending(Base):
+    """
+    Platform-only: after an operator clears sign-in friction for a workspace+identity, the next successful
+    password verification must complete login step-up (OTP) once. Row deleted when step-up completes session issuance.
+    Does not replace password-fail streak rules; complements unlock that clears streak state.
+    """
+
+    __tablename__ = "platform_login_unlock_step_up_pending"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email_fingerprint", name="uq_plusup_tenant_fp"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("platform_tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    email_fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+
 class PlatformLoginPasswordFailStreak(Base):
     """
     Platform-only: sliding-window count of consecutive failed password verifications per tenant + email fingerprint.

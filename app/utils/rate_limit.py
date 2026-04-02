@@ -9,11 +9,14 @@ For multi-instance, use Redis or similar in front.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import threading
 import time
 from collections import defaultdict
-from fastapi import Request
+from datetime import datetime, timedelta, timezone
+
+from fastapi import HTTPException, Request
 
 
 def _email_hash(email: str) -> str:
@@ -51,6 +54,50 @@ class SlidingWindowLimiter:
             self._timestamps[key].append(now)
             return True
 
+    def is_at_or_over_limit(self, key: str) -> bool:
+        """True if this key already has max_requests events in the window (does not consume a slot)."""
+        now = time.monotonic()
+        with self._lock:
+            self._clean(key, now)
+            return len(self._timestamps[key]) >= self.max_requests
+
+    def seconds_until_slot_available(self, key: str) -> float:
+        """
+        Seconds until the oldest in-window event expires and one slot could open.
+        Call after allow() returned False (bucket full for this key) or when is_at_or_over_limit is True.
+        """
+        now = time.monotonic()
+        with self._lock:
+            self._clean(key, now)
+            ts = self._timestamps[key]
+            if not ts or len(ts) < self.max_requests:
+                return 0.0
+            oldest = min(ts)
+            return max(0.0, oldest + self.window_seconds - now)
+
+    def reset_key(self, key: str) -> bool:
+        """Drop all timestamps for this key. Returns True if the key had any entries before reset."""
+        with self._lock:
+            had = bool(self._timestamps.get(key))
+            self._timestamps.pop(key, None)
+            return had
+
+
+def _raise_login_rate_limited(limiter: SlidingWindowLimiter, key: str, message: str) -> None:
+    """429 for POST /auth/login only: Retry-After + structured body for countdown UX."""
+    retry_raw = limiter.seconds_until_slot_available(key)
+    retry_sec = max(1, int(math.ceil(retry_raw)))
+    retry_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_sec)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "detail": message,
+            "retry_after_seconds": retry_sec,
+            "retry_at": retry_at,
+        },
+        headers={"Retry-After": str(retry_sec)},
+    )
+
 
 # Per-IP limits (shared by verify and resend)
 verify_otp_per_ip = SlidingWindowLimiter(max_requests=15, window_seconds=900)   # 15 per 15 min
@@ -69,7 +116,15 @@ create_workspace_per_user = SlidingWindowLimiter(max_requests=5, window_seconds=
 
 # Login: per IP (same window density as verify_otp per IP) + per workspace identity (tenant + hashed email)
 login_per_ip = SlidingWindowLimiter(max_requests=15, window_seconds=900)  # 15 per 15 min per IP
-login_per_tenant_email = SlidingWindowLimiter(max_requests=10, window_seconds=3600)  # 10 per hour per tenant+email
+login_per_tenant_email = SlidingWindowLimiter(max_requests=5, window_seconds=3600)  # 5 per hour per tenant+email
+
+# Distinct 429 copy so users (and support) can tell sign-in throttles from other limiters.
+LOGIN_RATE_LIMIT_IP_DETAIL = (
+    "Too many sign-in attempts from this network. Wait about 15 minutes, then try again."
+)
+LOGIN_RATE_LIMIT_TENANT_EMAIL_DETAIL = (
+    "Too many sign-in attempts for this email on this workspace. Wait up to an hour, then try again."
+)
 
 # Login step-up OTP (NOT shared with signup verify/resend limiters; keys are login_step_up_* only)
 login_step_up_issue_per_ip = SlidingWindowLimiter(max_requests=10, window_seconds=900)
@@ -160,20 +215,100 @@ async def rate_limit_forgot_password(request: Request, email: str) -> None:
 
 async def rate_limit_login_ip(request: Request) -> None:
     """Per-IP login throttle (POST /auth/login). Safe to call before tenant is known (apex host)."""
-    from fastapi import HTTPException
-
     ip = _client_ip(request)
-    if not login_per_ip.allow(f"login_ip:{ip}"):
-        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    key = f"login_ip:{ip}"
+    if not login_per_ip.allow(key):
+        _raise_login_rate_limited(login_per_ip, key, LOGIN_RATE_LIMIT_IP_DETAIL)
 
 
 async def rate_limit_login_tenant_email(request: Request, tenant_id: int, email_norm: str) -> None:
     """Per-workspace + email fingerprint throttle after tenant_id is known."""
+    eh = _email_hash(email_norm or "")
+    key = f"login_tid_mail:{int(tenant_id)}:{eh}"
+    if not login_per_tenant_email.allow(key):
+        _raise_login_rate_limited(login_per_tenant_email, key, LOGIN_RATE_LIMIT_TENANT_EMAIL_DETAIL)
+
+
+def login_tenant_email_bucket_key(tenant_id: int, email_norm: str) -> str:
+    """Same key shape as rate_limit_login_tenant_email (for read-only checks)."""
+    eh = _email_hash(email_norm or "")
+    return f"login_tid_mail:{int(tenant_id)}:{eh}"
+
+
+def login_step_up_issue_tenant_email_bucket_key(tenant_id: int, email_norm: str) -> str:
+    eh = _email_hash(email_norm or "")
+    return f"login_step_up_issue_tid:{int(tenant_id)}:{eh}"
+
+
+def login_step_up_verify_tenant_email_bucket_key(tenant_id: int, email_norm: str) -> str:
+    eh = _email_hash(email_norm or "")
+    return f"login_step_up_verify_tid:{int(tenant_id)}:{eh}"
+
+
+def get_login_unlock_throttle_snapshot(tenant_id: int, email_norm: str) -> dict[str, dict[str, str | bool | int]]:
+    """
+    Read-only: tenant+email login + step-up buckets only (not login_per_ip).
+    at_limit True means the user would get 429 from that bucket if they hit it again.
+    """
+    tid = int(tenant_id)
+    specs: list[tuple[str, SlidingWindowLimiter, str]] = [
+        ("login_per_tenant_email", login_per_tenant_email, login_tenant_email_bucket_key(tid, email_norm)),
+        (
+            "login_step_up_issue_per_tenant_email",
+            login_step_up_issue_per_tenant_email,
+            login_step_up_issue_tenant_email_bucket_key(tid, email_norm),
+        ),
+        (
+            "login_step_up_verify_per_tenant_email",
+            login_step_up_verify_per_tenant_email,
+            login_step_up_verify_tenant_email_bucket_key(tid, email_norm),
+        ),
+    ]
+    out: dict[str, dict[str, str | bool | int]] = {}
+    for name, limiter, key in specs:
+        at = limiter.is_at_or_over_limit(key)
+        retry_raw = limiter.seconds_until_slot_available(key) if at else 0.0
+        retry_sec = max(0, int(math.ceil(retry_raw))) if at else 0
+        out[name] = {"key": key, "at_limit": at, "retry_after_seconds": retry_sec}
+    return out
+
+
+def clear_login_unlock_throttles_for_tenant_email(tenant_id: int, email_norm: str) -> dict[str, dict[str, str | bool]]:
+    """
+    Clear tenant+email buckets only (login POST + step-up issue/verify). Does not touch login_per_ip.
+    Returns each limiter name, the key cleared, and whether that key had entries.
+    """
+    tid = int(tenant_id)
+    specs: list[tuple[str, SlidingWindowLimiter, str]] = [
+        ("login_per_tenant_email", login_per_tenant_email, login_tenant_email_bucket_key(tid, email_norm)),
+        (
+            "login_step_up_issue_per_tenant_email",
+            login_step_up_issue_per_tenant_email,
+            login_step_up_issue_tenant_email_bucket_key(tid, email_norm),
+        ),
+        (
+            "login_step_up_verify_per_tenant_email",
+            login_step_up_verify_per_tenant_email,
+            login_step_up_verify_tenant_email_bucket_key(tid, email_norm),
+        ),
+    ]
+    out: dict[str, dict[str, str | bool]] = {}
+    for name, limiter, key in specs:
+        had = limiter.reset_key(key)
+        out[name] = {"key": key, "had_entries": had}
+    return out
+
+
+async def rate_limit_forgot_password_respects_login_tenant_bucket(tenant_id: int, email_norm: str) -> None:
+    """
+    When on a workspace host, password reset must not bypass sign-in throttles: if the tenant+email
+    login bucket is already full (user saw \"Too many sign-in attempts for this email…\"), block
+    forgot-password with the same 429 detail until the window slides.
+    """
     from fastapi import HTTPException
 
-    eh = _email_hash(email_norm or "")
-    if not login_per_tenant_email.allow(f"login_tid_mail:{int(tenant_id)}:{eh}"):
-        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    if login_per_tenant_email.is_at_or_over_limit(login_tenant_email_bucket_key(tenant_id, email_norm)):
+        raise HTTPException(status_code=429, detail=LOGIN_RATE_LIMIT_TENANT_EMAIL_DETAIL)
 
 
 async def rate_limit_login(request: Request, tenant_id: int, email_norm: str) -> None:

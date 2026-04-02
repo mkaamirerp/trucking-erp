@@ -22,6 +22,7 @@ services:
       - truckerp-postgres
     command: ["/bin/sh", "-lc", "/app/scripts/start_api_with_ssm.sh"]
     environment:
+      SSM_ENV: prod
       BASE_DOMAIN: truckerp.me
       COOKIE_DOMAIN: .truckerp.me
       SECURE_COOKIES: "false"

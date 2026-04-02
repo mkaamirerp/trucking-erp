@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>TruckERP — Service temporarily unavailable</title>
+  <style>
+    :root {
+      --bg: #0c0f14;
+      --surface: #151b24;
+      --text: #e8edf2;
+      --muted: #8b98a8;
+      --accent: #e8941c;
+      --accent-dim: rgba(232, 148, 28, 0.15);
+      --border: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      line-height: 1.5;
+    }
+    .card {
+      max-width: 28rem;
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem 1.75rem;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+    }
+    .mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 1rem;
+    }
+    .mark::before {
+      content: "";
+      width: 1.5rem;
+      height: 2px;
+      background: var(--accent);
+      opacity: 0.85;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin-bottom: 0.6rem;
+      letter-spacing: -0.02em;
+    }
+    p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 1.25rem;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+    }
+    a, button {
+      font: inherit;
+      cursor: pointer;
+      border-radius: 8px;
+      text-decoration: none;
+      padding: 0.55rem 1rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .primary {
+      background: var(--accent);
+      color: #0c0f14;
+    }
+    .primary:hover { filter: brightness(1.06); }
+    .secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .secondary:hover { background: var(--accent-dim); border-color: rgba(232, 148, 28, 0.35); }
+    footer {
+      margin-top: 1.35rem;
+      padding-top: 1.1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--muted);
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark">TruckERP</div>
+    <h1>We can’t reach the app right now</h1>
+    <p>
+      The service is recovering or busy for a moment. This is usually brief.
+      Try again, or return to the home page.
+    </p>
+    <div class="actions">
+      <button class="primary" type="button" onclick="location.reload()">Try again</button>
+      <a class="secondary" href="https://truckerp.me/">Home</a>
+    </div>
+    <footer>If this continues, contact your workspace admin or support.</footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,297 @@
+/* === TruckERP Login (Option 3) — Drop-in CSS ===
+   Put this in: apps/web/src/styles/login.css  (or any global css you import)
+   If you have Tailwind, you can still use this alongside it.
+*/
+
+:root{
+  --bg0:#070A14;
+  --bg1:#0B1020;
+  --bg2:#0F1630;
+
+  --card:#121A2E;
+  --card2:#0F172A;
+
+  --border:rgba(148,163,184,.14);
+  --border2:rgba(148,163,184,.20);
+
+  --text:#EAF0FF;
+  --muted:#9AA8C7;
+
+  --shadow: 0 20px 60px rgba(0,0,0,.55);
+
+  --gradA:#2BD67B;
+  --gradB:#7B61FF;
+
+  --ring: rgba(123,97,255,.35);
+  --ring2: rgba(43,214,123,.25);
+}
+
+/* Page background */
+.trk-auth{
+  min-height:100vh;
+  color:var(--text);
+  background:
+    radial-gradient(900px 500px at 15% 10%, rgba(123,97,255,.25), transparent 60%),
+    radial-gradient(900px 500px at 85% 15%, rgba(43,214,123,.18), transparent 60%),
+    radial-gradient(1100px 650px at 50% 110%, rgba(43,214,123,.12), transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg2));
+}
+
+/* subtle grid */
+.trk-auth::before{
+  content:"";
+  position:fixed; inset:0;
+  pointer-events:none;
+  background-image:
+    linear-gradient(to right, rgba(148,163,184,.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148,163,184,.06) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity:.22;
+  mask-image: radial-gradient(60% 45% at 50% 30%, #000 55%, transparent 100%);
+}
+
+.trk-auth-wrap{
+  width:100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 56px 18px;
+}
+
+/* Header (logo + title) */
+.trk-brand{
+  display:flex;
+  gap:12px;
+  align-items:center;
+  margin-bottom: 18px;
+}
+.trk-badge{
+  width:42px; height:42px;
+  border-radius: 999px;
+  display:grid; place-items:center;
+  font-weight:700;
+  background: linear-gradient(135deg, rgba(43,214,123,.95), rgba(123,97,255,.95));
+  box-shadow: 0 10px 25px rgba(0,0,0,.35);
+}
+.trk-brand h1{
+  margin:0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+.trk-brand p{
+  margin:0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Card */
+.trk-card{
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(123,97,255,.12), transparent 52%),
+    radial-gradient(120% 140% at 100% 0%, rgba(43,214,123,.10), transparent 52%),
+    linear-gradient(180deg, rgba(18,26,46,.92), rgba(15,23,42,.88));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 20px;
+}
+
+/* SSO buttons */
+.trk-sso{
+  display:grid;
+  gap:10px;
+  margin-bottom: 14px;
+}
+.trk-btn{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  height:44px;
+  border-radius: 12px;
+  border: 1px solid var(--border2);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  font-weight: 600;
+  cursor:pointer;
+  transition: transform .06s ease, background .18s ease, border-color .18s ease;
+}
+.trk-btn:hover{ background: rgba(255,255,255,.06); border-color: rgba(148,163,184,.28); }
+.trk-btn:active{ transform: translateY(1px); }
+
+/* Divider */
+.trk-divider{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin: 14px 0;
+  color: rgba(154,168,199,.9);
+  font-size: 12px;
+}
+.trk-divider::before,
+.trk-divider::after{
+  content:"";
+  height:1px;
+  flex:1;
+  background: rgba(148,163,184,.18);
+}
+
+/* Form fields */
+.trk-field{ margin-top: 12px; }
+.trk-label{
+  display:block;
+  margin: 0 0 7px 2px;
+  font-size: 12px;
+  color: rgba(234,240,255,.92);
+}
+.trk-input{
+  width:100%;
+  height:44px;
+  border-radius: 12px;
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(8,12,24,.55);
+  color: var(--text);
+  padding: 0 14px;
+  outline: none;
+  transition: box-shadow .18s ease, border-color .18s ease, background .18s ease;
+}
+.trk-input::placeholder{ color: rgba(154,168,199,.65); }
+.trk-input:focus{
+  border-color: rgba(123,97,255,.45);
+  box-shadow: 0 0 0 4px var(--ring), 0 0 0 10px rgba(43,214,123,.10);
+  background: rgba(8,12,24,.75);
+}
+
+/* Password row (toggle button) */
+.trk-passwrap{ position:relative; }
+.trk-passbtn{
+  position:absolute;
+  right: 10px;
+  top: 9px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(255,255,255,.04);
+  color: rgba(234,240,255,.9);
+  font-size: 12px;
+  cursor:pointer;
+}
+.trk-passbtn:hover{ background: rgba(255,255,255,.06); }
+
+/* Row under inputs */
+.trk-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top: 12px;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.trk-link{
+  color: rgba(234,240,255,.92);
+  text-decoration:none;
+}
+.trk-link:hover{ text-decoration:underline; }
+
+/* Primary gradient button */
+.trk-primary{
+  width:100%;
+  height:46px;
+  border:0;
+  border-radius: 14px;
+  margin-top: 14px;
+  font-weight: 700;
+  color: #081018;
+  cursor:pointer;
+  background: linear-gradient(90deg, var(--gradA), var(--gradB));
+  box-shadow:
+    0 18px 45px rgba(0,0,0,.35),
+    0 0 0 1px rgba(255,255,255,.08) inset;
+  transition: transform .06s ease, filter .18s ease;
+}
+.trk-primary:hover{ filter: brightness(1.04); }
+.trk-primary:active{ transform: translateY(1px); }
+.trk-primary:disabled{ opacity:.6; cursor:not-allowed; }
+
+/* Error message */
+.trk-error{
+  margin-top: 8px;
+  border: 1px solid rgba(239,68,68,.35);
+  background: rgba(239,68,68,.12);
+  color: #fca5a5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+/* Secondary text under button */
+.trk-foot{
+  margin-top: 14px;
+  text-align:center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Page footer */
+.trk-copyright{
+  margin-top: 18px;
+  text-align:center;
+  font-size: 12px;
+  color: rgba(154,168,199,.75);
+}
+
+/* Neutral callout (MFA / unlock notice) */
+.trk-callout-info{
+  margin-top: 10px;
+  border: 1px solid rgba(59,130,246,.35);
+  background: rgba(59,130,246,.10);
+  color: rgba(191,219,254,.95);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.trk-callout-info p{ margin: 0; }
+
+.trk-check{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(8,12,24,.35);
+  cursor: pointer;
+  text-align: left;
+}
+.trk-check input{
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--gradA);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.trk-check span{
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.trk-check .trk-check-hint{
+  display:block;
+  margin-top: 4px;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Mobile */
+@media (max-width: 480px){
+  .trk-auth-wrap{ padding: 34px 14px; }
+  .trk-card{ padding: 16px; border-radius: 16px; }
+}

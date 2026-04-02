@@ -1,23 +1,54 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { PLATFORM } from "../routes";
-import { getPlatformAdminApiKey, setPlatformAdminApiKey } from "../lib/platformAdminFetch";
+import {
+  getPlatformAdminApiKey,
+  setPlatformAdminApiKey,
+  verifyPlatformAdminKeyWithServer,
+} from "../lib/platformAdminFetch";
 
 export default function PlatformShellLayout() {
   const [apiKeyInput, setApiKeyInput] = useState(() => getPlatformAdminApiKey());
   const [authRequired, setAuthRequired] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     setApiKeyInput(getPlatformAdminApiKey());
   }, []);
 
-  const saveKey = useCallback(() => {
-    setPlatformAdminApiKey(apiKeyInput);
-    setAuthRequired(false);
-    window.location.reload();
+  const saveKey = useCallback(async () => {
+    setSaveError(null);
+    setSaveBusy(true);
+    try {
+      const v = await verifyPlatformAdminKeyWithServer(apiKeyInput);
+      if (!v.ok) {
+        if (v.status === 401) {
+          setSaveError("Server rejected this key (401). Re-copy from SSM with no spaces or line breaks.");
+        } else if (v.status === 503) {
+          setSaveError("Platform admin API is disabled on the server (503). Check PLATFORM_ADMIN_API_KEY.");
+        } else if (v.status === 0) {
+          setSaveError(v.detail ?? "Could not reach the API.");
+        } else {
+          setSaveError(v.detail ?? `Request failed (${v.status}).`);
+        }
+        return;
+      }
+      try {
+        setPlatformAdminApiKey(apiKeyInput);
+      } catch {
+        setSaveError("Browser blocked sessionStorage. Disable strict privacy mode or use a normal window.");
+        return;
+      }
+      setAuthRequired(false);
+      window.location.reload();
+    } finally {
+      setSaveBusy(false);
+    }
   }, [apiKeyInput]);
 
   const clearKey = useCallback(() => {
+    setSaveError(null);
     setPlatformAdminApiKey("");
     setApiKeyInput("");
     setAuthRequired(false);
@@ -40,7 +71,7 @@ export default function PlatformShellLayout() {
             <Link to={PLATFORM.HOME} className="text-white font-semibold tracking-tight hover:text-slate-200">
               Platform
             </Link>
-            <nav className="flex gap-4 text-sm">
+            <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
               <NavLink
                 to={PLATFORM.HOME}
                 end
@@ -66,10 +97,20 @@ export default function PlatformShellLayout() {
               >
                 Login failures
               </NavLink>
+              <NavLink
+                to={PLATFORM.TESTING_UNLOCK_LOGIN}
+                className={({ isActive }) =>
+                  isActive ? "text-white" : "text-slate-400 hover:text-slate-200"
+                }
+              >
+                Unlock login
+              </NavLink>
             </nav>
           </div>
           <div className="flex flex-wrap items-end gap-2 text-xs max-w-xl">
-            <label className="block text-slate-500 w-full">X-Platform-Admin-Key (session only)</label>
+            <label className="block text-slate-500 w-full">
+              Platform admin key (same as PLATFORM_ADMIN_API_KEY; session only)
+            </label>
             <input
               type="password"
               autoComplete="off"
@@ -81,9 +122,10 @@ export default function PlatformShellLayout() {
             <button
               type="button"
               onClick={() => void saveKey()}
-              className="rounded bg-slate-700 px-2 py-1 text-white hover:bg-slate-600"
+              disabled={saveBusy}
+              className="rounded bg-slate-700 px-2 py-1 text-white hover:bg-slate-600 disabled:opacity-50"
             >
-              Save
+              {saveBusy ? "Checking…" : "Save"}
             </button>
             <button
               type="button"
@@ -94,6 +136,11 @@ export default function PlatformShellLayout() {
             </button>
           </div>
         </div>
+        {saveError ? (
+          <div className="max-w-6xl mx-auto px-4 pb-2">
+            <div className="rounded border border-red-900/60 bg-red-950/50 px-3 py-2 text-sm text-red-100">{saveError}</div>
+          </div>
+        ) : null}
       </header>
 
       {(!hasKey || authRequired) && (

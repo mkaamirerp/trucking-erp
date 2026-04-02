@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PLATFORM } from "../routes";
-import { platformAdminJson, PlatformAdminUnauthorizedError } from "../lib/platformAdminFetch";
+import {
+  getPlatformAdminApiKey,
+  platformAdminJson,
+  PlatformAdminUnauthorizedError,
+} from "../lib/platformAdminFetch";
 import { signalPlatformAdminUnauthorized } from "../components/PlatformShellLayout";
 import type { PlatformTenantRow } from "../types/platformAdmin";
 
@@ -13,6 +17,12 @@ export default function PlatformTenantsPage() {
   const load = useCallback(async () => {
     setError(null);
     setLoading(true);
+    if (!getPlatformAdminApiKey().trim()) {
+      setRows(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     try {
       const data = await platformAdminJson<PlatformTenantRow[]>("/platform/tenants");
       setRows(Array.isArray(data) ? data : []);
@@ -66,6 +76,7 @@ export default function PlatformTenantsPage() {
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">DB</th>
+                <th className="px-3 py-2 font-medium">Sign-in</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -80,6 +91,14 @@ export default function PlatformTenantsPage() {
                   <td className="px-3 py-2 text-slate-300">{t.name}</td>
                   <td className="px-3 py-2 text-slate-300">{t.status}</td>
                   <td className="px-3 py-2 text-slate-300">{t.db_status ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    <Link
+                      className="text-indigo-400 hover:text-indigo-300 hover:underline whitespace-nowrap"
+                      to={`${PLATFORM.TENANT_DETAIL(t.id)}#unlock-sign-in`}
+                    >
+                      Unlock sign-in
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

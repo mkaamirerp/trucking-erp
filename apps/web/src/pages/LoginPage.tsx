@@ -4,13 +4,20 @@ import {
   login,
   loginStepUpIssue,
   loginStepUpVerify,
+  getTenantStatus,
+  LoginRateLimitedError,
   LoginVerificationRequiredError,
   LoginStepUpRequiredError,
 } from "../api";
 import { authErrorToMessage } from "../utils/authErrorToMessage";
 import { loadTurnstileScript } from "../lib/turnstile";
+import { getTenantSlugFromHost } from "../tenant";
 
-const TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "").trim();
+/** Optional build-time fallback; on workspace hosts the API value from GET /api/v1/public/tenant/{slug} wins when present. */
+const VITE_TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "").trim();
+
+const SIGN_IN_SECURITY_HINT =
+  "If you did not try to sign in, use Forgot password after you regain access, or contact your workspace admin.";
 
 function loginErrorStatus(err: unknown): number {
   if (err instanceof Error && "status" in err && typeof (err as Error & { status?: number }).status === "number") {
@@ -22,6 +29,9 @@ function loginErrorStatus(err: unknown): number {
 function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const tenantSlug = getTenantSlugFromHost();
+  /** Runtime Turnstile site key from GET /api/v1/public/tenant/{slug}; prefer over VITE when non-empty. */
+  const [apiTurnstile, setApiTurnstile] = useState<{ loaded: boolean; key: string }>({ loaded: false, key: "" });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -29,6 +39,12 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [needsVerification, setNeedsVerification] = useState(false);
   const [loginChallengeId, setLoginChallengeId] = useState<string | null>(null);
+  /** After admin cleared a sign-in block: show plain-language notice on the MFA step. */
+  const [stepUpAfterAdminUnlock, setStepUpAfterAdminUnlock] = useState(false);
+  /** User preference: remember browser after successful sign-in (optional cookie, set only when allowed). */
+  const [trustThisDevice, setTrustThisDevice] = useState(false);
+  /** Sign-in rate limit (POST /auth/login 429): seconds until user can retry without refresh. */
+  const [loginLockoutSeconds, setLoginLockoutSeconds] = useState(0);
 
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
@@ -40,6 +56,35 @@ function LoginPage() {
     const sessionError = location.state?.sessionError as string | undefined;
     if (sessionError) setError(sessionError);
   }, [location.state]);
+
+  useEffect(() => {
+    if (!tenantSlug) {
+      setApiTurnstile({ loaded: true, key: "" });
+      return;
+    }
+    let cancelled = false;
+    setApiTurnstile({ loaded: false, key: "" });
+    getTenantStatus(tenantSlug)
+      .then((t) => {
+        if (!cancelled) setApiTurnstile({ loaded: true, key: (t.turnstile_site_key ?? "").trim() });
+      })
+      .catch(() => {
+        if (!cancelled) setApiTurnstile({ loaded: true, key: "" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantSlug]);
+
+  const turnstileSiteKey = (apiTurnstile.key || VITE_TURNSTILE_SITE_KEY || "").trim();
+
+  useEffect(() => {
+    if (loginLockoutSeconds <= 0) return;
+    const id = window.setTimeout(() => {
+      setLoginLockoutSeconds((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => window.clearTimeout(id);
+  }, [loginLockoutSeconds]);
 
   const navigateAfterLogin = useCallback(
     (result: { workspace_url?: string }) => {
@@ -60,6 +105,7 @@ function LoginPage() {
   const resetStepUpState = useCallback(() => {
     setLoginChallengeId(null);
     setOtpCode("");
+    setStepUpAfterAdminUnlock(false);
     otpFlowTurnstileRef.current = null;
   }, []);
 
@@ -72,11 +118,21 @@ function LoginPage() {
           email,
           password,
           turnstile_token: turnstileToken ?? undefined,
+          // Password-only sign-in: no MFA checkbox; keep convenient trust cookie unless policy adds a checkbox here later.
+          trust_this_device: true,
         });
+        setLoginLockoutSeconds(0);
         setNeedsVerification(false);
         resetStepUpState();
         navigateAfterLogin(result);
       } catch (err) {
+        if (err instanceof LoginRateLimitedError) {
+          setLoginLockoutSeconds(err.retryAfterSeconds);
+          setError(err.message);
+          setNeedsVerification(false);
+          resetStepUpState();
+          return;
+        }
         if (err instanceof LoginStepUpRequiredError) {
           otpFlowTurnstileRef.current = turnstileToken ?? null;
           try {
@@ -89,12 +145,30 @@ function LoginPage() {
           }
           setError(null);
           setNeedsVerification(false);
+          setTrustThisDevice(false);
+          setStepUpAfterAdminUnlock(err.afterSignInUnlock);
           setLoginChallengeId(err.loginChallengeId);
           return;
         }
         if (err instanceof LoginVerificationRequiredError) {
-          if (!TURNSTILE_SITE_KEY) {
-            setError("Sign-in verification is unavailable. Please try again later or contact support.");
+          let key = turnstileSiteKey;
+          if (!key && tenantSlug) {
+            try {
+              const t = await getTenantStatus(tenantSlug);
+              const k = (t.turnstile_site_key ?? "").trim();
+              setApiTurnstile({ loaded: true, key: k });
+              if (k) key = k;
+              else if (VITE_TURNSTILE_SITE_KEY) key = VITE_TURNSTILE_SITE_KEY.trim();
+            } catch {
+              /* ignore */
+            }
+          }
+          if (!key) {
+            setError(
+              "For your security we need a quick check before you sign in, but this workspace is not finished being set up for that yet. " +
+                "Your administrator should add the Turnstile site key to the server (TURNSTILE_SITE_KEY — the public key, alongside the secret). " +
+                "After that, refresh this page and try again.",
+            );
             setNeedsVerification(false);
           } else {
             setError(null);
@@ -111,7 +185,7 @@ function LoginPage() {
         setLoading(false);
       }
     },
-    [email, password, navigateAfterLogin, resetStepUpState]
+    [email, password, navigateAfterLogin, resetStepUpState, turnstileSiteKey]
   );
 
   // Changing credentials ends verification / step-up flows.
@@ -121,7 +195,7 @@ function LoginPage() {
   }, [email, password, resetStepUpState]);
 
   useEffect(() => {
-    if (!needsVerification || !TURNSTILE_SITE_KEY) return;
+    if (!needsVerification || !turnstileSiteKey) return;
     const el = turnstileContainerRef.current;
     if (!el) return;
 
@@ -143,7 +217,7 @@ function LoginPage() {
       }
       el.innerHTML = "";
       widgetIdRef.current = window.turnstile.render(el, {
-        sitekey: TURNSTILE_SITE_KEY,
+        sitekey: turnstileSiteKey,
         callback: (token: string) => {
           void performLogin(token);
         },
@@ -165,7 +239,7 @@ function LoginPage() {
       }
       el.innerHTML = "";
     };
-  }, [needsVerification, performLogin]);
+  }, [needsVerification, performLogin, turnstileSiteKey]);
 
   const handleOtpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,13 +253,23 @@ function LoginPage() {
         password,
         login_challenge_id: loginChallengeId,
         turnstile_token: otpFlowTurnstileRef.current ?? undefined,
+        trust_this_device: trustThisDevice,
       });
+      setLoginLockoutSeconds(0);
       resetStepUpState();
       navigateAfterLogin(result);
     } catch (err) {
+      if (err instanceof LoginRateLimitedError) {
+        setLoginLockoutSeconds(err.retryAfterSeconds);
+        setError(err.message);
+        return;
+      }
       if (err instanceof LoginVerificationRequiredError) {
-        if (!TURNSTILE_SITE_KEY) {
-          setError("Sign-in verification is unavailable. Please try again later or contact support.");
+        if (!turnstileSiteKey) {
+          setError(
+            "We still need the sign-in check to finish, but the verification step is not available on this page yet. " +
+              "An administrator should set TURNSTILE_SITE_KEY on the server (public site key next to the secret), then refresh.",
+          );
         } else {
           setError(null);
           setNeedsVerification(true);
@@ -193,7 +277,7 @@ function LoginPage() {
         return;
       }
       if (err instanceof LoginStepUpRequiredError) {
-        setError("Additional verification is still required. Try signing in again.");
+        setError("We still need to verify it’s you. Try signing in again.");
         resetStepUpState();
         return;
       }
@@ -245,7 +329,17 @@ function LoginPage() {
           <p className="trk-foot">Access your company workspace</p>
 
           <form onSubmit={handleSubmit}>
-            {error && <div className="trk-error">{error}</div>}
+            {(error || loginLockoutSeconds > 0) && (
+              <div className="trk-error" role="status">
+                {error ? <p>{error}</p> : null}
+                {loginLockoutSeconds > 0 ? (
+                  <p style={{ marginTop: error ? "0.5rem" : 0, fontWeight: 600 }}>
+                    You can try again in{" "}
+                    {`${Math.floor(loginLockoutSeconds / 60)}:${String(loginLockoutSeconds % 60).padStart(2, "0")}`}
+                  </p>
+                ) : null}
+              </div>
+            )}
 
             <div className="trk-field">
               <label className="trk-label">Email</label>
@@ -256,7 +350,7 @@ function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="trk-input"
                 placeholder="admin@company.com"
-                disabled={Boolean(loginChallengeId)}
+                disabled={Boolean(loginChallengeId) || loginLockoutSeconds > 0}
               />
             </div>
 
@@ -269,15 +363,24 @@ function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="trk-input"
                 placeholder="••••••••"
-                disabled={Boolean(loginChallengeId)}
+                disabled={Boolean(loginChallengeId) || loginLockoutSeconds > 0}
               />
             </div>
 
             {loginChallengeId ? (
               <div className="trk-field">
-                <p className="trk-foot" style={{ marginBottom: "0.75rem" }}>
-                  Enter the verification code sent to your email.
-                </p>
+                {stepUpAfterAdminUnlock ? (
+                  <div className="trk-callout-info" role="status">
+                    <p>
+                      This sign-in lock was cleared. For security, enter the verification code we sent to your
+                      email.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="trk-foot" style={{ marginBottom: "0.75rem" }}>
+                    Enter the verification code sent to your email.
+                  </p>
+                )}
                 <label className="trk-label">Verification code</label>
                 <input
                   type="text"
@@ -287,23 +390,46 @@ function LoginPage() {
                   onChange={(e) => setOtpCode(e.target.value)}
                   className="trk-input"
                   placeholder="6-digit code"
+                  disabled={loginLockoutSeconds > 0}
                 />
-                <button type="button" className="trk-link" style={{ marginTop: "0.5rem", background: "none", border: "none", padding: 0, cursor: "pointer" }} onClick={() => void handleResendStepUp()} disabled={loading}>
+                <button type="button" className="trk-link" style={{ marginTop: "0.5rem", background: "none", border: "none", padding: 0, cursor: "pointer" }} onClick={() => void handleResendStepUp()} disabled={loading || loginLockoutSeconds > 0}>
                   Resend code
                 </button>
+
+                <label className="trk-check">
+                  <input
+                    type="checkbox"
+                    checked={trustThisDevice}
+                    onChange={(e) => setTrustThisDevice(e.target.checked)}
+                    disabled={loginLockoutSeconds > 0}
+                  />
+                  <span>
+                    Trust this device
+                    <span className="trk-check-hint">Skip the verification code on this device next time.</span>
+                  </span>
+                </label>
               </div>
             ) : null}
 
-            {needsVerification && TURNSTILE_SITE_KEY && !loginChallengeId ? (
+            {needsVerification && turnstileSiteKey && !loginChallengeId ? (
               <div className="trk-field">
                 <p className="trk-foot" style={{ marginBottom: "0.75rem" }}>
-                  Complete verification to continue signing in.
+                  Complete the verification below to continue signing in.
                 </p>
                 <div ref={turnstileContainerRef} className="trk-turnstile-host" />
+                <p className="trk-foot" style={{ marginTop: "0.75rem", fontSize: "0.9rem" }}>
+                  {SIGN_IN_SECURITY_HINT}
+                </p>
               </div>
             ) : null}
 
-            <button type="submit" disabled={loading} className="trk-primary">
+            {loginChallengeId ? (
+              <p className="trk-foot" style={{ marginTop: "-0.5rem", marginBottom: "0.5rem", fontSize: "0.9rem" }}>
+                {SIGN_IN_SECURITY_HINT}
+              </p>
+            ) : null}
+
+            <button type="submit" disabled={loading || loginLockoutSeconds > 0} className="trk-primary">
               {loading ? "Please wait..." : loginChallengeId ? "Verify and sign in" : "Sign in"}
             </button>
 

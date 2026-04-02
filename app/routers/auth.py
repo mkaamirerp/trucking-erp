@@ -42,11 +42,13 @@ from app.utils.email import send_password_reset_email
 from app.utils.rate_limit import (
     check_create_workspace_rate_limits,
     rate_limit_forgot_password,
+    rate_limit_forgot_password_respects_login_tenant_bucket,
     rate_limit_login_ip,
     rate_limit_login_tenant_email,
     rate_limit_login_step_up_issue,
     rate_limit_login_step_up_verify,
 )
+from app.utils.login_trust_cookie import clear_login_trust_cookie, set_login_trust_cookie, verify_login_trust_cookie
 from app.utils.slug import is_slug_available
 from app.schemas.signup import CreateWorkspaceRequest, VerifyOTPResponse, _normalize_phone_digits
 from app.services.workspace_bootstrap import provision_new_workspace_for_platform_user
@@ -218,6 +220,7 @@ async def logout(response: Response):
         params_refresh = _clear_cookie_params(TokenType.REFRESH)
         response.set_cookie("access_token", "", **params_access)
         response.set_cookie("refresh_token", "", **params_refresh)
+        clear_login_trust_cookie(response)
     except Exception:
         # Still return 200 so client can clear local state
         pass
@@ -273,6 +276,8 @@ class LoginRequest(BaseModel):
         validation_alias=AliasChoices("turnstile_token", "cf_turnstile_response", "cf-turnstile-response"),
     )
     login_challenge_id: str | None = None
+    # After successful login: if true, set optional device-trust cookie. Default false (opt-in, e.g. MFA checkbox).
+    trust_this_device: bool = False
 
 
 class LoginStepUpIssueRequest(BaseModel):
@@ -308,6 +313,8 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
         email_norm = normalize_auth_email(payload.email)
         await rate_limit_forgot_password(request, email_norm)
         tenant_id = getattr(request.state, "tenant_id", None)
+        if tenant_id is not None:
+            await rate_limit_forgot_password_respects_login_tenant_bucket(int(tenant_id), email_norm)
         tenant_row = None
         if tenant_id is not None:
             tenant_row = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == int(tenant_id)))
@@ -856,6 +863,8 @@ async def login(
     if tenant.status != "ACTIVE" or tenant.db_status != "READY":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
 
+    familiar_device = verify_login_trust_cookie(request, int(tenant_id))
+
     if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
         sub: int | None = None
         sv_out: int | None = None
@@ -979,8 +988,16 @@ async def login(
         )
         response.set_cookie("access_token", access, **_cookie_params(TokenType.ACCESS))
         response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
+        if payload.trust_this_device:
+            set_login_trust_cookie(response, int(tenant_id))
         workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
-        return {"ok": True, "workspace_url": workspace_url, "access_token": access, "refresh_token": refresh}
+        return {
+            "ok": True,
+            "workspace_url": workspace_url,
+            "access_token": access,
+            "refresh_token": refresh,
+            "familiar_device": familiar_device,
+        }
 
     user = await db.scalar(select(PlatformUser).where(PlatformUser.email == email_norm))
     if not user:
@@ -1064,8 +1081,16 @@ async def login(
     response.set_cookie("refresh_token", refresh, **_cookie_params(TokenType.REFRESH))
 
     await clear_login_password_fail_streak(tenant_id, email_norm)
+    if payload.trust_this_device:
+        set_login_trust_cookie(response, int(tenant_id))
     workspace_url = _workspace_url(request, tenant.slug, "/dashboard")
-    return {"ok": True, "workspace_url": workspace_url, "access_token": access, "refresh_token": refresh}
+    return {
+        "ok": True,
+        "workspace_url": workspace_url,
+        "access_token": access,
+        "refresh_token": refresh,
+        "familiar_device": familiar_device,
+    }
 
 
 @router.post("/login-step-up/issue")

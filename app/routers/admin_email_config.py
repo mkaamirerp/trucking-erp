@@ -12,6 +12,7 @@ V1 Gmail callback: tenant_email_accounts is the authoritative write target.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -33,6 +34,13 @@ from app.models.email_mailbox import TenantEmailMailbox
 from app.models.platform_integration import TenantIntegrationSecret
 from app.models.tenant_email_account import TenantEmailAccount
 from app.schemas.email_config import EmailConfigOut, EmailConfigUpdate, EmailConfigTestOut
+from app.services.email_ingestion_imap import (
+    EMAIL_PROVIDER_OTHER,
+    imap_test_connection_sync,
+    load_mailbox_secret_json,
+    smtp_test_connection_sync,
+    sync_other_imap_inbox_for_tenant,
+)
 from app.services.gmail_oauth import (
     build_authorize_url,
     exchange_code_for_tokens,
@@ -43,6 +51,20 @@ from app.services.gmail_oauth import (
     refresh_access_token,
 )
 from app.services.email_ingestion_gmail import bootstrap_gmail_history_cursor, sync_gmail_inbox_for_tenant
+from app.services.microsoft_graph_sync import (
+    PROVIDER_MICROSOFT365,
+    ensure_microsoft_subscription,
+    renew_microsoft_subscription_if_due,
+    stop_microsoft_subscription_safe,
+    sync_microsoft_delta_for_tenant,
+)
+from app.services.microsoft_oauth import (
+    build_microsoft_authorize_url,
+    exchange_ms_code_for_tokens,
+    graph_get_me_profile,
+    make_ms_state,
+    parse_ms_state,
+)
 from app.services.gmail_mailbox_platform_index import (
     delete_gmail_mailbox_mappings_for_tenant,
     upsert_gmail_mailbox_tenant_mapping,
@@ -81,22 +103,97 @@ def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
         imap_host=None,
         imap_port=None,
         imap_username=None,
+        imap_security=None,
         smtp_host=None,
         smtp_port=None,
         smtp_username=None,
+        reply_to=None,
+        smtp_security=None,
         use_ssl=None,
         use_tls=None,
         oauth_provider="google",
         oauth_account_email=acc.email_address,
+        connection_status=None,
         last_tested_at=None,
         last_test_status=None,
+        last_inbound_test_at=None,
+        last_outbound_test_at=None,
         last_error_code=None,
         last_error_message=acc.last_error,
         last_inbound_sync_at=acc.last_sync_at,
+        last_sync_status=None,
+        last_sync_error=None,
+        imap_uidvalidity=None,
+        imap_last_seen_uid=None,
         gmail_history_cursor_present=cursor_present,
         gmail_watch_active=watch_active,
         gmail_watch_expires_at=acc.gmail_watch_expiration_at,
         last_gmail_webhook_at=acc.last_gmail_webhook_at,
+        ms_graph_subscription_id=None,
+        ms_graph_subscription_status=None,
+        ms_graph_subscription_expiration_at=None,
+        ms_graph_delta_cursor_present=None,
+        ms_graph_last_notification_at=None,
+        ms_graph_last_delta_sync_at=None,
+        ms_graph_last_sync_status=None,
+        ms_graph_last_sync_error=None,
+        created_at=acc.created_at,
+        updated_at=acc.updated_at,
+    )
+
+
+def _microsoft_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
+    delta_present = bool(acc.ms_graph_delta_link and str(acc.ms_graph_delta_link).strip())
+    return EmailConfigOut(
+        id=acc.id,
+        tenant_id=acc.tenant_id,
+        email_address=acc.email_address or "",
+        display_name=None,
+        mailbox_type="microsoft365",
+        provider_name="Microsoft 365 / Outlook",
+        connection_mode="oauth",
+        is_primary=acc.is_primary,
+        is_active=True,
+        inbound_enabled=True,
+        outbound_enabled=True,
+        status=acc.status,
+        imap_host=None,
+        imap_port=None,
+        imap_username=None,
+        imap_security=None,
+        smtp_host=None,
+        smtp_port=None,
+        smtp_username=None,
+        reply_to=None,
+        smtp_security=None,
+        use_ssl=None,
+        use_tls=None,
+        oauth_provider="microsoft",
+        oauth_account_email=acc.email_address,
+        connection_status=acc.ms_graph_subscription_status,
+        last_tested_at=None,
+        last_test_status=None,
+        last_inbound_test_at=None,
+        last_outbound_test_at=None,
+        last_error_code=None,
+        last_error_message=acc.last_error,
+        last_inbound_sync_at=acc.last_sync_at,
+        last_sync_status=acc.ms_graph_last_sync_status,
+        last_sync_error=acc.ms_graph_last_sync_error,
+        imap_uidvalidity=None,
+        imap_last_seen_uid=None,
+        gmail_history_cursor_present=None,
+        gmail_watch_active=None,
+        gmail_watch_expires_at=None,
+        last_gmail_webhook_at=None,
+        ms_graph_subscription_id=acc.ms_graph_subscription_id,
+        ms_graph_subscription_status=acc.ms_graph_subscription_status,
+        ms_graph_subscription_expiration_at=acc.ms_graph_subscription_expiration_at,
+        ms_graph_delta_cursor_present=delta_present,
+        ms_graph_last_notification_at=acc.ms_graph_last_notification_at,
+        ms_graph_last_delta_sync_at=acc.ms_graph_last_delta_sync_at,
+        ms_graph_last_sync_status=acc.ms_graph_last_sync_status,
+        ms_graph_last_sync_error=acc.ms_graph_last_sync_error,
         created_at=acc.created_at,
         updated_at=acc.updated_at,
     )
@@ -119,29 +216,47 @@ def _mailbox_to_out(m: TenantEmailMailbox) -> EmailConfigOut:
         imap_host=m.imap_host,
         imap_port=m.imap_port,
         imap_username=m.imap_username,
+        imap_security=m.imap_security,
         smtp_host=m.smtp_host,
         smtp_port=m.smtp_port,
         smtp_username=m.smtp_username,
+        smtp_security=m.smtp_security,
+        reply_to=m.reply_to,
         use_ssl=m.use_ssl,
         use_tls=m.use_tls,
         oauth_provider=m.oauth_provider,
         oauth_account_email=m.oauth_account_email,
+        connection_status=m.connection_status,
         last_tested_at=m.last_tested_at,
         last_test_status=m.last_test_status,
+        last_inbound_test_at=m.last_inbound_test_at,
+        last_outbound_test_at=m.last_outbound_test_at,
         last_error_code=m.last_error_code,
         last_error_message=m.last_error_message,
         last_inbound_sync_at=m.last_sync_at,
+        last_sync_status=m.last_sync_status,
+        last_sync_error=m.last_sync_error,
+        imap_uidvalidity=int(m.imap_uidvalidity) if m.imap_uidvalidity is not None else None,
+        imap_last_seen_uid=int(m.imap_last_seen_uid) if m.imap_last_seen_uid is not None else None,
         gmail_history_cursor_present=None,
         gmail_watch_active=None,
         gmail_watch_expires_at=None,
         last_gmail_webhook_at=None,
+        ms_graph_subscription_id=None,
+        ms_graph_subscription_status=None,
+        ms_graph_subscription_expiration_at=None,
+        ms_graph_delta_cursor_present=None,
+        ms_graph_last_notification_at=None,
+        ms_graph_last_delta_sync_at=None,
+        ms_graph_last_sync_status=None,
+        ms_graph_last_sync_error=None,
         created_at=m.created_at,
         updated_at=m.updated_at,
     )
 
 
-def _build_secret_payload(payload: EmailConfigUpdate) -> dict:
-    out: dict = {}
+def _merge_secret_payload(payload: EmailConfigUpdate, existing: dict) -> dict:
+    out = dict(existing or {})
     if payload.imap_password:
         out["imap_password"] = payload.imap_password
     if payload.smtp_password:
@@ -169,6 +284,14 @@ def _platform_callback_url() -> str:
         return url.rstrip("/")
     base = settings.base_domain or "truckerp.me"
     return f"https://{base}/api/v1/admin/email-config/gmail/callback"
+
+
+def _microsoft_platform_callback_url() -> str:
+    url = settings.microsoft_oauth_callback_url
+    if url:
+        return url.rstrip("/")
+    base = settings.base_domain or "truckerp.me"
+    return f"https://{base}/api/v1/admin/email-config/microsoft/callback"
 
 
 @router.get("/email-config/gmail/authorize")
@@ -344,6 +467,202 @@ async def gmail_callback(
     return RedirectResponse(url=f"{return_url}?gmail=connected", status_code=302)
 
 
+async def _microsoft_callback_ctx(
+    request: Request,
+    state: str | None = Query(None),
+):
+    if not state:
+        state = request.query_params.get("state")
+    if not state:
+        return _gmail_callback_error_redirect(None, "missing_params")
+    parsed = parse_ms_state(state)
+    if not parsed:
+        return _gmail_callback_error_redirect(None, "invalid_state")
+    tid, slug = parsed
+    request.state.tenant_id = tid
+    request.state.tenant_slug = slug
+    return {"tenant_id": tid, "tenant_slug": slug}
+
+
+@router.get("/email-config/microsoft/authorize")
+async def microsoft_authorize(
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    if not settings.microsoft_client_id:
+        raise HTTPException(
+            status_code=503,
+            detail="Microsoft 365 integration is not configured. Contact your administrator.",
+        )
+    redirect_uri = _microsoft_platform_callback_url()
+    state = make_ms_state(tenant_id, tenant_slug)
+    try:
+        url = build_microsoft_authorize_url(redirect_uri=redirect_uri, state=state)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return RedirectResponse(url=url, status_code=302)
+
+
+@router.get("/email-config/microsoft/callback")
+async def microsoft_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    callback_ctx: dict | RedirectResponse = Depends(_microsoft_callback_ctx),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    if isinstance(callback_ctx, RedirectResponse):
+        return callback_ctx
+    if not isinstance(callback_ctx, dict) or "tenant_id" not in callback_ctx or "tenant_slug" not in callback_ctx:
+        base = settings.base_domain or "truckerp.me"
+        return RedirectResponse(url=f"https://{base}/?ms_error=invalid_state", status_code=302)
+    tid = callback_ctx["tenant_id"]
+    slug = callback_ctx["tenant_slug"]
+    return_url = _return_url(slug)
+    if not code:
+        code = request.query_params.get("code")
+    if not state:
+        state = request.query_params.get("state")
+    if error:
+        return RedirectResponse(url=f"{return_url}?ms_error={error}", status_code=302)
+    if not code or not state:
+        return RedirectResponse(url=f"{return_url}?ms_error=missing_params", status_code=302)
+    if not current_user or not is_tenant_admin(current_user.role):
+        return RedirectResponse(url=f"{return_url}?ms_error=unauthorized", status_code=302)
+    redirect_uri = _microsoft_platform_callback_url()
+    try:
+        tokens = await exchange_ms_code_for_tokens(code=code, redirect_uri=redirect_uri)
+    except Exception:
+        return RedirectResponse(url=f"{return_url}?ms_error=token_exchange_failed", status_code=302)
+    access_token = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+
+    async for tenant_db in open_tenant_session_by_id(int(tid)):
+        existing = await tenant_db.scalar(
+            select(TenantEmailAccount)
+            .where(
+                TenantEmailAccount.tenant_id == int(tid),
+                TenantEmailAccount.provider == PROVIDER_MICROSOFT365,
+            )
+            .limit(1)
+        )
+        if not refresh_token and existing:
+            try:
+                refresh_token = decrypt_secret(existing.refresh_token_encrypted).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                pass
+        if not access_token or not refresh_token:
+            return RedirectResponse(url=f"{return_url}?ms_error=no_refresh_token", status_code=302)
+
+        profile = await graph_get_me_profile(access_token)
+        mail = (profile.get("mail") or profile.get("userPrincipalName") or "").strip() or None
+        oid = str(profile.get("id") or "").strip() or None
+
+        expires_in = tokens.get("expires_in")
+        token_expiry_at = None
+        if expires_in is not None and isinstance(expires_in, (int, float)):
+            token_expiry_at = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+        scope_str = tokens.get("scope")
+        access_enc = encrypt_secret(access_token)
+        refresh_enc = encrypt_secret(refresh_token)
+        user_id = str(current_user.user.id)
+        if existing:
+            existing.access_token_encrypted = access_enc
+            existing.refresh_token_encrypted = refresh_enc
+            existing.token_expiry_at = token_expiry_at
+            existing.scope = scope_str
+            existing.status = "CONNECTED"
+            existing.email_address = mail or existing.email_address
+            existing.provider_account_id = oid
+            existing.last_error = None
+            existing.connected_by_user_id = user_id
+            existing.updated_at = datetime.now(timezone.utc)
+            acc = existing
+        else:
+            acc = TenantEmailAccount(
+                tenant_id=int(tid),
+                provider=PROVIDER_MICROSOFT365,
+                email_address=mail,
+                status="CONNECTED",
+                access_token_encrypted=access_enc,
+                refresh_token_encrypted=refresh_enc,
+                token_expiry_at=token_expiry_at,
+                scope=scope_str,
+                is_primary=True,
+                connected_by_user_id=user_id,
+                provider_account_id=oid,
+            )
+            tenant_db.add(acc)
+        await tenant_db.flush()
+        try:
+            await ensure_microsoft_subscription(tenant_db, int(tid), acc, access_token=access_token)
+        except Exception as exc:
+            logger.warning("microsoft subscription create failed: %s", exc)
+            acc.ms_graph_last_sync_error = (str(exc) or "subscription_failed")[:2000]
+        await tenant_db.commit()
+        break
+
+    return RedirectResponse(url=f"{return_url}?microsoft365=connected", status_code=302)
+
+
+@router.post("/email-config/microsoft/renew-subscription")
+async def microsoft_renew_subscription_route(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+    force: bool = Query(False),
+):
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    acc = await tenant_db.scalar(
+        select(TenantEmailAccount)
+        .where(
+            TenantEmailAccount.tenant_id == tenant_id,
+            TenantEmailAccount.provider == PROVIDER_MICROSOFT365,
+        )
+        .limit(1)
+    )
+    if not acc:
+        raise HTTPException(status_code=404, detail="No Microsoft 365 account connected")
+    try:
+        ok = await renew_microsoft_subscription_if_due(
+            tenant_db, tenant_id, acc, renew_within_hours=0 if force else 12, force=force
+        )
+        return {"ok": True, "renewed": ok}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)[:240]) from e
+
+
+@router.post("/email-config/microsoft/sync-now")
+async def microsoft_sync_now(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+    max_pages: int = Query(25, ge=1, le=100),
+):
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    try:
+        r = await sync_microsoft_delta_for_tenant(tenant_db, tenant_id, max_pages=max_pages)
+        return {
+            "ok": True,
+            "tenant_id": r.tenant_id,
+            "provider": r.provider,
+            "messages_processed": r.messages_processed,
+            "delta_pages": r.delta_pages,
+            "delta_cursor_advanced": r.delta_cursor_advanced,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("microsoft_sync_failed tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="Microsoft sync failed") from e
+
+
 @router.post("/email-config/primary/disconnect")
 async def disconnect_primary_email_config(
     tenant_id: int = Depends(require_tenant),
@@ -369,8 +688,23 @@ async def disconnect_primary_email_config(
                 ).limit(1)
             )
             if secret_row:
-                platform_db.delete(secret_row)
-        tenant_db.delete(row)
+                await platform_db.delete(secret_row)
+        await tenant_db.delete(row)
+        await platform_db.commit()
+        await tenant_db.commit()
+        return {"ok": True, "message": "Mailbox disconnected"}
+
+    ms_acc = await tenant_db.scalar(
+        select(TenantEmailAccount)
+        .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == PROVIDER_MICROSOFT365)
+        .limit(1)
+    )
+    if ms_acc:
+        try:
+            await stop_microsoft_subscription_safe(tenant_db, ms_acc)
+        except Exception as exc:
+            logger.warning("microsoft disconnect cleanup: %s", exc)
+        await tenant_db.delete(ms_acc)
         await platform_db.commit()
         await tenant_db.commit()
         return {"ok": True, "message": "Mailbox disconnected"}
@@ -384,7 +718,7 @@ async def disconnect_primary_email_config(
     if gmail_acc:
         await delete_gmail_mailbox_mappings_for_tenant(platform_db, tenant_id=tenant_id)
         await stop_gmail_watch_for_tenant(tenant_db, tenant_id)
-        tenant_db.delete(gmail_acc)
+        await tenant_db.delete(gmail_acc)
         await platform_db.commit()
         await tenant_db.commit()
         return {"ok": True, "message": "Mailbox disconnected"}
@@ -409,7 +743,13 @@ async def get_primary_email_config(
     )
     if row:
         return _mailbox_to_out(row)
-    # Gmail OAuth (V1): check tenant_email_accounts
+    ms = await db.scalar(
+        select(TenantEmailAccount)
+        .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == PROVIDER_MICROSOFT365)
+        .limit(1)
+    )
+    if ms:
+        return _microsoft_account_to_out(ms)
     gmail = await db.scalar(
         select(TenantEmailAccount)
         .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
@@ -431,10 +771,10 @@ async def upsert_primary_email_config(
     """Create or update primary mailbox config. Credentials encrypted in platform DB."""
     if not is_tenant_admin(current_user.role):
         raise HTTPException(status_code=403, detail="Admin role required")
-    if payload.connection_mode == "oauth" and payload.mailbox_type != "gmail":
+    if payload.connection_mode == "oauth" and payload.mailbox_type not in ("gmail", "microsoft365"):
         raise HTTPException(
             status_code=400,
-            detail="OAuth is only available for Gmail. Use Connect Gmail button, or manual IMAP/SMTP for other providers.",
+            detail="OAuth is only available for Gmail or Microsoft 365. Use Connect buttons, or manual IMAP/SMTP for other providers.",
         )
 
     row = await tenant_db.scalar(
@@ -443,11 +783,34 @@ async def upsert_primary_email_config(
         .limit(1)
     )
 
-    secret_payload = _build_secret_payload(payload)
+    mbox_type = (payload.mailbox_type or EMAIL_PROVIDER_OTHER).strip().lower()
+    if mbox_type == "imap":
+        mbox_type = EMAIL_PROVIDER_OTHER
+
+    existing_json: dict = {}
+    if row and row.credential_ref:
+        sr0 = await platform_db.scalar(
+            select(TenantIntegrationSecret).where(
+                TenantIntegrationSecret.credential_ref == row.credential_ref,
+                TenantIntegrationSecret.tenant_id == tenant_id,
+            ).limit(1)
+        )
+        if sr0:
+            existing_json = load_mailbox_secret_json(sr0)
+
+    merged_secret = _merge_secret_payload(payload, existing_json)
+    need_secret_write = bool(
+        payload.imap_password
+        or payload.smtp_password
+        or payload.oauth_access_token
+        or payload.oauth_refresh_token
+    )
     new_credential_ref: str | None = None
 
-    if secret_payload:
-        plaintext = json.dumps(secret_payload)
+    secret_platform_value = EMAIL_PROVIDER_OTHER if mbox_type == EMAIL_PROVIDER_OTHER else (mbox_type or "imap")
+
+    if need_secret_write and merged_secret:
+        plaintext = json.dumps(merged_secret)
         encrypted = encrypt_secret(plaintext)
 
         if row and row.credential_ref:
@@ -459,13 +822,14 @@ async def upsert_primary_email_config(
             )
             if secret_row:
                 secret_row.encrypted_payload = encrypted
+                secret_row.provider = secret_platform_value
                 secret_row.updated_at = datetime.now(timezone.utc)
             else:
                 cred_ref = generate_credential_ref()
                 secret_row = TenantIntegrationSecret(
                     tenant_id=tenant_id,
                     integration_type="email_mailbox",
-                    provider=payload.mailbox_type or "imap",
+                    provider=secret_platform_value,
                     credential_ref=cred_ref,
                     encrypted_payload=encrypted,
                 )
@@ -477,7 +841,7 @@ async def upsert_primary_email_config(
             secret_row = TenantIntegrationSecret(
                 tenant_id=tenant_id,
                 integration_type="email_mailbox",
-                provider=payload.mailbox_type or "imap",
+                provider=secret_platform_value,
                 credential_ref=cred_ref,
                 encrypted_payload=encrypted,
             )
@@ -489,19 +853,23 @@ async def upsert_primary_email_config(
     now = datetime.now(timezone.utc)
 
     if row:
-        row.email_address = payload.email_address
+        row.email_address = str(payload.email_address)
         row.display_name = payload.display_name
-        row.mailbox_type = payload.mailbox_type or "imap"
+        row.reply_to = payload.reply_to
+        row.mailbox_type = mbox_type
         row.provider_name = payload.provider_name
         row.connection_mode = payload.connection_mode
         row.inbound_enabled = payload.inbound_enabled
         row.outbound_enabled = payload.outbound_enabled
+        row.is_primary = payload.is_primary
         row.imap_host = payload.imap_host
         row.imap_port = payload.imap_port
         row.imap_username = payload.imap_username
+        row.imap_security = payload.imap_security
         row.smtp_host = payload.smtp_host
         row.smtp_port = payload.smtp_port
         row.smtp_username = payload.smtp_username
+        row.smtp_security = payload.smtp_security
         row.use_ssl = payload.use_ssl
         row.use_tls = payload.use_tls
         row.oauth_provider = payload.oauth_provider
@@ -515,19 +883,23 @@ async def upsert_primary_email_config(
         row = TenantEmailMailbox(
             tenant_id=tenant_id,
             credential_ref=new_credential_ref,
-            email_address=payload.email_address,
+            email_address=str(payload.email_address),
             display_name=payload.display_name,
-            mailbox_type=payload.mailbox_type or "imap",
+            reply_to=payload.reply_to,
+            mailbox_type=mbox_type,
             provider_name=payload.provider_name,
             connection_mode=payload.connection_mode,
             inbound_enabled=payload.inbound_enabled,
             outbound_enabled=payload.outbound_enabled,
+            is_primary=payload.is_primary,
             imap_host=payload.imap_host,
             imap_port=payload.imap_port,
             imap_username=payload.imap_username,
+            imap_security=payload.imap_security,
             smtp_host=payload.smtp_host,
             smtp_port=payload.smtp_port,
             smtp_username=payload.smtp_username,
+            smtp_security=payload.smtp_security,
             use_ssl=payload.use_ssl,
             use_tls=payload.use_tls,
             oauth_provider=payload.oauth_provider,
@@ -617,28 +989,27 @@ async def test_primary_email_config(
                 return EmailConfigTestOut(ok=False, status="ERROR", message=row.last_error_message, last_tested_at=now.isoformat())
 
     if row.connection_mode == "manual" and row.imap_host and row.imap_username:
-        try:
-            import imaplib
-            port = row.imap_port or 993
-            use_ssl = row.use_ssl if row.use_ssl is not None else (port == 993)
-            M = imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
-            conn = M(row.imap_host, port)
-            if not imap_password:
-                conn.logout()
-                row.last_test_status = "ERROR"
-                row.last_error_message = "No password stored for manual IMAP"
-                row.status = "ERROR"
-            else:
-                conn.login(row.imap_username, imap_password)
-                conn.logout()
+        if not imap_password:
+            row.last_test_status = "ERROR"
+            row.last_error_message = "No password stored for manual IMAP"
+            row.status = "ERROR"
+        else:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: imap_test_connection_sync(row, imap_password),
+                )
                 row.last_test_status = "CONNECTED"
                 row.last_error_code = None
                 row.last_error_message = None
                 row.status = "CONNECTED"
-        except Exception as e:
-            row.last_test_status = "ERROR"
-            row.last_error_message = str(e)[:500]
-            row.status = "ERROR"
+                row.last_inbound_test_at = now
+                row.connection_status = "CONNECTED"
+            except Exception as e:
+                row.last_test_status = "ERROR"
+                row.last_error_message = str(e)[:500]
+                row.status = "ERROR"
+                row.connection_status = "ERROR"
     elif row.connection_mode == "oauth" and row.credential_ref:
         try:
             dec = decrypt_secret(secret_row.encrypted_payload) if secret_row else b"{}"
@@ -675,9 +1046,208 @@ async def test_primary_email_config(
     return EmailConfigTestOut(
         ok=row.last_test_status == "CONNECTED",
         status=row.last_test_status,
+        direction="inbound" if row.connection_mode == "manual" else None,
         message=row.last_error_message,
         last_tested_at=row.last_tested_at.isoformat() if row.last_tested_at else None,
     )
+
+
+@router.post("/email-config/primary/test-inbound", response_model=EmailConfigTestOut)
+async def test_primary_inbound_only(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+    platform_db: AsyncSession = Depends(get_db),
+):
+    """Test IMAP (inbound) for manual Other mailbox. Does not test SMTP."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    row = await tenant_db.scalar(
+        select(TenantEmailMailbox)
+        .where(TenantEmailMailbox.tenant_id == tenant_id, TenantEmailMailbox.is_primary == True)
+        .limit(1)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No primary mailbox configured")
+    mtype = (row.mailbox_type or "").strip().lower()
+    if mtype not in (EMAIL_PROVIDER_OTHER, "imap"):
+        raise HTTPException(
+            status_code=400,
+            detail="Inbound IMAP test applies to Other email provider mailboxes only",
+        )
+    if row.connection_mode != "manual" or not row.imap_host or not row.imap_username:
+        raise HTTPException(status_code=400, detail="IMAP host and username required")
+
+    now = datetime.now(timezone.utc)
+    imap_password: str | None = None
+    if row.credential_ref:
+        secret_row = await platform_db.scalar(
+            select(TenantIntegrationSecret).where(
+                TenantIntegrationSecret.credential_ref == row.credential_ref,
+                TenantIntegrationSecret.tenant_id == tenant_id,
+            ).limit(1)
+        )
+        if secret_row:
+            data = load_mailbox_secret_json(secret_row)
+            imap_password = data.get("imap_password")
+
+    if not imap_password:
+        row.last_inbound_test_at = now
+        row.last_error_message = "No IMAP password stored"
+        row.connection_status = "ERROR"
+        await tenant_db.commit()
+        return EmailConfigTestOut(
+            ok=False,
+            status="ERROR",
+            direction="inbound",
+            message=row.last_error_message,
+            last_tested_at=now.isoformat(),
+        )
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: imap_test_connection_sync(row, imap_password),
+        )
+        row.last_inbound_test_at = now
+        row.last_tested_at = now
+        row.last_test_status = "CONNECTED"
+        row.last_error_code = None
+        row.last_error_message = None
+        row.connection_status = "CONNECTED"
+        row.status = "CONNECTED"
+    except Exception as e:
+        row.last_inbound_test_at = now
+        row.last_test_status = "ERROR"
+        row.last_error_message = str(e)[:500]
+        row.connection_status = "ERROR"
+        row.status = "ERROR"
+
+    await tenant_db.commit()
+    return EmailConfigTestOut(
+        ok=row.last_test_status == "CONNECTED",
+        status=row.last_test_status or "ERROR",
+        direction="inbound",
+        message=row.last_error_message,
+        last_tested_at=now.isoformat(),
+    )
+
+
+@router.post("/email-config/primary/test-outbound", response_model=EmailConfigTestOut)
+async def test_primary_outbound_only(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+    platform_db: AsyncSession = Depends(get_db),
+):
+    """Test SMTP (outbound) for manual Other mailbox."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    row = await tenant_db.scalar(
+        select(TenantEmailMailbox)
+        .where(TenantEmailMailbox.tenant_id == tenant_id, TenantEmailMailbox.is_primary == True)
+        .limit(1)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No primary mailbox configured")
+    mtype = (row.mailbox_type or "").strip().lower()
+    if mtype not in (EMAIL_PROVIDER_OTHER, "imap"):
+        raise HTTPException(
+            status_code=400,
+            detail="Outbound SMTP test applies to Other email provider mailboxes only",
+        )
+    if row.connection_mode != "manual" or not row.smtp_host or not row.smtp_username:
+        raise HTTPException(status_code=400, detail="SMTP host and username required")
+
+    now = datetime.now(timezone.utc)
+    smtp_password: str | None = None
+    if row.credential_ref:
+        secret_row = await platform_db.scalar(
+            select(TenantIntegrationSecret).where(
+                TenantIntegrationSecret.credential_ref == row.credential_ref,
+                TenantIntegrationSecret.tenant_id == tenant_id,
+            ).limit(1)
+        )
+        if secret_row:
+            data = load_mailbox_secret_json(secret_row)
+            smtp_password = data.get("smtp_password")
+
+    if not smtp_password:
+        row.last_outbound_test_at = now
+        row.last_error_message = "No SMTP password stored"
+        row.connection_status = "ERROR"
+        await tenant_db.commit()
+        return EmailConfigTestOut(
+            ok=False,
+            status="ERROR",
+            direction="outbound",
+            message=row.last_error_message,
+            last_tested_at=now.isoformat(),
+        )
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: smtp_test_connection_sync(row, smtp_password),
+        )
+        row.last_outbound_test_at = now
+        row.last_error_message = None
+        row.connection_status = row.connection_status or "CONNECTED"
+    except Exception as e:
+        row.last_outbound_test_at = now
+        row.last_error_message = str(e)[:500]
+        row.connection_status = "ERROR"
+
+    await tenant_db.commit()
+    ok = row.last_error_message is None
+    return EmailConfigTestOut(
+        ok=ok,
+        status="CONNECTED" if ok else "ERROR",
+        direction="outbound",
+        message=row.last_error_message,
+        last_tested_at=now.isoformat(),
+    )
+
+
+@router.post("/email-config/other/sync-now")
+async def other_imap_sync_now(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+    platform_db: AsyncSession = Depends(get_db),
+    max_messages: int = 50,
+):
+    """
+    Operator-only incremental IMAP sync for Other / domain mailbox (shared engine; not Gmail/Graph).
+    Same ingestion path a future scheduler would call.
+    """
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    if max_messages < 1 or max_messages > 200:
+        raise HTTPException(status_code=400, detail="max_messages must be between 1 and 200")
+    try:
+        result = await sync_other_imap_inbox_for_tenant(
+            tenant_db,
+            platform_db,
+            tenant_id,
+            max_messages=max_messages,
+        )
+        return {
+            "ok": True,
+            "tenant_id": result.tenant_id,
+            "provider": result.provider,
+            "threads_upserted": result.threads_upserted,
+            "messages_upserted": result.messages_upserted,
+            "attachments_upserted": result.attachments_upserted,
+            "uids_fetched": result.uids_fetched,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("other_imap_sync_failed tenant_id=%s", tenant_id)
+        raise HTTPException(status_code=502, detail="IMAP sync failed") from e
 
 
 @router.post("/email-config/gmail/register-watch")

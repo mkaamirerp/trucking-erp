@@ -3,7 +3,7 @@
 # Usage: ./tools/reset_signup.sh <slug> <email>
 # Example: ./tools/reset_signup.sh demo user@example.com
 #
-# Run from repo root. Uses same compose as API (-f docker-compose.yml -f docker-compose.dev.yml).
+# Run from repo root. Uses production-shaped compose (-f docker-compose.yml).
 # Platform DB (trucking_erp): removes tenant, user, memberships, subscriptions,
 # onboarding payloads, OTP tokens, security events, and reserved_slugs.
 # Then drops the tenant database (tenant_<slug>).
@@ -18,7 +18,7 @@ fi
 slug="$1"
 email="$2"
 
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+COMPOSE="docker compose -f docker-compose.yml"
 
 # Platform DB: delete in FK-safe order. Tables must match current schema.
 # - tenant_memberships, platform_tenant_members: link user ↔ tenant

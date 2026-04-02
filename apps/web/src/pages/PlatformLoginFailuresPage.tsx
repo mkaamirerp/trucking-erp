@@ -4,6 +4,7 @@
  */
 import { useCallback, useState } from "react";
 import {
+  getPlatformAdminApiKey,
   platformAdminJson,
   PlatformAdminHttpError,
   PlatformAdminUnauthorizedError,
@@ -43,6 +44,12 @@ export default function PlatformLoginFailuresPage() {
   const fetchRows = useCallback(async () => {
     setError(null);
     setLoading(true);
+    if (!getPlatformAdminApiKey().trim()) {
+      setRows(null);
+      setLoading(false);
+      signalPlatformAdminUnauthorized();
+      return;
+    }
     const params = new URLSearchParams();
     if (tenantId.trim()) params.set("tenant_id", tenantId.trim());
     if (reason.trim()) params.set("reason", reason.trim());

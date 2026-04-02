@@ -27,24 +27,23 @@ logger = logging.getLogger(__name__)
 
 def require_platform_admin_key(
     x_platform_admin_key: str | None = Header(default=None, alias="X-Platform-Admin-Key"),
+    x_truckerp_platform_admin_key: str | None = Header(
+        default=None, alias="X-TruckERP-Platform-Admin-Key"
+    ),
 ) -> None:
     """
     Protects /api/v1/platform/* control-plane routes.
-    Production and staging: PLATFORM_ADMIN_API_KEY must be set and sent in X-Platform-Admin-Key.
-    Dev-like: if key is unset, allow (local tooling); if set, header must match.
+    PLATFORM_ADMIN_API_KEY must be set on the API; request must send the same value in either:
+    X-Platform-Admin-Key (curl/scripts) or X-TruckERP-Platform-Admin-Key (browser via nginx; no underscores in name).
     """
     expected = settings.platform_admin_api_key
-    strict_env = settings.is_production() or not settings.allows_dev_tenant_resolution_shortcuts()
-    if strict_env:
-        if not expected:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Platform admin API disabled: set PLATFORM_ADMIN_API_KEY.",
-            )
-        if not x_platform_admin_key or x_platform_admin_key != expected:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-        return
-    if expected and x_platform_admin_key != expected:
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Platform admin API disabled: set PLATFORM_ADMIN_API_KEY.",
+        )
+    sent = (x_platform_admin_key or x_truckerp_platform_admin_key or "").strip()
+    if not sent or sent != expected:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 

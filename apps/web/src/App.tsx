@@ -43,6 +43,7 @@ import PlatformHomePage from "./pages/PlatformHomePage";
 import PlatformTenantsPage from "./pages/PlatformTenantsPage";
 import PlatformTenantDetailPage from "./pages/PlatformTenantDetailPage";
 import PlatformLoginFailuresPage from "./pages/PlatformLoginFailuresPage";
+import PlatformUnlockLoginPage from "./pages/PlatformUnlockLoginPage";
 
 function RedirectDriverOnboardingDetail() {
   const { id } = useParams<{ id: string }>();
@@ -259,6 +260,7 @@ function App() {
         <Route path="tenants" element={<PlatformTenantsPage />} />
         <Route path="tenants/:id" element={<PlatformTenantDetailPage />} />
         <Route path="login-failures" element={<PlatformLoginFailuresPage />} />
+        <Route path="testing/unlock-login" element={<PlatformUnlockLoginPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

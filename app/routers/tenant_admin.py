@@ -12,6 +12,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
@@ -36,8 +37,12 @@ from app.models.platform import (
     UserInvite,
 )
 from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember
+from app.services.login_password_abuse import clear_login_password_fail_streak
+from app.services.login_unlock_step_up_pending import set_login_step_up_pending_after_unlock
+from app.services.sign_in_lock_state import build_sign_in_lock_state, build_sign_in_security_panel
 from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.utils.auth_identity import normalize_auth_email
+from app.utils.rate_limit import clear_login_unlock_throttles_for_tenant_email
 from app.utils.email import send_user_invite_email
 from app.utils.password import hash_password
 
@@ -364,6 +369,19 @@ class UserMemberOut(BaseModel):
     joined_at: str
 
 
+class SignInSecurityOut(BaseModel):
+    """Sign-in protection detail for tenant admin user drawer (this API instance)."""
+
+    sign_in_status: str
+    all_clear: bool
+    reasons: list[str]
+    trigger_sources: list[str]
+    timestamps: dict[str, str | None]
+    restriction_summary: dict[str, Any]
+    lock_scope: dict[str, Any]
+    note: str
+
+
 class InviteUserRequest(BaseModel):
     """Approved temporary fields: username, email, phone, access_level."""
     username: str = Field(..., min_length=1, max_length=200)
@@ -412,6 +430,98 @@ async def list_tenant_users(
             )
         )
     return result
+
+
+@router.get("/users/{user_id}/sign-in-security", response_model=SignInSecurityOut)
+async def get_user_sign_in_security(
+    user_id: str,
+    tenant_id: int = Depends(require_tenant),
+    _: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Workspace member sign-in protection (detail drawer). READ_ONLY and FULL_ACCESS."""
+    ptm = await db.scalar(
+        select(PlatformTenantMember).where(
+            PlatformTenantMember.tenant_id == tenant_id,
+            PlatformTenantMember.platform_user_id == user_id,
+        ).limit(1)
+    )
+    if not ptm:
+        raise HTTPException(status_code=404, detail="User not found in this workspace")
+
+    pu = await db.get(PlatformUser, user_id)
+    if not pu or not (pu.email or "").strip():
+        raise HTTPException(status_code=400, detail="User has no email")
+
+    email_norm = normalize_auth_email(pu.email)
+    if not email_norm:
+        raise HTTPException(status_code=400, detail="Invalid email for user")
+
+    panel = await build_sign_in_security_panel(tenant_id, email_norm)
+    return SignInSecurityOut.model_validate(panel)
+
+
+@router.post("/users/{user_id}/unlock-sign-in")
+async def unlock_user_sign_in_for_tenant(
+    user_id: str,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Clear password-fail streak + tenant+email login/step-up buckets for a member's email.
+    FULL_ACCESS only. Does not change password or clear IP-wide login throttle.
+    """
+    if not has_full_access(current_user.role):
+        raise HTTPException(
+            status_code=403,
+            detail="Full access required to unlock sign-in.",
+        )
+
+    ptm = await db.scalar(
+        select(PlatformTenantMember).where(
+            PlatformTenantMember.tenant_id == tenant_id,
+            PlatformTenantMember.platform_user_id == user_id,
+        ).limit(1)
+    )
+    if not ptm:
+        raise HTTPException(status_code=404, detail="User not found in this workspace")
+
+    pu = await db.get(PlatformUser, user_id)
+    if not pu or not (pu.email or "").strip():
+        raise HTTPException(status_code=400, detail="User has no email")
+
+    email_norm = normalize_auth_email(pu.email)
+    if not email_norm:
+        raise HTTPException(status_code=400, detail="Invalid email for user")
+
+    streak_deleted = await clear_login_password_fail_streak(tenant_id, email_norm)
+    rate_cleared = clear_login_unlock_throttles_for_tenant_email(tenant_id, email_norm)
+    await set_login_step_up_pending_after_unlock(db, tenant_id, email_norm)
+    state_after = await build_sign_in_lock_state(tenant_id, email_norm)
+
+    logger.info(
+        "tenant_admin.unlock_sign_in tenant_id=%s actor=%s target=%s email_norm=%s streak_deleted=%s",
+        tenant_id,
+        current_user.user.id,
+        user_id,
+        email_norm,
+        streak_deleted,
+    )
+
+    return {
+        "ok": True,
+        "cleared": {
+            "platform_login_password_fail_streaks": {"rows_deleted": streak_deleted},
+            "rate_limiters": rate_cleared,
+        },
+        "state_after": state_after,
+        "note": "IP-wide login throttle is not cleared. If sign-in still fails, wait or use another network.",
+        "operator_message": (
+            "Sign-in limits were cleared for this user. For security, they will need a verification code "
+            "the next time they sign in. After that, they can trust the device to skip the code on that browser."
+        ),
+    }
 
 
 @router.post("/users/invite")

@@ -31,7 +31,7 @@ describe("platformAdminFetch layer", () => {
     expect(sessionStorage.getItem("platform_admin_api_key")).toBeNull();
   });
 
-  it("sends X-Platform-Admin-Key when a key is stored", async () => {
+  it("sends platform admin headers when a key is stored", async () => {
     setPlatformAdminApiKey("secret");
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
 
@@ -42,6 +42,7 @@ describe("platformAdminFetch layer", () => {
     expect(url).toMatch(/\/api\/v1\/platform\/tenants$/);
     const headers = init.headers as Headers;
     expect(headers.get("X-Platform-Admin-Key")).toBe("secret");
+    expect(headers.get("X-TruckERP-Platform-Admin-Key")).toBe("secret");
   });
 
   it("omits X-Platform-Admin-Key when no key is stored", async () => {

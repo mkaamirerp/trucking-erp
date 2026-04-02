@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -40,12 +40,23 @@ class TenantEmailMailbox(Base):
     oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     oauth_account_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    reply_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    imap_security: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    smtp_security: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    connection_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     sync_cursor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_test_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_inbound_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_outbound_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_sync_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    imap_uidvalidity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    imap_last_seen_uid: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="NOT_CONFIGURED")
 
