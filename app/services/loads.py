@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.broker import Broker, BrokerContact
+from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
 from app.models.driver import Driver
 from app.models.load import Load, LoadNote, LoadStop
 from app.models.truck import Truck
@@ -34,6 +35,16 @@ async def _get_broker_contact(db: AsyncSession, tenant_id: int, contact_id: int)
         select(BrokerContact).where(
             BrokerContact.id == contact_id,
             BrokerContact.tenant_id == tenant_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_customs_broker(db: AsyncSession, tenant_id: int, customs_broker_id: int) -> CustomsBroker | None:
+    result = await db.execute(
+        select(CustomsBroker).where(
+            CustomsBroker.id == customs_broker_id,
+            CustomsBroker.tenant_id == tenant_id,
         )
     )
     return result.scalar_one_or_none()
@@ -87,6 +98,8 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Truck not found")
     if payload.trailer_id is not None and not await _get_trailer(db, tenant_id, payload.trailer_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trailer not found")
+    if payload.customs_broker_id is not None and not await _get_customs_broker(db, tenant_id, payload.customs_broker_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
 
     load_number = payload.load_number or f"DRAFT-{uuid.uuid4().hex[:8].upper()}"
     await _ensure_unique_load_number(db, tenant_id, load_number)
@@ -120,13 +133,26 @@ async def get_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | Non
             selectinload(Load.driver),
             selectinload(Load.broker),
             selectinload(Load.broker_contact),
+            selectinload(Load.customs_broker),
+            selectinload(Load.customs_snapshot),
             selectinload(Load.truck),
             selectinload(Load.trailer),
             selectinload(Load.stops),
         )
         .where(Load.id == load_id, Load.tenant_id == tenant_id)
     )
-    return result.scalar_one_or_none()
+    row = result.scalar_one_or_none()
+    # selectinload for this one-to-one with composite (tenant_id, load_id) -> loads does not populate in tests +
+    # async batch loaders; explicit SELECT matches the row. Relationship primaryjoin remains correct for lazy access.
+    if row is not None and row.customs_snapshot is None:
+        snap = await db.scalar(
+            select(LoadCustomsSnapshot).where(
+                LoadCustomsSnapshot.load_id == row.id,
+                LoadCustomsSnapshot.tenant_id == row.tenant_id,
+            )
+        )
+        row.customs_snapshot = snap
+    return row
 
 
 async def list_loads(
@@ -147,6 +173,8 @@ async def list_loads(
             selectinload(Load.driver),
             selectinload(Load.broker),
             selectinload(Load.broker_contact),
+            selectinload(Load.customs_broker),
+            selectinload(Load.customs_snapshot),
             selectinload(Load.truck),
             selectinload(Load.trailer),
             selectinload(Load.stops),
@@ -217,6 +245,18 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
                     detail="Broker contact must belong to the selected broker",
                 )
 
+    if "customs_broker_id" in data:
+        if load.document_snapshot_confirmed_at is not None:
+            new_cb = data["customs_broker_id"]
+            if new_cb != load.customs_broker_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot change customs broker after document snapshot is confirmed",
+                )
+        new_val = data["customs_broker_id"]
+        if new_val is not None and not await _get_customs_broker(db, tenant_id, new_val):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
+
     if "load_number" in data and data["load_number"]:
         await _ensure_unique_load_number(db, tenant_id, data["load_number"], exclude_id=load.id)
 
@@ -263,6 +303,8 @@ async def list_loads_for_board(
             selectinload(Load.driver),
             selectinload(Load.broker),
             selectinload(Load.broker_contact),
+            selectinload(Load.customs_broker),
+            selectinload(Load.customs_snapshot),
             selectinload(Load.truck),
             selectinload(Load.trailer),
             selectinload(Load.stops),
@@ -358,3 +400,52 @@ async def list_load_notes(db: AsyncSession, tenant_id: int, load_id: int) -> lis
         select(LoadNote).where(LoadNote.load_id == load_id, LoadNote.tenant_id == tenant_id).order_by(LoadNote.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def confirm_load_customs_document_snapshot(
+    db: AsyncSession, tenant_id: int, load_id: int, *, confirming_user_id: str | None
+) -> Load:
+    load = await get_load(db, tenant_id, load_id)
+    if not load:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    if load.document_snapshot_confirmed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document snapshot already confirmed for this load",
+        )
+    if load.customs_broker_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Link a customs broker on the load before confirming the document snapshot",
+        )
+
+    broker = await _get_customs_broker(db, tenant_id, load.customs_broker_id)
+    if not broker:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
+
+    now = datetime.now(timezone.utc)
+    snap = LoadCustomsSnapshot(
+        load_id=load.id,
+        tenant_id=tenant_id,
+        legal_name_snapshot=broker.legal_name,
+        address_line1_snapshot=broker.address_line1,
+        address_line2_snapshot=broker.address_line2,
+        city_snapshot=broker.city,
+        admin_area_snapshot=broker.admin_area,
+        postal_code_snapshot=broker.postal_code,
+        country_code_snapshot=broker.country_code,
+        phone_primary_snapshot=broker.phone_primary,
+        phone_secondary_snapshot=broker.phone_secondary,
+        fax_snapshot=broker.fax,
+        generic_email_snapshot=broker.generic_email,
+        website_url_snapshot=broker.website_url,
+        customs_broker_id_at_confirm=broker.id,
+        confirmed_at=now,
+    )
+    db.add(snap)
+    load.document_snapshot_confirmed_at = now
+    load.document_snapshot_confirmed_by_user_id = confirming_user_id
+    load.document_snapshot_version = int(load.document_snapshot_version or 0) + 1
+
+    await db.commit()
+    return await get_load(db, tenant_id, load.id) or load

@@ -80,6 +80,19 @@ async def update_load(
     return LoadResponse.model_validate(load)
 
 
+@router.post("/{load_id}/confirm-document-snapshot", response_model=LoadResponse)
+async def confirm_document_snapshot(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    load = await loads_service.confirm_load_customs_document_snapshot(
+        db, tenant_id, load_id, confirming_user_id=getattr(user, "user_id", None)
+    )
+    return LoadResponse.model_validate(load)
+
+
 @router.post("/{load_id}/mark-ready", response_model=LoadResponse)
 async def mark_load_ready(
     load_id: int,

@@ -26,6 +26,7 @@ from app.routers.pay_runs import router as pay_runs_router
 from app.routers.me import router as me_router
 from app.routers.auth import router as auth_router
 from app.routers.brokers import router as brokers_router
+from app.routers.customs_brokers import router as customs_brokers_router
 from app.routers.loads import router as loads_router
 from app.routers.dispatch import router as dispatch_router
 from app.routers.trucks import router as trucks_router
@@ -98,6 +99,7 @@ app.include_router(pay_runs_router)
 app.include_router(me_router)
 app.include_router(auth_router)
 app.include_router(brokers_router, prefix="/api/v1")
+app.include_router(customs_brokers_router, prefix="/api/v1")
 app.include_router(loads_router, prefix="/api/v1")
 app.include_router(dispatch_router, prefix="/api/v1")
 app.include_router(trucks_router, prefix="/api/v1")

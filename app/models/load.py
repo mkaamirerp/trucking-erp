@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -12,6 +12,15 @@ from app.models.base import Base
 
 class Load(Base):
     __tablename__ = "loads"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_loads_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "customs_broker_id"],
+            ["customs_brokers.tenant_id", "customs_brokers.id"],
+            ondelete="SET NULL",
+            name="fk_loads_customs_broker_tenant",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
@@ -20,6 +29,10 @@ class Load(Base):
     broker_contact_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("broker_contacts.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    customs_broker_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    document_snapshot_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    document_snapshot_confirmed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    document_snapshot_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     driver_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True, index=True)
     truck_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("trucks.id", ondelete="SET NULL"), nullable=True, index=True)
     trailer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("trailers.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -59,6 +72,20 @@ class Load(Base):
 
     broker = relationship("Broker", back_populates="loads")
     broker_contact = relationship("BrokerContact", backref="loads")
+    customs_broker = relationship("CustomsBroker", back_populates="loads")
+    # Composite FK on child (tenant_id, load_id) -> loads(tenant_id, id): needs explicit join so loaders resolve.
+    customs_snapshot = relationship(
+        "LoadCustomsSnapshot",
+        primaryjoin=(
+            "and_("
+            "Load.id==foreign(LoadCustomsSnapshot.load_id), "
+            "Load.tenant_id==foreign(LoadCustomsSnapshot.tenant_id)"
+            ")"
+        ),
+        back_populates="load",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     driver = relationship("Driver", back_populates="loads")
     truck = relationship("Truck", backref="loads")
     trailer = relationship("Trailer", backref="loads")

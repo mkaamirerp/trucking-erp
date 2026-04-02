@@ -7,6 +7,7 @@ from typing import Optional, Sequence
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.broker import BrokerContactOut
+from app.schemas.customs_broker import CustomsBrokerSummary, LoadCustomsSnapshotOut
 
 DISPATCH_STATUSES = {
     "draft", "ready",
@@ -68,6 +69,7 @@ class LoadStopOut(LoadStopBase):
 
 class LoadBase(BaseModel):
     load_number: Optional[str] = Field(default=None, max_length=50)
+    customs_broker_id: Optional[int] = None
     broker_id: Optional[int] = None
     broker_contact_id: Optional[int] = None
     broker_name_snapshot: Optional[str] = Field(default=None, max_length=255)
@@ -109,6 +111,7 @@ class LoadCreate(LoadBase):
 
 class LoadUpdate(BaseModel):
     load_number: Optional[str] = Field(default=None, max_length=50)
+    customs_broker_id: Optional[int] = None
     broker_id: Optional[int] = None
     broker_contact_id: Optional[int] = None
     broker_name_snapshot: Optional[str] = Field(default=None, max_length=255)
@@ -190,6 +193,11 @@ class LoadResponse(LoadBase):
     driver: Optional[NestedDriver] = None
     broker: Optional[NestedBroker] = None
     broker_contact: Optional[BrokerContactOut] = None
+    customs_broker: Optional[CustomsBrokerSummary] = None
+    document_snapshot_confirmed_at: Optional[datetime] = None
+    document_snapshot_confirmed_by_user_id: Optional[str] = None
+    document_snapshot_version: int = 0
+    customs_snapshot: Optional[LoadCustomsSnapshotOut] = None
     truck: Optional[NestedTruck] = None
     trailer: Optional[NestedTrailer] = None
     stops: Optional[list[LoadStopOut]] = None

@@ -764,6 +764,35 @@ export async function updateLoad(id: number, payload: Partial<Load>) {
   return handle<Load>(res);
 }
 
+export type CustomsBroker = {
+  id: number;
+  tenant_id?: number;
+  legal_name: string;
+  phone_primary?: string | null;
+  is_active?: boolean;
+  fax?: string | null;
+};
+
+export async function listCustomsBrokers(params: {
+  page?: number;
+  size?: number;
+  include_inactive?: boolean;
+} = {}) {
+  const url = new URL(`${API_BASE}/customs-brokers`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.include_inactive) url.searchParams.set("include_inactive", "true");
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<CustomsBroker>>(res);
+}
+
+export async function confirmLoadDocumentSnapshot(loadId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/confirm-document-snapshot`, {
+    method: "POST",
+  });
+  return handle<Load>(res);
+}
+
 export type DispatchBoard = Record<string, Load[]>;
 
 export async function getDispatchBoard(search?: string) {
@@ -2047,9 +2076,41 @@ export type Broker = {
   notes?: string | null;
 };
 
+export type CustomsBrokerSummary = {
+  id: number;
+  legal_name: string;
+  is_active: boolean;
+  phone_primary?: string | null;
+};
+
+export type LoadCustomsSnapshot = {
+  load_id: number;
+  tenant_id: number;
+  legal_name_snapshot?: string | null;
+  address_line1_snapshot?: string | null;
+  address_line2_snapshot?: string | null;
+  city_snapshot?: string | null;
+  admin_area_snapshot?: string | null;
+  postal_code_snapshot?: string | null;
+  country_code_snapshot?: string | null;
+  phone_primary_snapshot?: string | null;
+  phone_secondary_snapshot?: string | null;
+  fax_snapshot?: string | null;
+  generic_email_snapshot?: string | null;
+  website_url_snapshot?: string | null;
+  customs_broker_id_at_confirm?: number | null;
+  confirmed_at: string;
+};
+
 export type Load = {
   id: number;
   load_number: string;
+  customs_broker_id?: number | null;
+  customs_broker?: CustomsBrokerSummary | null;
+  document_snapshot_confirmed_at?: string | null;
+  document_snapshot_confirmed_by_user_id?: string | null;
+  document_snapshot_version?: number;
+  customs_snapshot?: LoadCustomsSnapshot | null;
   broker_load_reference?: string | null;
   broker_name_snapshot?: string | null;
   broker_id?: number | null;
