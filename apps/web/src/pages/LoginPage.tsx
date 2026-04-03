@@ -188,11 +188,13 @@ function LoginPage() {
     [email, password, navigateAfterLogin, resetStepUpState, turnstileSiteKey]
   );
 
-  // Changing credentials ends verification / step-up flows.
+  // Changing credentials ends verification / step-up flows (not while OTP challenge is active — fields are
+  // disabled then, but this avoids edge cases where a stale effect run could clear the challenge).
   useEffect(() => {
+    if (loginChallengeId) return;
     setNeedsVerification(false);
     resetStepUpState();
-  }, [email, password, resetStepUpState]);
+  }, [email, password, loginChallengeId, resetStepUpState]);
 
   useEffect(() => {
     if (!needsVerification || !turnstileSiteKey) return;

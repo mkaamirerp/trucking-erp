@@ -6,6 +6,7 @@ import EmptyState from "@/components/EmptyState";
 import StatusBadge from "@/components/StatusBadge";
 import { Table } from "@/components/Table";
 import { listLoads, Load } from "@/api";
+import { formatLoadsListRoute, firstPickupScheduleLabel } from "@/utils/loadStops";
 
 export default function LoadsListPage() {
   const navigate = useNavigate();
@@ -46,9 +47,8 @@ export default function LoadsListPage() {
           <Table
             headers={[
               "Load #",
-              "Pickup",
-              "Delivery",
-              "Pickup Date",
+              "Route (stops)",
+              "First pickup date",
               "Status",
               "Driver",
               "Rate",
@@ -61,13 +61,10 @@ export default function LoadsListPage() {
                   {load.load_number}
                 </td>
                 <td className="px-4 py-2 text-sm text-gray-700">
-                  {load.pickup_location || "—"}
+                  {formatRouteFromStops(load.stops)}
                 </td>
                 <td className="px-4 py-2 text-sm text-gray-700">
-                  {load.delivery_location || "—"}
-                </td>
-                <td className="px-4 py-2 text-sm text-gray-700">
-                  {load.pickup_date || "—"}
+                  {firstPickupAppointmentDate(load.stops) || "—"}
                 </td>
                 <td className="px-4 py-2 text-sm">
                   <StatusBadge status={load.status} />

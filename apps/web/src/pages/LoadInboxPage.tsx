@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   createDraftLoadFromEmailThread,
@@ -6,6 +6,7 @@ import {
   recomputeEmailThreadIntake,
   getEmailThread,
   getEmailThreadMessages,
+  getLoad,
   InboxMessageItem,
   InboxThreadDetail,
   InboxThreadListItem,
@@ -13,8 +14,10 @@ import {
   listEmailThreads,
   listLoads,
   pullGmailDeltaFromInbox,
+  uploadPdfToEmailThread,
   type Load,
 } from "../api";
+import { IntakeVerificationPanel, type IntakeKpis } from "../components/intake/IntakeVerificationPanel";
 import { OPS } from "../routes";
 
 function formatWhen(iso: string | null | undefined): string {
@@ -97,6 +100,15 @@ export default function LoadInboxPage() {
   const [linkSubmitting, setLinkSubmitting] = useState<boolean>(false);
   const [recomputingIntake, setRecomputingIntake] = useState<boolean>(false);
   const [pullingGmailDelta, setPullingGmailDelta] = useState<boolean>(false);
+  const [uploadingPdf, setUploadingPdf] = useState<boolean>(false);
+  const [linkedLoadDetail, setLinkedLoadDetail] = useState<Load | null>(null);
+  const [loadingLinkedLoad, setLoadingLinkedLoad] = useState<boolean>(false);
+  const [intakeKpis, setIntakeKpis] = useState<IntakeKpis>({
+    pendingReview: 0,
+    createdToday: 0,
+    awaitingCarrier: 0,
+    dispatchedWeek: 0,
+  });
 
   const isBandView = status === "active" && queueFocus === "intake";
   const isLinkedOnlyView = status === "active" && queueFocus === "linked";
@@ -117,6 +129,47 @@ export default function LoadInboxPage() {
     const keep = opts?.keepSelection && selectedThreadId && items.some((t) => t.id === selectedThreadId);
     return keep ? selectedThreadId! : items[0].id;
   };
+
+  const refreshIntakeKpis = useCallback(async () => {
+    try {
+      const prov = provider || undefined;
+      const [rq, loadsPage] = await Promise.all([
+        listEmailThreads({
+          provider: prov,
+          status: "active",
+          intake_bucket: "needs_review",
+          page: 1,
+          size: 1,
+        }),
+        listLoads({ page: 1, size: 500 }),
+      ]);
+      const items = loadsPage.items ?? [];
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      weekAgo.setHours(0, 0, 0, 0);
+      const createdToday = items.filter((l) => l.created_at && new Date(l.created_at) >= startOfDay).length;
+      const awaitingCarrier = items.filter((l) => {
+        const s = (l.status || "").toLowerCase();
+        return s === "ready" || s === "unassigned";
+      }).length;
+      const dispatchedWeek = items.filter((l) => {
+        const s = (l.status || "").toLowerCase();
+        if (s !== "dispatched") return false;
+        const t = l.updated_at ? new Date(l.updated_at) : null;
+        return Boolean(t && t >= weekAgo);
+      }).length;
+      setIntakeKpis({
+        pendingReview: rq.total ?? 0,
+        createdToday,
+        awaitingCarrier,
+        dispatchedWeek,
+      });
+    } catch {
+      /* keep last good KPIs */
+    }
+  }, [provider]);
 
   const loadThreads = async (opts?: { keepSelection?: boolean; retainSelectionId?: number }) => {
     setLoadingThreads(true);
@@ -214,6 +267,7 @@ export default function LoadInboxPage() {
     } finally {
       setLoadingThreads(false);
     }
+    void refreshIntakeKpis();
   };
 
   useEffect(() => {
@@ -254,6 +308,30 @@ export default function LoadInboxPage() {
     () => allThreads.find((t) => t.id === selectedThreadId) ?? threadDetail,
     [allThreads, selectedThreadId, threadDetail]
   );
+
+  const linkedLoadId = threadDetail?.linked_load_id ?? selectedThread?.linked_load_id ?? null;
+
+  useEffect(() => {
+    if (!linkedLoadId) {
+      setLinkedLoadDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingLinkedLoad(true);
+    getLoad(linkedLoadId)
+      .then((ld) => {
+        if (!cancelled) setLinkedLoadDetail(ld);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedLoadDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingLinkedLoad(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedLoadId]);
 
   const handleRecomputeIntake = async () => {
     if (!selectedThreadId || recomputingIntake) return;
@@ -338,6 +416,29 @@ export default function LoadInboxPage() {
       setActionError(err instanceof Error ? err.message : "Failed to link load");
     } finally {
       setLinkSubmitting(false);
+    }
+  };
+
+  const handleUploadDocumentChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !selectedThreadId) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setActionError("Choose a PDF file.");
+      return;
+    }
+    setActionError(null);
+    setUploadingPdf(true);
+    try {
+      const updated = await uploadPdfToEmailThread(selectedThreadId, file);
+      setThreadDetail(updated);
+      const msgs = await getEmailThreadMessages(selectedThreadId);
+      setMessages(msgs ?? []);
+      await loadThreads({ retainSelectionId: selectedThreadId });
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "PDF upload failed");
+    } finally {
+      setUploadingPdf(false);
     }
   };
 
@@ -619,160 +720,154 @@ export default function LoadInboxPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14]">
-          <div className="border-b border-[#1e293b] px-5 py-4">
+        <section className="flex min-h-[620px] flex-col rounded-xl border border-[#1e293b] bg-[#0a0e14]">
+          <div className="shrink-0 border-b border-[#1e293b] px-5 py-3">
             {!selectedThread ? (
               <p className="text-sm text-[#64748b]">Select an item to open the thread.</p>
             ) : (
-              <>
-                <h2 className="text-lg font-semibold text-[#e8edf5]">{selectedThread.subject || "(No subject)"}</h2>
-                <p className="mt-1 text-sm text-[#94a3b8]">{participantPreview(selectedThread.participants_json)}</p>
-                <div className="mt-2 flex flex-wrap gap-3 text-xs text-[#64748b]">
-                  <span>Provider: {selectedThread.provider}</span>
-                  <span>Status: {selectedThread.status}</span>
-                  <span>Bucket: {selectedThread.intake_bucket}</span>
-                  {selectedThread.confidence_level && <span>Confidence: {confidenceLabel(selectedThread.confidence_level)}</span>}
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-lg font-semibold text-[#e8edf5]">{selectedThread.subject || "(No subject)"}</h2>
+                  <p className="mt-1 text-sm text-[#94a3b8]">{participantPreview(selectedThread.participants_json)}</p>
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-[#64748b]">
+                    <span>Provider: {selectedThread.provider}</span>
+                    <span>Status: {selectedThread.status}</span>
+                    <span>Bucket: {selectedThread.intake_bucket}</span>
+                    {selectedThread.confidence_level ? (
+                      <span>Confidence: {confidenceLabel(selectedThread.confidence_level)}</span>
+                    ) : null}
+                  </div>
+                  {selectedThread.pickup_delivery_summary ? (
+                    <p className="mt-2 text-xs text-[#94a3b8]">{selectedThread.pickup_delivery_summary}</p>
+                  ) : null}
+                  {!selectedThread.linked_load_id ? (
+                    <p className="mt-1 text-xs text-amber-200/80">{formatRoutingReason(selectedThread.routing_reason)}</p>
+                  ) : null}
                 </div>
-                <div className="mt-3 rounded-lg border border-[#1e293b] bg-[#0d111a] p-3">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   {selectedThread.linked_load_id ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-[#64748b]">Load linkage</p>
-                        <p className="text-sm font-semibold text-emerald-300">
-                          {selectedThread.linked_load_number
-                            ? `Trip / load # ${selectedThread.linked_load_number}`
-                            : `Linked load id ${selectedThread.linked_load_id}`}
-                        </p>
-                        {selectedThread.pickup_delivery_summary && (
-                          <p className="mt-1 text-xs text-[#94a3b8]">{selectedThread.pickup_delivery_summary}</p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => navigate(OPS.LOAD_DETAIL(selectedThread.linked_load_id!))}
-                          className="rounded border border-sky-900/50 bg-sky-950/30 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-950/50"
-                        >
-                          Open in Loads
-                        </button>
-                        <span className="rounded border border-emerald-900/60 bg-emerald-900/20 px-2 py-1.5 text-xs text-emerald-300">
-                          Linked
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs uppercase tracking-wide text-[#64748b]">Load linkage</p>
-                          <p className="text-sm font-semibold text-amber-300">No load yet</p>
-                          <p className="mt-1 text-xs text-[#94a3b8]">{formatRoutingReason(selectedThread.routing_reason)}</p>
-                        </div>
-                        <span className="rounded border border-amber-900/60 bg-amber-900/20 px-2 py-1 text-xs text-amber-300">
-                          Needs review
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedThread.provider === "gmail" && selectedThread.status === "active" && (
-                      <button
-                        type="button"
-                        onClick={handleRecomputeIntake}
-                        disabled={recomputingIntake}
-                        className="rounded border border-[#475569] bg-[#0f1420] px-3 py-1.5 text-xs font-medium text-[#94a3b8] hover:bg-[#1e293b] disabled:opacity-50"
-                        title="Re-run TQL / PDF intake rules on this thread (after sync or code changes)"
-                      >
-                        {recomputingIntake ? "Re-running…" : "Re-run intake rules"}
-                      </button>
-                    )}
-                    {(selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background") &&
-                      !selectedThread.linked_load_id &&
-                      selectedThread.status === "active" && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={handleCreateDraftLoad}
-                            disabled={draftCreating}
-                            className="rounded border border-sky-900/50 bg-sky-950/40 px-3 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-950/60 disabled:opacity-50"
-                          >
-                            {draftCreating ? "Creating…" : "Create Draft Load"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setLinkModalOpen(true);
-                              setLinkResults([]);
-                              setLinkSearch("");
-                            }}
-                            className="rounded border border-indigo-900/50 bg-indigo-950/40 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-950/60"
-                          >
-                            Link Existing Load
-                          </button>
-                        </>
-                      )}
                     <button
                       type="button"
-                      onClick={handleDisregard}
-                      disabled={disregarding || selectedThread.status === "disregarded"}
-                      className="rounded border border-amber-900/60 bg-amber-900/20 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => navigate(OPS.LOAD_DETAIL(selectedThread.linked_load_id!))}
+                      className="rounded border border-sky-900/50 bg-sky-950/30 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-950/50"
                     >
-                      {selectedThread.status === "disregarded"
-                        ? "Disregarded"
-                        : disregarding
-                          ? "Disregarding…"
-                          : "Ignore"}
+                      Open in Loads
                     </button>
-                  </div>
+                  ) : null}
+                  {(selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background") &&
+                    !selectedThread.linked_load_id &&
+                    selectedThread.status === "active" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLinkModalOpen(true);
+                          setLinkResults([]);
+                          setLinkSearch("");
+                        }}
+                        className="rounded border border-indigo-900/50 bg-indigo-950/40 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-950/60"
+                      >
+                        Link existing load
+                      </button>
+                    )}
+                  <button
+                    type="button"
+                    onClick={handleDisregard}
+                    disabled={disregarding || selectedThread.status === "disregarded"}
+                    className="rounded border border-amber-900/60 bg-amber-900/20 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {selectedThread.status === "disregarded"
+                      ? "Disregarded"
+                      : disregarding
+                        ? "Disregarding…"
+                        : "Ignore"}
+                  </button>
                 </div>
-              </>
+              </div>
             )}
           </div>
 
-          <div className="max-h-[560px] overflow-auto p-4">
-            {loadingMessages && selectedThreadId && <div className="text-sm text-[#94a3b8]">Loading messages…</div>}
-            {!loadingMessages && messagesError && <div className="text-sm text-red-400">{messagesError}</div>}
-            {!loadingMessages && !messagesError && selectedThreadId && messages.length === 0 && (
-              <div className="text-sm text-[#64748b]">No messages in this thread.</div>
-            )}
-            {!loadingMessages &&
-              !messagesError &&
-              messages.map((m) => {
-                const outbound = (m.direction || "").toLowerCase() === "outbound";
-                return (
-                  <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
-                    <article
-                      className={`w-full max-w-[820px] rounded-xl border p-4 ${
-                        outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[#1e293b] bg-[#0d111a]"
-                      }`}
-                    >
-                      <div className="mb-2 grid gap-1 text-xs text-[#94a3b8] md:grid-cols-2">
-                        <span>From: {m.from_email || "—"}</span>
-                        <span className="md:text-right">{formatWhen(m.received_at || m.sent_at || m.created_at)}</span>
-                        <span className="md:col-span-2">To: {recipientPreview(m.to_json)}</span>
-                        {m.subject && <span className="md:col-span-2">Subject: {m.subject}</span>}
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm leading-6 text-[#e8edf5]">
-                        {m.body_text || m.snippet || "No message body available."}
-                      </p>
-                      {m.attachments && m.attachments.length > 0 && (
-                        <ul className="mt-2 space-y-1 text-xs text-[#94a3b8]">
-                          {m.attachments.map((a) => (
-                            <li key={a.id}>
-                              <span className="text-[#cbd5e1]">{a.filename || a.external_attachment_id}</span>
-                              {a.mime_type ? <span className="text-[#64748b]"> · {a.mime_type}</span> : null}
-                              {a.size_bytes != null ? <span className="text-[#64748b]"> · {a.size_bytes} bytes</span> : null}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      {m.has_attachments && (!m.attachments || m.attachments.length === 0) && (
-                        <p className="mt-2 text-xs text-[#94a3b8]">Has attachments (metadata pending or inline-only).</p>
-                      )}
-                    </article>
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            {selectedThread ? (
+              <>
+                {loadingLinkedLoad && linkedLoadId ? (
+                  <p className="mb-2 text-xs text-[#64748b]">Loading linked load for verification…</p>
+                ) : null}
+                <IntakeVerificationPanel
+                  threadSubject={selectedThread.subject}
+                  participantsJson={selectedThread.participants_json}
+                  routingReason={formatRoutingReason(selectedThread.routing_reason)}
+                  messages={messages}
+                  linkedLoad={linkedLoadDetail}
+                  kpis={intakeKpis}
+                  canReparse={selectedThread.provider === "gmail" && selectedThread.status === "active"}
+                  recomputingIntake={recomputingIntake}
+                  onReparse={handleRecomputeIntake}
+                  canVerifyCreate={
+                    (selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background") &&
+                    !selectedThread.linked_load_id &&
+                    selectedThread.status === "active"
+                  }
+                  draftCreating={draftCreating}
+                  onVerifyCreate={handleCreateDraftLoad}
+                  onManualEntry={() => navigate(OPS.LOAD_NEW)}
+                  uploadBusy={uploadingPdf}
+                  onUploadDocumentChange={handleUploadDocumentChange}
+                />
+
+                <details className="mt-6 rounded-xl border border-[#1e293b] bg-[#0d111a]">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#cbd5e1] marker:text-[#64748b]">
+                    Email thread (reference)
+                  </summary>
+                  <div className="border-t border-[#1e293b] p-4">
+                    {loadingMessages && selectedThreadId ? (
+                      <div className="text-sm text-[#94a3b8]">Loading messages…</div>
+                    ) : null}
+                    {!loadingMessages && messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : null}
+                    {!loadingMessages && !messagesError && selectedThreadId && messages.length === 0 ? (
+                      <div className="text-sm text-[#64748b]">No messages in this thread.</div>
+                    ) : null}
+                    {!loadingMessages && !messagesError
+                      ? messages.map((m) => {
+                          const outbound = (m.direction || "").toLowerCase() === "outbound";
+                          return (
+                            <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
+                              <article
+                                className={`w-full max-w-[820px] rounded-xl border p-4 ${
+                                  outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[#1e293b] bg-[#0d111a]"
+                                }`}
+                              >
+                                <div className="mb-2 grid gap-1 text-xs text-[#94a3b8] md:grid-cols-2">
+                                  <span>From: {m.from_email || "—"}</span>
+                                  <span className="md:text-right">{formatWhen(m.received_at || m.sent_at || m.created_at)}</span>
+                                  <span className="md:col-span-2">To: {recipientPreview(m.to_json)}</span>
+                                  {m.subject ? <span className="md:col-span-2">Subject: {m.subject}</span> : null}
+                                </div>
+                                <p className="whitespace-pre-wrap text-sm leading-6 text-[#e8edf5]">
+                                  {m.body_text || m.snippet || "No message body available."}
+                                </p>
+                                {m.attachments && m.attachments.length > 0 ? (
+                                  <ul className="mt-2 space-y-1 text-xs text-[#94a3b8]">
+                                    {m.attachments.map((a) => (
+                                      <li key={a.id}>
+                                        <span className="text-[#cbd5e1]">{a.filename || a.external_attachment_id}</span>
+                                        {a.mime_type ? <span className="text-[#64748b]"> · {a.mime_type}</span> : null}
+                                        {a.size_bytes != null ? <span className="text-[#64748b]"> · {a.size_bytes} bytes</span> : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                                {m.has_attachments && (!m.attachments || m.attachments.length === 0) ? (
+                                  <p className="mt-2 text-xs text-[#94a3b8]">Has attachments (metadata pending or inline-only).</p>
+                                ) : null}
+                              </article>
+                            </div>
+                          );
+                        })
+                      : null}
                   </div>
-                );
-              })}
+                </details>
+              </>
+            ) : null}
           </div>
         </section>
       </div>

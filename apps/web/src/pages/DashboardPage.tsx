@@ -1,35 +1,17 @@
 import { useNavigate } from "react-router-dom";
 import { useDashboard } from "../hooks/useDashboard";
 import { useMe } from "../hooks/useMe";
-import { seedDemoData } from "../api";
 import { useAuth } from "../contexts/AuthContext";
-import { useState } from "react";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { logout, isLoggingOut } = useAuth();
   const { me } = useMe();
   const { loading, error, summary, drivers = [], driversError, refetch } = useDashboard();
-  const [seeding, setSeeding] = useState(false);
-  const [seedError, setSeedError] = useState<string | null>(null);
-
   const handleLogout = async () => {
     if (isLoggingOut) return;
     await logout();
     navigate("/login", { replace: true });
-  };
-
-  const handleSeedDemo = async () => {
-    setSeeding(true);
-    setSeedError(null);
-    try {
-      await seedDemoData();
-      await refetch();
-    } catch (e) {
-      setSeedError(e instanceof Error ? e.message : "Seed failed");
-    } finally {
-      setSeeding(false);
-    }
   };
 
   const s = summary;
@@ -62,14 +44,6 @@ export default function DashboardPage() {
             </div>
             <button
               type="button"
-              onClick={handleSeedDemo}
-              disabled={loading || seeding}
-              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium disabled:opacity-50"
-            >
-              {seeding ? "Seeding…" : "Seed demo data"}
-            </button>
-            <button
-              type="button"
               onClick={handleLogout}
               disabled={isLoggingOut}
               className="px-4 py-2 rounded-lg bg-red-900/60 hover:bg-red-800/60 text-red-200 text-sm font-medium disabled:opacity-50 border border-red-700/50"
@@ -85,13 +59,6 @@ export default function DashboardPage() {
             <div className="mt-1 text-xs break-words">{error}</div>
           </div>
         ) : null}
-        {seedError ? (
-          <div className="mt-4 rounded-xl border border-red-700/50 bg-red-950/30 p-4 text-red-200">
-            <div className="font-semibold">Seed failed</div>
-            <div className="mt-1 text-xs break-words">{seedError}</div>
-          </div>
-        ) : null}
-
         <section className="mt-6 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
           <KpiCard
             icon="🚛"
@@ -170,7 +137,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <p className="text-sm text-slate-400">
-              No drivers yet. Use &quot;Seed demo data&quot; above to add demo drivers and loads.
+              No drivers yet. Add drivers in Fleet or your admin workflow.
             </p>
           )}
         </section>

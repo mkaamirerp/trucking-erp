@@ -495,32 +495,51 @@ async def unlock_user_sign_in_for_tenant(
     if not email_norm:
         raise HTTPException(status_code=400, detail="Invalid email for user")
 
+    state_before = await build_sign_in_lock_state(tenant_id, email_norm)
+    had_workspace_sign_in_friction = not bool(
+        state_before.get("overall", {}).get("all_clear_for_tenant_email_unlock_tool")
+    )
+
     streak_deleted = await clear_login_password_fail_streak(tenant_id, email_norm)
     rate_cleared = clear_login_unlock_throttles_for_tenant_email(tenant_id, email_norm)
-    await set_login_step_up_pending_after_unlock(db, tenant_id, email_norm)
+    mandated_next_sign_in_verification = False
+    if had_workspace_sign_in_friction:
+        await set_login_step_up_pending_after_unlock(db, tenant_id, email_norm)
+        mandated_next_sign_in_verification = True
     state_after = await build_sign_in_lock_state(tenant_id, email_norm)
 
     logger.info(
-        "tenant_admin.unlock_sign_in tenant_id=%s actor=%s target=%s email_norm=%s streak_deleted=%s",
+        "tenant_admin.unlock_sign_in tenant_id=%s actor=%s target=%s email_norm=%s streak_deleted=%s "
+        "mandated_next_sign_in_verification=%s",
         tenant_id,
         current_user.user.id,
         user_id,
         email_norm,
         streak_deleted,
+        mandated_next_sign_in_verification,
     )
+
+    if mandated_next_sign_in_verification:
+        operator_message = (
+            "Sign-in limits were cleared for this user. For security, they will need a verification code "
+            "the next time they sign in. After that, they can trust the device to skip the code on that browser."
+        )
+    else:
+        operator_message = (
+            "No workspace-level sign-in limits were active for this email, so sign-in was already normal. "
+            "They will not be asked for an extra email code solely because of this action."
+        )
 
     return {
         "ok": True,
+        "mandated_next_sign_in_verification": mandated_next_sign_in_verification,
         "cleared": {
             "platform_login_password_fail_streaks": {"rows_deleted": streak_deleted},
             "rate_limiters": rate_cleared,
         },
         "state_after": state_after,
         "note": "IP-wide login throttle is not cleared. If sign-in still fails, wait or use another network.",
-        "operator_message": (
-            "Sign-in limits were cleared for this user. For security, they will need a verification code "
-            "the next time they sign in. After that, they can trust the device to skip the code on that browser."
-        ),
+        "operator_message": operator_message,
     }
 
 

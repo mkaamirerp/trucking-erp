@@ -27,6 +27,47 @@ def guess_broker_load_reference(text: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
+def extract_tql_rate_con_hints(text: str) -> dict[str, float | int | str]:
+    """
+    Best-effort parse of common TQL / digital rate-con text (no OCR).
+    Used only to prefill load fields on high-confidence PDF intake.
+    """
+    out: dict[str, float | int | str] = {}
+    if not text or len(text.strip()) < 20:
+        return out
+    t = text
+    rate_patterns = [
+        r"(?:total\s+rate|line\s*haul|linehaul|carrier\s+pay|total\s+(?:carrier\s+)?pay|amount\s+due)[:\s]*\$?\s*([\d,]+(?:\.\d{2})?)\b",
+        r"(?:\$|USD)\s*([\d,]+(?:\.\d{2})?)\b\s*(?:flat|total|per\s+load)?",
+    ]
+    for pat in rate_patterns:
+        m = re.search(pat, t, re.IGNORECASE)
+        if m:
+            try:
+                out["rate"] = float(m.group(1).replace(",", ""))
+                break
+            except ValueError:
+                pass
+    m_miles = re.search(r"(?:billable|total|loaded)?\s*miles[:\s]*(\d{1,5})\b", t, re.IGNORECASE)
+    if not m_miles:
+        m_miles = re.search(r"\b(\d{1,5})\s*(?:loaded\s+)?miles\b", t, re.IGNORECASE)
+    if m_miles:
+        try:
+            out["miles"] = int(m_miles.group(1))
+        except ValueError:
+            pass
+    m_com = re.search(
+        r"(?:commodity|description\s+of\s+goods?|product)[:\s]+([^\n]{1,200}?)(?:\n|$)",
+        t,
+        re.IGNORECASE,
+    )
+    if m_com:
+        line = " ".join(m_com.group(1).split())
+        if line and len(line) > 2:
+            out["commodity"] = line[:255]
+    return out
+
+
 def tql_digital_pdf_high_confidence(text: str) -> tuple[bool, str]:
     """
     Hardcoded high-confidence gate for TQL digital PDFs only:

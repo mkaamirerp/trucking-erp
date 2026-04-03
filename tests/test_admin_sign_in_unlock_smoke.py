@@ -5,7 +5,8 @@ Protected behavior:
   - `GET /api/v1/admin/users/{id}/sign-in-security` returns `sign_in_status` in
     `clear` | `locked` | `verification_on_next_sign_in` (API uses `clear` when no block — not `no_lock`).
   - Wrong passwords move the panel from `clear` → `locked` (workspace+email / streak signals).
-  - `POST .../unlock-sign-in` clears streak + tenant-email throttle buckets, sets one-shot step-up pending,
+  - `POST .../unlock-sign-in` clears streak + tenant-email throttle buckets; sets one-shot step-up pending
+    only when there was workspace-level sign-in friction (otherwise no extra email code is mandated),
     returns `operator_message` and `state_after.post_unlock_step_up_pending`.
   - After unlock, correct password does not issue a session immediately: 403 step-up with
     `login_challenge_id`, `after_sign_in_unlock`, and trust cookie cleared for `trk_login_trust`.
@@ -183,4 +184,55 @@ async def test_smoke_post_unlock_login_step_up_clears_trust_cookie():
     assert body.get("detail") == "Additional verification required."
     assert body.get("login_challenge_id")
     assert body.get("after_sign_in_unlock") is True
-    assert _any_trust_cookie_clear(_set_cookie_directives(step)), _set_cookie_directives(step)
+            assert _any_trust_cookie_clear(_set_cookie_directives(step)), _set_cookie_directives(step)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(SKIP_NO_DB, reason="DATABASE_URL required")
+async def test_smoke_unlock_when_already_clear_does_not_mandate_step_up():
+    """Admin unlock with no streak/rates/friction does not set post_unlock mandate; login stays password-only."""
+    slug = f"smoke_clr_{uuid.uuid4().hex[:8]}"
+    email = f"{slug}@example.com"
+    password = "password123456"
+    otp = "612088"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://truckerp.me") as ac:
+        tenant_slug = await _signup_workspace(ac, slug, email, password, otp)
+
+    user_id = await _platform_user_id(email)
+    origin = f"http://{_host(tenant_slug)}"
+
+    with (
+        patch("app.routers.auth.rate_limit_login_tenant_email", AsyncMock()),
+        patch("app.routers.auth.rate_limit_login_ip", AsyncMock()),
+        patch.object(settings, "turnstile_secret_key", ""),
+        patch.object(settings, "login_step_up_otp_required", False),
+        patch.object(settings, "login_trust_cookie_secret", "pytest-admin-unlock-trust-secret"),
+        patch.object(settings, "login_trust_cookie_dev_fallback_to_jwt", False),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=origin) as admin_ac:
+            login_ok = await admin_ac.post(
+                "/api/v1/auth/login",
+                json={"email": email, "password": password, "trust_this_device": False},
+            )
+            assert login_ok.status_code == 200, login_ok.text
+            access_token = login_ok.json().get("access_token")
+            assert access_token
+
+            unlock = await admin_ac.post(
+                "/api/v1/admin/users/{}/unlock-sign-in".format(user_id),
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            assert unlock.status_code == 200, unlock.text
+            uj = unlock.json()
+            assert uj.get("mandated_next_sign_in_verification") is False
+            st = uj.get("state_after") or {}
+            assert st.get("post_unlock_step_up_pending") in (False, None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=origin) as ac:
+        lr = await ac.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": password, "trust_this_device": False},
+        )
+    assert lr.status_code == 200, lr.text
+    assert lr.json().get("ok") is True

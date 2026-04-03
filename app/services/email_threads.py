@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import HTTPException, status
-from sqlalchemy import case, select
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -261,6 +261,75 @@ async def map_message_attachments(
     for r in rows:
         out.setdefault(r.message_id, []).append(r)
     return out
+
+
+async def upload_pdf_to_intake_thread(
+    db: AsyncSession,
+    tenant_id: int,
+    tenant_slug: str,
+    thread_id: int,
+    file: UploadFile,
+) -> EmailThreadOut:
+    """Attach a PDF from the UI to a Gmail thread, store bytes, and re-run the Gmail TQL intake gate."""
+    from datetime import datetime, timezone
+
+    from app.core.storage import get_storage
+
+    thread = await get_email_thread(db, tenant_id, thread_id)
+    if (thread.provider or "").lower() != "gmail":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only Gmail threads support PDF upload",
+        )
+    if thread.status != "active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thread is not active")
+    fn = (file.filename or "").strip()
+    if not fn.lower().endswith(".pdf"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File must be a PDF")
+
+    stored = await get_storage().save_upload(tenant_slug, "email_intake", "thread", thread_id, file)
+
+    now = datetime.now(timezone.utc)
+    ext_mid = f"web-upload:{uuid.uuid4().hex}"
+    msg = EmailMessage(
+        tenant_id=tenant_id,
+        thread_id=thread.id,
+        provider=thread.provider,
+        external_message_id=ext_mid,
+        external_thread_id=thread.external_thread_id,
+        direction="inbound",
+        subject=thread.subject,
+        received_at=now,
+        snippet=(f"Uploaded: {fn}"[:998] if fn else "Uploaded PDF"),
+        body_text="PDF uploaded from load intake UI.",
+        has_attachments=True,
+    )
+    db.add(msg)
+    await db.flush()
+    db.add(
+        EmailMessageAttachment(
+            tenant_id=tenant_id,
+            message_id=msg.id,
+            provider=thread.provider,
+            external_attachment_id=f"web:{uuid.uuid4().hex}",
+            filename=fn or "upload.pdf",
+            mime_type="application/pdf",
+            size_bytes=stored.file_size_bytes,
+            is_inline=False,
+            storage_key=stored.storage_key,
+            download_status="stored",
+        )
+    )
+    cnt = await db.scalar(
+        select(func.count()).select_from(EmailMessage).where(EmailMessage.thread_id == thread.id)
+    )
+    thread.message_count = int(cnt or 0)
+    if thread.last_message_at is None or now > thread.last_message_at:
+        thread.last_message_at = now
+    thread.updated_at = now
+
+    await db.commit()
+    return await recompute_gmail_intake_for_thread(db, tenant_id=tenant_id, thread_id=thread_id)
 
 
 async def recompute_gmail_intake_for_thread(db: AsyncSession, tenant_id: int, thread_id: int) -> EmailThreadOut:

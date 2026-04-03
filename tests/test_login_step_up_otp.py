@@ -107,6 +107,13 @@ async def test_forced_login_step_up_full_flow():
         )
     assert vr.status_code == 200, vr.json() == {"ok": True}
 
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=origin) as ac:
+        vr_repeat = await ac.post(
+            "/api/v1/auth/login-step-up/verify",
+            json={"login_challenge_id": challenge_id, "otp": "000000"},
+        )
+    assert vr_repeat.status_code == 200, vr_repeat.text
+
     with patch.object(settings, "login_step_up_otp_required", True):
         async with AsyncClient(transport=ASGITransport(app=app), base_url=origin) as ac:
             ok = await ac.post(

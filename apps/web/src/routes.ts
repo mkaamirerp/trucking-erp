@@ -13,6 +13,8 @@ export const OPS = {
   DISPATCH: "/dispatch",
   FLEET: "/fleet",
   LOADS: "/loads",
+  /** Create a new load draft and open its detail page (manual entry from intake, etc.). */
+  LOAD_NEW: "/loads/new",
   LOAD_DETAIL: (id: number | string) => `/loads/${id}`,
   PAY_RUNS: "/payroll/pay-runs",
   PAY_RUN_NEW: "/payroll/pay-runs/new",

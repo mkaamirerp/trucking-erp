@@ -17,6 +17,7 @@ import {
   type Trailer,
   type Load,
 } from "@/api";
+import { firstPickupAppointmentDate, formatRouteFromStops } from "@/utils/loadStops";
 const STATUS_LABELS: Record<string, string> = {
   unassigned: "Unassigned",
   assigned: "Assigned",
@@ -110,13 +111,10 @@ function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: num
         #{load.load_number}
       </td>
       <td className="px-4 py-2 text-xs text-[#94a3b8]">
-        {load.pickup_location || "—"}
+        {formatRouteFromStops(load.stops)}
       </td>
       <td className="px-4 py-2 text-xs text-[#94a3b8]">
-        {load.delivery_location || "—"}
-      </td>
-      <td className="px-4 py-2 text-xs text-[#94a3b8]">
-        {formatDate(load.pickup_date)}
+        {formatDate(firstPickupAppointmentDate(load.stops))}
       </td>
       <td className="px-4 py-2 text-xs">
         <span className="px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 text-[10px]">
@@ -234,9 +232,8 @@ function AssetRow({
                   <thead>
                     <tr className="border-b border-[#1e293b]">
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Load #</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Pickup</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Delivery</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Pickup Date</th>
+                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Route (stops)</th>
+                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">1st pickup date</th>
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Status</th>
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Truck</th>
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Trailer</th>

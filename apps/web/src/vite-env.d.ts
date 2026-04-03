@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+declare const __UI_BUILD_ID__: string;
+
 interface ImportMetaEnv {
   readonly VITE_API_BASE?: string;
   readonly VITE_TENANT_ID?: string;

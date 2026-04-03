@@ -16,6 +16,7 @@ import DashboardPage from "./pages/DashboardPage";
 import FleetPage from "./pages/FleetPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import DispatchPage from "./pages/DispatchPage";
+import LoadCreatePage from "./pages/LoadCreatePage";
 import LoadInboxPage from "./pages/LoadInboxPage";
 import LoadDetailPage from "./pages/LoadDetailPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
@@ -162,6 +163,14 @@ function App() {
         element={
           <Layout>
             <LoadsListPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/loads/new"
+        element={
+          <Layout>
+            <LoadCreatePage />
           </Layout>
         }
       />

@@ -20,6 +20,7 @@ from app.services.email_engine.attachment_extractor import download_gmail_attach
 from app.services.email_engine.message_classifier import PostIngestIntakePath, thread_indicates_tql_affinity
 from app.services.email_intake_pdf import (
     extract_pdf_text_bytes,
+    extract_tql_rate_con_hints,
     guess_broker_load_reference,
     tql_digital_pdf_high_confidence,
 )
@@ -121,9 +122,14 @@ async def apply_gmail_tql_intake_gate(
 
         for msg, att in rows:
             try:
-                raw = await download_gmail_attachment_bytes(
-                    access_token, msg.external_message_id, att.external_attachment_id
-                )
+                if getattr(att, "storage_key", None):
+                    from app.core.storage import get_storage
+
+                    raw = get_storage().read_bytes(att.storage_key, "email_intake", None)
+                else:
+                    raw = await download_gmail_attachment_bytes(
+                        access_token, msg.external_message_id, att.external_attachment_id
+                    )
             except Exception as exc:
                 logger.warning("intake gmail attachment download failed: %s", exc)
                 gate_reason = "gmail_attachment_download_failed"
@@ -148,6 +154,10 @@ async def apply_gmail_tql_intake_gate(
         if high_ok:
             ref = guess_broker_load_reference(pdf_text)
             excerpt = (pdf_text or "")[:4000]
+            hints = extract_tql_rate_con_hints(pdf_text)
+            rate = hints.get("rate")
+            miles = hints.get("miles")
+            commodity = hints.get("commodity")
             load_number = f"INT-{uuid.uuid4().hex[:12].upper()}"
             load = Load(
                 tenant_id=tenant_id,
@@ -157,6 +167,9 @@ async def apply_gmail_tql_intake_gate(
                 broker_load_reference=ref,
                 status="draft",
                 internal_notes=excerpt or None,
+                rate=float(rate) if isinstance(rate, (int, float)) else None,
+                miles=int(miles) if isinstance(miles, int) else None,
+                commodity=str(commodity)[:255] if commodity else None,
             )
             db.add(load)
             await db.flush()

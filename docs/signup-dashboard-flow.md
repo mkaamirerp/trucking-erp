@@ -68,7 +68,7 @@ If you only change backend (Python) code, a container rebuild is enough; no Vite
 
 ## Fix: "Workspace schema is not ready" (loads/drivers tables missing)
 
-If the dashboard shows zeros and **Seed demo data** fails with "Workspace schema is not ready. Run tenant migrations…", the tenant DB exists but migrations were run only up to an old revision (before the `loads` table).
+If the dashboard shows zeros and API errors mention missing tables, the tenant DB exists but migrations were run only up to an old revision (before the `loads` table).
 
 **Driver list empty but count &gt; 0 (new tenants):** Seed and default driver data must use validation-safe values (e.g. `@demo.test` for email, not `@demo.local`). See **docs/driver-list-root-cause-and-prevention.md** (§0 and §3) so new tenants never get "List could not be loaded" with a non-zero driver count.
 
@@ -77,4 +77,4 @@ If the dashboard shows zeros and **Seed demo data** fails with "Workspace schema
    ```bash
    PYTHONPATH=. python scripts/run_tenant_migrations.py <tenant_slug>
    ```
-   Example: `PYTHONPATH=. python scripts/run_tenant_migrations.py acme`. Then reload the dashboard and use **Seed demo data** again.
+   Example: `PYTHONPATH=. python scripts/run_tenant_migrations.py acme`. Then reload the dashboard.

@@ -60,6 +60,7 @@ class LoadStopUpdate(BaseModel):
 class LoadStopOut(LoadStopBase):
     id: int
     load_id: int
+    scheduled_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
@@ -154,6 +155,8 @@ class NestedDriver(BaseModel):
     id: int
     first_name: str
     last_name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -76,27 +76,48 @@ async def testing_unlock_login(
     if not email_norm:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email")
 
+    state_before = await build_sign_in_lock_state(tenant_id, email_norm)
+    had_workspace_sign_in_friction = not bool(
+        state_before.get("overall", {}).get("all_clear_for_tenant_email_unlock_tool")
+    )
+
     streak_deleted = await clear_login_password_fail_streak(tenant_id, email_norm)
     rate_cleared = clear_login_unlock_throttles_for_tenant_email(tenant_id, email_norm)
-    await set_login_step_up_pending_after_unlock(db, tenant_id, email_norm)
+    mandated_next_sign_in_verification = False
+    if had_workspace_sign_in_friction:
+        await set_login_step_up_pending_after_unlock(db, tenant_id, email_norm)
+        mandated_next_sign_in_verification = True
     state_after = await build_sign_in_lock_state(tenant_id, email_norm)
 
     rid = request.headers.get("X-Request-ID")
     audit_log.info(
         "platform_admin_action=unlock_login tenant_id=%s tenant_slug=%s email_norm=%s "
-        "password_fail_streak_rows_deleted=%s rate_limiters=%s request_id=%s",
+        "password_fail_streak_rows_deleted=%s rate_limiters=%s mandated_next_sign_in_verification=%s request_id=%s",
         tenant_id,
         tenant.slug,
         email_norm,
         streak_deleted,
         {k: v["had_entries"] for k, v in rate_cleared.items()},
+        mandated_next_sign_in_verification,
         rid,
     )
+
+    if mandated_next_sign_in_verification:
+        operator_message = (
+            "Sign-in limits were cleared for this user. For security, they will need a verification code "
+            "the next time they sign in. After that, they can trust the device to skip the code on that browser."
+        )
+    else:
+        operator_message = (
+            "No workspace-level sign-in limits were active for this email, so sign-in was already normal. "
+            "They will not be asked for an extra email code solely because of this action."
+        )
 
     return {
         "tenant_id": tenant_id,
         "tenant_slug": tenant.slug,
         "email_norm": email_norm,
+        "mandated_next_sign_in_verification": mandated_next_sign_in_verification,
         "cleared": {
             "platform_login_password_fail_streaks": {"rows_deleted": streak_deleted},
             "rate_limiters": rate_cleared,
@@ -104,8 +125,5 @@ async def testing_unlock_login(
         "state_after": state_after,
         "note": "IP-based login throttle (login_per_ip) is not cleared. If sign-in still shows "
         "a network-wide limit, wait for the window or use another connection.",
-        "operator_message": (
-            "Sign-in limits were cleared for this user. For security, they will need a verification code "
-            "the next time they sign in. After that, they can trust the device to skip the code on that browser."
-        ),
+        "operator_message": operator_message,
     }

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
 from app.deps.entitlements import require_entitlement
-from app.deps.tenant import require_tenant
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.models.tenant_email_account import TenantEmailAccount
 from app.schemas.email_threads import (
@@ -168,6 +168,25 @@ async def recompute_email_thread_intake(
 ):
     """Re-apply Gmail intake routing (e.g. TQL heuristics) without waiting for a new sync event."""
     return await email_threads_service.recompute_gmail_intake_for_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+
+
+@router.post("/{thread_id}/upload-pdf", response_model=EmailThreadOut)
+async def upload_pdf_to_email_thread(
+    thread_id: int,
+    file: UploadFile = File(...),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Attach a PDF from the intake UI; stored in tenant object storage and included in TQL PDF intake."""
+    return await email_threads_service.upload_pdf_to_intake_thread(
+        db,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        thread_id=thread_id,
+        file=file,
+    )
 
 
 @router.post("/{thread_id}/disregard", response_model=EmailThreadOut)

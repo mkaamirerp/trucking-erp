@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.services.email_intake_pdf import (
+    extract_tql_rate_con_hints,
     guess_broker_load_reference,
     tql_digital_pdf_high_confidence,
 )
@@ -34,6 +35,22 @@ def test_tql_high_confidence_requires_keywords_and_length() -> None:
 def test_guess_broker_load_reference() -> None:
     assert guess_broker_load_reference("Please see Load # ABC12X for details") == "ABC12X"
     assert guess_broker_load_reference("no ref here") is None
+
+
+def test_extract_tql_rate_con_hints() -> None:
+    blob = """
+    TOTAL QUALITY LOGISTICS
+    RATE CONFIRMATION
+    Total Rate: $2,500.50
+    Billable Miles: 1245
+    Commodity: Paper rolls
+    PICKUP Chicago IL
+    DELIVERY Dallas TX
+    """
+    h = extract_tql_rate_con_hints(blob)
+    assert h["rate"] == 2500.50
+    assert h["miles"] == 1245
+    assert "Paper" in str(h.get("commodity", ""))
 
 
 def test_participants_indicate_tql() -> None:

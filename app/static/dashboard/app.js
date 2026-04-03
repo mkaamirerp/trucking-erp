@@ -23,13 +23,6 @@
     });
   }
 
-  function seedDemo() {
-    return fetch(API + '/dashboard/seed-demo', { ...opts, method: 'POST' }).then(r => {
-      if (!r.ok) throw new Error('Seed failed');
-      return r.json();
-    });
-  }
-
   function renderSummary(data) {
     document.getElementById('kpi-active-loads').textContent = data.active_loads ?? 0;
     document.getElementById('kpi-drivers').textContent = data.drivers_active ?? 0;
@@ -68,7 +61,6 @@
         '<td>' + (l.delivery_location || '—') + '</td>';
       tbody.appendChild(tr);
     });
-    const available = items.filter(l => (l.status || '') === 'planned' || (l.status || '') === 'assigned').length;
     const el = document.getElementById('loads-available');
     if (el) el.textContent = '#' + (items.length || 0) + ' Loads';
   }
@@ -79,36 +71,12 @@
         renderSummary(summary);
         renderDrivers(drivers);
         renderLoads(loads);
-        const hasData = (summary.active_loads || 0) > 0 || (summary.drivers_active || 0) > 0;
-        const banner = document.getElementById('seed-banner');
-        if (banner) banner.classList.toggle('hidden', hasData);
       })
-      .catch(() => {
-        document.getElementById('seed-banner').classList.remove('hidden');
-      });
-  }
-
-  function initSeedButton() {
-    const btn = document.getElementById('seed-demo-btn');
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      btn.disabled = true;
-      btn.textContent = 'Seeding…';
-      seedDemo()
-        .then(() => {
-          btn.textContent = 'Done';
-          loadDashboard();
-        })
-        .catch(() => {
-          btn.disabled = false;
-          btn.textContent = 'Seed demo data';
-        });
-    });
+      .catch(() => {});
   }
 
   document.getElementById('date-display').textContent =
     'Today ' + new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
   loadDashboard();
-  initSeedButton();
 })();

@@ -292,7 +292,9 @@ async def verify_login_step_up_otp_for_challenge(
     if ch is None:
         return False
     if ch.otp_verified_at is not None:
-        return False
+        # OTP already consumed for this challenge; allow the client to retry POST /login with
+        # login_challenge_id (e.g. network error or Turnstile after a successful verify).
+        return True
     otp_row = await db.scalar(
         select(PlatformOTPToken)
         .where(

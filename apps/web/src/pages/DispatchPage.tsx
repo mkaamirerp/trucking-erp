@@ -27,6 +27,7 @@ import { getTenantSlugFromHost } from "@/tenant";
 import { useWorkspaceLayout } from "@/hooks/useWorkspaceLayout";
 import { useMe } from "@/hooks/useMe";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatRouteFromStops } from "@/utils/loadStops";
 
 const RIBBON_TABS = [
   { key: "active", label: "Active", statuses: ["unassigned", "assigned", "dispatched"] },
@@ -61,14 +62,8 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
 
 const COLUMN_WIDTH = 220;
 
-function formatLoc(loc: string | null | undefined): string {
-  if (!loc) return "—";
-  const parts = loc.split(",").map((s) => s.trim());
-  return parts.length >= 2 ? `${parts[0]}, ${parts[1]}` : loc;
-}
-
 function formatRoute(load: Load): string {
-  return `${formatLoc(load.pickup_location)} → ${formatLoc(load.delivery_location)}`;
+  return formatRouteFromStops(load.stops);
 }
 
 /** Board card — 3 fields only: Load #, Route, Status */

@@ -698,22 +698,6 @@ export async function getDashboardSummary() {
   return handle<DashboardSummary>(res);
 }
 
-export async function seedDemoData() {
-  const res = await fetchWithTenant(`${API_BASE}/dashboard/seed-demo`, { method: "POST" });
-  if (!res.ok) {
-    const text = await res.text();
-    let message = text || "Seed failed";
-    try {
-      const json = JSON.parse(text) as { detail?: string };
-      if (json.detail) message = json.detail;
-    } catch {
-      /* use message as-is */
-    }
-    throw new Error(message);
-  }
-  return handle<{ ok?: boolean; message?: string }>(res);
-}
-
 export async function listLoads(params: {
   status?: string[];
   driver_id?: number;
@@ -1796,6 +1780,16 @@ export async function recomputeEmailThreadIntake(threadId: number): Promise<Inbo
   return handle<InboxThreadDetail>(res);
 }
 
+export async function uploadPdfToEmailThread(threadId: number, file: File): Promise<InboxThreadDetail> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/upload-pdf`, {
+    method: "POST",
+    body: form,
+  });
+  return handle<InboxThreadDetail>(res);
+}
+
 export type EmailThreadActionLoadSummary = {
   id: number;
   load_number: string;
@@ -2102,6 +2096,28 @@ export type LoadCustomsSnapshot = {
   confirmed_at: string;
 };
 
+export type LoadStop = {
+  id: number;
+  load_id: number;
+  stop_type: string;
+  sequence: number;
+  facility_name?: string | null;
+  street?: string | null;
+  city?: string | null;
+  state_or_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  reference_number?: string | null;
+  appointment_type?: string | null;
+  appointment_date?: string | null;
+  appointment_time_text?: string | null;
+  scheduled_at?: string | null;
+  notes?: string | null;
+  commodity_notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export type Load = {
   id: number;
   load_number: string;
@@ -2113,7 +2129,11 @@ export type Load = {
   customs_snapshot?: LoadCustomsSnapshot | null;
   broker_load_reference?: string | null;
   broker_name_snapshot?: string | null;
+  broker_contact_name_snapshot?: string | null;
+  broker_contact_phone_snapshot?: string | null;
+  broker_contact_email_snapshot?: string | null;
   broker_id?: number | null;
+  broker_contact_id?: number | null;
   driver_id?: number | null;
   truck_id?: number | null;
   trailer_id?: number | null;
@@ -2123,15 +2143,39 @@ export type Load = {
   delivery_time?: string | null;
   pickup_location?: string | null;
   delivery_location?: string | null;
+  mode?: string | null;
   equipment_type?: string | null;
+  trailer_type?: string | null;
+  trailer_size?: string | null;
+  commodity?: string | null;
+  estimated_weight?: number | null;
+  hazmat_flag?: boolean | null;
+  temperature_requirement?: string | null;
+  pallet_case_count?: string | null;
+  internal_notes?: string | null;
   rate?: number | null;
   customer_rate?: number | null;
   miles?: number | null;
   status: string;
   broker?: Broker | null;
-  driver?: { id: number; first_name: string; last_name: string } | null;
+  broker_contact?: {
+    id: number;
+    broker_id: number;
+    name: string;
+    phone?: string | null;
+    extension?: string | null;
+    email?: string | null;
+  } | null;
+  driver?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
   truck?: { id: number; unit_number: string } | null;
   trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
+  stops?: LoadStop[] | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
