@@ -42,5 +42,6 @@ SAME-TENANT HAPPY PATH
 
 Notes
 -----
-- Rebuild API image after backend changes; restart nginx if frontend dist changed.
+- Rebuild API image after backend changes.
+- Frontend (`apps/web/dist` is baked into the nginx image): run `npm run build` in `apps/web`, then `docker compose -f docker-compose.yml build truckerp-nginx && docker compose -f docker-compose.yml up -d truckerp-nginx`, or use `scripts/reload_nginx_web.sh` — see `docs/FRONTEND_DEPLOY.md`. (`restart` alone does not pick up new dist.)
 - Cross-tenant tests need two ACTIVE tenants and demo-style data; may skip in minimal DBs.
