@@ -33,7 +33,7 @@ export default function LoadCreatePage() {
         <button
           type="button"
           className="ml-3 text-sky-400 underline"
-          onClick={() => navigate(OPS.INBOX, { replace: true })}
+          onClick={() => navigate(OPS.INTAKE, { replace: true })}
         >
           Back to intake
         </button>

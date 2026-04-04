@@ -4,9 +4,10 @@
 
 So that **code changes reflect immediately** without running `npm run build`:
 
-1. Start the API (e.g. with dev stack so API is on port 8000):
+1. Start the API on port **8000** (your normal stack). For **optional local** iteration with bind mounts / `.env`, some engineers use the dev overlay — see repo root `docker-compose.dev.yml` and `./scripts/dev-up.sh`.  
+   **Standard deployment / production-like:**  
    ```bash
-   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+   docker compose -f docker-compose.yml up -d
    ```
 2. From repo root, run the Vite dev server:
    ```bash
@@ -25,4 +26,4 @@ For deployment or when serving via nginx from built assets:
 cd apps/web && npm run build
 ```
 
-Output is in `dist/`. With `docker-compose.dev.yml`, nginx serves `./apps/web/dist`; update it by rebuilding after changes if you are not using the Vite dev server.
+Output is in `dist/`. On production compose, **`dist` is copied into the nginx image** at image build time — use **`reload_nginx_web.sh`** (build + `docker compose build` + `up -d` for `truckerp-nginx`), not **`restart` only**. See **`docs/FRONTEND_DEPLOY.md`**.

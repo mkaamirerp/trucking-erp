@@ -1,7 +1,7 @@
 # Tenant auth cutover — operator runbook
 
-Commands assume the **API container** at `/app`, secrets in `/run/secrets/truckerp.env`, and compose:  
-`docker compose -f docker-compose.yml -f docker-compose.dev.yml` (from `/home/admin/trucking_erp` on EC2 dev).
+Commands assume the **API container** at `/app`, secrets in `/run/secrets/truckerp.env`, and compose from `/home/admin/trucking_erp`:  
+`docker compose -f docker-compose.yml` (standard deployment). Optional local iteration may use `-f docker-compose.dev.yml` in addition—see `docker-compose.dev.yml`.
 
 Replace `<tenant_id>` with the numeric `platform_tenants.id`.
 

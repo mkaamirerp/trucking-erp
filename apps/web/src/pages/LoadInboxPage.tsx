@@ -1,5 +1,5 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   createDraftLoadFromEmailThread,
   disregardEmailThread,
@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { IntakeVerificationPanel, type IntakeKpis } from "../components/intake/IntakeVerificationPanel";
 import { OPS } from "../routes";
+import { useMe } from "../hooks/useMe";
 
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -74,8 +75,21 @@ function formatRoutingReason(raw: string | null | undefined): string {
   return raw.replace(/^tql_pdf_not_high_confidence:/i, "TQL PDF did not meet auto rules: ").replace(/_/g, " ");
 }
 
+function threadIntakePrimaryLabel(t: InboxThreadListItem): string {
+  const s = (t.subject || "").toLowerCase();
+  if (/rate\s*con|rate\s*confirmation|\brc\b|^fw:/i.test(s) || /tql/i.test(s)) return "Rate confirmation";
+  return t.subject || "(No subject)";
+}
+
 export default function LoadInboxPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { me } = useMe();
+  const isEmailLoadRoute = location.pathname.startsWith(OPS.EMAIL_LOAD);
+  const pageTitle = isEmailLoadRoute ? "Email load" : "Load Intake";
+  const pageSubtitle = isEmailLoadRoute
+    ? "Gmail threads, sync, and broker-mail intake queues."
+    : "Create and verify incoming loads.";
   const [provider, setProvider] = useState<string>("");
   const [status, setStatus] = useState<string>("active");
   const [queueFocus, setQueueFocus] = useState<"intake" | "linked">("intake");
@@ -511,7 +525,7 @@ export default function LoadInboxPage() {
         ) : (
           <div className="flex flex-col gap-1">
             <div className="flex items-start justify-between gap-2">
-              <span className="line-clamp-2 text-sm font-medium text-[#e8edf5]">{t.subject || "(No subject)"}</span>
+              <span className="line-clamp-2 text-sm font-medium text-[#e8edf5]">{threadIntakePrimaryLabel(t)}</span>
               <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${confidenceClass(t.confidence_level)}`}>
                 {confidenceLabel(t.confidence_level)}
               </span>
@@ -537,14 +551,23 @@ export default function LoadInboxPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-[#e8edf5]">Load Intake</h1>
-          <p className="text-sm text-[#64748b]">
-            New loads from high-confidence email (e.g. TQL digital PDFs) and review queues for broker-affine mail. In
-            production, new Gmail arrives via Google push → backend delta sync → classify → route; no clicks required.
-            Use Refresh to reload this list from the server, or Pull new mail (optional) only if push was delayed or you
-            are debugging.
-          </p>
+        <div className="max-w-2xl">
+          <h1 className="text-xl font-semibold text-[#e8edf5]">{pageTitle}</h1>
+          <p className="text-sm text-[#64748b]">{pageSubtitle}</p>
+          {isEmailLoadRoute ? (
+            <details className="mt-2 text-xs text-[#64748b] marker:text-[#475569]">
+              <summary className="cursor-pointer text-[#94a3b8] hover:text-[#cbd5e1]">Ingestion &amp; troubleshooting</summary>
+              <p className="mt-2 leading-relaxed">
+                New Gmail is classified and routed via backend sync (push → delta → route). Use Refresh to reload this list
+                from the server. Pull new mail is optional if push was delayed or you are debugging.
+              </p>
+            </details>
+          ) : (
+            <p className="mt-2 text-xs text-[#64748b]">
+              Open <strong className="text-[#94a3b8]">Email load</strong> for sync, queues, and ingestion tools. This screen
+              focuses on verification and draft load creation.
+            </p>
+          )}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <select
@@ -634,7 +657,7 @@ export default function LoadInboxPage() {
             {!loadingThreads && !threadsError && isBandView && (
               <>
                 <div className="border-b border-[#1e293b] bg-[#0d111a] px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[#94a3b8]">New Loads</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#94a3b8]">New loads</p>
                   <p className="text-[11px] text-[#64748b]">Auto-created loads with trip numbers; verify in Loads.</p>
                 </div>
                 {bandNewLoads.length === 0 ? (
@@ -644,8 +667,8 @@ export default function LoadInboxPage() {
                 )}
 
                 <div className="border-b border-t border-[#1e293b] bg-[#0d111a] px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[#94a3b8]">Needs Review</p>
-                  <p className="text-[11px] text-[#64748b]">Open thread, verify, or ignore. No trip number until promoted.</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#94a3b8]">Needs review</p>
+                  <p className="text-[11px] text-[#64748b]">Rate cons and broker mail — verify, link, or ignore.</p>
                 </div>
                 {bandNeedsReview.length === 0 ? (
                   <div className="px-3 py-4 text-xs text-[#64748b]">None right now.</div>
@@ -721,30 +744,33 @@ export default function LoadInboxPage() {
         </section>
 
         <section className="flex min-h-[620px] flex-col rounded-xl border border-[#1e293b] bg-[#0a0e14]">
-          <div className="shrink-0 border-b border-[#1e293b] px-5 py-3">
+          <div className="shrink-0 border-b border-[#1e293b] px-4 py-2.5">
             {!selectedThread ? (
-              <p className="text-sm text-[#64748b]">Select an item to open the thread.</p>
+              <p className="text-sm text-[#64748b]">Select a queue item to verify intake.</p>
             ) : (
-              <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-lg font-semibold text-[#e8edf5]">{selectedThread.subject || "(No subject)"}</h2>
-                  <p className="mt-1 text-sm text-[#94a3b8]">{participantPreview(selectedThread.participants_json)}</p>
-                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-[#64748b]">
-                    <span>Provider: {selectedThread.provider}</span>
-                    <span>Status: {selectedThread.status}</span>
-                    <span>Bucket: {selectedThread.intake_bucket}</span>
-                    {selectedThread.confidence_level ? (
-                      <span>Confidence: {confidenceLabel(selectedThread.confidence_level)}</span>
-                    ) : null}
-                  </div>
+                  <h2 className="truncate text-sm font-semibold text-[#e8edf5]">
+                    {selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background"
+                      ? threadIntakePrimaryLabel(selectedThread)
+                      : selectedThread.subject || "(No subject)"}
+                  </h2>
+                  <p className="truncate text-xs text-[#64748b]">
+                    {participantPreview(selectedThread.participants_json)}
+                    <span className="text-[#475569]"> · </span>
+                    {selectedThread.provider} · {selectedThread.intake_bucket}
+                    {selectedThread.confidence_level ? ` · ${confidenceLabel(selectedThread.confidence_level)}` : ""}
+                  </p>
                   {selectedThread.pickup_delivery_summary ? (
-                    <p className="mt-2 text-xs text-[#94a3b8]">{selectedThread.pickup_delivery_summary}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-[#94a3b8]/90">{selectedThread.pickup_delivery_summary}</p>
                   ) : null}
-                  {!selectedThread.linked_load_id ? (
-                    <p className="mt-1 text-xs text-amber-200/80">{formatRoutingReason(selectedThread.routing_reason)}</p>
+                  {!selectedThread.linked_load_id && selectedThread.routing_reason ? (
+                    <p className="mt-0.5 truncate text-[11px] text-amber-200/75">
+                      {formatRoutingReason(selectedThread.routing_reason)}
+                    </p>
                   ) : null}
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
                   {selectedThread.linked_load_id ? (
                     <button
                       type="button"
@@ -812,6 +838,8 @@ export default function LoadInboxPage() {
                   onManualEntry={() => navigate(OPS.LOAD_NEW)}
                   uploadBusy={uploadingPdf}
                   onUploadDocumentChange={handleUploadDocumentChange}
+                  userEmail={me?.email ?? null}
+                  onClose={() => navigate(OPS.DASHBOARD)}
                 />
 
                 <details className="mt-6 rounded-xl border border-[#1e293b] bg-[#0d111a]">

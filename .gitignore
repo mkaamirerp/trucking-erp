@@ -57,6 +57,7 @@ apps/web/dist/
 # Ignore repo-root scripts/ except versioned maintenance entrypoints (pattern "scripts/" also matched app/scripts/).
 /scripts/*
 !/scripts/prune_platform_login_failure_events.sh
+!/scripts/reload_nginx_web.sh
 
 # Vault/runtime rendered secrets
 runtime/rendered/

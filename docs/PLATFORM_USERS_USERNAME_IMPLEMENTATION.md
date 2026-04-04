@@ -43,7 +43,7 @@ Replaced the temporary bridge (username stored in `first_name` with `last_name =
 ### 1. Schema verification
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T truckerp-postgres psql -U postgres -d trucking_erp -c "\d platform_users"
+docker compose -f docker-compose.yml exec -T truckerp-postgres psql -U postgres -d trucking_erp -c "\d platform_users"
 ```
 
 Expect: `username` column (nullable), `first_name`/`last_name` nullable.
@@ -51,7 +51,7 @@ Expect: `username` column (nullable), `first_name`/`last_name` nullable.
 ### 2. Unique index verification
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T truckerp-postgres psql -U postgres -d trucking_erp -c "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'platform_users';"
+docker compose -f docker-compose.yml exec -T truckerp-postgres psql -U postgres -d trucking_erp -c "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'platform_users';"
 ```
 
 Expect: `uq_platform_users_username_lower` with `lower((username)::text)` and `WHERE (username IS NOT NULL)`.

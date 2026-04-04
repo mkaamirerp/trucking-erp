@@ -60,6 +60,7 @@ function App() {
     /^\/payroll\//.test(location.pathname) ||
     /^\/dashboard/.test(location.pathname) ||
     /^\/dispatch/.test(location.pathname) ||
+    /^\/intake/.test(location.pathname) ||
     /^\/inbox/.test(location.pathname) ||
     /^\/fleet/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
@@ -144,6 +145,14 @@ function App() {
       />
       <Route
         path="/inbox"
+        element={
+          <Layout>
+            <LoadInboxPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/intake"
         element={
           <Layout>
             <LoadInboxPage />

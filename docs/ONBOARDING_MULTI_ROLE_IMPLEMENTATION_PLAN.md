@@ -350,7 +350,7 @@ interface IntakePayload {
 | 11 | `apps/web/src/pages/DriverOnboardingAdminDetailPage.tsx` | Display application_type, requested_role_code; for non-DRIVER hide license/work/docs sections. |
 | 12 | `app/routers/driver_onboarding.py` | Add immutability guard: if changing application_type and intake has progress, return 409. (Requires PATCH endpoint for application_type if not yet present.) |
 | 13 | `app/routers/driver_onboarding.py` | Normalize intake_payload on save into common/role_specific/review_only/documents where possible. |
-| 14 | Frontend build & nginx restart | `npm run build` → `restart truckerp-nginx` |
+| 14 | Frontend deploy | `scripts/reload_nginx_web.sh` (or `npm run build` + rebuild `truckerp-nginx` image); see `docs/FRONTEND_DEPLOY.md` |
 
 ### LATER REFACTOR
 

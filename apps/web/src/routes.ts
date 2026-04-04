@@ -6,7 +6,10 @@
 /** Operations workspace — dispatch, loads, review, payroll, etc. */
 export const OPS = {
   DASHBOARD: "/dashboard",
-  INBOX: "/inbox",
+  /** Email load — Gmail / thread queues, sync, ingestion (not the Load Intake verification module). */
+  EMAIL_LOAD: "/inbox",
+  /** Load Intake — verify broker docs, KPIs, draft loads from email queues. */
+  INTAKE: "/intake",
   DRIVER_ONBOARDING_APPLICANT: "/driver-onboarding",
   DRIVER_ONBOARDING_REVIEW: "/operations/driver-onboarding-review",
   DRIVER_ONBOARDING_REVIEW_DETAIL: (id: number | string) => `/operations/driver-onboarding-review/${id}`,

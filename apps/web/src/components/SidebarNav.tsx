@@ -17,19 +17,6 @@ function BoardIcon() {
   );
 }
 
-const operationsLinks = [
-  { to: OPS.DASHBOARD, label: "Dashboard", short: "Home", icon: GridIcon },
-  { to: OPS.INBOX, label: "Load Intake", short: "Intake", icon: MailIcon },
-  { to: OPS.DISPATCH, label: "Dispatch", short: "Dispatch", icon: BoardIcon },
-  { to: OPS.DRIVER_ONBOARDING_REVIEW, label: "Onboarding Review", short: "Review", icon: ReviewIcon },
-  { to: OPS.DRIVER_ONBOARDING_APPLICANT, label: "Driver Onboarding", short: "Drivers", icon: UserIcon },
-  { to: OPS.FLEET, label: "Fleet", short: "Fleet", icon: TruckIcon },
-  { to: OPS.LOADS, label: "Loads", short: "Loads", icon: BoxIcon },
-  { to: OPS.PAY_RUNS, label: "Pay Runs", short: "Payroll", icon: BoxIcon },
-  { to: OPS.PAY_PERIODS, label: "Pay Periods", short: "Cards", icon: CardIcon },
-  { to: OPS.DOCUMENTS, label: "Documents", short: "Docs", icon: FolderIcon },
-];
-
 function GridIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -108,6 +95,31 @@ function MailIcon() {
   );
 }
 
+function IntakeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 4h10a2 2 0 0 1 2 2v3H6V6a2 2 0 0 1 2-2Z" />
+      <path d="M6 10h14v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10Z" />
+      <path d="m10 15 2 2 4-4" />
+    </svg>
+  );
+}
+
+/** After icon components — avoids TDZ if bundler reordering ever breaks hoisting. */
+const operationsLinks = [
+  { to: OPS.DASHBOARD, label: "Dashboard", short: "Home", icon: GridIcon },
+  { to: OPS.EMAIL_LOAD, label: "Inbox & sync", short: "Email load", icon: MailIcon },
+  { to: OPS.INTAKE, label: "Verify & create", short: "Load Intake", icon: IntakeIcon },
+  { to: OPS.DISPATCH, label: "Dispatch", short: "Dispatch", icon: BoardIcon },
+  { to: OPS.DRIVER_ONBOARDING_REVIEW, label: "Onboarding Review", short: "Review", icon: ReviewIcon },
+  { to: OPS.DRIVER_ONBOARDING_APPLICANT, label: "Driver Onboarding", short: "Drivers", icon: UserIcon },
+  { to: OPS.FLEET, label: "Fleet", short: "Fleet", icon: TruckIcon },
+  { to: OPS.LOADS, label: "Loads", short: "Loads", icon: BoxIcon },
+  { to: OPS.PAY_RUNS, label: "Pay Runs", short: "Payroll", icon: BoxIcon },
+  { to: OPS.PAY_PERIODS, label: "Pay Periods", short: "Cards", icon: CardIcon },
+  { to: OPS.DOCUMENTS, label: "Documents", short: "Docs", icon: FolderIcon },
+];
+
 function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -163,17 +175,17 @@ export default function SidebarNav() {
   const navigate = useNavigate();
   const { logout, isLoggingOut } = useAuth();
   const { me } = useMe();
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const saved = window.localStorage.getItem("sidebar-collapsed-v2");
+    if (saved == null) return false;
+    return saved === "true";
+  });
   const slug = getTenantSlugFromHost() ? "" : "";
   const showAdmin = isTenantAdmin(me?.roles ?? []);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("sidebar-collapsed");
-    if (saved != null) setCollapsed(saved === "true");
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("sidebar-collapsed", String(collapsed));
+    window.localStorage.setItem("sidebar-collapsed-v2", String(collapsed));
   }, [collapsed]);
 
   const handleLogout = async () => {
@@ -189,7 +201,10 @@ export default function SidebarNav() {
         collapsed ? "w-[86px]" : "w-[250px]"
       )}
     >
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(245,166,35,0.05),transparent_26%),repeating-linear-gradient(0deg,transparent,transparent_39px,rgba(255,255,255,0.02)_39px,rgba(255,255,255,0.02)_40px)]" />
+      <div
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(245,166,35,0.05),transparent_26%),repeating-linear-gradient(0deg,transparent,transparent_39px,rgba(255,255,255,0.02)_39px,rgba(255,255,255,0.02)_40px)]"
+        aria-hidden
+      />
       <button
         type="button"
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -199,7 +214,7 @@ export default function SidebarNav() {
         <span className="text-[10px]">{collapsed ? "›" : "‹"}</span>
       </button>
 
-      <div className="relative flex min-h-screen flex-col items-center px-3 py-6">
+      <div className="relative z-10 flex min-h-screen flex-col items-center px-3 py-6">
         <div className={clsx("mb-8 flex w-full items-center", collapsed ? "justify-center" : "justify-start px-2")}>
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#f5a623] font-['Barlow_Condensed'] text-2xl font-extrabold tracking-tight text-[#080a0f]">
             FP

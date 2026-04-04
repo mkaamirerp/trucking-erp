@@ -1,4 +1,6 @@
-# Dev-only overrides. Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Optional LOCAL dev overrides only — not used on standard deployment.
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Standard server: docker compose -f docker-compose.yml (see .cursor/rules/rebuild-restart-commands.mdc).
 # Prod: image-only, no host mounts. Dev: host mounts allowed here only.
 #
 # In dev, API still uses AWS SSM via start_api_with_ssm.sh, but with SSM_ENV=dev.

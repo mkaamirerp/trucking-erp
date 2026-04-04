@@ -8,7 +8,7 @@
   4. Deploy the new `apps/web/dist/` (or repo) to the server.  
   (Saves having to remember these steps; API + frontend must both be updated.)
 - [ ] **DB Inspector** (`/tools/diagnostics`): Your tool to see the database in the browser (tables, schema, sample rows) — no terminal. Password: `devtools123`. To use from main domain (truckerp.me) without a tenant subdomain, set `TOOLS_DEFAULT_TENANT_SLUG` or `TOOLS_DEFAULT_TENANT_ID` in env so the tools/db endpoints know which tenant DB to show.
-- [ ] **Frontend live reload:** Run `./scripts/dev-web.sh` (or `cd apps/web && npm run dev`), open http://localhost:5173 — changes reflect without rebuilding; API must be on port 8000 (e.g. dev stack with docker-compose.dev.yml).
+- [ ] **Frontend live reload (local):** Run `./scripts/dev-web.sh` (or `cd apps/web && npm run dev`), open http://localhost:5173 — changes reflect without rebuilding; API must be on port 8000. Optional: local dev overlay (`docker-compose.dev.yml`) if your machine uses bind mounts; standard deploy uses `docker-compose.yml` only.
 - [ ] Tenant middleware enforced (X-Tenant-ID required)
 - [ ] Models match migrations (Alembic applied)
 - [ ] New routes use app.core.database.get_db

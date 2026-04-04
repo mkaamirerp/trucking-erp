@@ -37,22 +37,22 @@ No approval → CI fails.
 
 ## Layer C — Runtime “single source of truth”
 
-- **Prod:** Image-only, no host mounts, SSM-only for secrets. Use `docker-compose.yml` only.
-- **Dev:** Host mounts allowed **only** in `docker-compose.dev.yml`, never in `docker-compose.yml`.
+- **Standard deployment:** Image-only (or as defined in `docker-compose.yml`), SSM-only for secrets where applicable. Use **`docker compose -f docker-compose.yml`** — do not assume a dev overlay on the server.
+- **Optional local dev:** Host mounts and relaxed startup may exist **only** in `docker-compose.dev.yml`. Never put dev-only mounts in `docker-compose.yml`.
 
 **Usage:**
 
-- **See changes locally (dev):**  
+- **Deployment / primary server:**  
+  `docker compose -f docker-compose.yml up -d`  
+  Rebuild services (API, nginx) after code or image changes as documented in `.cursor/rules/rebuild-restart-commands.mdc` and `scripts/reload_api.sh`.
+
+- **Optional local iteration (bind mounts, etc.):**  
   `./scripts/dev-up.sh`  
   or: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`  
-  Nginx serves `./apps/web/dist` from the host. After editing the frontend, run `npm run build` in `apps/web` and refresh — no image rebuild.
+  Only when you intentionally use the dev overlay. Nginx may serve `./apps/web/dist` from the host depending on that file — after frontend edits, `npm run build` in `apps/web` may be enough without an nginx image rebuild.
 
-- **Move to Docker (prod-like / deploy):**  
+- **Bake frontend into nginx image (some workflows):**  
   `./scripts/prod-build-nginx.sh`  
-  Builds the frontend and bakes it into the nginx image. Then run `docker compose up -d` (without the dev file) so nginx serves from the image.
-
-- **Production-like (default compose):**  
-  `docker compose up -d`  
-  Nginx serves the frontend built into the image. Frontend changes require running `prod-build-nginx.sh` then `docker compose up -d`.
+  then `docker compose -f docker-compose.yml up -d` so nginx serves assets from the image.
 
 This keeps prod stable and limits “works locally but not in CI/prod” drift.

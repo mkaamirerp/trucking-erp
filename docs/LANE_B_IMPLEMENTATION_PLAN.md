@@ -166,8 +166,8 @@ docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set 
 ### 3.4 App startup / imports / tests
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml build truckerp-api \
-  && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d truckerp-api
+docker compose -f docker-compose.yml build truckerp-api \
+  && docker compose -f docker-compose.yml up -d truckerp-api
 docker logs truckerp-api --tail 30
 ```
 
