@@ -26,11 +26,13 @@ All secrets are stored under these SSM paths:
 
 ### Required Parameters
 
-The following parameters **must** exist and be non-empty:
+The following parameters **must** exist and be non-empty (enforced in `scripts/start_api_with_ssm.sh`):
 
 - `DATABASE_URL` – Async connection string for the platform database
 - `POSTGRES_ADMIN_URL` – Sync psycopg2 connection string for admin operations
 - `POSTGRES_PASSWORD` – Raw Postgres password (used by scripts and migrations)
+- `LOGIN_TRUST_COOKIE_SECRET` – HMAC secret for the `trk_login_trust` cookie (separate from `JWT_SECRET`)
+- `ENVIRONMENT` – Application environment string (use `production` for live stacks; required so the API never runs with an implicit default)
 
 ## How Secrets Flow
 
@@ -107,8 +109,7 @@ This ensures:
 
 HMAC secret for the familiar-browser httpOnly cookie. **Separate from `JWT_SECRET`.** Use a long random value (e.g. `openssl rand -hex 32`).
 
-- **SSM parameter name (prod example):** `/truckerp/prod/platform/LOGIN_TRUST_COOKIE_SECRET`
-- **Dev example:** `/truckerp/dev/platform/LOGIN_TRUST_COOKIE_SECRET` (when `SSM_ENV=dev`)
+- **SSM parameter name:** `/truckerp/prod/platform/LOGIN_TRUST_COOKIE_SECRET`
 - **Rendered env key:** `LOGIN_TRUST_COOKIE_SECRET` (last path segment; see `scripts/start_api_with_ssm.sh`)
 
 Put or rotate the parameter, then **restart the API container** so a fresh `/run/secrets/truckerp.env` is built.
@@ -118,7 +119,7 @@ export LOGIN_TRUST_COOKIE_SECRET="$(openssl rand -hex 32)"
 SSM_ENV=prod ./scripts/ssm_put_login_trust_cookie_secret.sh
 ```
 
-If this parameter is missing in production/staging, the trust cookie is disabled (fail closed for that feature only); the API still starts.
+This parameter is **required** in `scripts/start_api_with_ssm.sh` (non-empty); the API will not start without it.
 
 ### Cloudflare Turnstile (optional — sign-in abuse)
 

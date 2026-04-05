@@ -17,7 +17,7 @@ def test_allows_tenant_resolution_shortcuts_requires_flag_and_allowlisted_env() 
     for env in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS:
         assert Settings(**base, environment=env).allows_tenant_resolution_shortcuts() is True
 
-    assert Settings(database_url=url, environment="dev", allow_tenant_resolution_shortcuts=False).allows_tenant_resolution_shortcuts() is False
+    assert Settings(database_url=url, environment="test", allow_tenant_resolution_shortcuts=False).allows_tenant_resolution_shortcuts() is False
 
     for bad in ("production", "prod", "staging", "uat", "preprod", "demo", ""):
         assert (

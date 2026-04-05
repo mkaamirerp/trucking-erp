@@ -103,7 +103,7 @@ def test_staging_missing_secret_no_jwt_fallback(monkeypatch):
 
 
 def test_dev_explicit_jwt_fallback_only_when_flag(monkeypatch):
-    monkeypatch.setattr(settings, "environment", "dev")
+    monkeypatch.setattr(settings, "environment", "test")
     monkeypatch.setattr(settings, "login_trust_cookie_secret", None)
     monkeypatch.setattr(settings, "login_trust_cookie_dev_fallback_to_jwt", True)
     monkeypatch.setattr(settings, "jwt_secret", "jwt-dev-only")
@@ -114,7 +114,7 @@ def test_dev_explicit_jwt_fallback_only_when_flag(monkeypatch):
 
 
 def test_dev_no_fallback_without_flag(monkeypatch):
-    monkeypatch.setattr(settings, "environment", "dev")
+    monkeypatch.setattr(settings, "environment", "test")
     monkeypatch.setattr(settings, "login_trust_cookie_secret", None)
     monkeypatch.setattr(settings, "login_trust_cookie_dev_fallback_to_jwt", False)
     monkeypatch.setattr(settings, "jwt_secret", "jwt-unused")

@@ -696,12 +696,12 @@ async def verify_otp(
     except IntegrityError:
         logger.exception("verify_otp failed", extra=context)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="OTP verification conflict")
-    except Exception as exc:
+    except Exception:
         logger.exception("verify_otp failed", extra=context)
-        detail = "OTP verification failed"
-        if settings.environment == "dev":
-            detail = f"{detail}: {exc!s}"
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OTP verification failed",
+        )
 
 
 @router.post("/resend-otp")
@@ -799,8 +799,7 @@ async def resend_otp(
         except Exception as exc:
             logger.warning("resend_otp_send_failed error=%s", exc)
 
-        debug_otp = otp if settings.environment == "dev" else None
-        return {"ok": True, "message": "If a pending signup exists for this email, a new code has been sent.", "debug_otp": debug_otp}
+        return {"ok": True, "message": "If a pending signup exists for this email, a new code has been sent.", "debug_otp": None}
 
     except Exception as exc:
         try:

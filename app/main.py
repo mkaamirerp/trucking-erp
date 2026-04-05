@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -41,6 +42,23 @@ from app.routers.gmail_pubsub import router as gmail_pubsub_router
 from app.routers.microsoft_graph_webhook import router as microsoft_graph_webhook_router
 from app.middleware.tenant_context import TenantContextMiddleware, tenant_middleware_allow_paths
 
+def _guard_environment_from_ssm_secrets() -> None:
+    """
+    start_api_with_ssm.sh merges SSM into /run/secrets/truckerp.env; uvicorn loads it via --env-file.
+    For SSM_ENV=prod, ENVIRONMENT must be present and non-empty (fail-closed; also enforced in start script).
+    """
+    if (os.environ.get("SSM_ENV") or "").strip().lower() != "prod":
+        return
+    if (os.environ.get("ENVIRONMENT") or "").strip():
+        return
+    raise RuntimeError(
+        "ENVIRONMENT is missing or empty after loading SSM secrets "
+        "(scripts/start_api_with_ssm.sh → /run/secrets/truckerp.env). "
+        "Set /truckerp/prod/platform/ENVIRONMENT (e.g. production) in AWS SSM, redeploy secrets, "
+        "then restart the API."
+    )
+
+
 def _startup_banner() -> None:
     parsed = urlparse(settings.database_url)
     platform_host = parsed.hostname or "(no hostname)"
@@ -61,6 +79,7 @@ logger = logging.getLogger("trucking_erp")
 @app.on_event("startup")
 def _log_startup():
     enforce_test_bypass_auth_policy()
+    _guard_environment_from_ssm_secrets()
     _startup_banner()
     _sec = (getattr(settings, "turnstile_secret_key", None) or "").strip()
     _site = (getattr(settings, "turnstile_site_key", None) or "").strip()

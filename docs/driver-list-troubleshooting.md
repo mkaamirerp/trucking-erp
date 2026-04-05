@@ -39,7 +39,7 @@
    docker compose -f docker-compose.yml restart truckerp-api
    ```
 
-   With a **local dev bind mount** overlay, your team’s playbook may use an additional `-f docker-compose.dev.yml`; otherwise rebuild via `./scripts/dev-up.sh` if you are not bind-mounting code.
+   If code inside the image seems stale, rebuild and restart: `./scripts/reload_api.sh` or `./scripts/dev-up.sh`.
 
 2. **Confirm DB emails**  
    Demo data should use `@demo.test`, not `@demo.local`.  

@@ -4,8 +4,9 @@ from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ENVIRONMENT values where tenant-resolution shortcuts may be enabled (requires ALLOW_TENANT_RESOLUTION_SHORTCUTS).
+# Production-like runtimes must never be listed here. CI/pytest uses ENVIRONMENT=test (see tests/conftest.py).
 TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS: frozenset[str] = frozenset(
-    {"dev", "development", "test", "testing", "ci", "local"}
+    {"test", "testing", "ci"}
 )
 
 
@@ -30,7 +31,7 @@ def _validate_database_url(url: str, name: str) -> None:
 
 class Settings(BaseSettings):
     app_name: str = "Trucking ERP API"
-    environment: str = "dev"
+    environment: str = "production"
 
     # Opt-in: JWT-without-subdomain resolution, TOOLS_DEFAULT_*, tools routes, TEST_BYPASS_AUTH.
     # Must also set ENVIRONMENT to a value in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS.
@@ -50,7 +51,7 @@ class Settings(BaseSettings):
         e = (self.environment or "").lower().strip()
         return e in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS
 
-    # Canonical DB URL (loaded from .env as DATABASE_URL)
+    # Canonical DB URL (from process environment / SSM-rendered secrets file)
     database_url: str
     # Privileged Postgres URL to create tenant DBs; falls back to database_url if unset
     postgres_admin_url: str | None = None
@@ -124,7 +125,7 @@ class Settings(BaseSettings):
     local_storage_dir: str | None = None
     company_docs_dir: str | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore")
 
 settings = Settings()
 
@@ -151,5 +152,5 @@ def enforce_test_bypass_auth_policy(cfg: Settings | None = None) -> None:
         raise RuntimeError(
             "TEST_BYPASS_AUTH=1 requires ALLOW_TENANT_RESOLUTION_SHORTCUTS=true and ENVIRONMENT in "
             f"{sorted(TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS)!r}. "
-            "Enable only on local or CI test runners."
+            "Enable only on CI/automated test runners (ENVIRONMENT=test|testing|ci)."
         )

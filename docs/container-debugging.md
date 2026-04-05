@@ -8,13 +8,9 @@ If **all** API calls (e.g. `/api/v1/me`, `/api/v1/tools/ping`) return **502 Bad 
    Check: `docker ps` (is `truckerp-api` up?) and `docker logs truckerp-api`.
 
 2. **API never started** (default command uses AWS SSM)  
-   The default `start_api_with_ssm.sh` needs AWS SSM. If SSM is unavailable, the script exits and uvicorn never starts.
+   The default `start_api_with_ssm.sh` needs AWS SSM and writes `/run/secrets/truckerp.env` from `/truckerp/prod/platform/` and `/truckerp/prod/shared/`. If SSM is unavailable or required keys are missing, the script exits and uvicorn never starts.
 
-   **Fix on public / prod hosts:** Restore AWS/SSM access; stack must stay **`docker compose -f docker-compose.yml` only** (no dev overlay).
-
-   **Fix on a local engineering machine only (never internet-facing prod):** You may merge **`docker-compose.dev.yml`** per the warning banner in that file, e.g.  
-   `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`  
-   Some local flows document a root **`.env`** alongside that overlay. **Production** always uses **`docker compose -f docker-compose.yml`** and SSM-rendered secrets only.
+   **Fix:** Restore AWS/SSM access and required parameters (including `ENVIRONMENT`, `LOGIN_TRUST_COOKIE_SECRET`, DB URLs). Stack uses **`docker compose -f docker-compose.yml` only** — there is no `.env` fallback in `start_api_with_ssm.sh`.
 
 3. **Nginx can’t reach API**  
    Check that `truckerp-api` and `truckerp-nginx` are on the same Docker network and that the API listens on port 8000.

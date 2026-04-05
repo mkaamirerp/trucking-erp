@@ -14,9 +14,7 @@ TMPDIR="$(mktemp -d)"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 SSM_PATH_PLATFORM="${SSM_PATH_PLATFORM:-/truckerp/prod/platform/}"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
-# Canonical prod / public server: docker compose -f docker-compose.yml ONLY.
-# docker-compose.dev.yml exists for local machines only — never merge it on proof/audit for prod.
-COMPOSE_DEV_FILE="${COMPOSE_DEV_FILE:-$ROOT_DIR/docker-compose.dev.yml}"
+# Canonical: docker compose -f docker-compose.yml ONLY (single prod-oriented compose file).
 NETWORK="${NETWORK:-truckerp_net}"
 API_NAME="${API_NAME:-truckerp-api}"
 API_HOST="${API_HOST:-truckerp-api}"
@@ -522,11 +520,8 @@ h2 "13) Docker Compose Validation"
 if [[ -f "$COMPOSE_FILE" ]]; then
   section_result PASS "Docker compose file exists"
   log "  Compose file (prod canonical): $COMPOSE_FILE"
-  if [[ -f "$COMPOSE_DEV_FILE" ]]; then
-    log "  Note: $COMPOSE_DEV_FILE exists for LOCAL dev only — not merged for this check."
-  fi
 
-  # Prod-safe: validate base compose only (public server must not use dev overlay).
+  # Validate prod compose only.
   _compose_validate_ok=0
   if docker compose version >/dev/null 2>&1; then
     if docker compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
@@ -544,15 +539,6 @@ if [[ -f "$COMPOSE_FILE" ]]; then
     fi
   else
     section_result WARN "docker compose / docker-compose not available — skipped compose config check"
-  fi
-
-  # Optional: local engineers may validate dev merge manually; never required for prod proof.
-  if [[ "${OMNISCIENCE_VALIDATE_DEV_MERGE:-}" == "1" && -f "$COMPOSE_DEV_FILE" ]] && docker compose version >/dev/null 2>&1; then
-    if docker compose -f "$COMPOSE_FILE" -f "$COMPOSE_DEV_FILE" config >/dev/null 2>&1; then
-      section_result PASS "Optional: base+dev merge config valid (OMNISCIENCE_VALIDATE_DEV_MERGE=1)"
-    else
-      section_result WARN "Optional: base+dev merge config invalid (local dev overlay)"
-    fi
   fi
 else
   section_result WARN "Docker compose file not found"

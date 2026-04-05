@@ -1,8 +1,7 @@
 # Tenant auth cutover — operator runbook
 
 Commands assume the **API container** at `/app`, secrets in `/run/secrets/truckerp.env`, and compose from `/home/admin/trucking_erp`:  
-**Production / public server:** `docker compose -f docker-compose.yml` only.  
-**Local-only:** `docker-compose.dev.yml` may be merged on a developer machine; see the warning banner in that file — not for internet-facing prod.
+**All hosts:** `docker compose -f docker-compose.yml` only (single compose file; prod SSM under `/truckerp/prod/...`).
 
 Replace `<tenant_id>` with the numeric `platform_tenants.id`.
 

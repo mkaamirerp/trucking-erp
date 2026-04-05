@@ -12,4 +12,4 @@ Example for (3): add a line below with date and reason.
 
 ---
 
-<!-- Example: 2026-02-02 Add dev-only nginx dist mount in docker-compose.dev.yml for local iteration -->
+<!-- Example: 2026-02-02 CONFIG-CHANGE: tune postgres mem_limit in docker-compose.yml -->
