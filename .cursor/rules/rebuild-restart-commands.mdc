@@ -1,0 +1,134 @@
+---
+description: Exact commands to rebuild, restart, and run npm for TruckERP. Always apply — never guess these commands.
+globs: "**/*"
+alwaysApply: true
+---
+
+# TruckERP — Rebuild / Restart / npm Commands
+
+**Compose:** Use **`docker compose -f docker-compose.yml`** only (single prod-oriented file).
+
+## API — Full rebuild + restart (most common)
+
+```bash
+cd /home/admin/trucking_erp
+
+docker compose -f docker-compose.yml build truckerp-api \
+  && docker compose -f docker-compose.yml up -d truckerp-api
+```
+
+## API — Restart only (no code change, no rebuild needed)
+
+```bash
+docker compose -f docker-compose.yml restart truckerp-api
+```
+
+## Nginx — Config reload only (`default.conf` is bind-mounted; no image rebuild)
+
+After changing **`infra/nginx/default.conf`** only:
+
+```bash
+docker compose -f docker-compose.yml exec truckerp-nginx nginx -s reload
+# or: docker compose -f docker-compose.yml restart truckerp-nginx
+```
+
+Do **not** confuse this with **frontend `dist`** updates — those require **rebuilding the `truckerp-nginx` image** (see below).
+
+## Nginx — Full rebuild + recreate (frontend `dist` **or** `infra/nginx/Dockerfile`)
+
+```bash
+cd /home/admin/trucking_erp
+
+docker compose -f docker-compose.yml build truckerp-nginx \
+  && docker compose -f docker-compose.yml up -d truckerp-nginx
+```
+
+## Full stack — rebuild everything and bring up
+
+```bash
+cd /home/admin/trucking_erp
+
+docker compose -f docker-compose.yml build \
+  && docker compose -f docker-compose.yml up -d
+```
+
+## Frontend (npm) — Build for production (output goes to apps/web/dist)
+
+```bash
+cd /home/admin/trucking_erp/apps/web && npm run build
+```
+
+**LOCK:** Prod `docker-compose.yml` bakes `apps/web/dist` into the **nginx image** (`infra/nginx/Dockerfile` `COPY apps/web/dist/`). **`docker compose restart truckerp-nginx` does not pick up new JS** — you must **rebuild the image** after `npm run build`:
+
+```bash
+/home/admin/trucking_erp/scripts/reload_nginx_web.sh
+```
+
+Or manually:
+
+```bash
+cd /home/admin/trucking_erp
+docker compose -f docker-compose.yml build truckerp-nginx \
+  && docker compose -f docker-compose.yml up -d truckerp-nginx
+```
+
+## Frontend (npm) — Install dependencies (after package.json change)
+
+```bash
+cd /home/admin/trucking_erp/apps/web && npm install
+```
+
+## Frontend (npm) — Dev server (local only, not used in Docker)
+
+```bash
+cd /home/admin/trucking_erp/apps/web && npm run dev
+```
+
+## Check API logs (after restart)
+
+```bash
+docker logs truckerp-api --tail 50 -f
+```
+
+## Run Alembic migrations (tenant)
+
+**LOCK:** Tenant migrations are authoritative only inside the container. Run from container only (never rely on host venv unless drift is confirmed). Before upgrade, run `alembic -c alembic_tenant.ini heads` in container — must be 1 head. Drift check: `git rev-parse --short HEAD` on host and `docker exec truckerp-api bash -lc 'cd /app && git rev-parse --short HEAD'` in container must match.
+
+```bash
+docker exec truckerp-api bash -lc \
+  'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_tenant.ini upgrade head'
+```
+
+## Run Alembic migrations (platform)
+
+```bash
+docker exec truckerp-api sh -lc \
+  'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_platform.ini upgrade head'
+```
+
+## API image — psql (postgresql-client) for read-only audit
+
+- **Add postgresql-client in the Dockerfile for truckerp-api** (apt-get install postgresql-client on Debian; apk add postgresql-client on Alpine). Do **not** put it in docker-compose env — env won’t persist the binary and won’t fix “psql not found”.
+- **Rebuild the image once** (see “API — Full rebuild + restart” above). After that, any `up -d` or `up -d --force-recreate` keeps psql as long as it uses that image.
+- No need to add anything in compose YAML env for this.
+
+One-liner for Cursor: *Install psql in the truckerp-api Dockerfile (postgresql-client / apk add). Once it’s in the image, recreating containers won’t remove it; only rebuilding from a Dockerfile without that line would.*
+
+## When to do what
+
+| Situation | Command |
+|---|---|
+| Changed Python code (model, router, schema, service) | rebuild + restart API |
+| Changed `docker-compose*.yml` or `Dockerfile` | rebuild + restart API |
+| Changed frontend `.tsx`/`.ts`/`.css` | `npm run build` → **rebuild** `truckerp-nginx` image → `up -d` (see `scripts/reload_nginx_web.sh`) |
+| Changed `infra/nginx/default.conf` | restart nginx only |
+| Changed `package.json` dependencies | `npm install` → `npm run build` → rebuild `truckerp-nginx` image |
+| Config change (no code change) | restart API only |
+| Migration needed | run Alembic (tenant or platform) → restart API |
+
+## IMPORTANT
+
+- NEVER use `docker-compose` (v1 hyphenated). Always `docker compose` (v2 space).
+- **Standard deployment:** `docker compose -f docker-compose.yml` (single file).
+- Working directory for all Docker commands: `/home/admin/trucking_erp`
+- Frontend build output: `apps/web/dist` (served by nginx as static files)

@@ -1,0 +1,12 @@
+# Login security — runtime proof required
+
+Do **not** treat login hardening (trusted-device cookie, Turnstile/captcha, step-up OTP) as **complete** until both **positive** and **failure** paths are **proven on the actual running stack** (prod or equivalent), not inferred from code.
+
+- **Trusted device** (`trk_login_trust`): prove cookie lifecycle (set, refresh, clear, tenant match) and **observable behavior** on repeat login vs fresh/incognito profile. Do **not** assume it changes OTP or password policy unless code and docs explicitly say so and you still verify in browser/network.
+- **Turnstile**: prove threshold behavior, widget display, backend rejection without/invalid token, and success with valid token when armed — with **real** `TURNSTILE_SECRET_KEY` / `VITE_TURNSTILE_SITE_KEY` in the environment under test.
+
+Code review or unit tests alone are **insufficient** closure for these items. Capture: exact steps, URLs, HTTP status/detail, cookies/set-cookie headers, and any UI screenshots or HAR snippets as needed.
+
+## User-facing copy (MFA / device memory)
+
+Prefer plain language from common sign-in UX: **Trust this device**, **Don’t ask again on this device**, **Remember this device** — not “trusted session token,” “bypass step-up,” or “untrusted device.” Keep admin and login copy understandable for normal users, not engineers.

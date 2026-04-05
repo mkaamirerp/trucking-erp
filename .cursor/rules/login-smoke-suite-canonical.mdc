@@ -1,0 +1,35 @@
+---
+description: Login behavior changes must update the two canonical smoke tests; warning cleanup is separate and must not change login behavior or grow the suite.
+globs: tests/test_login_hardening_smoke.py,tests/test_admin_sign_in_unlock_smoke.py,app/routers/auth.py,app/services/login_*.py,app/services/sign_in_lock_state.py
+alwaysApply: false
+---
+
+# Canonical login smoke suite (LOCKED)
+
+## Scope
+
+These two files are the **only** canonical backend smoke tests for login hardening / admin unlock behavior:
+
+- `tests/test_login_hardening_smoke.py`
+- `tests/test_admin_sign_in_unlock_smoke.py`
+
+They encode the **behavior contract** for public tenant config, login baselines, Turnstile threshold (mocked verify), tenant+email rate limit, step-up trust cookie clearing, `trust_this_device`, admin sign-in security panel (`sign_in_status`: **`clear`**, `locked`, `verification_on_next_sign_in` — not `no_lock`), unlock, and post-unlock step-up.
+
+## Rules for agents
+
+- **Any change to login behavior** (auth routes, step-up, Turnstile/streak thresholds, trust cookie, admin unlock / sign-in security, public tenant sign-in config) **must** update these two smoke tests so they still assert the intended contract. No login behavior PR is complete without green smoke on both files.
+- **Do not** grow these files into a large scenario matrix. New edge cases belong in focused tests under `tests/` with a narrow name, or in existing domain tests (e.g. `test_login_step_up_otp.py`).
+- **Warning / deprecation cleanup** is a **separate** workstream (see `docs/TECH_DEBT_SMOKE_WARNINGS.md`). It **must not** be used as a reason to alter login security behavior, weaken smoke assertions, or expand the canonical suite.
+- **Do not** mix unrelated refactors into login smoke PRs — keep smoke diffs small and behavior-focused.
+
+## Run (API container)
+
+```bash
+docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && python -m pytest tests/test_login_hardening_smoke.py tests/test_admin_sign_in_unlock_smoke.py -q'
+```
+
+If `/app` in the container is not bind-mounted to the repo, sync the two files into `/app/tests/` before running.
+
+## Warnings during pytest
+
+Deprecation / noise warnings from a full smoke run are tracked separately — see `docs/TECH_DEBT_SMOKE_WARNINGS.md`. **Do not** “fix” warnings by changing product login behavior or by inflating the two smoke files; fix call sites elsewhere or accept scoped warning filters **outside** this contract.

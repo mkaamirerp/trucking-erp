@@ -1,0 +1,42 @@
+---
+description: Company contact must be canonical for business documents. Owner info is not business identity.
+globs: "app/routers/tenant_admin.py,app/services/company_contact.py,**/pay_runs*.py,**/invoice*,**/payroll/**"
+alwaysApply: true
+---
+
+# Company Contact Document Safety (LOCK)
+
+## Rule
+
+Business documents (invoices, pay stubs, company-facing PDFs) must use **ONLY** canonical company profile data from `platform_company_profiles`:
+
+- `company_phone`
+- `company_email`
+- `address_street`, `address_city`, `address_region`, `address_postal`, `address_country`
+- `legal_name`
+
+**Owner/user contact from `platform_users` must NOT be used** for documents.
+
+## Document-Safe Accessor
+
+All document generation paths MUST use:
+
+```python
+from app.services.company_contact import get_canonical_company_contact_for_documents
+
+result = await get_canonical_company_contact_for_documents(tenant_id, db)
+if not result.is_document_ready:
+    # Block or warn; do not fall back to owner
+    ...
+contact = result.contact
+```
+
+## Allowed Uses of Owner Contact
+
+- Initial prefill during company setup
+- Admin UI display fallback when profile is incomplete (with warning)
+- Internal support/debug visibility
+
+## Reference
+
+See `docs/COMPANY_CONTACT_DOCUMENT_SAFETY.md`.

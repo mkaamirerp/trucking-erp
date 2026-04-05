@@ -1,0 +1,44 @@
+---
+description: TruckERP hard guards — SSM-only secrets, platform vs tenant DB, people-first, no compose drift. Always applies.
+globs: "**/*"
+alwaysApply: true
+---
+
+# TruckERP Hard Guards (NO EXCEPTIONS, NO ASSUMPTIONS)
+
+## SSM — Single Source of Truth
+
+- API MUST start via `app/scripts/start_api_with_ssm.sh`
+- Secrets are rendered to `/run/secrets/truckerp.env` by that script
+- NEVER add `DATABASE_URL`, `TENANT_DATABASE_URL`, `POSTGRES_ADMIN_URL`, or `POSTGRES_PASSWORD` to any `docker-compose*.yml`
+- NEVER source secrets from `.env` files in prod or dev-on-EC2
+- If you are about to touch `docker-compose*.yml` or `app/core/config.py` or `app/scripts/**`: invoke `ssm-guardian` first
+
+## Platform DB vs Tenant DB
+
+- Platform DB = control plane only (`platform_*`, plans, subscriptions, RBAC, registry)
+- Tenant DB = all business data (drivers, loads, fleet, settlements, dispatch, people, etc.)
+- Tenant routes MUST use `get_tenant_db` — NEVER `get_db` for tenant data
+- Platform routes MUST use `get_db` — NEVER `get_tenant_db` for platform data
+- No cross-DB queries. No mixing. No exceptions.
+
+## People-First Model
+
+- Authoritative schema: `people` → `person_roles` → `driver_profiles`
+- Composite tenant isolation required: `(tenant_id, id)` on all tenant tables
+- `drivers` table is legacy — do NOT write new business logic against it
+
+## Alembic
+
+- Platform migrations: `alembic_platform.ini` + `alembic_platform/versions/`
+- Tenant migrations: `alembic_tenant.ini` + `alembic_tenant/versions/` + requires `ALEMBIC_TENANT_DATABASE_URL`
+- NEVER use root `alembic.ini` for platform changes
+- No stamping unless explicitly approved
+
+## Agent Workflow (no assumptions)
+
+1. REPORT FIRST — findings + exact files/lines
+2. STOP and ask if anything is unclear — do NOT guess
+3. Minimal patch only — no refactors
+4. Verify with exact commands after patch
+5. If touching compose/config/scripts → invoke `ssm-guardian` before changing anything

@@ -1,0 +1,67 @@
+---
+description: Use correct Alembic config for platform vs tenant DB. Never use root alembic.ini for platform.
+globs: "**/alembic*.ini"
+alwaysApply: true
+---
+
+# Alembic: Platform vs tenant config (do not confuse)
+
+## Permanent rule
+
+- **Platform DB** (tables like `platform_onboarding_payloads`, `platform_otp_tokens`) → **always** use:
+  - Config: `alembic_platform.ini`
+  - Versions: `alembic_platform/versions/` (revisions 0013–0018 etc.)
+- **Tenant DB** → **always** use:
+  - Config: `alembic_tenant.ini`
+  - Versions: `alembic_tenant/versions/`
+  - **ALEMBIC_TENANT_DATABASE_URL** must be set for any tenant command (`current`, `upgrade`, etc.); otherwise env.py raises. Always export it (e.g. via `set -a && . /run/secrets/truckerp.env && set +a`) before running `alembic -c alembic_tenant.ini current` or `upgrade head`.
+- **Do not** use root `alembic.ini` for platform schema changes; it points to a different script_location and does not contain platform migrations 0015–0018.
+
+## If alembic_version fails with "value too long"
+
+Revision IDs like `0016_onboarding_payload_tenant_id_nullable` can exceed 32 chars. Fix:
+
+```sql
+ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255);
+```
+
+Then run migrations with the **correct** config (see above).
+
+## Commands (platform)
+
+Run platform migrations (container, env from secrets):
+
+```bash
+docker exec truckerp-api sh -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_platform.ini upgrade head'
+```
+
+Run onboarding cleanup (dry-run):
+
+```bash
+docker exec truckerp-api sh -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && python -m app.scripts.cleanup_onboarding'
+```
+
+## Commands (tenant) — LOCK: container-only authority
+
+**Tenant migrations MUST be run inside the container.** Do not run tenant Alembic from the host unless drift is confirmed (see drift proof below).
+
+```bash
+docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_tenant.ini upgrade head'
+```
+
+**Before every tenant upgrade:** Run `alembic -c alembic_tenant.ini heads` inside the container; it **must** show exactly one head. If more than one head, create a merge revision before upgrading.
+
+**Env gate (do not weaken):** Tenant upgrades require **ALEMBIC_TENANT_DATABASE_URL**. If you see `RuntimeError: ALEMBIC_TENANT_DATABASE_URL is not set`, confirm with `echo "$ALEMBIC_TENANT_DATABASE_URL"` (inside the same shell that will run alembic). If empty, set it before upgrade (e.g. for tenant_demo: `export ALEMBIC_TENANT_DATABASE_URL="${DATABASE_URL%/*}/tenant_demo"`). Use async URL (postgresql+asyncpg). Retry upgrade only after `alembic -c alembic_tenant.ini heads` shows exactly one head.
+
+**Drift proof:** To ensure host and container use the same revision before any host-based assumption:
+- Host: `git rev-parse --short HEAD`
+- Container: `docker exec truckerp-api bash -lc 'cd /app && git rev-parse --short HEAD'`
+If they differ, run tenant Alembic only from the container (or sync and rebuild so container has the same tree).
+
+**/app:** With **production** compose (`docker-compose.yml` only), `/app` comes from the **image** — rebuild the API image after migration or code changes so the container has new revisions. (Optional local dev overlay may bind-mount the repo into `/app`; that is not the standard server setup.)
+
+Check current revision (same env, inside container):
+
+```bash
+docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_tenant.ini current'
+```

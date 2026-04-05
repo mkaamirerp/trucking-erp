@@ -1,0 +1,27 @@
+---
+description: Prod deployment vs host venv test tooling (terminology and defaults for this server)
+alwaysApply: true
+---
+
+# Production deployment vs test tooling
+
+## Machine policy (this host)
+
+- **Strictly prod-only** for this server: runtime and deployment = production.
+- **Host venv pytest** = verification tooling only (not a dev environment or deployment mode change).
+- **Do not recommend** for this machine: non-prod SSM paths (`/truckerp/non-prod/...`) or phrasing that implies a **non-production** deployment—unless the user explicitly says this machine is not prod.
+
+## Default for this project/server
+
+- **Runtime and deployment are production.** Use `docker-compose.yml` and `/truckerp/prod/...` SSM only for this host’s deployment unless the user explicitly says otherwise.
+- **Treat this server as prod-only** when giving operational guidance.
+
+## Manual pytest / host venv
+
+- Running **pytest** (or installing `pytest`, `pytest-asyncio`, etc.) in a **shell venv on the prod host** is **verification / test tooling only**. It is **not** “dev mode,” **not** switching the deployment to development, and **not** a second runtime environment.
+- **`requirements-dev.txt`** is a **pin list for test/verification packages**, not a signal to run dev compose or dev SSM profiles.
+
+## Wording
+
+- Prefer: *prod*, *production*, *host venv for manual checks*, *verification*, *test tooling*.
+- Avoid implying that installing test packages or running pytest changes **how the app is deployed** on this server.

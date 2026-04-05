@@ -1,0 +1,17 @@
+---
+description: S3 document storage bucket — canonical location for all documents
+alwaysApply: false
+globs: app/core/storage.py,**/storage*.py
+---
+
+# S3 Document Storage
+
+## Bucket
+
+All documents (driver docs, pay documents, company docs, etc.) are stored in:
+
+```
+s3://truckerp-015421055625-us-east-1-an
+```
+
+Use this bucket name when configuring S3 storage, boto3 clients, or document upload logic.

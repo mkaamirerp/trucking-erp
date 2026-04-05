@@ -1,0 +1,53 @@
+---
+description: Tenant Alembic migrations — container-only authority, preflight gate, single head.
+globs: "**/alembic_tenant/**"
+alwaysApply: true
+---
+
+# Tenant migrations (LOCK)
+
+## Never run alembic upgrade directly
+
+Always use the wrapper so preflight runs first:
+
+```bash
+docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && bash scripts/tenant_upgrade_head.sh'
+```
+
+Do **not** run `alembic -c alembic_tenant.ini upgrade head` directly (from host or container) without going through the wrapper.
+
+## Must be in container at /app
+
+Tenant migrations are authoritative only inside the truckerp-api container at `/app`. Run the wrapper via `docker exec truckerp-api bash -lc '...'` so that preflight and upgrade both execute in the same environment.
+
+## Must have exactly one head
+
+Before upgrade, the wrapper runs preflight, which checks that `alembic -c alembic_tenant.ini heads` shows exactly one head. If you have multiple heads, create a merge revision and commit it before running the wrapper again.
+
+## Must have ALEMBIC_TENANT_DATABASE_URL set
+
+Tenant upgrades require `ALEMBIC_TENANT_DATABASE_URL` (and preflight derives `TENANT_DATABASE_URL` for psql if not set). Derivation is bullet-proofed:
+
+- `postgresql+asyncpg://...` → `postgresql://...`
+- `postgresql://...` → unchanged
+- `postgres://...` → `postgresql://...` (normalized for safety)
+
+If the final `TENANT_DATABASE_URL` does not start with `postgresql://`, preflight **STOPs**.
+
+## Wrapper runs critical audit checks first
+
+`scripts/tenant_upgrade_head.sh` runs `scripts/tenant_migrate_preflight.sh` before upgrade. Preflight is read-only and checks: authoritative environment, commit hash, single head, env set, then a critical subset of safety checks (orphan rows, cross-tenant mismatches, FKs to people include tenant_id, critical NULLs, NOT VALID constraints). If any check fails, the script prints a STOP banner and exits non-zero; upgrade is not run.
+
+Preflight also prints the target database name before running checks:
+
+- `Tenant DB target: tenant_demo` (from `select current_database();`)
+
+And it hard-stops if `alembic ... heads` errors (errors are not swallowed before counting heads).
+
+## Optional confirmation
+
+By default there is no interactive prompt (automation-safe). To prompt before upgrade, run with `CONFIRM=1`:
+
+```bash
+docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && CONFIRM=1 bash scripts/tenant_upgrade_head.sh'
+```

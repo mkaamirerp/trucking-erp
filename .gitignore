@@ -54,10 +54,11 @@ writing/
 storage/
 /web/
 apps/web/dist/
-# Ignore repo-root scripts/ except versioned maintenance entrypoints (pattern "scripts/" also matched app/scripts/).
-/scripts/*
-!/scripts/prune_platform_login_failure_events.sh
-!/scripts/reload_nginx_web.sh
+# Repo-root scripts/ is versioned (SSM boot, API container command, reload/publish, migrations, SSM helpers).
+# Machine-local SQL scratch only (not operator/prod truth):
+/scripts/dev_sql_clean_reset_*.sql
+# Empty artifact stash (never prod truth)
+/scripts/artifacts/
 
 # Vault/runtime rendered secrets
 runtime/rendered/
@@ -81,8 +82,10 @@ runtime/vault/
 # Runtime outputs (never commit)
 runtime/
 
-# Cursor
-.cursor/
+# Cursor — track .cursor/rules/ and rules.md (operator/deploy policy in-repo); ignore IDE-only trees
+.cursor/agents/
+.cursor/hooks/
+.cursor/context/
 
 # Alembic backups
 alembic_tenant/versions.BAK.*/

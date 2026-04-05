@@ -1,0 +1,87 @@
+---
+description: AUTH/SIGNUP CHANGE POLICY — STOP rule, required reading, acceptance gates. Non-negotiable.
+globs: "app/routers/auth.py,app/routers/public_signup.py,app/utils/password.py,app/utils/otp.py,**/middleware*,**/platform*.py,alembic_platform/versions/*"
+alwaysApply: true
+---
+
+# TO CURSOR — AUTH/SIGNUP CHANGE POLICY (NON-NEGOTIABLE)
+
+You must not edit auth/signup-related code on assumptions. Follow this process every time.
+
+---
+
+## 1) STOP RULE (effective immediately)
+
+You are **not allowed** to edit anything touching these paths unless you have **first read** the required docs and can cite the exact snippets that justify the change:
+
+**Auth/Signup sensitive paths:**
+- `app/routers/public_signup.py`
+- `app/routers/auth.py`
+- `app/utils/password.py`
+- `app/utils/otp.py`
+- Any middleware that affects tenant resolution (tenant_context, host/headers)
+- Any platform tables/migrations related to `platform_users`, tokens, sessions
+
+**Before any edit:** Open and read the files you will change; read the required docs below. Do not proceed until you have done this.
+
+---
+
+## 2) REQUIRED READING (before any auth edit)
+
+Before touching auth/signup you **must** open and read, then be able to cite:
+
+1. **`.cursor/rules/alembic-platform-tenant-config.mdc`** — platform vs tenant DB; which Alembic config for platform_users / tokens.
+2. **Auth/signup rule docs in repo** — run `rg -n "auth|signup|otp|login" docs .cursor/rules` and read the top hits. At minimum:
+   - `.cursor/rules/25_signup_setup_strict_input_permissive_read.md` (signup field contract, strict input).
+   - `.cursor/rules/26_onboarding_payload_flow.md` (onboarding payload, no premature company profile writes).
+   - Any `docs/` file that mentions signup, OTP, or login (e.g. `docs/signup-dashboard-flow.md`).
+
+If you don’t know what applies: run `rg -n "auth|signup|otp|login" docs .cursor/rules` and read the relevant files.
+
+---
+
+## 3) CURRENT PRODUCTION BEHAVIOR MUST MATCH REQUIREMENTS
+
+Signup must support normal email/password login and forgot-password. The following are **required** (minimal, no drift):
+
+**A) Signup must set password_hash when password is provided**
+- In `public_signup.py`: If payload contains password, call `hash_password(payload.password)` and store that hash (e.g. in onboarding payload and then on the created user).
+- **Never** overwrite an existing `password_hash` with `None`.
+
+**B) Re-enable forgot-password (no 410 gate)**
+- `POST /api/v1/auth/forgot-password` must:
+  - Return **200** with a generic response for both existing and non-existing email (no enumeration).
+  - Write `password_reset_token_hash` and `password_reset_expires_at` (or equivalent) for existing users.
+  - Send reset email (or dev log if email is disabled).
+
+**C) Reset-password must set password_hash and invalidate old sessions**
+- Verify token → set new `password_hash` → bump `session_version` (or equivalent) so existing sessions are invalidated.
+
+**D) Login must behave correctly**
+- If `password_hash` is missing for the user: return a **clear** message like “Password not set for this account. Use ‘Forgot password’ to set one.” — **not** generic “Invalid email or password.”
+
+---
+
+## 4) ACCEPTANCE GATES (must pass before considering auth change done)
+
+Run these and confirm (paste outputs if doing a PR/commit):
+
+1. **Tenant routing:**  
+   `curl -i https://demo.truckerp.me/api/v1/public/tenant/demo` → **200**
+
+2. **Password login works:**  
+   `curl -i https://demo.truckerp.me/api/v1/auth/login` with valid creds → **200**
+
+3. **Forgot-password enabled:**  
+   `curl -i https://demo.truckerp.me/api/v1/auth/forgot-password` with body → **200** (NOT 410)
+
+4. **Reset sets password and login works:**  
+   Complete reset flow; then login with new password → **200**
+
+(Use actual host/URL for your environment; demo.truckerp.me is the example.)
+
+---
+
+## 5) NO ASSUMPTIONS
+
+If any step above is unclear, or you are unsure whether a change touches “auth/signup” — **stop and ask** before changing code. No silent edits to auth/signup.

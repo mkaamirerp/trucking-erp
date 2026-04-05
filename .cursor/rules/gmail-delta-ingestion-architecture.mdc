@@ -1,0 +1,30 @@
+---
+description: Gmail delta ingestion — Pub/Sub push is primary; manual sync is fallback only.
+globs: app/services/email_ingestion_gmail.py,app/services/gmail_watch.py,app/routers/gmail_pubsub.py,app/routers/admin_email_config.py,app/routers/email_threads.py,apps/web/src/pages/LoadInboxPage.tsx,apps/web/src/pages/AdminEmailConfigPage.tsx
+alwaysApply: false
+---
+
+# Gmail delta ingestion architecture (LOCK)
+
+## Intended production path (no UI required)
+
+1. **Gmail** `users.watch` points at the configured **Pub/Sub topic**.
+2. **Google** pushes notifications to **Cloud Pub/Sub** → **push subscription** → **`POST /api/v1/webhooks/gmail/pubsub`** (OIDC / optional header per config).
+3. Backend resolves tenant, runs **`sync_gmail_delta_for_tenant`** (History API — **delta only**), **persists** threads/messages, then **intake classify/route** on affected threads.
+4. **Watch renewal** (cron/script + `renew-watch`) keeps watches from silently expiring.
+
+The system **must work with zero clicks** in the app. Operators do not need to open Load Inbox or Admin Email for mail to ingest.
+
+## Secondary paths (operator / break-glass only)
+
+- **Admin:** `POST /api/v1/admin/email-config/gmail/sync-now` — same delta sync; for troubleshooting or when push was delayed.
+- **Load Inbox:** `POST /api/v1/email-threads/gmail/pull-delta` — same delta sync; **`email_inbox`** entitlement; optional convenience for operators who already have the queue open.
+
+These **must not** be the only way mail enters the system in production. Do **not** add polling loops or design flows that assume a human clicks “Sync”.
+
+## Do / Don’t
+
+- **Do** extend the webhook → `sync_gmail_delta_for_tenant` → persistence → routing pipeline.
+- **Do** keep manual endpoints as thin wrappers around the same delta function used by Pub/Sub.
+- **Don’t** build new ingestion features around “user pressed a button” as the default.
+- **Don’t** document or imply that the inbox “Refresh” button fetches from Gmail (it only reloads the thread list from the DB).

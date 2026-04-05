@@ -1,0 +1,44 @@
+---
+description: After backend code change you MUST rebuild+restart API and verify. No exceptions.
+globs: app/**/*.py,infra/**/*
+alwaysApply: true
+---
+
+# POST-CODE-CHANGE MANDATORY STEP (NO EXCEPTIONS)
+
+After **any** backend code change, especially in:
+
+- `app/routers/*`
+- `app/utils/*`
+- middleware
+- auth logic
+- tenant routing
+- anything touching DB models
+
+You **MUST**:
+
+1. **Rebuild + restart API container** (one command: run the script below, or the two compose commands).
+2. **Confirm new container is running:** `docker compose -f docker-compose.yml ps`
+3. **Confirm logs show fresh startup:** `docker logs --tail 50 truckerp-api` — you must see startup logs.
+
+**One safe command (preferred):**
+
+```bash
+/home/admin/trucking_erp/scripts/reload_api.sh
+```
+
+Or manually (same as script):
+
+```bash
+cd /home/admin/trucking_erp
+docker compose -f docker-compose.yml build truckerp-api \
+  && docker compose -f docker-compose.yml up -d truckerp-api
+docker compose -f docker-compose.yml ps
+docker logs truckerp-api --tail 50
+```
+
+**Why:** This setup does **not** use `uvicorn --reload` or bind-mounted hot reload. The API runs from a **built image**. If you don't rebuild, you are running **old code**. No proof = change didn't happen.
+
+**Verification loop:** After restart, hit a curl endpoint and paste proof when reporting. Discipline beats intelligence at this scale (multi-tenant, auth, provisioning, SSM, Docker).
+
+**Compose:** Use `docker compose -f docker-compose.yml` (v2). Working directory: `/home/admin/trucking_erp`. Do not use `docker-compose` (v1 hyphenated).
