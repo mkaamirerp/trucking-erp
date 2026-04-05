@@ -4,8 +4,8 @@
 
 So that **code changes reflect immediately** without running `npm run build`:
 
-1. **Production-shaped API:** `./scripts/dev-up.sh` (`docker compose -f docker-compose.yml` only). **Local-only** bind mount / API on host **8000:** see repo root `docker-compose.dev.yml` (warning: not for public servers).  
-   **Standard deployment / production-like:**  
+1. **API (Docker):** `./scripts/dev-up.sh` — `docker compose -f docker-compose.yml` only.  
+   **Standard deployment:**  
    ```bash
    docker compose -f docker-compose.yml up -d
    ```
