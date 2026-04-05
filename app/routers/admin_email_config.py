@@ -33,7 +33,12 @@ from app.core.database import AsyncSessionLocal, get_db
 from app.models.email_mailbox import TenantEmailMailbox
 from app.models.platform_integration import TenantIntegrationSecret
 from app.models.tenant_email_account import TenantEmailAccount
-from app.schemas.email_config import EmailConfigOut, EmailConfigUpdate, EmailConfigTestOut
+from app.schemas.email_config import (
+    EmailConfigOut,
+    EmailConfigUpdate,
+    EmailConfigTestOut,
+    GmailIngestionHealthOut,
+)
 from app.services.email_ingestion_imap import (
     EMAIL_PROVIDER_OTHER,
     imap_test_connection_sync,
@@ -80,6 +85,62 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
+_GMAIL_PROOF_STEPS = [
+    "Platform: GMAIL_PUBSUB_TOPIC_NAME, push auth (OIDC or X-TruckERP-Gmail-Push-Token), and Gmail API/Pub/Sub are configured in Google Cloud.",
+    "Tenant: Gmail is connected and “Automatic new-mail alerts” shows Active with a future expiry.",
+    "Send a test email to the connected inbox from an external address.",
+    "Within about 1–3 minutes, “Last automatic signal received” updates (Pub/Sub → webhook).",
+    "Email load / inbox in TruckERP shows the new thread without clicking Sync.",
+]
+
+
+def _gmail_ingestion_aux(acc: TenantEmailAccount) -> dict:
+    """Compute automatic ingestion readiness (not implied by OAuth CONNECTED)."""
+    topic = getattr(settings, "gmail_pubsub_topic_name", None)
+    pubsub_ok = bool(topic and str(topic).strip())
+    now = datetime.now(timezone.utc)
+    exp = acc.gmail_watch_expiration_at
+    watch_live = bool(exp and exp > now)
+    cursor_ok = bool(acc.gmail_history_id and str(acc.gmail_history_id).strip())
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if not pubsub_ok:
+        blockers.append(
+            "Server is missing Gmail Pub/Sub topic configuration (GMAIL_PUBSUB_TOPIC_NAME). "
+            "Automatic new-mail delivery cannot work until operations finishes Google Cloud setup."
+        )
+    elif acc.gmail_watch_expiration_at is None:
+        blockers.append(
+            "Google is not subscribed to send new-mail notifications to TruckERP. "
+            "Complete setup: use “Turn on automatic new-mail alerts” (or reconnect Gmail after platform is ready)."
+        )
+    elif not watch_live:
+        blockers.append(
+            "The Gmail notification subscription has expired. Renew automatic alerts (Advanced → Extend subscription), "
+            "or ask operations to run the Gmail watch renewal job."
+        )
+    elif not cursor_ok:
+        blockers.append(
+            "Ingestion bookmark (History ID) is not set. Use “Fetch mail once” in Advanced or trigger a sync so the server can track changes."
+        )
+    ready = len(blockers) == 0
+    if ready and acc.last_gmail_webhook_at is None:
+        warnings.append(
+            "No push notification recorded yet. After turning alerts on, send a test email and confirm “Last automatic signal received” updates."
+        )
+    elif ready and acc.last_gmail_webhook_at is not None:
+        age_s = (now - acc.last_gmail_webhook_at).total_seconds()
+        if age_s > 7 * 24 * 3600:
+            warnings.append(
+                "No push notification in the last 7 days. If the inbox should have received mail, verify Pub/Sub → webhook delivery."
+            )
+    return {
+        "gmail_pubsub_topic_configured": pubsub_ok,
+        "gmail_automatic_ingestion_ready": ready,
+        "gmail_automatic_ingestion_blockers": blockers,
+        "gmail_automatic_ingestion_warnings": warnings,
+    }
+
 
 def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
     """Map tenant_email_accounts (Gmail OAuth) to EmailConfigOut."""
@@ -87,6 +148,7 @@ def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
     exp = acc.gmail_watch_expiration_at
     watch_active = bool(exp and exp > now)
     cursor_present = bool(acc.gmail_history_id and str(acc.gmail_history_id).strip())
+    aux = _gmail_ingestion_aux(acc)
     return EmailConfigOut(
         id=acc.id,
         tenant_id=acc.tenant_id,
@@ -129,6 +191,10 @@ def _gmail_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
         gmail_watch_active=watch_active,
         gmail_watch_expires_at=acc.gmail_watch_expiration_at,
         last_gmail_webhook_at=acc.last_gmail_webhook_at,
+        gmail_pubsub_topic_configured=aux["gmail_pubsub_topic_configured"],
+        gmail_automatic_ingestion_ready=aux["gmail_automatic_ingestion_ready"],
+        gmail_automatic_ingestion_blockers=aux["gmail_automatic_ingestion_blockers"],
+        gmail_automatic_ingestion_warnings=aux["gmail_automatic_ingestion_warnings"],
         ms_graph_subscription_id=None,
         ms_graph_subscription_status=None,
         ms_graph_subscription_expiration_at=None,
@@ -186,6 +252,10 @@ def _microsoft_account_to_out(acc: TenantEmailAccount) -> EmailConfigOut:
         gmail_watch_active=None,
         gmail_watch_expires_at=None,
         last_gmail_webhook_at=None,
+        gmail_pubsub_topic_configured=None,
+        gmail_automatic_ingestion_ready=None,
+        gmail_automatic_ingestion_blockers=None,
+        gmail_automatic_ingestion_warnings=None,
         ms_graph_subscription_id=acc.ms_graph_subscription_id,
         ms_graph_subscription_status=acc.ms_graph_subscription_status,
         ms_graph_subscription_expiration_at=acc.ms_graph_subscription_expiration_at,
@@ -242,6 +312,10 @@ def _mailbox_to_out(m: TenantEmailMailbox) -> EmailConfigOut:
         gmail_watch_active=None,
         gmail_watch_expires_at=None,
         last_gmail_webhook_at=None,
+        gmail_pubsub_topic_configured=None,
+        gmail_automatic_ingestion_ready=None,
+        gmail_automatic_ingestion_blockers=None,
+        gmail_automatic_ingestion_warnings=None,
         ms_graph_subscription_id=None,
         ms_graph_subscription_status=None,
         ms_graph_subscription_expiration_at=None,
@@ -315,6 +389,60 @@ async def gmail_authorize(
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return RedirectResponse(url=url, status_code=302)
+
+
+@router.get("/email-config/gmail/ingestion-health", response_model=GmailIngestionHealthOut)
+async def gmail_ingestion_health(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+):
+    """
+    Explicit readiness for the production path: Gmail push → Pub/Sub → webhook → delta sync.
+    OAuth "CONNECTED" alone is not sufficient for automatic ingestion.
+    """
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    acc = await tenant_db.scalar(
+        select(TenantEmailAccount)
+        .where(TenantEmailAccount.tenant_id == tenant_id, TenantEmailAccount.provider == "gmail")
+        .limit(1)
+    )
+    if not acc:
+        return GmailIngestionHealthOut(
+            oauth_connected=False,
+            gmail_pubsub_topic_configured=bool(
+                getattr(settings, "gmail_pubsub_topic_name", None) and str(settings.gmail_pubsub_topic_name).strip()
+            ),
+            history_cursor_present=False,
+            watch_registered_and_valid=False,
+            watch_expires_at=None,
+            last_webhook_at=None,
+            last_delta_sync_at=None,
+            automatic_ingestion_ready=False,
+            blockers=["Gmail is not connected. Use Connect with Google first."],
+            warnings=[],
+            proof_steps=list(_GMAIL_PROOF_STEPS),
+        )
+    now = datetime.now(timezone.utc)
+    exp = acc.gmail_watch_expiration_at
+    watch_ok = bool(exp and exp > now)
+    cursor_ok = bool(acc.gmail_history_id and str(acc.gmail_history_id).strip())
+    aux = _gmail_ingestion_aux(acc)
+    oauth_ok = (acc.status or "").upper() == "CONNECTED" or bool(acc.refresh_token_encrypted)
+    return GmailIngestionHealthOut(
+        oauth_connected=oauth_ok,
+        gmail_pubsub_topic_configured=bool(aux["gmail_pubsub_topic_configured"]),
+        history_cursor_present=cursor_ok,
+        watch_registered_and_valid=watch_ok,
+        watch_expires_at=acc.gmail_watch_expiration_at,
+        last_webhook_at=acc.last_gmail_webhook_at,
+        last_delta_sync_at=acc.last_sync_at,
+        automatic_ingestion_ready=bool(aux["gmail_automatic_ingestion_ready"]),
+        blockers=list(aux["gmail_automatic_ingestion_blockers"]),
+        warnings=list(aux["gmail_automatic_ingestion_warnings"]),
+        proof_steps=list(_GMAIL_PROOF_STEPS),
+    )
 
 
 def _gmail_callback_error_redirect(slug: str | None, error: str) -> RedirectResponse:
@@ -456,15 +584,51 @@ async def gmail_callback(
             await upsert_gmail_mailbox_tenant_mapping(pdb, tenant_id=int(tid), gmail_address=push_mailbox)
             await pdb.commit()
 
+    watch_auto_ok = True
     async for tenant_db in open_tenant_session_by_id(int(tid)):
         try:
             await bootstrap_gmail_history_cursor(tenant_db, int(tid))
             await tenant_db.commit()
         except Exception as exc:
             logger.warning("gmail history cursor bootstrap failed: %s", exc)
+            try:
+                await tenant_db.rollback()
+            except Exception:
+                pass
+            try:
+                acc_boot = await tenant_db.scalar(
+                    select(TenantEmailAccount)
+                    .where(TenantEmailAccount.tenant_id == int(tid), TenantEmailAccount.provider == "gmail")
+                    .limit(1)
+                )
+                if acc_boot:
+                    detail = (str(exc) or "unknown").strip()
+                    acc_boot.last_error = f"gmail_bootstrap_failed: {detail[:220]}"
+                    acc_boot.updated_at = datetime.now(timezone.utc)
+                    await tenant_db.commit()
+            except Exception:
+                try:
+                    await tenant_db.rollback()
+                except Exception:
+                    pass
         break
 
-    return RedirectResponse(url=f"{return_url}?gmail=connected", status_code=302)
+    topic = getattr(settings, "gmail_pubsub_topic_name", None)
+    if topic and str(topic).strip():
+        async for tenant_db in open_tenant_session_by_id(int(tid)):
+            try:
+                await register_or_renew_gmail_watch_for_tenant(
+                    tenant_db, int(tid), topic_name=str(topic).strip()
+                )
+            except Exception as exc:
+                watch_auto_ok = False
+                logger.exception("gmail watch auto-register after OAuth failed tenant_id=%s", tid)
+            break
+
+    q = "gmail=connected"
+    if (topic and str(topic).strip()) and not watch_auto_ok:
+        q += "&gmail_watch=failed"
+    return RedirectResponse(url=f"{return_url}?{q}", status_code=302)
 
 
 async def _microsoft_callback_ctx(

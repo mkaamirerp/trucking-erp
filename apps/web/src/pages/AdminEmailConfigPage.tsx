@@ -11,8 +11,10 @@ import {
   registerGmailWatch,
   renewGmailWatch,
   syncGmailNow,
+  getGmailIngestionHealth,
   EmailConfig,
   EmailConfigUpdatePayload,
+  type GmailIngestionHealth,
 } from "../api";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -64,6 +66,9 @@ export default function AdminEmailConfigPage() {
   const [testingInbound, setTestingInbound] = useState(false);
   const [testingOutbound, setTestingOutbound] = useState(false);
   const [syncingOther, setSyncingOther] = useState(false);
+  const [gmailOpsAdvancedOpen, setGmailOpsAdvancedOpen] = useState(false);
+  const [gmailHealth, setGmailHealth] = useState<GmailIngestionHealth | null>(null);
+  const [loadingGmailHealth, setLoadingGmailHealth] = useState(false);
 
   const [form, setForm] = useState<EmailConfigUpdatePayload>({
     email_address: "",
@@ -98,7 +103,12 @@ export default function AdminEmailConfigPage() {
     const gmail = searchParams.get("gmail");
     const err = searchParams.get("error");
     if (gmail === "connected") {
-      setSuccess("Primary mailbox connected.");
+      const watchFailed = searchParams.get("gmail_watch") === "failed";
+      setSuccess(
+        watchFailed
+          ? "Signed in with Google, but automatic new-mail alerts could not be activated. See “Automatic mail” below or open Advanced."
+          : "Signed in with Google. Confirm “Automatic mail” below shows Live before treating Gmail intake as complete.",
+      );
       setSearchParams({}, { replace: true });
       refreshConfig();
     } else if (err) {
@@ -115,6 +125,27 @@ export default function AdminEmailConfigPage() {
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!config || config.mailbox_type !== "gmail" || config.connection_mode !== "oauth" || !gmailOpsAdvancedOpen) {
+      return;
+    }
+    let cancelled = false;
+    setLoadingGmailHealth(true);
+    getGmailIngestionHealth()
+      .then((h) => {
+        if (!cancelled) setGmailHealth(h);
+      })
+      .catch(() => {
+        if (!cancelled) setGmailHealth(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGmailHealth(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config, gmailOpsAdvancedOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -536,133 +567,207 @@ export default function AdminEmailConfigPage() {
         </div>
       )}
 
-      {/* Section 2 — Connected state for Gmail */}
+      {/* Section 2 — Gmail: automatic ingestion = definition of done */}
       {isGmailConnected && config && (
         <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-[#64748b]">
-            Connected mailbox
-          </h2>
-          <div className="space-y-3">
-            <p className="text-[#e8edf5]">
-              <span className="text-[#64748b]">Connected as </span>
-              {config.oauth_account_email || config.email_address}
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-[#64748b]">Gmail</h2>
+          <p className="mb-4 text-sm text-[#94a3b8]">
+            Signed in as <span className="text-[#e8edf5]">{config.oauth_account_email || config.email_address}</span>.
+            Signing in alone does not mean new mail arrives in TruckERP automatically — see{" "}
+            <span className="font-medium text-[#cbd5e1]">Automatic mail</span> below.
+          </p>
+
+          <div
+            className={`mb-4 rounded-lg border p-4 text-sm ${
+              config.gmail_automatic_ingestion_ready
+                ? "border-emerald-900/50 bg-emerald-950/20 text-emerald-100/90"
+                : "border-amber-900/50 bg-amber-950/15 text-amber-50/90"
+            }`}
+          >
+            <p className="font-semibold text-[#e8edf5]">
+              Automatic mail:{" "}
+              {config.gmail_automatic_ingestion_ready ? "Live (checks passed)" : "Not complete — action needed"}
             </p>
-            <p className="text-sm text-[#94a3b8]">
-              Provider: Google · Connection method: OAuth
+            <p className="mt-1 text-xs text-[#94a3b8]">
+              “Live” means the server can receive new-mail signals from Google and update your inbox without manual Sync.
+              OAuth “Connected” is only step one.
             </p>
-            <p className="text-sm text-[#94a3b8]">
-              Status: <span className={STATUS_COLORS[config.status] ?? "text-[#94a3b8]"}>{STATUS_BADGE[config.status] ?? config.status}</span>
-              {config.last_tested_at && ` · Last tested: ${formatLastTested(config.last_tested_at)}`}
+            {(config.gmail_automatic_ingestion_blockers?.length ?? 0) > 0 && (
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-[#fca5a5]">
+                {config.gmail_automatic_ingestion_blockers!.map((b, i) => (
+                  <li key={i}>{b}</li>
+                ))}
+              </ul>
+            )}
+            {(config.gmail_automatic_ingestion_warnings?.length ?? 0) > 0 && (
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-[#fde68a]">
+                {config.gmail_automatic_ingestion_warnings!.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="mb-4 grid gap-2 text-sm text-[#94a3b8]">
+            <p>
+              Google sign-in status:{" "}
+              <span className={STATUS_COLORS[config.status] ?? "text-[#94a3b8]"}>
+                {STATUS_BADGE[config.status] ?? config.status}
+              </span>
+              {config.last_tested_at ? ` · Last sign-in test: ${formatLastTested(config.last_tested_at)}` : ""}
             </p>
             {config.last_error_message && (
-              <p className="text-sm text-red-400">{config.last_error_message}</p>
+              <div className="space-y-2">
+                <p className="text-red-400">{config.last_error_message}</p>
+                {(config.last_error_message.includes("invalid_grant") ||
+                  config.last_error_message.includes("token refresh failed") ||
+                  config.last_error_message.includes("oauth2.googleapis.com/token")) && (
+                  <p className="text-xs leading-relaxed">
+                    Use <span className="font-medium text-[#cbd5e1]">Sign in with Google again</span> on the Gmail card
+                    above, or ask support to verify Google OAuth credentials in production.
+                  </p>
+                )}
+              </div>
             )}
-            <div className="mt-3 rounded-lg border border-[#1e293b] bg-[#0d111a] p-3 text-sm">
-              <p className="mb-2 font-medium text-[#94a3b8]">Ingestion (Gmail)</p>
-              <p className="mb-2 text-xs text-[#64748b]">
-                Production path: Gmail push → Pub/Sub → server delta sync (no UI). Buttons below are for operators and
-                break-glass only.
-              </p>
-              <ul className="space-y-1.5 text-[#94a3b8]">
-                <li>
-                  Delta cursor (History ID):{" "}
-                  <span className="text-[#e8edf5]">
-                    {config.gmail_history_cursor_present === true
-                      ? "Present"
-                      : config.gmail_history_cursor_present === false
-                        ? "Not set yet"
-                        : "—"}
-                  </span>
-                </li>
-                <li>
-                  Push watch:{" "}
-                  <span className="text-[#e8edf5]">
-                    {config.gmail_watch_expires_at == null
-                      ? "Not registered"
-                      : config.gmail_watch_active
-                        ? "Active"
-                        : "Expired"}
-                  </span>
-                  {config.gmail_watch_expires_at != null && (
-                    <>
-                      {" "}
-                      <span className="text-[#64748b]">· expires</span>{" "}
-                      <span className="text-[#e8edf5]">{formatLastTested(config.gmail_watch_expires_at)}</span>
-                    </>
-                  )}
-                </li>
-                <li>
-                  Last delta sync:{" "}
-                  <span className="text-[#e8edf5]">
-                    {config.last_inbound_sync_at ? formatLastTested(config.last_inbound_sync_at) : "—"}
-                  </span>
-                </li>
-                <li>
-                  Last Pub/Sub webhook:{" "}
-                  <span className="text-[#e8edf5]">
-                    {config.last_gmail_webhook_at ? formatLastTested(config.last_gmail_webhook_at) : "—"}
-                  </span>
-                </li>
-              </ul>
-            </div>
-            <div className="flex flex-wrap gap-2 pt-2">
-              <button
-                type="button"
-                onClick={handleSyncGmail}
-                disabled={syncingGmail}
-                className="rounded-lg border border-sky-900/50 bg-sky-950/30 px-3 py-1.5 text-sm font-medium text-sky-200 hover:bg-sky-950/50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {syncingGmail ? "Syncing…" : "Sync new mail (delta, fallback)"}
-              </button>
+          </div>
+
+          <div className="mb-4 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4 text-sm">
+            <p className="mb-2 font-medium text-[#cbd5e1]">Where we are in the pipeline</p>
+            <ul className="space-y-2 text-[#94a3b8]">
+              <li>
+                Server ready for Google push:{" "}
+                <span className="text-[#e8edf5]">{config.gmail_pubsub_topic_configured ? "Yes" : "No (operations)"}</span>
+              </li>
+              <li>
+                Bookmark for changes in Gmail:{" "}
+                <span className="text-[#e8edf5]">{config.gmail_history_cursor_present ? "Set" : "Not set"}</span>
+              </li>
+              <li>
+                Automatic alert subscription:{" "}
+                <span className="text-[#e8edf5]">
+                  {config.gmail_watch_expires_at == null
+                    ? "Off"
+                    : config.gmail_watch_active
+                      ? `On · renew before ${formatLastTested(config.gmail_watch_expires_at)}`
+                      : "Expired"}
+                </span>
+              </li>
+              <li>
+                Last automatic signal from Google:{" "}
+                <span className="text-[#e8edf5]">
+                  {config.last_gmail_webhook_at ? formatLastTested(config.last_gmail_webhook_at) : "None yet"}
+                </span>
+              </li>
+              <li>
+                Last time TruckERP pulled changes from Gmail:{" "}
+                <span className="text-[#e8edf5]">
+                  {config.last_inbound_sync_at ? formatLastTested(config.last_inbound_sync_at) : "—"}
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            {config.gmail_pubsub_topic_configured && !config.gmail_automatic_ingestion_ready && (
               <button
                 type="button"
                 onClick={handleRegisterWatch}
                 disabled={registeringWatch || renewingWatch}
-                className="rounded-lg border border-emerald-900/50 bg-emerald-950/25 px-3 py-1.5 text-sm font-medium text-emerald-200 hover:bg-emerald-950/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="rounded-lg border border-emerald-700 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {registeringWatch ? "Registering…" : "Register Gmail watch"}
+                {registeringWatch ? "Turning on…" : "Turn on automatic new-mail alerts"}
               </button>
-              <button
-                type="button"
-                onClick={() => handleRenewWatch(false)}
-                disabled={registeringWatch || renewingWatch}
-                className="rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-1.5 text-sm font-medium text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {renewingWatch ? "Renewing…" : "Renew watch"}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRenewWatch(true)}
-                disabled={registeringWatch || renewingWatch}
-                className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-sm font-medium text-amber-200/90 hover:bg-amber-950/35 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Force renew
-              </button>
-              <button
-                type="button"
-                onClick={handleTest}
-                disabled={testing}
-                className="rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-1.5 text-sm font-medium text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {testing ? "Testing…" : "Test connection"}
-              </button>
-              <button
-                type="button"
-                onClick={handleConnectGmail}
-                className="rounded-lg border border-[#334155] px-3 py-1.5 text-sm font-medium text-[#94a3b8] hover:border-[#475569] hover:text-[#e8edf5]"
-              >
-                Reconnect
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowDisconnectConfirm(true)}
-                disabled={disconnecting}
-                className="rounded-lg border border-red-900/50 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {disconnecting ? "Disconnecting…" : "Disconnect"}
-              </button>
-            </div>
+            )}
+            <button
+              type="button"
+              onClick={handleConnectGmail}
+              className="rounded-lg border border-[#334155] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:border-[#475569] hover:text-[#e8edf5]"
+            >
+              Sign in with Google again
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDisconnectConfirm(true)}
+              disabled={disconnecting}
+              className="rounded-lg border border-red-900/50 px-3 py-2 text-sm font-medium text-red-400 hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect Gmail"}
+            </button>
           </div>
+
+          <details
+            className="rounded-lg border border-[#1e293b] bg-[#0d111a]"
+            onToggle={(e) => setGmailOpsAdvancedOpen((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-[#94a3b8] hover:text-[#e8edf5]">
+              Advanced — support & manual tools (not required for normal operation)
+            </summary>
+            <div className="space-y-4 border-t border-[#1e293b] px-4 py-4 text-sm text-[#94a3b8]">
+              <p className="text-xs leading-relaxed text-[#64748b]">
+                For troubleshooting or when automatic mail is off. Routine renewal is handled by a scheduled server job
+                before Google expires the subscription (about every 7 days).
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleSyncGmail}
+                  disabled={syncingGmail}
+                  className="rounded-lg border border-sky-900/50 bg-sky-950/30 px-3 py-1.5 text-sm font-medium text-sky-200 hover:bg-sky-950/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {syncingGmail ? "Working…" : "Fetch new mail once (manual)"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRegisterWatch}
+                  disabled={registeringWatch || renewingWatch}
+                  className="rounded-lg border border-emerald-900/50 bg-emerald-950/25 px-3 py-1.5 text-sm font-medium text-emerald-200 hover:bg-emerald-950/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {registeringWatch ? "…" : "Subscribe with Google again"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRenewWatch(false)}
+                  disabled={registeringWatch || renewingWatch}
+                  className="rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-1.5 text-sm font-medium text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {renewingWatch ? "…" : "Extend subscription (if due soon)"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRenewWatch(true)}
+                  disabled={registeringWatch || renewingWatch}
+                  className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-sm font-medium text-amber-200/90 hover:bg-amber-950/35 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Force extend subscription
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTest}
+                  disabled={testing}
+                  className="rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-1.5 text-sm font-medium text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {testing ? "…" : "Test Google sign-in"}
+                </button>
+              </div>
+              <div className="rounded border border-[#1e293b] bg-[#0a0e14] p-3 text-xs leading-relaxed text-[#94a3b8]">
+                <p className="mb-2 font-medium text-[#cbd5e1]">End-to-end verification (proof)</p>
+                {loadingGmailHealth && <p>Loading checklist…</p>}
+                {!loadingGmailHealth && gmailHealth && (
+                  <>
+                    <p className="mb-2">
+                      API says automatic pipeline ready:{" "}
+                      <span className="text-[#e8edf5]">{gmailHealth.automatic_ingestion_ready ? "yes" : "no"}</span>
+                    </p>
+                    <ol className="list-decimal space-y-2 pl-5">
+                      {gmailHealth.proof_steps.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+              </div>
+            </div>
+          </details>
         </section>
       )}
 

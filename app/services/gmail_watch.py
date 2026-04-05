@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.tenant_email_account import TenantEmailAccount
-from app.services.gmail_oauth import refresh_access_token
+from app.services.gmail_oauth import gmail_api_error_detail, refresh_access_token
 from app.utils.encryption import decrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,8 @@ async def _http_watch(access_token: str, body: dict[str, Any]) -> dict[str, Any]
             json=body,
             headers={"Authorization": f"Bearer {access_token}"},
         )
-    resp.raise_for_status()
+    if resp.is_error:
+        raise ValueError(gmail_api_error_detail(resp))
     return resp.json()
 
 

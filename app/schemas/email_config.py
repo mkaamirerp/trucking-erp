@@ -7,6 +7,22 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 
+class GmailIngestionHealthOut(BaseModel):
+    """Structured readiness for Gmail push → Pub/Sub → webhook → delta sync (tenant admin)."""
+
+    oauth_connected: bool
+    gmail_pubsub_topic_configured: bool
+    history_cursor_present: bool
+    watch_registered_and_valid: bool
+    watch_expires_at: datetime | None = None
+    last_webhook_at: datetime | None = None
+    last_delta_sync_at: datetime | None = None
+    automatic_ingestion_ready: bool
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    proof_steps: list[str] = Field(default_factory=list)
+
+
 class EmailConfigOut(BaseModel):
     """Response shape for primary mailbox config. Never includes secrets."""
 
@@ -54,6 +70,11 @@ class EmailConfigOut(BaseModel):
     gmail_watch_active: bool | None = None
     gmail_watch_expires_at: datetime | None = None
     last_gmail_webhook_at: datetime | None = None
+    # Gmail automatic ingestion (push → Pub/Sub → webhook); not implied by status=CONNECTED
+    gmail_pubsub_topic_configured: bool | None = None
+    gmail_automatic_ingestion_ready: bool | None = None
+    gmail_automatic_ingestion_blockers: list[str] | None = None
+    gmail_automatic_ingestion_warnings: list[str] | None = None
 
     ms_graph_subscription_id: str | None = None
     ms_graph_subscription_status: str | None = None

@@ -11,7 +11,11 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 
 @pytest.mark.asyncio
-async def test_pubsub_push_unknown_mailbox_returns_200_skip():
+async def test_pubsub_push_unknown_mailbox_returns_200_skip(monkeypatch):
+    from app.routers import gmail_pubsub as gp
+
+    monkeypatch.setattr(gp, "_require_push_auth", lambda _r: None)
+
     inner = {"emailAddress": "nobody@example.com", "historyId": 1}
     data = base64.urlsafe_b64encode(json.dumps(inner).encode()).decode().rstrip("=")
     payload = {"message": {"data": data}}

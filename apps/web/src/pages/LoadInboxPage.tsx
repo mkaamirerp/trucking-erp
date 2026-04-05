@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   createDraftLoadFromEmailThread,
@@ -75,6 +75,68 @@ function formatRoutingReason(raw: string | null | undefined): string {
   return raw.replace(/^tql_pdf_not_high_confidence:/i, "TQL PDF did not meet auto rules: ").replace(/_/g, " ");
 }
 
+function ThreadMessageList({
+  loadingMessages,
+  messagesError,
+  selectedThreadId,
+  messages,
+}: {
+  loadingMessages: boolean;
+  messagesError: string | null;
+  selectedThreadId: number | null;
+  messages: InboxMessageItem[];
+}) {
+  return (
+    <>
+      {loadingMessages && selectedThreadId ? (
+        <div className="text-sm text-[#94a3b8]">Loading messages…</div>
+      ) : null}
+      {!loadingMessages && messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : null}
+      {!loadingMessages && !messagesError && selectedThreadId && messages.length === 0 ? (
+        <div className="text-sm text-[#64748b]">No messages in this thread.</div>
+      ) : null}
+      {!loadingMessages && !messagesError
+        ? messages.map((m) => {
+            const outbound = (m.direction || "").toLowerCase() === "outbound";
+            return (
+              <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
+                <article
+                  className={`w-full max-w-[820px] rounded-xl border p-4 ${
+                    outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[#1e293b] bg-[#0d111a]"
+                  }`}
+                >
+                  <div className="mb-2 grid gap-1 text-xs text-[#94a3b8] md:grid-cols-2">
+                    <span>From: {m.from_email || "—"}</span>
+                    <span className="md:text-right">{formatWhen(m.received_at || m.sent_at || m.created_at)}</span>
+                    <span className="md:col-span-2">To: {recipientPreview(m.to_json)}</span>
+                    {m.subject ? <span className="md:col-span-2">Subject: {m.subject}</span> : null}
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-[#e8edf5]">
+                    {m.body_text || m.snippet || "No message body available."}
+                  </p>
+                  {m.attachments && m.attachments.length > 0 ? (
+                    <ul className="mt-2 space-y-1 text-xs text-[#94a3b8]">
+                      {m.attachments.map((a) => (
+                        <li key={a.id}>
+                          <span className="text-[#cbd5e1]">{a.filename || a.external_attachment_id}</span>
+                          {a.mime_type ? <span className="text-[#64748b]"> · {a.mime_type}</span> : null}
+                          {a.size_bytes != null ? <span className="text-[#64748b]"> · {a.size_bytes} bytes</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {m.has_attachments && (!m.attachments || m.attachments.length === 0) ? (
+                    <p className="mt-2 text-xs text-[#94a3b8]">Has attachments (metadata pending or inline-only).</p>
+                  ) : null}
+                </article>
+              </div>
+            );
+          })
+        : null}
+    </>
+  );
+}
+
 function threadIntakePrimaryLabel(t: InboxThreadListItem): string {
   const s = (t.subject || "").toLowerCase();
   if (/rate\s*con|rate\s*confirmation|\brc\b|^fw:/i.test(s) || /tql/i.test(s)) return "Rate confirmation";
@@ -90,6 +152,9 @@ export default function LoadInboxPage() {
   const pageSubtitle = isEmailLoadRoute
     ? "Gmail threads, sync, and broker-mail intake queues."
     : "Create and verify incoming loads.";
+  const pathForKpisRef = useRef(location.pathname);
+  pathForKpisRef.current = location.pathname;
+  const emailUploadRef = useRef<HTMLInputElement>(null);
   const [provider, setProvider] = useState<string>("");
   const [status, setStatus] = useState<string>("active");
   const [queueFocus, setQueueFocus] = useState<"intake" | "linked">("intake");
@@ -281,7 +346,7 @@ export default function LoadInboxPage() {
     } finally {
       setLoadingThreads(false);
     }
-    void refreshIntakeKpis();
+    if (!pathForKpisRef.current.startsWith(OPS.EMAIL_LOAD)) void refreshIntakeKpis();
   };
 
   useEffect(() => {
@@ -326,6 +391,11 @@ export default function LoadInboxPage() {
   const linkedLoadId = threadDetail?.linked_load_id ?? selectedThread?.linked_load_id ?? null;
 
   useEffect(() => {
+    if (isEmailLoadRoute) {
+      setLinkedLoadDetail(null);
+      setLoadingLinkedLoad(false);
+      return;
+    }
     if (!linkedLoadId) {
       setLinkedLoadDetail(null);
       return;
@@ -345,7 +415,18 @@ export default function LoadInboxPage() {
     return () => {
       cancelled = true;
     };
-  }, [linkedLoadId]);
+  }, [linkedLoadId, isEmailLoadRoute]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith(OPS.INTAKE)) return;
+    const sp = new URLSearchParams(location.search);
+    const tid = sp.get("thread");
+    if (!tid) return;
+    const n = Number(tid);
+    if (!Number.isFinite(n) || n <= 0) return;
+    setSelectedThreadId(n);
+    navigate(OPS.INTAKE, { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   const handleRecomputeIntake = async () => {
     if (!selectedThreadId || recomputingIntake) return;
@@ -746,7 +827,11 @@ export default function LoadInboxPage() {
         <section className="flex min-h-[620px] flex-col rounded-xl border border-[#1e293b] bg-[#0a0e14]">
           <div className="shrink-0 border-b border-[#1e293b] px-4 py-2.5">
             {!selectedThread ? (
-              <p className="text-sm text-[#64748b]">Select a queue item to verify intake.</p>
+              <p className="text-sm text-[#64748b]">
+                {isEmailLoadRoute
+                  ? "Select a queue item to read the thread."
+                  : "Select a queue item to verify intake."}
+              </p>
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -771,6 +856,15 @@ export default function LoadInboxPage() {
                   ) : null}
                 </div>
                 <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+                  {isEmailLoadRoute ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`${OPS.INTAKE}?thread=${selectedThread.id}`)}
+                      className="rounded border border-violet-900/50 bg-violet-950/40 px-3 py-1.5 text-xs font-medium text-violet-200 hover:bg-violet-950/60"
+                    >
+                      Load Intake
+                    </button>
+                  ) : null}
                   {selectedThread.linked_load_id ? (
                     <button
                       type="button"
@@ -814,87 +908,97 @@ export default function LoadInboxPage() {
 
           <div className="min-h-0 flex-1 overflow-auto p-4">
             {selectedThread ? (
-              <>
-                {loadingLinkedLoad && linkedLoadId ? (
-                  <p className="mb-2 text-xs text-[#64748b]">Loading linked load for verification…</p>
-                ) : null}
-                <IntakeVerificationPanel
-                  threadSubject={selectedThread.subject}
-                  participantsJson={selectedThread.participants_json}
-                  routingReason={formatRoutingReason(selectedThread.routing_reason)}
-                  messages={messages}
-                  linkedLoad={linkedLoadDetail}
-                  kpis={intakeKpis}
-                  canReparse={selectedThread.provider === "gmail" && selectedThread.status === "active"}
-                  recomputingIntake={recomputingIntake}
-                  onReparse={handleRecomputeIntake}
-                  canVerifyCreate={
-                    (selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background") &&
-                    !selectedThread.linked_load_id &&
-                    selectedThread.status === "active"
-                  }
-                  draftCreating={draftCreating}
-                  onVerifyCreate={handleCreateDraftLoad}
-                  onManualEntry={() => navigate(OPS.LOAD_NEW)}
-                  uploadBusy={uploadingPdf}
-                  onUploadDocumentChange={handleUploadDocumentChange}
-                  userEmail={me?.email ?? null}
-                  onClose={() => navigate(OPS.DASHBOARD)}
-                />
-
-                <details className="mt-6 rounded-xl border border-[#1e293b] bg-[#0d111a]">
-                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#cbd5e1] marker:text-[#64748b]">
-                    Email thread (reference)
-                  </summary>
-                  <div className="border-t border-[#1e293b] p-4">
-                    {loadingMessages && selectedThreadId ? (
-                      <div className="text-sm text-[#94a3b8]">Loading messages…</div>
-                    ) : null}
-                    {!loadingMessages && messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : null}
-                    {!loadingMessages && !messagesError && selectedThreadId && messages.length === 0 ? (
-                      <div className="text-sm text-[#64748b]">No messages in this thread.</div>
-                    ) : null}
-                    {!loadingMessages && !messagesError
-                      ? messages.map((m) => {
-                          const outbound = (m.direction || "").toLowerCase() === "outbound";
-                          return (
-                            <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
-                              <article
-                                className={`w-full max-w-[820px] rounded-xl border p-4 ${
-                                  outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[#1e293b] bg-[#0d111a]"
-                                }`}
-                              >
-                                <div className="mb-2 grid gap-1 text-xs text-[#94a3b8] md:grid-cols-2">
-                                  <span>From: {m.from_email || "—"}</span>
-                                  <span className="md:text-right">{formatWhen(m.received_at || m.sent_at || m.created_at)}</span>
-                                  <span className="md:col-span-2">To: {recipientPreview(m.to_json)}</span>
-                                  {m.subject ? <span className="md:col-span-2">Subject: {m.subject}</span> : null}
-                                </div>
-                                <p className="whitespace-pre-wrap text-sm leading-6 text-[#e8edf5]">
-                                  {m.body_text || m.snippet || "No message body available."}
-                                </p>
-                                {m.attachments && m.attachments.length > 0 ? (
-                                  <ul className="mt-2 space-y-1 text-xs text-[#94a3b8]">
-                                    {m.attachments.map((a) => (
-                                      <li key={a.id}>
-                                        <span className="text-[#cbd5e1]">{a.filename || a.external_attachment_id}</span>
-                                        {a.mime_type ? <span className="text-[#64748b]"> · {a.mime_type}</span> : null}
-                                        {a.size_bytes != null ? <span className="text-[#64748b]"> · {a.size_bytes} bytes</span> : null}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : null}
-                                {m.has_attachments && (!m.attachments || m.attachments.length === 0) ? (
-                                  <p className="mt-2 text-xs text-[#94a3b8]">Has attachments (metadata pending or inline-only).</p>
-                                ) : null}
-                              </article>
-                            </div>
-                          );
-                        })
-                      : null}
+              isEmailLoadRoute ? (
+                <>
+                  <input
+                    ref={emailUploadRef}
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                    onChange={handleUploadDocumentChange}
+                  />
+                  <p className="mb-3 text-xs text-[#64748b]">
+                    Read and triage mail here. Open <span className="text-[#94a3b8]">Load Intake</span> for verify, form,
+                    and create-load.
+                  </p>
+                  <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[#1e293b] pb-4">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`${OPS.INTAKE}?thread=${selectedThread.id}`)}
+                      className="rounded-lg border border-violet-700/70 bg-violet-950/50 px-3 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-950/70"
+                    >
+                      Open Load Intake
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => emailUploadRef.current?.click()}
+                      disabled={uploadingPdf || selectedThread.status !== "active"}
+                      className="rounded-lg border border-[#2563eb] bg-[#1d4ed8] px-3 py-2 text-sm font-semibold text-white hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {uploadingPdf ? "Uploading…" : "Upload PDF"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRecomputeIntake}
+                      disabled={
+                        !(selectedThread.provider === "gmail" && selectedThread.status === "active") || recomputingIntake
+                      }
+                      className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {recomputingIntake ? "Re-parsing…" : "Re-parse"}
+                    </button>
                   </div>
-                </details>
-              </>
+                  <ThreadMessageList
+                    loadingMessages={loadingMessages}
+                    messagesError={messagesError}
+                    selectedThreadId={selectedThreadId}
+                    messages={messages}
+                  />
+                </>
+              ) : (
+                <>
+                  {loadingLinkedLoad && linkedLoadId ? (
+                    <p className="mb-2 text-xs text-[#64748b]">Loading linked load for verification…</p>
+                  ) : null}
+                  <IntakeVerificationPanel
+                    threadSubject={selectedThread.subject}
+                    participantsJson={selectedThread.participants_json}
+                    routingReason={formatRoutingReason(selectedThread.routing_reason)}
+                    messages={messages}
+                    linkedLoad={linkedLoadDetail}
+                    kpis={intakeKpis}
+                    canReparse={selectedThread.provider === "gmail" && selectedThread.status === "active"}
+                    recomputingIntake={recomputingIntake}
+                    onReparse={handleRecomputeIntake}
+                    canVerifyCreate={
+                      (selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background") &&
+                      !selectedThread.linked_load_id &&
+                      selectedThread.status === "active"
+                    }
+                    draftCreating={draftCreating}
+                    onVerifyCreate={handleCreateDraftLoad}
+                    onManualEntry={() => navigate(OPS.LOAD_NEW)}
+                    uploadBusy={uploadingPdf}
+                    onUploadDocumentChange={handleUploadDocumentChange}
+                    userEmail={me?.email ?? null}
+                    onClose={() => navigate(OPS.DASHBOARD)}
+                  />
+
+                  <details className="mt-6 rounded-xl border border-[#1e293b] bg-[#0d111a]">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#cbd5e1] marker:text-[#64748b]">
+                      Email thread (reference)
+                    </summary>
+                    <div className="border-t border-[#1e293b] p-4">
+                      <ThreadMessageList
+                        loadingMessages={loadingMessages}
+                        messagesError={messagesError}
+                        selectedThreadId={selectedThreadId}
+                        messages={messages}
+                      />
+                    </div>
+                  </details>
+                </>
+              )
             ) : null}
           </div>
         </section>

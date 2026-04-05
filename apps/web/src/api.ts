@@ -1519,8 +1519,28 @@ export type EmailConfig = {
   gmail_watch_active?: boolean | null;
   gmail_watch_expires_at?: string | null;
   last_gmail_webhook_at?: string | null;
+  /** Server has GMAIL_PUBSUB_TOPIC_NAME (platform ops). */
+  gmail_pubsub_topic_configured?: boolean | null;
+  /** True only when push path is viable end-to-end per server checks (not “OAuth OK”). */
+  gmail_automatic_ingestion_ready?: boolean | null;
+  gmail_automatic_ingestion_blockers?: string[] | null;
+  gmail_automatic_ingestion_warnings?: string[] | null;
   created_at: string;
   updated_at: string;
+};
+
+export type GmailIngestionHealth = {
+  oauth_connected: boolean;
+  gmail_pubsub_topic_configured: boolean;
+  history_cursor_present: boolean;
+  watch_registered_and_valid: boolean;
+  watch_expires_at: string | null;
+  last_webhook_at: string | null;
+  last_delta_sync_at: string | null;
+  automatic_ingestion_ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  proof_steps: string[];
 };
 
 export type EmailConfigUpdatePayload = {
@@ -1722,6 +1742,11 @@ export async function syncGmailNow(maxThreads = 30): Promise<{
     method: "POST",
   });
   return handle(res);
+}
+
+export async function getGmailIngestionHealth(): Promise<GmailIngestionHealth> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/gmail/ingestion-health`);
+  return handle<GmailIngestionHealth>(res);
 }
 
 /** Same delta sync as Pub/Sub push; `email_inbox` entitlement. Fallback only — production uses Gmail push. */

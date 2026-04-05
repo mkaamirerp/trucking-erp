@@ -24,7 +24,7 @@ from app.services.email_engine.message_normalizer import headers_map as _headers
 from app.services.email_engine.message_normalizer import parse_address_list as _parse_address_list
 from app.services.email_engine.message_normalizer import parse_date_header as _parse_date_header
 from app.services.email_engine.message_normalizer import participant_emails as _participant_emails
-from app.services.gmail_oauth import refresh_access_token
+from app.services.gmail_oauth import gmail_api_error_detail, refresh_access_token
 from app.utils.encryption import decrypt_secret
 
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -65,7 +65,8 @@ async def _gmail_http_get(access_token: str, path: str, params: dict[str, Any] |
 
 async def _gmail_get_json(access_token: str, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     resp = await _gmail_http_get(access_token, path, params=params)
-    resp.raise_for_status()
+    if resp.is_error:
+        raise ValueError(gmail_api_error_detail(resp))
     return resp.json()
 
 
@@ -187,7 +188,8 @@ async def sync_gmail_delta_for_tenant(tenant_db: AsyncSession, tenant_id: int) -
                 history_pages=pages,
                 history_cursor_advanced=True,
             )
-        resp.raise_for_status()
+        if resp.is_error:
+            raise ValueError(gmail_api_error_detail(resp))
         page = resp.json()
         pages += 1
         top_hid = str(page.get("historyId") or "").strip()

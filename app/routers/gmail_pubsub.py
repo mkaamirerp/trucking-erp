@@ -27,17 +27,25 @@ router = APIRouter(tags=["gmail_pubsub"])
 
 def _require_push_auth(request: Request) -> None:
     """
-    Production requires either OIDC (gmail_pubsub_push_audience) or shared secret header.
-    If audience is set, Bearer JWT is verified with Google; optional X-TruckERP-Gmail-Push-Token
-    must also match when gmail_pubsub_push_token is set.
+    Anonymous push is never allowed: set OIDC audience (standard Pub/Sub → HTTPS) and/or
+    GMAIL_PUBSUB_PUSH_TOKEN (X-TruckERP-Gmail-Push-Token) for lab/custom forwarders.
+    Pub/Sub OIDC pushes do not include custom headers; verified Bearer is sufficient on the OIDC path.
     """
     aud = getattr(settings, "gmail_pubsub_push_audience", None)
     shared = getattr(settings, "gmail_pubsub_push_token", None)
+    aud_ok = bool(aud and str(aud).strip())
+    shared_ok = bool(shared and str(shared).strip())
+
+    if not aud_ok and not shared_ok:
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail Pub/Sub push auth is not configured: set GMAIL_PUBSUB_PUSH_AUDIENCE (OIDC) and/or GMAIL_PUBSUB_PUSH_TOKEN",
+        )
 
     auth_hdr = request.headers.get("Authorization") or ""
     bearer = auth_hdr[7:].strip() if auth_hdr.startswith("Bearer ") else None
 
-    if aud:
+    if aud_ok:
         if not bearer:
             raise HTTPException(status_code=401, detail="Missing Authorization bearer (OIDC required)")
         try:
@@ -45,20 +53,10 @@ def _require_push_auth(request: Request) -> None:
         except ValueError as exc:
             logger.warning("gmail_pubsub_push: OIDC verify failed: %s", exc)
             raise HTTPException(status_code=401, detail="Invalid OIDC token") from exc
-        if shared and request.headers.get("X-TruckERP-Gmail-Push-Token") != shared:
-            raise HTTPException(status_code=401, detail="Unauthorized")
         return
 
-    if shared:
-        if request.headers.get("X-TruckERP-Gmail-Push-Token") != shared:
-            raise HTTPException(status_code=401, detail="Unauthorized")
-        return
-
-    if settings.is_production():
-        raise HTTPException(
-            status_code=503,
-            detail="Configure GMAIL_PUBSUB_PUSH_AUDIENCE (OIDC) or GMAIL_PUBSUB_PUSH_TOKEN for push ingestion",
-        )
+    if request.headers.get("X-TruckERP-Gmail-Push-Token") != shared:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @router.post("/webhooks/gmail/pubsub")

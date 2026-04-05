@@ -12,6 +12,31 @@ import httpx
 
 from app.core.config import settings
 
+
+def gmail_api_error_detail(resp: httpx.Response) -> str:
+    """Parse Gmail API JSON error so operators see the real reason (not just '403 Forbidden')."""
+    raw = (resp.text or "").strip()
+    try:
+        data = resp.json()
+        err = data.get("error")
+        if isinstance(err, dict):
+            parts: list[str] = []
+            st = err.get("status")
+            msg = err.get("message")
+            if st:
+                parts.append(str(st))
+            if msg:
+                parts.append(str(msg))
+            if parts:
+                return " ".join(parts)
+        if isinstance(err, str) and err:
+            return err
+    except Exception:
+        pass
+    if raw:
+        return raw[:500]
+    return f"HTTP {resp.status_code}"
+
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -19,6 +44,23 @@ GMAIL_SCOPES = [
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+
+def _google_token_endpoint_detail(resp: httpx.Response) -> str:
+    """Parse error body from https://oauth2.googleapis.com/token (JSON or text)."""
+    raw = (resp.text or "").strip()
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            err = data.get("error")
+            desc = data.get("error_description")
+            if err and desc:
+                return f"{err}: {desc}"
+            if err:
+                return str(err)
+    except Exception:
+        pass
+    return (raw[:400] if raw else f"HTTP {resp.status_code}")
 
 
 def _state_secret() -> str:
@@ -94,7 +136,9 @@ async def exchange_code_for_tokens(code: str, redirect_uri: str) -> dict:
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-    resp.raise_for_status()
+    if resp.is_error:
+        detail = _google_token_endpoint_detail(resp)
+        raise ValueError(f"Google OAuth code exchange failed ({resp.status_code}): {detail}")
     return resp.json()
 
 
@@ -132,5 +176,11 @@ async def refresh_access_token(refresh_token: str) -> dict:
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-    resp.raise_for_status()
+    if resp.is_error:
+        detail = _google_token_endpoint_detail(resp)
+        raise ValueError(
+            f"Google OAuth token refresh failed ({resp.status_code}): {detail}. "
+            "Typical fix: use Reconnect in Admin → Email to get a new refresh token, "
+            "or verify GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET match the Google Cloud OAuth client."
+        )
     return resp.json()
