@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Run tenant Alembic migrations for an existing tenant (creates loads/drivers tables if missing).
+Legacy host-side helper: resolves a tenant slug to a DB URL and runs tenant Alembic to ``head``.
+
+**Not the canonical operator path.** Routine production tenant upgrades must use
+``scripts/tenant_upgrade_head.sh`` in ``truckerp-api`` (preflight + env gate), e.g. via
+``./scripts/db_run.sh`` — see ``docs/secrets.md`` and ``.cursor/rules/tenant-migrations.mdc``.
+
+This script skips that wrapper (raw ``python -m alembic -c alembic_tenant.ini upgrade …`` via
+``app.services.tenant_provisioning._run_tenant_migrations``). Prefer the wrapper for operators;
+keep this entrypoint only for narrow legacy/host workflows until fully deprecated.
 
 Usage (from project root, with DATABASE_URL or POSTGRES_ADMIN_URL set):
   PYTHONPATH=. python scripts/run_tenant_migrations.py <tenant_slug>
-  e.g. PYTHONPATH=. python scripts/run_tenant_migrations.py acme
-
-Requires: platform DB (DATABASE_URL) and tenant credentials (from POSTGRES_ADMIN_URL or
-tenant_db_app_user / tenant_db_app_password). Runs: alembic -c alembic_tenant.ini upgrade head
-with ALEMBIC_TENANT_DATABASE_URL pointing at the tenant's DB.
 """
 from __future__ import annotations
 
@@ -67,15 +70,29 @@ async def _get_tenant_db_url(slug: str) -> str:
     return to_async_pg_url(_build_tenant_db_url(admin_url, db_name, app_user, app_pass))
 
 
+def _print_legacy_stderr_notice() -> None:
+    print(
+        "WARNING: run_tenant_migrations.py is legacy/host-side and skips tenant preflight "
+        "(not the operator path). Use scripts/tenant_upgrade_head.sh — see docs/secrets.md.\n",
+        file=sys.stderr,
+    )
+
+
 def main() -> None:
     if len(sys.argv) != 2:
-        print("Usage: PYTHONPATH=. python scripts/run_tenant_migrations.py <tenant_slug>", file=sys.stderr)
+        print(
+            "Usage: PYTHONPATH=. python scripts/run_tenant_migrations.py <tenant_slug>\n\n"
+            "Non-canonical: operators should run bash scripts/tenant_upgrade_head.sh in truckerp-api "
+            "(docs/secrets.md, db_run.sh).\n",
+            file=sys.stderr,
+        )
         sys.exit(2)
     slug = sys.argv[1].strip()
     if not slug:
         print("tenant_slug is required", file=sys.stderr)
         sys.exit(2)
 
+    _print_legacy_stderr_notice()
     tenant_url = asyncio.run(_get_tenant_db_url(slug))
     os.chdir(PROJECT_ROOT)
     asyncio.run(_run_tenant_migrations(tenant_url, "head"))

@@ -1,5 +1,9 @@
 # Tenant Demo Legacy Tables — Alembic Anti-Regression Report & Permanent Cleanup Plan
 
+> **Document type:** Historical / anti-regression planning — **not** the canonical production operator runbook.  
+> **Tenant migrations (operators):** use `scripts/tenant_upgrade_head.sh` in `truckerp-api` with `ALEMBIC_TENANT_DATABASE_URL` set (see `docs/secrets.md`, `.cursor/rules/tenant-migrations.mdc`).  
+> Raw `alembic -c alembic_tenant.ini …` below is **lab / test matrix / autogenerate** — not the default prod upgrade path.
+
 ## 1. Alembic Anti-Regression Report
 
 ### users
@@ -208,8 +212,10 @@ SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename IN ('use
 
 ### 4.2 Fresh empty tenant DB → upgrade head
 
+**Lab / test matrix only;** operators should use `bash scripts/tenant_upgrade_head.sh` with env set.
+
 1. Create a new empty tenant DB (e.g. `tenant_test`).
-2. Run `alembic -c alembic_tenant.ini upgrade head` with `ALEMBIC_TENANT_DATABASE_URL` pointing at that DB.
+2. **(Lab)** Run `alembic -c alembic_tenant.ini upgrade head` with `ALEMBIC_TENANT_DATABASE_URL` pointing at that DB.
 3. Confirm `users`, `user_roles`, `driver_phones_old` are **not** created (Lane A migration drops them if a prior migration created them; on a fresh DB, only `users` and `user_roles` would have been created by c8a3d0b9c777; `driver_phones_old` would not exist).
 4. After upgrade, verify dropped tables are absent.
 
@@ -217,13 +223,15 @@ SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename IN ('use
 
 ### 4.3 Dropped tables do not come back
 
-- Re-run `upgrade head` on the same DB.
+- **(Lab / idempotency check)** Re-run tenant upgrade to `head` on the same DB (operator: `tenant_upgrade_head.sh`).
 - Idempotent migrations (e.g. `DROP TABLE IF EXISTS`) should not fail.
 - Confirm tables remain dropped.
 
 ---
 
 ### 4.4 Autogenerate does not re-add dropped tables
+
+**Non-operator / migration authoring** (autogenerate from dev shell):
 
 ```bash
 alembic -c alembic_tenant.ini revision --autogenerate -m "test_no_recreate"

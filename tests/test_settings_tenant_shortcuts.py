@@ -1,14 +1,38 @@
-"""Settings: dev-only tenant resolution shortcuts never apply in production/staging."""
+"""Tenant resolution shortcuts: explicit allow flag + environment allowlist only."""
 from __future__ import annotations
 
-from app.core.config import Settings
+from app.core.config import (
+    TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS,
+    Settings,
+)
 
 
-def test_allows_dev_tenant_resolution_shortcuts() -> None:
-    url = "postgresql://u:p@db.example.com:5432/trucking_erp"
-    assert Settings(database_url=url, environment="dev").allows_dev_tenant_resolution_shortcuts() is True
-    assert Settings(database_url=url, environment="development").allows_dev_tenant_resolution_shortcuts() is True
-    assert Settings(database_url=url, environment="production").allows_dev_tenant_resolution_shortcuts() is False
-    assert Settings(database_url=url, environment="prod").allows_dev_tenant_resolution_shortcuts() is False
-    assert Settings(database_url=url, environment="staging").allows_dev_tenant_resolution_shortcuts() is False
-    assert Settings(database_url=url, environment="stg").allows_dev_tenant_resolution_shortcuts() is False
+def _url() -> str:
+    return "postgresql://u:p@db.example.com:5432/trucking_erp"
+
+
+def test_allows_tenant_resolution_shortcuts_requires_flag_and_allowlisted_env() -> None:
+    url = _url()
+    base = dict(database_url=url, allow_tenant_resolution_shortcuts=True)
+    for env in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS:
+        assert Settings(**base, environment=env).allows_tenant_resolution_shortcuts() is True
+
+    assert Settings(database_url=url, environment="dev", allow_tenant_resolution_shortcuts=False).allows_tenant_resolution_shortcuts() is False
+
+    for bad in ("production", "prod", "staging", "uat", "preprod", "demo", ""):
+        assert (
+            Settings(database_url=url, environment=bad, allow_tenant_resolution_shortcuts=True).allows_tenant_resolution_shortcuts()
+            is False
+        )
+
+
+def test_shortcuts_disallowed_for_unknown_env_even_with_flag() -> None:
+    url = _url()
+    assert (
+        Settings(
+            database_url=url,
+            environment="prodcution",
+            allow_tenant_resolution_shortcuts=True,
+        ).allows_tenant_resolution_shortcuts()
+        is False
+    )

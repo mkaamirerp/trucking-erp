@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import and_, func, select
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
@@ -94,15 +95,30 @@ async def dashboard_summary(
         raise
 
     # Include driver list in same request so dashboard always has drivers when count > 0 (permissive schema, no skip)
-    drivers_out: list[DriverListOut] = []
     try:
         drivers_result = await db.execute(
             select(Driver).where(Driver.tenant_id == tenant_id).order_by(Driver.id.desc()).limit(50)
         )
         driver_rows = list(drivers_result.scalars().all())
         drivers_out = [driver_row_to_list_out(d) for d in driver_rows]
-    except Exception as e:
-        logger.warning("Dashboard: driver list failed (%s), returning empty", e)
+    except SQLAlchemyError as e:
+        logger.exception("Dashboard: driver list database error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "detail": "Dashboard driver list could not be loaded (database error).",
+                "code": "DASHBOARD_DRIVERS_LIST_DB_ERROR",
+            },
+        ) from e
+    except ValidationError as e:
+        logger.exception("Dashboard: driver list serialization failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "detail": "Dashboard driver list could not be serialized.",
+                "code": "DASHBOARD_DRIVERS_LIST_SERIALIZE_ERROR",
+            },
+        ) from e
 
     return {
         "active_loads": int(active_loads or 0),

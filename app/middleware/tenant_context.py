@@ -42,10 +42,10 @@ DEFAULT_ALLOW_PATHS: Set[str] = {
 def tenant_middleware_allow_paths() -> Set[str]:
     """
     Paths that skip tenant resolution. Dev-only /api/v1/tools/* (no tenant) is allowlisted only when
-    Settings.allows_dev_tenant_resolution_shortcuts() is true, matching main.py mounting of dev_tools routers.
+    Settings.allows_tenant_resolution_shortcuts() is true, matching main.py mounting of dev_tools routers.
     """
     paths = set(DEFAULT_ALLOW_PATHS)
-    if settings.allows_dev_tenant_resolution_shortcuts():
+    if settings.allows_tenant_resolution_shortcuts():
         paths.update(
             {
                 "/api/v1/tools/unlock",
@@ -85,8 +85,8 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     """
     Enforces tenant context for tenant-scoped routes.
     Tenant resolution (browser/API): trusted Host subdomain → OAuth signed state (Gmail callback) →
-    dev-only (see Settings.allows_dev_tenant_resolution_shortcuts): JWT tenant_id when Host has no tenant slug,
-    or TOOLS_DEFAULT_* for /tools/db only. Never in production or staging.
+    dev/CI only (explicit ALLOW_TENANT_RESOLUTION_SHORTCUTS + safe ENVIRONMENT; see Settings): JWT tenant_id when Host has no tenant slug,
+    or TOOLS_DEFAULT_* for /tools/db only.
     X-Tenant-ID / X-Tenant-Slug are not used for resolution (browser cannot choose tenant).
     Platform routes and allowlist paths do NOT require tenant.
     Also adds/propagates X-Request-ID.
@@ -184,8 +184,8 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 log("token_invalid", level="warning")
                 return response
 
-        # Test bypass: non-production only; tenant from Host subdomain (same as production); skip JWT/membership
-        if os.environ.get("TEST_BYPASS_AUTH") == "1" and settings.allows_dev_tenant_resolution_shortcuts():
+        # Test bypass: requires ALLOW_TENANT_RESOLUTION_SHORTCUTS + safe ENVIRONMENT + TEST_BYPASS_AUTH=1 (startup-validated).
+        if os.environ.get("TEST_BYPASS_AUTH") == "1" and settings.allows_tenant_resolution_shortcuts():
             bypass_slug = self._slug_from_host(request)
             if bypass_slug:
                 try:
@@ -202,7 +202,12 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                         log("test_bypass", tenant_id=request.state.tenant_id)
                         return response
                 except SQLAlchemyError:
-                    pass
+                    logger.exception(
+                        "tenant_context test_bypass platform tenant lookup failed tenant_slug=%s request_id=%s",
+                        bypass_slug,
+                        request_id,
+                    )
+                    # Fail closed: do not grant bypass; fall through to normal resolution.
 
         # Forgot-password from main domain (no tenant): allow through without tenant_id
         if path.rstrip("/") == "/api/v1/auth/forgot-password":
@@ -272,7 +277,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         self, request: Request, path: str, jwt_tenant_id: Optional[int]
     ) -> tuple[int, str]:
         """
-        Resolve tenant from Host subdomain, Gmail OAuth state, non-prod JWT fallback, or non-prod tools defaults.
+        Resolve tenant from Host subdomain, Gmail OAuth state, optional JWT fallback, or tools defaults when shortcuts are enabled.
         Never from X-Tenant-ID / X-Tenant-Slug.
         """
         slug_from_host = self._slug_from_host(request)
@@ -296,13 +301,13 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 path_norm = path.rstrip("/")
                 if jwt_tenant_id is not None and path_norm in JWT_TENANT_FALLBACK_PATHS:
                     tenant_id_from_request = int(jwt_tenant_id)
-                elif settings.allows_dev_tenant_resolution_shortcuts() and jwt_tenant_id is not None:
+                elif settings.allows_tenant_resolution_shortcuts() and jwt_tenant_id is not None:
                     tenant_id_from_request = int(jwt_tenant_id)
                 else:
                     default_tid = os.environ.get("TOOLS_DEFAULT_TENANT_ID")
                     default_slug = os.environ.get("TOOLS_DEFAULT_TENANT_SLUG")
                     if (
-                        settings.allows_dev_tenant_resolution_shortcuts()
+                        settings.allows_tenant_resolution_shortcuts()
                         and path.startswith("/api/v1/tools/db/")
                         and (default_tid or default_slug)
                     ):

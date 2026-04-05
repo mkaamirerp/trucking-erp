@@ -67,7 +67,8 @@ Then run platform migrations with the **correct** config (see below).
 ## Permanent rule (do not forget)
 
 - **Platform DB migrations** MUST always use: **`alembic_platform.ini`**
-- **Tenant DB migrations** MUST always use: **`alembic_tenant.ini`**
+- **Tenant DB schema** is driven by **`alembic_tenant.ini`** + `alembic_tenant/versions/` (config/source-of-truth for revisions).
+- **Tenant DB operator upgrades** (prod / routine) MUST go through **`scripts/tenant_upgrade_head.sh`** inside `truckerp-api` at `/app` so **preflight** runs before `upgrade head`. Do **not** use raw `alembic -c alembic_tenant.ini upgrade head` as the default operator path—it skips preflight (see `.cursor/rules/tenant-migrations.mdc` and `docs/secrets.md`).
 - **Do not** use root **`alembic.ini`** for platform schema changes.
 
 ---
@@ -79,6 +80,15 @@ Then run platform migrations with the **correct** config (see below).
 ```bash
 docker exec truckerp-api sh -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_platform.ini upgrade head'
 ```
+
+**Run tenant migrations (operator — canonical):** `ALEMBIC_TENANT_DATABASE_URL` must point at the target tenant DB (async URL). Example via host wrapper:
+
+```bash
+cd /home/admin/trucking_erp
+./scripts/db_run.sh bash -c 'export ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" && bash scripts/tenant_upgrade_head.sh'
+```
+
+(Fleet-wide: `python -m app.scripts.tenant_fleet_upgrade_head` in the same container env; see `docs/secrets.md`.)
 
 **Run cleanup (dry-run):**
 

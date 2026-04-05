@@ -54,14 +54,20 @@ Application code (os.getenv)
 # Platform DB migrations (control plane) — alembic_platform.ini (matches scripts/start_api_with_ssm.sh)
 ./scripts/db_run.sh 'alembic -c alembic_platform.ini upgrade head'
 
-# Tenant DB migrations — each tenant has its own database; alembic_tenant.ini + ALEMBIC_TENANT_DATABASE_URL pointing at that DB
-./scripts/db_run.sh 'ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" alembic -c alembic_tenant.ini upgrade head'
+# Tenant DB migrations — each tenant has its own database. Operator upgrades MUST use scripts/tenant_upgrade_head.sh
+# (preflight + env gate); set ALEMBIC_TENANT_DATABASE_URL to that tenant’s async URL (example: tenant_demo).
+./scripts/db_run.sh bash -c 'export ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" && bash scripts/tenant_upgrade_head.sh'
+
+# Fleet-wide tenant upgrades (ACTIVE + READY tenants with db_name) — see app/scripts/tenant_fleet_upgrade_head.py
+./scripts/db_run.sh python -m app.scripts.tenant_fleet_upgrade_head
 
 # Direct psql check
 ./scripts/db_run.sh 'PGPASSWORD="${POSTGRES_PASSWORD}" psql -h truckerp-postgres -U postgres -d postgres -c "select 1;"'
 ```
 
 **Legacy note:** Root `alembic.ini` + `alembic/versions/` is an older parallel migration tree still present in the repo for CI/history. **Do not use it for routine platform upgrades.** Use `alembic_platform.ini` unless you are following a dedicated recovery doc that explicitly targets the root tree.
+
+**Tenant Alembic (non-operator):** Running `alembic -c alembic_tenant.ini upgrade head` directly (including via `db_run.sh`) skips preflight and is only for local experiments, autogenerate/revision workflows, or docs that explicitly require it—not the production operator upgrade path.
 
 This wrapper:
 1. Verifies the API container is running and `/run/secrets/truckerp.env` exists

@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import os
 
+# Before Settings() is imported: enable tenant shortcuts only for safe env + explicit allow
+# (matches policy in app.core.config).
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
+
 import pytest
 
 # Skip signup-to-dashboard flow tests if no database (CI may run without Postgres)

@@ -1,5 +1,9 @@
 # Lane B Implementation Plan — Exact File-Change Plan
 
+> **Document type:** Planning — **not** the canonical production operator runbook.  
+> **Tenant migrations (operators):** use `scripts/tenant_upgrade_head.sh` in `truckerp-api` with `ALEMBIC_TENANT_DATABASE_URL` set (see `docs/secrets.md`, `.cursor/rules/tenant-migrations.mdc`).  
+> Raw `alembic -c alembic_tenant.ini …` below is **autogenerate / lab** — not the default prod upgrade path.
+
 **Scope:** `employee_roles`, all `employees_legacy_%` tables  
 **Decision:** Option A (drop only)  
 **Status:** Plan only — DO NOT EXECUTE until approved.
@@ -151,11 +155,15 @@ WHERE schemaname='public'
 
 ### 3.2 Fresh empty tenant DB → upgrade head
 
+**Lab / test matrix:** create `tenant_test`, then run tenant upgrade to head (operator: `bash scripts/tenant_upgrade_head.sh` with `ALEMBIC_TENANT_DATABASE_URL` set; raw Alembic only if reproducing this plan’s empty-DB checks).
+
 1. Create `tenant_test`, run upgrade head.
 2. Same query as above.
 3. **Expected:** 0 rows (no `employee_roles`, no `employees_legacy_%`).
 
 ### 3.3 Autogenerate does not propose recreation
+
+**Non-operator / migration authoring** (autogenerate):
 
 ```bash
 docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_tenant.ini revision --autogenerate -m "test_lane_b_no_recreate"'

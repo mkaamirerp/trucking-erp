@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ from app.core.db_url import to_async_pg_url
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.platform import PlatformTenant
-from app.schemas.platform import PlatformTenantOut
+from app.schemas.platform import PlatformTenantCreateIn, PlatformTenantOut
 from app.services.tenant_provisioning import (
     _build_tenant_db_url,
     _create_database_if_not_exists,
@@ -43,7 +44,13 @@ def require_platform_admin_key(
             detail="Platform admin API disabled: set PLATFORM_ADMIN_API_KEY.",
         )
     sent = (x_platform_admin_key or x_truckerp_platform_admin_key or "").strip()
-    if not sent or sent != expected:
+    if not sent:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    try:
+        valid = secrets.compare_digest(sent, expected)
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
@@ -60,9 +67,9 @@ async def list_tenants(db: AsyncSession = Depends(get_db), _: None = Depends(req
 
 
 @router.post("/tenants", response_model=PlatformTenantOut)
-async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
-    name = body.get("company_name") or body.get("name")
-    slug = body.get("slug")
+async def create_tenant(body: PlatformTenantCreateIn, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
+    name = body.company_name or body.name
+    slug = body.slug
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="company_name is required")
     if not slug:
@@ -74,7 +81,7 @@ async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None 
         name=name,
         slug=slug,
         status="PROVISIONING",
-        plan=body.get("plan") or body.get("plan_code") or "trial",
+        plan=body.plan or body.plan_code or "trial",
         db_status="NOT_PROVISIONED",
     )
     db.add(tenant)
@@ -87,10 +94,10 @@ async def create_tenant(body: dict, db: AsyncSession = Depends(get_db), _: None 
 async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _: None = Depends(require_platform_admin_key)):
     raw_admin_url = settings.postgres_admin_url or settings.database_url
     logger.info(
-        "postgres_admin_url type=%s value=%r database_url_present=%s",
-        type(settings.postgres_admin_url),
-        settings.postgres_admin_url,
-        bool(settings.database_url),
+        "provision_tenant tenant_id=%s: postgres_admin_url_set=%s database_url_fallback=%s",
+        tenant_id,
+        bool(settings.postgres_admin_url),
+        bool(settings.database_url and not settings.postgres_admin_url),
     )
     admin_url = to_async_pg_url(raw_admin_url)
     if not admin_url:
@@ -163,6 +170,7 @@ async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _
             tenant.db_last_error_at = None
             tenant.provisioned_at = datetime.now(timezone.utc)
     except Exception as exc:
+        logger.exception("provision_tenant failed tenant_id=%s", tenant_id)
         async with db.begin():
             tenant = (
                 await db.execute(
@@ -172,7 +180,10 @@ async def provision_tenant(tenant_id: int, db: AsyncSession = Depends(get_db), _
             tenant.db_status = "ERROR"
             tenant.db_last_error = str(exc)
             tenant.db_last_error_at = datetime.now(timezone.utc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Provisioning failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Provisioning failed. Check server logs and this tenant's db_last_error in the platform registry.",
+        ) from exc
 
     return _provision_response(tenant)
 

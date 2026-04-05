@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -41,29 +42,46 @@ async def list_drivers(
     q: str | None = None,
     include_inactive: bool = False,
 ):
+    stmt = select(Driver).where(Driver.tenant_id == tenant_id).order_by(Driver.id.desc())
+
+    if not include_inactive:
+        stmt = stmt.where(Driver.is_active == True)
+
+    if q:
+        qq = f"%{q.strip()}%"
+        stmt = stmt.where(or_(
+            Driver.first_name.ilike(qq),
+            Driver.last_name.ilike(qq),
+            Driver.email.ilike(qq),
+            Driver.phone.ilike(qq),
+        ))
+
+    stmt = stmt.offset(offset).limit(limit)
+
     try:
-        stmt = select(Driver).where(Driver.tenant_id == tenant_id).order_by(Driver.id.desc())
-
-        if not include_inactive:
-            stmt = stmt.where(Driver.is_active == True)
-
-        if q:
-            qq = f"%{q.strip()}%"
-            stmt = stmt.where(or_(
-                Driver.first_name.ilike(qq),
-                Driver.last_name.ilike(qq),
-                Driver.email.ilike(qq),
-                Driver.phone.ilike(qq),
-            ))
-
-        stmt = stmt.offset(offset).limit(limit)
-
         result = await db.execute(stmt)
-        rows = list(result.scalars().all())
+    except SQLAlchemyError as e:
+        logger.exception("list_drivers database error: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "detail": "Driver list could not be loaded (database error).",
+                "code": "DRIVERS_LIST_DB_ERROR",
+            },
+        ) from e
+
+    rows = list(result.scalars().all())
+    try:
         return [driver_row_to_list_out(d) for d in rows]
-    except Exception as e:
-        logger.exception("list_drivers failed: %s", e)
-        return []
+    except ValidationError as e:
+        logger.exception("list_drivers serialization failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "detail": "Driver list could not be serialized.",
+                "code": "DRIVERS_LIST_SERIALIZE_ERROR",
+            },
+        ) from e
 
 @router.get("/{driver_id}", response_model=DriverOut)
 async def get_driver(

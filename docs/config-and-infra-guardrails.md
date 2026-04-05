@@ -37,22 +37,24 @@ No approval → CI fails.
 
 ## Layer C — Runtime “single source of truth”
 
-- **Standard deployment:** Image-only (or as defined in `docker-compose.yml`), SSM-only for secrets where applicable. Use **`docker compose -f docker-compose.yml`** — do not assume a dev overlay on the server.
-- **Optional local dev:** Host mounts and relaxed startup may exist **only** in `docker-compose.dev.yml`. Never put dev-only mounts in `docker-compose.yml`.
+- **Public server / production:** Use **`docker compose -f docker-compose.yml` only** (single file). No `docker-compose.dev.yml` on internet-facing hosts. SSM-only secrets per `scripts/start_api_with_ssm.sh`.
+- **Local-only file:** `docker-compose.dev.yml` is for engineering machines (bind mounts, API `:8000` on host, `SSM_ENV=dev`). Read the warning banner at the top of that file. Never put dev-only mounts in `docker-compose.yml`.
 
 **Usage:**
 
-- **Deployment / primary server:**  
+- **Deploy / public server (canonical):**  
   `docker compose -f docker-compose.yml up -d`  
-  Rebuild services (API, nginx) after code or image changes as documented in `.cursor/rules/rebuild-restart-commands.mdc` and `scripts/reload_api.sh`.
+  Rebuild API/nginx via `.cursor/rules/rebuild-restart-commands.mdc`, `scripts/reload_api.sh`, and `scripts/publish_frontend.sh`.
 
-- **Optional local iteration (bind mounts, etc.):**  
-  `./scripts/dev-up.sh`  
-  or: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`  
-  Only when you intentionally use the dev overlay. Nginx may serve `./apps/web/dist` from the host depending on that file — after frontend edits, `npm run build` in `apps/web` may be enough without an nginx image rebuild.
+- **Prod-shaped stack on a dev machine (still no dev overlay):**  
+  `./scripts/dev-up.sh` — same as **`docker compose -f docker-compose.yml`** build/up only.
 
-- **Bake frontend into nginx image (some workflows):**  
-  `./scripts/prod-build-nginx.sh`  
-  then `docker compose -f docker-compose.yml up -d` so nginx serves assets from the image.
+- **Explicit local overlay (laptop / sandbox only, never public server):**  
+  `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`  
+  Nginx may serve `./apps/web/dist` from a bind mount per that file; do not document this path as production-safe.
+
+- **Frontend baked into nginx image:**  
+  `./scripts/prod-build-nginx.sh` or `./scripts/publish_frontend.sh`  
+  then `docker compose -f docker-compose.yml up -d truckerp-nginx` as needed.
 
 This keeps prod stable and limits “works locally but not in CI/prod” drift.

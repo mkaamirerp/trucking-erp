@@ -1,6 +1,12 @@
+import os
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ENVIRONMENT values where tenant-resolution shortcuts may be enabled (requires ALLOW_TENANT_RESOLUTION_SHORTCUTS).
+TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS: frozenset[str] = frozenset(
+    {"dev", "development", "test", "testing", "ci", "local"}
+)
 
 
 def _validate_database_url(url: str, name: str) -> None:
@@ -26,20 +32,23 @@ class Settings(BaseSettings):
     app_name: str = "Trucking ERP API"
     environment: str = "dev"
 
+    # Opt-in: JWT-without-subdomain resolution, TOOLS_DEFAULT_*, tools routes, TEST_BYPASS_AUTH.
+    # Must also set ENVIRONMENT to a value in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS.
+    allow_tenant_resolution_shortcuts: bool = False
+
     def is_production(self) -> bool:
         return (self.environment or "").lower() in ("production", "prod", "prd")
 
-    def allows_dev_tenant_resolution_shortcuts(self) -> bool:
+    def allows_tenant_resolution_shortcuts(self) -> bool:
         """
-        JWT-without-subdomain tenant resolution, TOOLS_DEFAULT_TENANT_*, and TEST_BYPASS_AUTH
-        are allowed only in dev-like environments — never production or staging.
+        Explicit allow flag AND environment allowlist only. Never implicit “not prod”.
+        Used for: /api/v1/tools routes, JWT tenant without host slug, TOOLS_DEFAULT_TENANT_*,
+        and TEST_BYPASS_AUTH (middleware) together with startup checks.
         """
-        if self.is_production():
+        if not self.allow_tenant_resolution_shortcuts:
             return False
-        e = (self.environment or "").lower()
-        if e in ("staging", "stage", "stg", "preprod"):
-            return False
-        return True
+        e = (self.environment or "").lower().strip()
+        return e in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS
 
     # Canonical DB URL (loaded from .env as DATABASE_URL)
     database_url: str
@@ -122,3 +131,25 @@ settings = Settings()
 _validate_database_url(settings.database_url, "DATABASE_URL")
 if getattr(settings, "postgres_admin_url", None):
     _validate_database_url(settings.postgres_admin_url, "POSTGRES_ADMIN_URL")
+
+
+def enforce_test_bypass_auth_policy(cfg: Settings | None = None) -> None:
+    """
+    Fail fast at application startup if TEST_BYPASS_AUTH is set in an unsafe or incomplete configuration.
+    """
+    if os.environ.get("TEST_BYPASS_AUTH") != "1":
+        return
+    s = cfg or settings
+    e = (s.environment or "").lower().strip()
+    if e not in TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS:
+        raise RuntimeError(
+            "TEST_BYPASS_AUTH=1 is forbidden unless ENVIRONMENT is in "
+            f"{sorted(TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS)!r} (got {s.environment!r}). "
+            "Remove TEST_BYPASS_AUTH from this deployment."
+        )
+    if not s.allow_tenant_resolution_shortcuts:
+        raise RuntimeError(
+            "TEST_BYPASS_AUTH=1 requires ALLOW_TENANT_RESOLUTION_SHORTCUTS=true and ENVIRONMENT in "
+            f"{sorted(TENANT_RESOLUTION_SHORTCUT_SAFE_ENVIRONMENTS)!r}. "
+            "Enable only on local or CI test runners."
+        )

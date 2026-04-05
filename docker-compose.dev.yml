@@ -1,9 +1,16 @@
-# Optional LOCAL dev overrides only — not used on standard deployment.
-# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-# Standard server: docker compose -f docker-compose.yml (see .cursor/rules/rebuild-restart-commands.mdc).
-# Prod: image-only, no host mounts. Dev: host mounts allowed here only.
+# =============================================================================
+# WARNING: LOCAL / ENGINEERING-MACHINE ONLY — NOT FOR INTERNET-FACING PRODUCTION
+# =============================================================================
+# - Publishes API port 8000 to the host (bypasses nginx; fails security audits).
+# - Sets dev-oriented API behavior (e.g. SSM_ENV=dev, bind-mounts repo into /app).
+# - Never use this file on the public server or any host where prod traffic lands.
 #
-# In dev, API still uses AWS SSM via start_api_with_ssm.sh, but with SSM_ENV=dev.
+# Public / production workflow: docker compose -f docker-compose.yml ONLY
+#   See: .cursor/rules/rebuild-restart-commands.mdc, scripts/reload_api.sh
+#
+# Local iteration (your laptop / sandbox only):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# =============================================================================
 
 services:
   truckerp-api:
@@ -15,6 +22,8 @@ services:
       - "8000:8000"
     environment:
       SSM_ENV: dev
+      ENVIRONMENT: dev
+      ALLOW_TENANT_RESOLUTION_SHORTCUTS: "true"
       # STORAGE_PROVIDER: s3
     volumes:
       # Mount repo so code changes apply on container restart (no image rebuild).

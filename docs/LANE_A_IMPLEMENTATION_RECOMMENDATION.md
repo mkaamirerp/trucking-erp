@@ -1,5 +1,9 @@
 # Lane A Implementation Recommendation — Permanent Cleanup
 
+> **Document type:** Planning / design — **not** the canonical production operator runbook.  
+> **Tenant migrations (operators):** use `scripts/tenant_upgrade_head.sh` in `truckerp-api` with `ALEMBIC_TENANT_DATABASE_URL` set (see `docs/secrets.md`, `.cursor/rules/tenant-migrations.mdc`).  
+> Raw `alembic -c alembic_tenant.ini …` below is **lab / test DB / autogenerate** — not the default prod upgrade path.
+
 **Scope:** `users`, `user_roles`, `driver_phones_old`  
 **Excluded:** `employees_legacy_20260305`, `tenants`, `drivers`  
 **Status:** Design complete — DO NOT EXECUTE until approved.
@@ -157,6 +161,8 @@ docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set 
 
 #### 4.2 Fresh empty tenant DB → upgrade head
 
+**Lab / test matrix only** (empty `tenant_test`); not the routine operator prod procedure.
+
 1. Create empty DB: `createdb tenant_test` (or equivalent).
 2. Set `ALEMBIC_TENANT_DATABASE_URL` to that DB.
 3. Run:
@@ -175,6 +181,8 @@ docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set 
 **Expected:** Idempotent; no errors; tables remain absent.
 
 #### 4.4 Autogenerate drift check
+
+**Non-operator / migration authoring:** autogenerate only.
 
 ```bash
 docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && cd /app && alembic -c alembic_tenant.ini revision --autogenerate -m "test_no_recreate"'

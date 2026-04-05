@@ -1,5 +1,9 @@
 # Driver list empty / "List could not be loaded"
 
+> **Document type:** Operational troubleshooting — **not** the tenant migration runbook.  
+> **Tenant DB schema upgrades (operators):** `scripts/tenant_upgrade_head.sh` (see `docs/secrets.md`).  
+> The restart snippet below is for **picking up API code**, not for applying migrations.
+
 ## Where the problem is
 
 **Not schema drift.** The Driver model and tenant DB both use `is_active` (Boolean); there is no "Status era" vs "is_active era" mismatch.
@@ -28,8 +32,14 @@
 ## If the list is still empty
 
 1. **Confirm API has the latest code**  
-   With the dev bind mount, restart the API: `docker compose restart truckerp-api`.  
-   Without the mount, rebuild and up: `./scripts/dev-up.sh`.
+   Restart the API from the repo root (prod compose file):
+
+   ```bash
+   cd /home/admin/trucking_erp
+   docker compose -f docker-compose.yml restart truckerp-api
+   ```
+
+   With a **local dev bind mount** overlay, your team’s playbook may use an additional `-f docker-compose.dev.yml`; otherwise rebuild via `./scripts/dev-up.sh` if you are not bind-mounting code.
 
 2. **Confirm DB emails**  
    Demo data should use `@demo.test`, not `@demo.local`.  

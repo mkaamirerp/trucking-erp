@@ -37,7 +37,8 @@ Replace `YOUR_ACTUAL_POSTGRES_PASSWORD` with your real password.
 ### Step 2: Restart the API Container
 
 ```bash
-docker-compose restart truckerp-api
+cd /home/admin/trucking_erp
+docker compose -f docker-compose.yml restart truckerp-api
 ```
 
 The modified `start_api_with_ssm.sh` will now:
@@ -73,11 +74,16 @@ From now on, **always** use `scripts/db_run.sh` for migrations:
 # Platform DB (control plane) — alembic_platform.ini (same config the API runs at startup)
 ./scripts/db_run.sh 'alembic -c alembic_platform.ini upgrade head'
 
-# Tenant DB (per-tenant database) — alembic_tenant.ini; example URL for tenant_demo
-./scripts/db_run.sh 'ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" alembic -c alembic_tenant.ini upgrade head'
+# Tenant DB (per-tenant database) — locked wrapper scripts/tenant_upgrade_head.sh; example ALEMBIC_TENANT_DATABASE_URL for tenant_demo
+./scripts/db_run.sh bash -c 'export ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" && bash scripts/tenant_upgrade_head.sh'
+
+# Fleet-wide tenant upgrades — app/scripts/tenant_fleet_upgrade_head.py
+./scripts/db_run.sh python -m app.scripts.tenant_fleet_upgrade_head
 ```
 
 **Legacy:** Root `alembic.ini` / `alembic/versions/` is not the routine platform path. Use it only if a recovery document explicitly tells you to. Normal platform work: `alembic_platform.ini`.
+
+**Tenant Alembic (non-operator):** Do not use raw `alembic -c alembic_tenant.ini upgrade head` for routine upgrades—it bypasses preflight. Reserve direct tenant Alembic for local experiments or autogenerate/revision work unless a doc says otherwise.
 
 ## What Changed
 
@@ -101,7 +107,7 @@ From now on, **always** use `scripts/db_run.sh` for migrations:
 - [ ] API container restarts successfully (no FATAL errors)
 - [ ] `./scripts/db_run.sh 'PGPASSWORD="${POSTGRES_PASSWORD}" psql ...'` returns `?column? | 1`
 - [ ] Platform migrations work: `./scripts/db_run.sh 'alembic -c alembic_platform.ini upgrade head'`
-- [ ] Tenant migrations work: `./scripts/db_run.sh 'ALEMBIC_TENANT_DATABASE_URL="..." alembic -c alembic_tenant.ini upgrade head'`
+- [ ] Tenant migrations work: `./scripts/db_run.sh bash -c 'export ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/tenant_demo" && bash scripts/tenant_upgrade_head.sh'`
 
 ## The Rule (Remember Forever)
 

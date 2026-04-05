@@ -14,6 +14,9 @@ TMPDIR="$(mktemp -d)"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 SSM_PATH_PLATFORM="${SSM_PATH_PLATFORM:-/truckerp/prod/platform/}"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/docker-compose.yml}"
+# Canonical prod / public server: docker compose -f docker-compose.yml ONLY.
+# docker-compose.dev.yml exists for local machines only — never merge it on proof/audit for prod.
+COMPOSE_DEV_FILE="${COMPOSE_DEV_FILE:-$ROOT_DIR/docker-compose.dev.yml}"
 NETWORK="${NETWORK:-truckerp_net}"
 API_NAME="${API_NAME:-truckerp-api}"
 API_HOST="${API_HOST:-truckerp-api}"
@@ -21,11 +24,13 @@ API_PORT="${API_PORT:-8000}"
 NGINX_NAME="${NGINX_NAME:-truckerp-nginx}"
 POSTGRES_NAME="${POSTGRES_NAME:-truckerp-postgres}"
 PLATFORM_DB="${PLATFORM_DB:-trucking_erp}"
-TENANT_DB="${TENANT_DB:-truckerp}"
+# Per-team database (see docs/DATABASES_PLATFORM_AND_DEMO.md); not the platform control-plane DB name.
+TENANT_DB="${TENANT_DB:-tenant_demo}"
 ADMIN_DB="${ADMIN_DB:-postgres}"
 TENANT_SLUG="${TENANT_SLUG:-demo}"
 RENDERED_ENV="/run/secrets/truckerp.env"
-VAULT_AGENT_NAME="${VAULT_AGENT_NAME:-truckerp-vault-agent}"
+# Client image for on-the-fly psql probes (match truckerp-postgres major when possible).
+POSTGRES_CLIENT_IMAGE="${POSTGRES_CLIENT_IMAGE:-postgres:15-alpine}"
 
 PASS=0
 WARN=0
@@ -147,6 +152,28 @@ test_endpoint_post() {
     fi
 }
 
+# POST: pass if status is any of the space-separated acceptable codes (e.g. "400 422" for FastAPI validation).
+test_endpoint_post_any() {
+    local endpoint="$1"
+    local body="${2:-{}}"
+    local extra_headers="${3:-}"
+    local acceptable_codes="$4"
+    local timeout="${5:-10}"
+    local response_code
+    response_code=$(docker run --rm --network "$NETWORK" \
+        -e "CURL_BODY=$body" \
+        -e "CURL_EXTRA=$extra_headers" \
+        curlimages/curl:latest \
+        sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" $CURL_EXTRA -d "$CURL_BODY" "http://'"${API_HOST}"':'"${API_PORT}"''"${endpoint}"'" --max-time '"$timeout"' 2>/dev/null || echo "000"' | tail -n1)
+    for ok in $acceptable_codes; do
+        if [[ "$response_code" == "$ok" ]]; then
+            return 0
+        fi
+    done
+    log "  HTTP $response_code (expected one of: $acceptable_codes) for POST $endpoint"
+    return 1
+}
+
 # Start Audit
 hr
 log "TruckERP Omniscience Audit - COMPLETE"
@@ -248,6 +275,19 @@ if docker exec "$API_NAME" test -f "$RENDERED_ENV" 2>/dev/null; then
   else
     section_result FAIL "JWT_SECRET not loaded in container"
   fi
+
+  # Optional: Gmail automatic ingestion (Pub/Sub watch path)
+  GMAIL_TOPIC="$(read_env_key "GMAIL_PUBSUB_TOPIC_NAME")"
+  GMAIL_AUD="$(read_env_key "GMAIL_PUBSUB_PUSH_AUDIENCE")"
+  if [[ -n "$GMAIL_TOPIC" && -n "$GMAIL_AUD" ]]; then
+    section_result PASS "Gmail Pub/Sub env present (GMAIL_PUBSUB_TOPIC_NAME + GMAIL_PUBSUB_PUSH_AUDIENCE)"
+    log "GMAIL_PUBSUB_TOPIC_NAME: ${GMAIL_TOPIC}"
+    log "GMAIL_PUBSUB_PUSH_AUDIENCE: ${GMAIL_AUD}"
+  elif [[ -n "$GMAIL_TOPIC" || -n "$GMAIL_AUD" ]]; then
+    section_result WARN "Gmail Pub/Sub env incomplete (need both topic and push audience for OIDC webhook)"
+  else
+    log "Gmail Pub/Sub env not set (optional unless using Gmail watch)"
+  fi
 else
   section_result FAIL "Rendered env missing from container"
 fi
@@ -265,7 +305,7 @@ if [[ -n "${API_CID:-}" ]]; then
     log "Testing connection to $HOST/$PLATFORM_DB as $USER..."
     if docker run --rm --network "$NETWORK" \
         -e PGPASSWORD="$PW" \
-        postgres:16-alpine \
+        "$POSTGRES_CLIENT_IMAGE" \
         psql -h "$HOST" -U "$USER" -d "$PLATFORM_DB" -c "select 1;" >/dev/null 2>&1; then
       section_result PASS "Platform DB ($PLATFORM_DB) connectivity OK"
     else
@@ -276,7 +316,7 @@ if [[ -n "${API_CID:-}" ]]; then
     log "Testing connection to $HOST/$TENANT_DB as $USER..."
     if docker run --rm --network "$NETWORK" \
         -e PGPASSWORD="$PW" \
-        postgres:16-alpine \
+        "$POSTGRES_CLIENT_IMAGE" \
         psql -h "$HOST" -U "$USER" -d "$TENANT_DB" -c "select 1;" >/dev/null 2>&1; then
       section_result PASS "Tenant DB ($TENANT_DB) connectivity OK"
     else
@@ -287,7 +327,7 @@ if [[ -n "${API_CID:-}" ]]; then
     log "Testing connection to $HOST/$ADMIN_DB as $USER..."
     if docker run --rm --network "$NETWORK" \
         -e PGPASSWORD="$PW" \
-        postgres:16-alpine \
+        "$POSTGRES_CLIENT_IMAGE" \
         psql -h "$HOST" -U "$USER" -d "$ADMIN_DB" -c "select 1;" >/dev/null 2>&1; then
       section_result PASS "Admin DB ($ADMIN_DB) connectivity OK"
     else
@@ -323,7 +363,8 @@ h2 "6) API Health Check"
 if [[ -n "${API_CID:-}" ]]; then
   log "Testing API connectivity..."
   
-  ENDPOINTS=("/health" "/api/health" "/status" "/api/v1/health" "/healthz")
+  # Canonical app health first (matches API healthcheck); fallbacks only if needed.
+  ENDPOINTS=("/api/v1/health" "/healthz" "/health" "/api/health" "/status")
   HEALTH_OK=false
   HEALTH_ENDPOINT=""
   
@@ -446,16 +487,16 @@ if [[ -n "${API_CID:-}" ]]; then
     section_result FAIL "GET /api/v1/drivers with workspace Host, no auth (expected 401)"
   fi
   
-  # Test 6: Auth login – GET without tenant context → 400; POST JSON without Host → 400
+  # Test 6: Auth login – GET without tenant context → 400; malformed POST rejects before auth (400 or 422 per FastAPI validation)
   if test_endpoint "/api/v1/auth/login" "400" "5"; then
     section_result PASS "GET /api/v1/auth/login returns 400 (tenant required)"
   else
     section_result FAIL "GET /api/v1/auth/login (expected 400)"
   fi
-  if test_endpoint_post "/api/v1/auth/login" "{}" "" "400" "5"; then
-    section_result PASS "POST /api/v1/auth/login (no tenant Host) returns 400"
+  if test_endpoint_post_any "/api/v1/auth/login" "{}" "" "400 422" "5"; then
+    section_result PASS "Malformed POST /api/v1/auth/login rejected without tenant Host (400 or 422)"
   else
-    section_result FAIL "POST /api/v1/auth/login without tenant Host (expected 400)"
+    section_result FAIL "POST /api/v1/auth/login without tenant Host (expected rejection 400 or 422)"
   fi
 fi
 
@@ -480,14 +521,37 @@ fi
 h2 "13) Docker Compose Validation"
 if [[ -f "$COMPOSE_FILE" ]]; then
   section_result PASS "Docker compose file exists"
-  log "  Compose file: $COMPOSE_FILE"
-  
-  # Validate compose syntax
-  if command -v docker-compose >/dev/null 2>&1; then
-    if docker-compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
-      section_result PASS "Docker compose syntax valid"
+  log "  Compose file (prod canonical): $COMPOSE_FILE"
+  if [[ -f "$COMPOSE_DEV_FILE" ]]; then
+    log "  Note: $COMPOSE_DEV_FILE exists for LOCAL dev only — not merged for this check."
+  fi
+
+  # Prod-safe: validate base compose only (public server must not use dev overlay).
+  _compose_validate_ok=0
+  if docker compose version >/dev/null 2>&1; then
+    if docker compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+      section_result PASS "Docker compose syntax valid (docker-compose.yml only)"
+      _compose_validate_ok=1
     else
       section_result FAIL "Docker compose syntax invalid"
+    fi
+  elif command -v docker-compose >/dev/null 2>&1; then
+    if docker-compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+      section_result PASS "Docker compose syntax valid (docker-compose v1, base file only)"
+      _compose_validate_ok=1
+    else
+      section_result FAIL "Docker compose syntax invalid"
+    fi
+  else
+    section_result WARN "docker compose / docker-compose not available — skipped compose config check"
+  fi
+
+  # Optional: local engineers may validate dev merge manually; never required for prod proof.
+  if [[ "${OMNISCIENCE_VALIDATE_DEV_MERGE:-}" == "1" && -f "$COMPOSE_DEV_FILE" ]] && docker compose version >/dev/null 2>&1; then
+    if docker compose -f "$COMPOSE_FILE" -f "$COMPOSE_DEV_FILE" config >/dev/null 2>&1; then
+      section_result PASS "Optional: base+dev merge config valid (OMNISCIENCE_VALIDATE_DEV_MERGE=1)"
+    else
+      section_result WARN "Optional: base+dev merge config invalid (local dev overlay)"
     fi
   fi
 else

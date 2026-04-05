@@ -111,6 +111,17 @@ export default function AdminEmailConfigPage() {
       );
       setSearchParams({}, { replace: true });
       refreshConfig();
+    } else if (gmail === "degraded") {
+      const watchFailed = searchParams.get("gmail_watch") === "failed";
+      let msg =
+        "Google sign-in saved credentials, but the mailbox is not fully linked (for example, Google did not return an email or the inbox address could not be resolved). Check Email settings or reconnect.";
+      if (watchFailed) {
+        msg +=
+          " Automatic new-mail alerts could not be activated — see “Automatic mail” below.";
+      }
+      setSuccess(msg);
+      setSearchParams({}, { replace: true });
+      refreshConfig();
     } else if (err) {
       const messages: Record<string, string> = {
         missing_params: "Connection failed: missing parameters.",

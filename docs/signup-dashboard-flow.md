@@ -62,7 +62,14 @@ Backend sets `access_token` and `refresh_token` cookies (httponly, domain for su
 When you change **frontend** files under `apps/web/`, you must run the Vite build **before** rebuilding containers, or the nginx container will serve old assets. Order:
 
 1. **Frontend build:** `cd apps/web && npm run build` (writes `apps/web/dist/`).
-2. **Container rebuild:** `docker compose up --build -d` (API image and nginx image copy the new `dist/`).
+2. **Container rebuild** (from repo root, prod compose file):
+
+   ```bash
+   cd /home/admin/trucking_erp
+   docker compose -f docker-compose.yml up --build -d
+   ```
+
+   (API and nginx images pick up `dist/` when built per your `Dockerfile`s; see `docs/FRONTEND_DEPLOY.md` if you only need nginx.)
 
 If you only change backend (Python) code, a container rebuild is enough; no Vite step needed.
 
@@ -73,8 +80,11 @@ If the dashboard shows zeros and API errors mention missing tables, the tenant D
 **Driver list empty but count &gt; 0 (new tenants):** Seed and default driver data must use validation-safe values (e.g. `@demo.test` for email, not `@demo.local`). See **docs/driver-list-root-cause-and-prevention.md** (§0 and §3) so new tenants never get "List could not be loaded" with a non-zero driver count.
 
 1. **Config (new tenants):** `app/core/config.py` sets `tenant_alembic_target_rev = "head"` so **new** signups always get the current tenant schema (loads, drivers, etc.) without hardcoding a revision.
-2. **Existing tenant:** Run tenant migrations for that workspace once (from project root, with platform DB URL set):
+2. **Existing tenant:** Run the **locked tenant upgrade** once for that workspace’s database (preflight + `alembic_tenant.ini` under the hood). Use the tenant’s **`platform_tenants.db_name`** (e.g. `tenant_acme`) in `ALEMBIC_TENANT_DATABASE_URL`—not the workspace slug if they differ.
+
    ```bash
-   PYTHONPATH=. python scripts/run_tenant_migrations.py <tenant_slug>
+   cd /home/admin/trucking_erp
+   ./scripts/db_run.sh bash -c 'export ALEMBIC_TENANT_DATABASE_URL="postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@truckerp-postgres:5432/<tenant_db_name>" && bash scripts/tenant_upgrade_head.sh'
    ```
-   Example: `PYTHONPATH=. python scripts/run_tenant_migrations.py acme`. Then reload the dashboard.
+
+   Replace `<tenant_db_name>` with the real DB name, then reload the dashboard. (Same pattern as `docs/secrets.md` / `docs/QUICK_START_SSM.md`. Do **not** use raw `alembic -c alembic_tenant.ini upgrade head` for routine operator upgrades—it skips preflight.)

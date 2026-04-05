@@ -1,5 +1,9 @@
 # ANCHOR POINT — Multi-role onboarding MVP foundation complete
 
+> **Document type:** Point-in-time milestone / historical snapshot — **not** the canonical production operator runbook.  
+> **Tenant migrations (operators):** use `scripts/tenant_upgrade_head.sh` with `ALEMBIC_TENANT_DATABASE_URL` (see `docs/secrets.md`).  
+> **Rollback** commands below use raw `alembic -c alembic_tenant.ini downgrade` for **emergency / dev replay of this anchor** — not routine prod operations.
+
 **Date:** 2026-03-03  
 **State:** Locked after verification
 
@@ -27,6 +31,8 @@
 ---
 
 ## Rollback (verified down_revisions)
+
+**Historical / dev rollback only** — bypasses `tenant_upgrade_head.sh` preflight; do not treat as standard operator upgrades.
 
 To remove `requested_role_code` only:
 

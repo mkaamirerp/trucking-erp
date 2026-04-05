@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +22,8 @@ from app.schemas.email_threads import (
 )
 from app.services import email_threads as email_threads_service
 from app.services.email_ingestion_gmail import sync_gmail_inbox_for_tenant
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/email-threads",
@@ -71,7 +75,13 @@ async def gmail_pull_delta_from_inbox(
                 acc.last_error = f"sync_failed: {(str(e) or 'unknown error')[:240]}"
                 await db.commit()
         except Exception:
-            pass
+            logger.warning(
+                "gmail_pull_delta: could not persist TenantEmailAccount.last_error after sync failure "
+                "(tenant_id=%s, sync_error=%r)",
+                tenant_id,
+                e,
+                exc_info=True,
+            )
         raise HTTPException(status_code=502, detail="Gmail sync failed") from e
 
 

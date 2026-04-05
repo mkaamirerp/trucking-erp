@@ -85,6 +85,18 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
+# Mailbox "test connection" responses and stored diagnostics: stable copy only; use logger.exception for detail.
+_MAILBOX_TEST_MSG_OAUTH = (
+    "Could not complete mailbox test. Reconnect the account or try again later."
+)
+_MAILBOX_TEST_MSG_MAIL_SERVER = (
+    "Could not connect to the mail server. Check host, port, network, and stored credentials."
+)
+
+# TenantEmailAccount.last_error for Gmail admin routes: stable tokens only (details in logs).
+_GMAIL_ACCOUNT_LAST_ERROR_WATCH_REJECTED = "gmail_watch_rejected"
+_GMAIL_ACCOUNT_LAST_ERROR_SYNC_FAILED = "gmail_sync_failed"
+
 _GMAIL_PROOF_STEPS = [
     "Platform: GMAIL_PUBSUB_TOPIC_NAME, push auth (OIDC or X-TruckERP-Gmail-Push-Token), and Gmail API/Pub/Sub are configured in Google Cloud.",
     "Tenant: Gmail is connected and “Automatic new-mail alerts” shows Active with a future expiry.",
@@ -502,6 +514,7 @@ async def gmail_callback(
 
     # Open tenant DB only after tenant_id is validated (no dependency-order side effects)
     push_mailbox: str | None = None
+    oauth_complete_for_ui = False
 
     async for tenant_db in open_tenant_session_by_id(int(tid)):
         # Reconnect: Google may not return refresh_token; keep existing if present
@@ -532,10 +545,15 @@ async def gmail_callback(
             raw_pid = (profile.get("id") or profile.get("sub") or "").strip()
             if raw_pid:
                 provider_account_id = raw_pid[:255]
-        except Exception as e:
-            # Keep OAuth connect successful, but store concise identity-fetch diagnostics.
-            detail = (str(e) or "Google userinfo request failed").strip()
-            identity_fetch_error = f"userinfo_fetch_failed: {detail[:180]}"
+        except Exception:
+            logger.exception(
+                "gmail_oauth_callback userinfo fetch failed tenant_id=%s",
+                tid,
+            )
+            identity_fetch_error = "userinfo_fetch_failed"
+
+        email_from_profile = bool(identity_email and str(identity_email).strip())
+        gmail_fully_identified = identity_fetch_succeeded and email_from_profile
 
         expires_in = tokens.get("expires_in")
         token_expiry_at = None
@@ -545,16 +563,28 @@ async def gmail_callback(
         access_enc = encrypt_secret(access_token)
         refresh_enc = encrypt_secret(refresh_token)
         user_id = str(current_user.user.id)
+        push_mailbox = identity_email or (existing.email_address if existing else None)
+        push_mailbox = (push_mailbox or "").strip() or None
+        oauth_complete_for_ui = bool(gmail_fully_identified and push_mailbox)
+        resolved_account_status = "CONNECTED" if oauth_complete_for_ui else "CONFIGURED"
+        if identity_fetch_succeeded and not email_from_profile and not identity_fetch_error:
+            identity_fetch_error = "gmail_identity_incomplete: no email in Google profile"
+
         if existing:
             existing.access_token_encrypted = access_enc
             existing.refresh_token_encrypted = refresh_enc
             existing.token_expiry_at = token_expiry_at
             existing.scope = scope_str
-            existing.status = "CONNECTED"
+            existing.status = resolved_account_status
             if identity_fetch_succeeded:
-                existing.email_address = identity_email
-                existing.provider_account_id = provider_account_id
-                existing.last_error = None
+                if identity_email:
+                    existing.email_address = identity_email
+                if provider_account_id:
+                    existing.provider_account_id = provider_account_id
+                if gmail_fully_identified:
+                    existing.last_error = None
+                elif identity_fetch_error:
+                    existing.last_error = identity_fetch_error
             elif identity_fetch_error:
                 existing.last_error = identity_fetch_error
             existing.connected_by_user_id = user_id
@@ -564,18 +594,19 @@ async def gmail_callback(
                 tenant_id=int(tid),
                 provider="gmail",
                 email_address=identity_email,
-                status="CONNECTED",
+                status=resolved_account_status,
                 access_token_encrypted=access_enc,
                 refresh_token_encrypted=refresh_enc,
                 token_expiry_at=token_expiry_at,
                 scope=scope_str,
                 is_primary=True,
-                last_error=identity_fetch_error,
+                last_error=identity_fetch_error
+                if (identity_fetch_error or not oauth_complete_for_ui)
+                else None,
                 connected_by_user_id=user_id,
                 provider_account_id=provider_account_id,
             )
             tenant_db.add(acc)
-        push_mailbox = identity_email or (existing.email_address if existing else None)
         await tenant_db.commit()
         break
 
@@ -625,7 +656,7 @@ async def gmail_callback(
                 logger.exception("gmail watch auto-register after OAuth failed tenant_id=%s", tid)
             break
 
-    q = "gmail=connected"
+    q = "gmail=connected" if oauth_complete_for_ui else "gmail=degraded"
     if (topic and str(topic).strip()) and not watch_auto_ok:
         q += "&gmail_watch=failed"
     return RedirectResponse(url=f"{return_url}?{q}", status_code=302)
@@ -798,7 +829,10 @@ async def microsoft_renew_subscription_route(
         )
         return {"ok": True, "renewed": ok}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e)[:240]) from e
+        logger.exception("microsoft_renew_subscription_failed tenant_id=%s", tenant_id)
+        raise HTTPException(
+            status_code=502, detail="Microsoft subscription renew failed"
+        ) from e
 
 
 @router.post("/email-config/microsoft/sync-now")
@@ -946,6 +980,9 @@ async def upsert_primary_email_config(
         .where(TenantEmailMailbox.tenant_id == tenant_id, TenantEmailMailbox.is_primary == True)
         .limit(1)
     )
+    # Snapshot for split-commit diagnostics (tenant row may be replaced below for first-time create).
+    prev_credential_ref: str | None = row.credential_ref if row else None
+    secret_platform_action: str = "none"
 
     mbox_type = (payload.mailbox_type or EMAIL_PROVIDER_OTHER).strip().lower()
     if mbox_type == "imap":
@@ -988,6 +1025,7 @@ async def upsert_primary_email_config(
                 secret_row.encrypted_payload = encrypted
                 secret_row.provider = secret_platform_value
                 secret_row.updated_at = datetime.now(timezone.utc)
+                secret_platform_action = "update_in_place"
             else:
                 cred_ref = generate_credential_ref()
                 secret_row = TenantIntegrationSecret(
@@ -1000,6 +1038,7 @@ async def upsert_primary_email_config(
                 platform_db.add(secret_row)
                 await platform_db.flush()
                 new_credential_ref = cred_ref
+                secret_platform_action = "insert_new"
         else:
             cred_ref = generate_credential_ref()
             secret_row = TenantIntegrationSecret(
@@ -1012,6 +1051,7 @@ async def upsert_primary_email_config(
             platform_db.add(secret_row)
             await platform_db.flush()
             new_credential_ref = cred_ref
+            secret_platform_action = "insert_new"
 
     user_id = str(current_user.user.id)
     now = datetime.now(timezone.utc)
@@ -1075,7 +1115,54 @@ async def upsert_primary_email_config(
         tenant_db.add(row)
 
     await platform_db.commit()
-    await tenant_db.commit()
+    try:
+        await tenant_db.commit()
+    except Exception:
+        logger.exception(
+            "upsert_primary_email_config split_commit_failure: platform DB committed but tenant "
+            "mailbox commit failed (possible cross-DB drift). tenant_id=%s "
+            "secret_platform_action=%s prev_credential_ref=%s new_credential_ref=%s "
+            "need_secret_write=%s",
+            tenant_id,
+            secret_platform_action,
+            prev_credential_ref,
+            new_credential_ref,
+            need_secret_write,
+        )
+        # Safe compensation: tenant never persisted a pointer to this ref; remove orphan secret only.
+        if new_credential_ref:
+            try:
+                orphan = await platform_db.scalar(
+                    select(TenantIntegrationSecret).where(
+                        TenantIntegrationSecret.tenant_id == tenant_id,
+                        TenantIntegrationSecret.credential_ref == new_credential_ref,
+                    ).limit(1)
+                )
+                if orphan:
+                    await platform_db.delete(orphan)
+                    await platform_db.commit()
+                    logger.warning(
+                        "upsert_primary_email_config: removed orphan TenantIntegrationSecret after "
+                        "tenant commit failure tenant_id=%s credential_ref=%s",
+                        tenant_id,
+                        new_credential_ref,
+                    )
+            except Exception:
+                logger.exception(
+                    "upsert_primary_email_config: orphan secret cleanup failed tenant_id=%s "
+                    "credential_ref=%s",
+                    tenant_id,
+                    new_credential_ref,
+                )
+        try:
+            await tenant_db.rollback()
+        except Exception:
+            logger.exception(
+                "upsert_primary_email_config: tenant rollback failed tenant_id=%s",
+                tenant_id,
+            )
+        raise
+
     await tenant_db.refresh(row)
     return _mailbox_to_out(row)
 
@@ -1116,9 +1203,14 @@ async def test_primary_email_config(
                 else:
                     gmail_acc.status = "ERROR"
                     gmail_acc.last_error = "No OAuth tokens stored"
-            except Exception as e:
+            except Exception:
+                logger.exception(
+                    "email_mailbox_test_failed route=test_primary_email_config branch=gmail_oauth "
+                    "tenant_id=%s",
+                    tenant_id,
+                )
                 gmail_acc.status = "ERROR"
-                gmail_acc.last_error = str(e)[:500]
+                gmail_acc.last_error = _MAILBOX_TEST_MSG_OAUTH
             await tenant_db.commit()
             return EmailConfigTestOut(
                 ok=gmail_acc.status == "CONNECTED",
@@ -1169,9 +1261,14 @@ async def test_primary_email_config(
                 row.status = "CONNECTED"
                 row.last_inbound_test_at = now
                 row.connection_status = "CONNECTED"
-            except Exception as e:
+            except Exception:
+                logger.exception(
+                    "email_mailbox_test_failed route=test_primary_email_config branch=manual_imap "
+                    "tenant_id=%s",
+                    tenant_id,
+                )
                 row.last_test_status = "ERROR"
-                row.last_error_message = str(e)[:500]
+                row.last_error_message = _MAILBOX_TEST_MSG_MAIL_SERVER
                 row.status = "ERROR"
                 row.connection_status = "ERROR"
     elif row.connection_mode == "oauth" and row.credential_ref:
@@ -1194,6 +1291,11 @@ async def test_primary_email_config(
                 row.last_error_message = "No OAuth tokens stored"
                 row.status = "ERROR"
         except Exception:
+            logger.exception(
+                "email_mailbox_test_failed route=test_primary_email_config branch=mailbox_oauth_secret "
+                "tenant_id=%s",
+                tenant_id,
+            )
             row.last_test_status = "ERROR"
             row.last_error_message = "OAuth token refresh or validation failed"
             row.status = "ERROR"
@@ -1281,10 +1383,14 @@ async def test_primary_inbound_only(
         row.last_error_message = None
         row.connection_status = "CONNECTED"
         row.status = "CONNECTED"
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "email_mailbox_test_failed route=test_primary_inbound_only branch=imap tenant_id=%s",
+            tenant_id,
+        )
         row.last_inbound_test_at = now
         row.last_test_status = "ERROR"
-        row.last_error_message = str(e)[:500]
+        row.last_error_message = _MAILBOX_TEST_MSG_MAIL_SERVER
         row.connection_status = "ERROR"
         row.status = "ERROR"
 
@@ -1359,9 +1465,13 @@ async def test_primary_outbound_only(
         row.last_outbound_test_at = now
         row.last_error_message = None
         row.connection_status = row.connection_status or "CONNECTED"
-    except Exception as e:
+    except Exception:
+        logger.exception(
+            "email_mailbox_test_failed route=test_primary_outbound_only branch=smtp tenant_id=%s",
+            tenant_id,
+        )
         row.last_outbound_test_at = now
-        row.last_error_message = str(e)[:500]
+        row.last_error_message = _MAILBOX_TEST_MSG_MAIL_SERVER
         row.connection_status = "ERROR"
 
     await tenant_db.commit()
@@ -1434,7 +1544,14 @@ async def gmail_register_watch(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except httpx.HTTPStatusError as e:
-        detail_txt = (e.response.text or "")[:240]
+        body_preview = (e.response.text or "")[:500]
+        logger.warning(
+            "gmail_register_watch users.watch HTTP error tenant_id=%s status=%s body_preview=%r",
+            tenant_id,
+            e.response.status_code,
+            body_preview,
+            exc_info=True,
+        )
         try:
             acc = await tenant_db.scalar(
                 select(TenantEmailAccount)
@@ -1442,10 +1559,13 @@ async def gmail_register_watch(
                 .limit(1)
             )
             if acc:
-                acc.last_error = f"watch_failed: {e.response.status_code} {detail_txt}"
+                acc.last_error = _GMAIL_ACCOUNT_LAST_ERROR_WATCH_REJECTED
                 await tenant_db.commit()
         except Exception:
-            pass
+            logger.exception(
+                "gmail_register_watch: persist last_error failed tenant_id=%s",
+                tenant_id,
+            )
         raise HTTPException(status_code=502, detail="Gmail users.watch rejected") from e
 
 
@@ -1485,7 +1605,14 @@ async def gmail_renew_watch(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except httpx.HTTPStatusError as e:
-        detail_txt = (e.response.text or "")[:240]
+        body_preview = (e.response.text or "")[:500]
+        logger.warning(
+            "gmail_renew_watch users.watch HTTP error tenant_id=%s status=%s body_preview=%r",
+            tenant_id,
+            e.response.status_code,
+            body_preview,
+            exc_info=True,
+        )
         try:
             acc2 = await tenant_db.scalar(
                 select(TenantEmailAccount)
@@ -1493,10 +1620,13 @@ async def gmail_renew_watch(
                 .limit(1)
             )
             if acc2:
-                acc2.last_error = f"watch_failed: {e.response.status_code} {detail_txt}"
+                acc2.last_error = _GMAIL_ACCOUNT_LAST_ERROR_WATCH_REJECTED
                 await tenant_db.commit()
         except Exception:
-            pass
+            logger.exception(
+                "gmail_renew_watch: persist last_error failed tenant_id=%s",
+                tenant_id,
+            )
         raise HTTPException(status_code=502, detail="Gmail users.watch rejected") from e
 
 
@@ -1535,7 +1665,7 @@ async def gmail_sync_now(
             "last_sync_at": last_sync,
         }
     except Exception as e:
-        # Keep error concise and tenant-scoped diagnostics on account row where possible.
+        logger.exception("gmail_sync_now failed tenant_id=%s", tenant_id)
         try:
             acc = await tenant_db.scalar(
                 select(TenantEmailAccount)
@@ -1543,8 +1673,11 @@ async def gmail_sync_now(
                 .limit(1)
             )
             if acc:
-                acc.last_error = f"sync_failed: {(str(e) or 'unknown error')[:240]}"
+                acc.last_error = _GMAIL_ACCOUNT_LAST_ERROR_SYNC_FAILED
                 await tenant_db.commit()
         except Exception:
-            pass
+            logger.exception(
+                "gmail_sync_now: persist last_error failed tenant_id=%s",
+                tenant_id,
+            )
         raise HTTPException(status_code=502, detail="Gmail sync failed") from e

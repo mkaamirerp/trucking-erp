@@ -4,7 +4,7 @@
 
 So that **code changes reflect immediately** without running `npm run build`:
 
-1. Start the API on port **8000** (your normal stack). For **optional local** iteration with bind mounts / `.env`, some engineers use the dev overlay — see repo root `docker-compose.dev.yml` and `./scripts/dev-up.sh`.  
+1. **Production-shaped API:** `./scripts/dev-up.sh` (`docker compose -f docker-compose.yml` only). **Local-only** bind mount / API on host **8000:** see repo root `docker-compose.dev.yml` (warning: not for public servers).  
    **Standard deployment / production-like:**  
    ```bash
    docker compose -f docker-compose.yml up -d

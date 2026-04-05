@@ -27,7 +27,7 @@ ENTITLEMENTS (subscription gate)
 
 PRODUCTION / STAGING SAFETY
 ---------------------------
-[ ] ENVIRONMENT is production|staging → TEST_BYPASS_AUTH has no effect; TOOLS_DEFAULT_* / JWT-without-host shortcuts off (allows_dev_tenant_resolution_shortcuts false)
+[ ] Production/public: TEST_BYPASS_AUTH unset; ALLOW_TENANT_RESOLUTION_SHORTCUTS false/unset; shortcuts require explicit allow + ENVIRONMENT in {dev,development,test,testing,ci,local}
 [ ] GET /api/v1/platform/tenants without X-Platform-Admin-Key → 401 or 503 (key configured); with correct key → 200
 [ ] PLATFORM_ADMIN_API_KEY present in SSM/secrets for staging/prod (503 if missing on strict envs)
 [ ] Dev tools routes absent: GET /api/v1/tools/ping → 404 (routers not mounted; nginx still proxies /api/ to API)

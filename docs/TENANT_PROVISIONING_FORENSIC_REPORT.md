@@ -1,5 +1,9 @@
 # Tenant provisioning failure — forensic report
 
+> **Document type:** Forensic / historical analysis — **not** the canonical production operator runbook.  
+> **Tenant migrations (operators):** use `scripts/tenant_upgrade_head.sh` in `truckerp-api` with `ALEMBIC_TENANT_DATABASE_URL` set (see `docs/secrets.md`, `.cursor/rules/tenant-migrations.mdc`).  
+> Any raw `alembic -c alembic_tenant.ini …` snippets below are **legacy context, one-off repair discussion, or non-operator** — not the default prod upgrade path.
+
 **Error:** `UndefinedColumnError: column "is_primary" of relation "person_roles" does not exist`
 
 **Observed state:** Tenant `attia` — `status=PENDING_SETUP`, `db_status=ERROR`, `db_name=tenant_attia`. Tenant DB `tenant_erp`: no `person*` tables.
@@ -113,7 +117,7 @@
 
 Run against **each** affected tenant DB (e.g. `tenant_erp`, `tenant_attia`, and any other tenant that has or will have `person_roles`):
 
-1. **Ensure migrations are at head** (so `person_roles` exists; for DBs like `tenant_erp` with no `person_*` tables, this creates them via 74ff, then the new migration will add columns):
+1. **Ensure migrations are at head** (so `person_roles` exists; for DBs like `tenant_erp` with no `person_*` tables, this creates them via 74ff, then the new migration will add columns). **Non-operator / historical repair snippet** (today use `bash scripts/tenant_upgrade_head.sh` with env set instead):
 
    ```bash
    # Set ALEMBIC_TENANT_DATABASE_URL to point at the tenant DB, then:
@@ -146,7 +150,7 @@ Run against **each** affected tenant DB (e.g. `tenant_erp`, `tenant_attia`, and 
 \""
 ```
 
-Repeat for `tenant_erp` and any other tenant DBs. For `tenant_erp` (no `person_*` tables yet), run **alembic upgrade head** first so 74ff creates the tables, then run the new migration (or the same ALTERs) so `person_roles` gets `is_primary` and `updated_at`.
+Repeat for `tenant_erp` and any other tenant DBs. For `tenant_erp` (no `person_*` tables yet), run a **full tenant upgrade to head** (operator: `tenant_upgrade_head.sh`) first so 74ff creates the tables, then run the new migration (or the same ALTERs) so `person_roles` gets `is_primary` and `updated_at`.
 
 **Existing script:** `scripts/fix_tenant_schema.sh` already adds `is_primary` for a given tenant DB; extend it to also add `updated_at` to `person_roles` when missing, so one script fixes both columns.
 
@@ -207,7 +211,7 @@ Repeat for `tenant_erp` and any other tenant DBs. For `tenant_erp` (no `person_*
 2. No application code change.
 
 **DB REPAIR COMMANDS**  
-- Run `alembic -c alembic_tenant.ini upgrade head` for each affected tenant DB (so `person_roles` exists and new migration runs).  
+- **Lab / repair context (this report):** run `alembic -c alembic_tenant.ini upgrade head` for each affected tenant DB (so `person_roles` exists and new migration runs). **Operators:** prefer `bash scripts/tenant_upgrade_head.sh` with `ALEMBIC_TENANT_DATABASE_URL` per `docs/secrets.md`.  
 - Or run the ALTERs above (ADD COLUMN IF NOT EXISTS for `is_primary` and `updated_at`, then backfill and set NOT NULL/DEFAULT for `updated_at`) per tenant DB.  
 - Extend `scripts/fix_tenant_schema.sh` to add `updated_at` in addition to `is_primary`.
 

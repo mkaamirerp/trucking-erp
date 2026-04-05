@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.routers.fleet import router as fleet_router
 
-from app.core.config import settings
+from app.core.config import enforce_test_bypass_auth_policy, settings
 from app.routers.health import router as health_router
 from app.routers.drivers import router as drivers_router
 from app.routers.driver_phones import router as driver_phones_router
@@ -60,6 +60,7 @@ logger = logging.getLogger("trucking_erp")
 
 @app.on_event("startup")
 def _log_startup():
+    enforce_test_bypass_auth_policy()
     _startup_banner()
     _sec = (getattr(settings, "turnstile_secret_key", None) or "").strip()
     _site = (getattr(settings, "turnstile_site_key", None) or "").strip()
@@ -106,7 +107,7 @@ app.include_router(trucks_router, prefix="/api/v1")
 app.include_router(trailers_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 # Dev-only: password + cookie auth; no tenant RBAC. Omitted in production/staging (routes do not exist → 404).
-if settings.allows_dev_tenant_resolution_shortcuts():
+if settings.allows_tenant_resolution_shortcuts():
     app.include_router(dev_tools_router)
     app.include_router(dev_tools_db_router)
 app.include_router(tenant_admin_router)
