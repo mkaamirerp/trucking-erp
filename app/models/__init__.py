@@ -29,7 +29,7 @@ from app.models.payee import (
     PayRunPayment,
     TenantBankConnector,
 )
-from app.models.broker import Broker, BrokerContact
+from app.models.broker import Broker, BrokerAlias, BrokerContact, BrokerDomain, BrokerKnownSender
 from app.models.customs_broker import CustomsBroker, CustomsBrokerContact, LoadCustomsSnapshot
 from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
 

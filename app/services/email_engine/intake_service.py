@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.broker import Broker
@@ -17,6 +17,10 @@ from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_ingestion import EmailMessage, EmailThread
 from app.models.load import Load
 from app.services.email_engine.attachment_extractor import download_gmail_attachment_bytes
+from app.services.broker_intake_resolve import (
+    fetch_latest_inbound_from_header,
+    resolve_broker_for_intake_from_header,
+)
 from app.services.email_engine.message_classifier import PostIngestIntakePath, thread_indicates_tql_affinity
 from app.services.email_intake_pdf import (
     extract_pdf_text_bytes,
@@ -29,14 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 async def resolve_tql_broker_for_intake(db: AsyncSession, tenant_id: int) -> tuple[int | None, str]:
+    label = func.coalesce(Broker.display_name, Broker.legal_name, Broker.name)
     b = await db.scalar(
         select(Broker)
         .where(Broker.tenant_id == tenant_id)
-        .where(Broker.name.ilike("%tql%"))
+        .where(Broker.is_active.is_(True))
+        .where(label.ilike("%tql%"))
         .limit(1)
     )
     if b:
-        return b.id, b.name
+        disp = (b.display_name or b.legal_name or b.name or "").strip()
+        return b.id, disp or b.name
     return None, "Total Quality Logistics"
 
 
@@ -115,7 +122,10 @@ async def apply_gmail_tql_intake_gate(
         return
 
     if tql_affinity and rows:
-        broker_id, broker_snapshot = await resolve_tql_broker_for_intake(db, tenant_id)
+        from_hdr = await fetch_latest_inbound_from_header(db, tenant_id, thread_id)
+        broker_id, broker_snapshot = await resolve_broker_for_intake_from_header(db, tenant_id, from_hdr)
+        if broker_id is None:
+            broker_id, broker_snapshot = await resolve_tql_broker_for_intake(db, tenant_id)
         high_ok = False
         gate_reason = "no_pdf_bytes"
         pdf_text = ""
