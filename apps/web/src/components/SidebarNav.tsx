@@ -58,6 +58,16 @@ function BoxIcon() {
   );
 }
 
+function BriefcaseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <path d="M3 12h18" />
+    </svg>
+  );
+}
+
 function CardIcon() {
   return (
     <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -114,6 +124,7 @@ const operationsLinks = [
   { to: OPS.DRIVER_ONBOARDING_REVIEW, label: "Onboarding Review", short: "Review", icon: ReviewIcon },
   { to: OPS.DRIVER_ONBOARDING_APPLICANT, label: "Driver Onboarding", short: "Drivers", icon: UserIcon },
   { to: OPS.FLEET, label: "Fleet", short: "Fleet", icon: TruckIcon },
+  { to: OPS.BROKERS, label: "Freight brokers", short: "Brokers", icon: BriefcaseIcon },
   { to: OPS.LOADS, label: "Loads", short: "Loads", icon: BoxIcon },
   { to: OPS.PAY_RUNS, label: "Pay Runs", short: "Payroll", icon: BoxIcon },
   { to: OPS.PAY_PERIODS, label: "Pay Periods", short: "Cards", icon: CardIcon },

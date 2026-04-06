@@ -14,6 +14,8 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import DashboardPage from "./pages/DashboardPage";
 import FleetPage from "./pages/FleetPage";
+import BrokersPage from "./pages/BrokersPage";
+import BrokerDetailPage from "./pages/BrokerDetailPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import DispatchPage from "./pages/DispatchPage";
 import LoadCreatePage from "./pages/LoadCreatePage";
@@ -63,6 +65,7 @@ function App() {
     /^\/intake/.test(location.pathname) ||
     /^\/inbox/.test(location.pathname) ||
     /^\/fleet/.test(location.pathname) ||
+    /^\/brokers/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
     /^\/operations/.test(location.pathname) ||
@@ -164,6 +167,22 @@ function App() {
         element={
           <Layout>
             <FleetPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/brokers"
+        element={
+          <Layout>
+            <BrokersPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/brokers/:id"
+        element={
+          <Layout>
+            <BrokerDetailPage />
           </Layout>
         }
       />

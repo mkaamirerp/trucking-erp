@@ -807,12 +807,215 @@ export async function addLoadNote(loadId: number, body: string) {
   return handle<LoadNote>(res);
 }
 
-export async function listBrokers(params: { page?: number; size?: number } = {}) {
+export async function listBrokers(
+  params: {
+    page?: number;
+    size?: number;
+    q?: string;
+    include_archived?: boolean;
+    sort?: "name_asc" | "name_desc" | "id_desc";
+  } = {}
+) {
   const url = new URL(`${API_BASE}/brokers`, window.location.origin);
   if (params.page) url.searchParams.set("page", String(params.page));
   if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.q?.trim()) url.searchParams.set("q", params.q.trim());
+  if (params.include_archived) url.searchParams.set("include_archived", "true");
+  if (params.sort) url.searchParams.set("sort", params.sort);
   const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
   return handle<PagedResponse<Broker>>(res);
+}
+
+export async function createBroker(payload: Partial<Broker> & { name?: string; display_name?: string; legal_name?: string }) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Broker>(res);
+}
+
+export async function getBroker(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${id}`);
+  return handle<Broker>(res);
+}
+
+export async function updateBroker(id: number, payload: Partial<Broker>) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<Broker>(res);
+}
+
+export type BrokerWorkspace = {
+  broker: Broker;
+  contacts: BrokerContact[];
+  domains: BrokerDomain[];
+  aliases: BrokerAlias[];
+  known_senders: BrokerKnownSender[];
+};
+
+export async function getBrokerWorkspace(brokerId: number, params: { include_archived?: boolean } = {}) {
+  const url = new URL(`${API_BASE}/brokers/${brokerId}/workspace`, window.location.origin);
+  if (params.include_archived === false) url.searchParams.set("include_archived", "false");
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<BrokerWorkspace>(res);
+}
+
+export async function archiveBroker(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${id}/archive`, { method: "POST" });
+  return handle<Broker>(res);
+}
+
+export async function unarchiveBroker(id: number) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${id}/unarchive`, { method: "POST" });
+  return handle<Broker>(res);
+}
+
+export type BrokerContact = {
+  id: number;
+  broker_id: number;
+  name: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  role?: string | null;
+  department?: string | null;
+  phone?: string | null;
+  extension?: string | null;
+  fax?: string | null;
+  email?: string | null;
+  is_primary: boolean;
+  notes?: string | null;
+  is_active: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BrokerDomain = {
+  id: number;
+  tenant_id: number;
+  broker_id: number;
+  domain: string;
+  is_primary: boolean;
+  notes?: string | null;
+  is_active: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BrokerAlias = {
+  id: number;
+  tenant_id: number;
+  broker_id: number;
+  alias: string;
+  alias_type: string;
+  is_active: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BrokerKnownSender = {
+  id: number;
+  tenant_id: number;
+  broker_id: number;
+  email_normalized: string;
+  notes?: string | null;
+  is_active: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listBrokerContacts(brokerId: number, params: { page?: number; size?: number; include_archived?: boolean } = {}) {
+  const url = new URL(`${API_BASE}/brokers/${brokerId}/contacts`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.include_archived) url.searchParams.set("include_archived", "true");
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<BrokerContact>>(res);
+}
+
+export async function createBrokerContact(
+  brokerId: number,
+  payload: {
+    name: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    role?: string | null;
+    department?: string | null;
+    phone?: string | null;
+    extension?: string | null;
+    fax?: string | null;
+    email?: string | null;
+    is_primary?: boolean;
+    notes?: string | null;
+  }
+) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${brokerId}/contacts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<BrokerContact>(res);
+}
+
+export async function listBrokerDomains(brokerId: number, params: { page?: number; size?: number; include_archived?: boolean } = {}) {
+  const url = new URL(`${API_BASE}/brokers/${brokerId}/domains`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.include_archived) url.searchParams.set("include_archived", "true");
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<BrokerDomain>>(res);
+}
+
+export async function createBrokerDomain(
+  brokerId: number,
+  payload: { domain: string; is_primary?: boolean; notes?: string | null }
+) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${brokerId}/domains`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<BrokerDomain>(res);
+}
+
+export async function listBrokerAliases(brokerId: number, params: { page?: number; size?: number; include_archived?: boolean } = {}) {
+  const url = new URL(`${API_BASE}/brokers/${brokerId}/aliases`, window.location.origin);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  if (params.include_archived) url.searchParams.set("include_archived", "true");
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<BrokerAlias>>(res);
+}
+
+export async function createBrokerAlias(
+  brokerId: number,
+  payload: { alias: string; alias_type?: string }
+) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${brokerId}/aliases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<BrokerAlias>(res);
+}
+
+export async function createBrokerKnownSender(
+  brokerId: number,
+  payload: { email: string; notes?: string | null }
+) {
+  const res = await fetchWithTenant(`${API_BASE}/brokers/${brokerId}/known-senders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<BrokerKnownSender>(res);
 }
 
 export type Truck = {
@@ -2089,10 +2292,29 @@ export type DashboardSummary = {
 export type Broker = {
   id: number;
   name: string;
+  legal_name?: string | null;
+  display_name?: string | null;
   mc_number?: string | null;
+  dot_number?: string | null;
+  scac?: string | null;
   phone?: string | null;
+  phone_secondary?: string | null;
   email?: string | null;
+  email_secondary?: string | null;
+  website?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  address_city?: string | null;
+  address_region?: string | null;
+  address_postal?: string | null;
+  address_country?: string | null;
+  classification_notes?: string | null;
+  internal_notes?: string | null;
   notes?: string | null;
+  is_active?: boolean;
+  archived_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type CustomsBrokerSummary = {

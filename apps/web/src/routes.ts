@@ -15,6 +15,9 @@ export const OPS = {
   DRIVER_ONBOARDING_REVIEW_DETAIL: (id: number | string) => `/operations/driver-onboarding-review/${id}`,
   DISPATCH: "/dispatch",
   FLEET: "/fleet",
+  /** Freight brokers (MC / intake identity), not customs brokers. */
+  BROKERS: "/brokers",
+  BROKER_DETAIL: (id: number | string) => `/brokers/${id}`,
   LOADS: "/loads",
   /** Create a new load draft and open its detail page (manual entry from intake, etc.). */
   LOAD_NEW: "/loads/new",
