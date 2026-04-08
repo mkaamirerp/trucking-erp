@@ -42,6 +42,14 @@ class Broker(Base):
     internal_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    #: When true, intake resolver excludes this broker (messages route to review if no other match).
+    intake_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: System-created broker stub metadata (global reference / auto-create phases).
+    auto_created: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    auto_create_origin: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    auto_create_needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: Logical link to platform.global_booking_brokers.id (no cross-DB FK).
+    platform_global_broker_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

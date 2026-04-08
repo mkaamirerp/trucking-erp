@@ -9,8 +9,16 @@ cd "$REPO_ROOT"
 
 COMPOSE="docker compose -f docker-compose.yml"
 
+# Bake git short SHA into the image for tenant preflight / upgrade logs (.dockerignore excludes .git).
+if [ -z "${TRUCKERP_APP_GIT_SHA:-}" ] && command -v git >/dev/null 2>&1 \
+   && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  export TRUCKERP_APP_GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+fi
+
 echo "==> Rebuilding and starting truckerp-api..."
 $COMPOSE build truckerp-api && $COMPOSE up -d truckerp-api
+
+bash "$REPO_ROOT/scripts/api_import_smoke.sh"
 
 echo ""
 echo "==> Container status"

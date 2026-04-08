@@ -13,8 +13,11 @@ echo "==> 1/3 Frontend: npm run build"
 (cd apps/web && npm run build)
 
 echo ""
-echo "==> 2/3 API + Nginx: rebuild images (nginx bakes dist) and recreate containers"
-$COMPOSE build truckerp-api truckerp-nginx && $COMPOSE up -d --force-recreate truckerp-api truckerp-nginx
+echo "==> 2/3 API + Nginx: rebuild images; start API; import smoke; then nginx"
+$COMPOSE build truckerp-api truckerp-nginx
+$COMPOSE up -d --force-recreate truckerp-api
+bash "$REPO_ROOT/scripts/api_import_smoke.sh"
+$COMPOSE up -d --force-recreate truckerp-nginx
 
 echo ""
 echo "==> 3/3 Container status"

@@ -32,6 +32,7 @@ from app.models.payee import (
 from app.models.broker import Broker, BrokerAlias, BrokerContact, BrokerDomain, BrokerKnownSender
 from app.models.customs_broker import CustomsBroker, CustomsBrokerContact, LoadCustomsSnapshot
 from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
+from app.models.dispatch_trip import TenantDispatchNumbering, DispatchTrip
 
 # Platform models (B3 onboarding)
 from app.models.platform import (
@@ -45,12 +46,23 @@ from app.models.platform import (
     PlatformOnboardingPayload,
     ReservedSlug,
 )
+from app.models.global_booking_broker import (
+    GlobalBookingBroker,
+    GlobalBookingBrokerAlias,
+    GlobalBookingBrokerAuditEvent,
+    GlobalBookingBrokerDomain,
+    GlobalBookingBrokerDuplicateCandidate,
+    GlobalBookingBrokerKnownSender,
+    GlobalBookingBrokerMergePreview,
+)
 from app.models.platform_admin import PlatformAdmin
 from app.models.platform_integration import TenantIntegrationSecret
 from app.models.email_mailbox import TenantEmailMailbox
 from app.models.tenant_email_account import TenantEmailAccount
 from app.models.email_ingestion import EmailThread, EmailMessage
+from app.models.email_intake_review import EmailIntakeReview, EmailIntakeReviewEvent
 from app.models.email_attachment import EmailMessageAttachment
+from app.models.email_intake_qr_extraction import EmailIntakeQrExtraction
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem

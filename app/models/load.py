@@ -36,6 +36,11 @@ class Load(Base):
     driver_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True, index=True)
     truck_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("trucks.id", ondelete="SET NULL"), nullable=True, index=True)
     trailer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("trailers.id", ondelete="SET NULL"), nullable=True, index=True)
+    #: Read-model only — canonical trip state lives on dispatch_trips.
+    #: DB-level FK exists (Alembic); omit ORM ForeignKey to avoid ambiguous Load↔DispatchTrip paths.
+    active_dispatch_trip_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    #: Denormalized from active dispatch_trips.trip_number for search/list convenience only.
+    trip_number: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     # Broker/contact snapshots (load-specific copies; edits don't change master)
     broker_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -44,6 +49,14 @@ class Load(Base):
     broker_contact_extension_snapshot: Mapped[str | None] = mapped_column(String(20), nullable=True)
     broker_contact_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     broker_load_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    #: Intake-only: how broker snapshot was chosen (exact_known_sender, domain, alias, fallback_tql, …).
+    broker_match_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    broker_match_confidence_tier: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    broker_match_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    is_duplicate_of_load_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("loads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     mode: Mapped[str | None] = mapped_column(String(50), nullable=True)
     equipment_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -89,6 +102,7 @@ class Load(Base):
     driver = relationship("Driver", back_populates="loads")
     truck = relationship("Truck", backref="loads")
     trailer = relationship("Trailer", backref="loads")
+    dispatch_trips = relationship("DispatchTrip", back_populates="load")
     stops = relationship("LoadStop", back_populates="load", order_by="LoadStop.sequence", cascade="all, delete-orphan")
     notes_rel = relationship("LoadNote", back_populates="load", order_by="LoadNote.created_at", cascade="all, delete-orphan")
 

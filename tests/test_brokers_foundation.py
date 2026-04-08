@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.deps.tenant_db import open_tenant_session_by_id
 from app.main import app
-from app.services.broker_intake_resolve import resolve_broker_for_intake_from_header
+from app.services.broker_intake_resolve import _result_from_match_rows, resolve_broker_for_intake_from_header
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_mutable_tenant_current_user_and_tenant,
@@ -316,9 +316,9 @@ class TestBrokerResolver:
 
         hdr = f"Human <{sender_email}>"
         async for db in open_tenant_session_by_id(tid):
-            rid, rname = await resolve_broker_for_intake_from_header(db, tid, hdr)
-            assert rid == ksid
-            assert rname == f"KnownSenderWinner {suf}"
+            res = await resolve_broker_for_intake_from_header(db, tid, hdr)
+            assert res.broker_id == ksid
+            assert res.broker_label == f"KnownSenderWinner {suf}"
             break
 
     async def test_domain_precedence_over_alias(self, client, tenant_resolver, demo_tid) -> None:
@@ -354,7 +354,79 @@ class TestBrokerResolver:
 
         hdr = f"displaymatch{suf} <ops@{win_domain}>"
         async for db in open_tenant_session_by_id(tid):
-            rid, rname = await resolve_broker_for_intake_from_header(db, tid, hdr)
-            assert rid == wid
-            assert rname == f"DomainWinner {suf}"
+            res = await resolve_broker_for_intake_from_header(db, tid, hdr)
+            assert res.broker_id == wid
+            assert res.broker_label == f"DomainWinner {suf}"
             break
+
+    async def test_intake_blocked_excluded_from_resolution(self, client, tenant_resolver, demo_tid) -> None:
+        from sqlalchemy import select
+
+        from app.models.broker import Broker
+
+        tenant_resolver["tenant_id"] = demo_tid
+        tid = demo_tid
+        suf = uuid.uuid4().hex[:8]
+        dom = f"blk-{suf}.example.com"
+
+        br = await client.post(
+            "/api/v1/brokers",
+            json={"name": f"Blocked Firm {suf}", "mc_number": None},
+            headers=AUTH_HEADERS,
+        )
+        assert br.status_code == 201
+        bid = br.json()["id"]
+        await client.post(f"/api/v1/brokers/{bid}/domains", json={"domain": dom}, headers=AUTH_HEADERS)
+
+        async for db in open_tenant_session_by_id(tid):
+            row = await db.scalar(select(Broker).where(Broker.id == bid, Broker.tenant_id == tid))
+            assert row is not None
+            row.intake_blocked = True
+            await db.commit()
+            break
+
+        hdr = f"X <u@{dom}>"
+        async for db in open_tenant_session_by_id(tid):
+            res = await resolve_broker_for_intake_from_header(db, tid, hdr)
+            assert res.broker_id is None
+            assert res.ambiguous is False
+            assert res.blocked_match is True
+            break
+
+
+def test_broker_intake_resolve_rows_ambiguous_two_brokers() -> None:
+    r = _result_from_match_rows([(101, "A", False), (102, "B", False)], "domain")
+    assert r.broker_id is None
+    assert r.ambiguous is True
+
+
+def test_broker_intake_resolve_rows_single_match() -> None:
+    r = _result_from_match_rows([(7, "Acme", False)], "alias")
+    assert r.broker_id == 7
+    assert r.broker_label == "Acme"
+    assert r.match_method == "alias"
+    assert r.ambiguous is False
+
+
+def test_broker_intake_resolve_rows_same_id_duplicates_collapsed() -> None:
+    r = _result_from_match_rows([(3, "X", False), (3, "X", False)], "exact_known_sender")
+    assert r.broker_id == 3
+    assert not r.ambiguous
+
+
+def test_broker_intake_resolve_rows_empty() -> None:
+    r = _result_from_match_rows([], "domain")
+    assert r.broker_id is None
+    assert not r.ambiguous
+
+
+def test_broker_intake_resolve_rows_blocked_only() -> None:
+    r = _result_from_match_rows([(9, "Blocked Co", True)], "domain")
+    assert r.broker_id is None
+    assert r.blocked_match is True
+
+
+def test_broker_intake_resolve_rows_non_blocked_wins_over_blocked() -> None:
+    r = _result_from_match_rows([(1, "Good", False), (2, "Bad", True)], "domain")
+    assert r.broker_id == 1
+    assert not r.blocked_match

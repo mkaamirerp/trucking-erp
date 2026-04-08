@@ -87,6 +87,8 @@ class PlatformTenant(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     # tenant: JWT sub = tenant_users.id; platform: legacy platform_users.id (UUID). Per-tenant cutover only.
     tenant_auth_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="platform", server_default="platform")
+    #: When true (default), a global booking-broker match may auto-create a tenant `brokers` row. Opt out for suggest-only.
+    broker_auto_create_from_global: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
     members = relationship("PlatformTenantMember", back_populates="tenant", cascade="all, delete-orphan")
     subscriptions = relationship("PlatformSubscription", back_populates="tenant", cascade="all, delete-orphan")

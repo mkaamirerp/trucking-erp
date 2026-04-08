@@ -6,6 +6,9 @@
 # (plain postgresql:// for psql). If only ALEMBIC_* is set, we derive
 # TENANT_DATABASE_URL by stripping +asyncpg.
 # Exit non-zero and print STOP banner if any check fails.
+#
+# Commit line: uses TRUCKERP_APP_GIT_SHA, SOURCE_COMMIT, or GIT_COMMIT when /app
+# has no .git (baked images). Set one at build/runtime for audit logs; else "unknown".
 # =============================================================================
 set -euo pipefail
 
@@ -32,13 +35,14 @@ if ! [ -f /app/alembic_tenant.ini ]; then
   exit 1
 fi
 
-# 2) Repo alignment (commit hash)
+# 2) Repo alignment (commit hash) — baked images often have no .git; do not hard-fail.
 echo "Preflight: repo at /app"
-COMMIT_APP=$(git_safe_app rev-parse --short HEAD 2>/dev/null || true)
+COMMIT_APP="${TRUCKERP_APP_GIT_SHA:-${SOURCE_COMMIT:-${GIT_COMMIT:-}}}"
+COMMIT_APP="${COMMIT_APP:-$(git_safe_app rev-parse --short HEAD 2>/dev/null || true)}"
 if [ -z "$COMMIT_APP" ]; then
-  echo "Preflight failed: could not get commit hash for /app."
-  echo "$STOP_BANNER"
-  exit 1
+  echo "Preflight warning: no git commit for /app (missing .git and TRUCKERP_APP_GIT_SHA / SOURCE_COMMIT / GIT_COMMIT)."
+  echo "  Set TRUCKERP_APP_GIT_SHA at image build or runtime for traceability. Continuing with commit=unknown."
+  COMMIT_APP="unknown"
 fi
 echo "  commit (container /app): $COMMIT_APP"
 

@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.load import Load
+from app.schemas.email_intake_review import EmailIntakeReviewCardOut
 
 
 def pickup_delivery_summary_from_load(load: Load | None) -> str | None:
@@ -44,12 +45,21 @@ class EmailThreadOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     linked_load_number: str | None = None
+    #: Denormalized trip_number from linked load when thread is linked (read-only).
+    linked_trip_number: str | None = None
     linked_broker_name: str | None = None
     pickup_delivery_summary: str | None = None
+    #: Structured intake review row when present (detail GET only in practice).
+    intake_review: EmailIntakeReviewCardOut | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
-def email_thread_to_out(thread: Any, *, linked_load: Load | None = None) -> EmailThreadOut:
+def email_thread_to_out(
+    thread: Any,
+    *,
+    linked_load: Load | None = None,
+    intake_review: EmailIntakeReviewCardOut | None = None,
+) -> EmailThreadOut:
     score = getattr(thread, "confidence_score", None)
     if isinstance(score, Decimal):
         score = float(score)
@@ -72,8 +82,12 @@ def email_thread_to_out(thread: Any, *, linked_load: Load | None = None) -> Emai
         created_at=thread.created_at,
         updated_at=thread.updated_at,
         linked_load_number=linked_load.load_number if linked_load else None,
+        linked_trip_number=(
+            (linked_load.trip_number or "").strip() or None if linked_load else None
+        ),
         linked_broker_name=linked_load.broker_name_snapshot if linked_load else None,
         pickup_delivery_summary=pickup_delivery_summary_from_load(linked_load),
+        intake_review=intake_review,
     )
 
 
@@ -84,6 +98,7 @@ class EmailAttachmentOut(BaseModel):
     size_bytes: int | None = None
     is_inline: bool = False
     download_status: str = "metadata_only"
+    content_sha256: str | None = Field(default=None, max_length=64)
     external_attachment_id: str
     model_config = ConfigDict(from_attributes=True)
 
@@ -110,6 +125,24 @@ class EmailMessageOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     attachments: list[EmailAttachmentOut] = []
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmailIntakeQrExtractionOut(BaseModel):
+    """Supplemental intake signal: persisted QR decode rows for a thread (read path)."""
+
+    id: int
+    thread_id: int
+    message_id: int
+    attachment_id: int | None = None
+    raw_value: str
+    normalized_value: str | None = None
+    extracted_from_source_type: str
+    page_number: int | None = None
+    format_hint: str | None = None
+    linked_load_id: int | None = None
+    linked_broker_id: int | None = None
+    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 

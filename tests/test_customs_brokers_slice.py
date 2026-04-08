@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import os
-import uuid
-from unittest.mock import MagicMock
 
+os.environ["ENVIRONMENT"] = "test"
+os.environ["ALLOW_TENANT_RESOLUTION_SHORTCUTS"] = "true"
+import uuid
 import pytest
-from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.deps.auth import get_current_user
-from app.deps.tenant import require_tenant
+from tests.support.integration_auth import (
+    clear_current_user_and_tenant_overrides,
+    install_mutable_tenant_current_user_and_tenant,
+)
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 AUTH_HEADERS = {"host": "demo.truckerp.me"}
@@ -36,20 +38,13 @@ async def client():
 
 @pytest.fixture
 def tenant_resolver():
-    """Mutable tenant id for dependency injection (default 1 = demo)."""
+    """Mutable tenant id for dependency injection (isolation tests use platform ids 1 vs 2)."""
     holder = {"tenant_id": 1}
-
-    fake_user = MagicMock()
-    fake_user.user_id = "test-user-customs"
-    fake_user.email = "test@example.com"
-    fake_user.tenant_id = 1
-    fake_user.role = "TENANT_ADMIN"
-
-    app.dependency_overrides[get_current_user] = lambda: fake_user
-    app.dependency_overrides[require_tenant] = lambda: int(holder["tenant_id"])
+    install_mutable_tenant_current_user_and_tenant(
+        app, holder, role="TENANT_ADMIN", user_id="test-user-customs", email="test@example.com"
+    )
     yield holder
-    app.dependency_overrides.pop(get_current_user, None)
-    app.dependency_overrides.pop(require_tenant, None)
+    clear_current_user_and_tenant_overrides(app)
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")

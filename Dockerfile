@@ -13,6 +13,10 @@ RUN python -m pip wheel --wheel-dir /wheels -r requirements.txt
 
 # ---------- Runtime (no compilers) ----------
 FROM python:3.13-slim-bookworm AS prod
+# Baked images omit .git (.dockerignore). Pass at build for tenant preflight / upgrade logs:
+#   docker build --build-arg TRUCKERP_APP_GIT_SHA=$(git rev-parse --short HEAD) ...
+ARG TRUCKERP_APP_GIT_SHA=
+ENV TRUCKERP_APP_GIT_SHA=${TRUCKERP_APP_GIT_SHA}
 WORKDIR /app
 
 # Runtime libs and migration wrapper tooling: libpq5, curl, jq, ca-certificates,

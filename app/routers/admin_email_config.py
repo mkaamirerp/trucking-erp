@@ -38,6 +38,7 @@ from app.schemas.email_config import (
     EmailConfigUpdate,
     EmailConfigTestOut,
     GmailIngestionHealthOut,
+    MicrosoftOAuthStatusOut,
 )
 from app.services.email_ingestion_imap import (
     EMAIL_PROVIDER_OTHER,
@@ -677,6 +678,18 @@ async def _microsoft_callback_ctx(
     request.state.tenant_id = tid
     request.state.tenant_slug = slug
     return {"tenant_id": tid, "tenant_slug": slug}
+
+
+@router.get("/email-config/microsoft/oauth-status", response_model=MicrosoftOAuthStatusOut)
+async def microsoft_oauth_status(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """True if MICROSOFT_CLIENT_ID is set on the API — use before starting browser OAuth."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    cid = (settings.microsoft_client_id or "").strip()
+    return MicrosoftOAuthStatusOut(oauth_configured=bool(cid))
 
 
 @router.get("/email-config/microsoft/authorize")

@@ -18,9 +18,8 @@ import BrokersPage from "./pages/BrokersPage";
 import BrokerDetailPage from "./pages/BrokerDetailPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import DispatchPage from "./pages/DispatchPage";
-import LoadCreatePage from "./pages/LoadCreatePage";
 import LoadInboxPage from "./pages/LoadInboxPage";
-import LoadDetailPage from "./pages/LoadDetailPage";
+import LoadWorkspacePage from "./pages/LoadWorkspacePage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
@@ -35,6 +34,8 @@ import AcceptInvitePage from "./pages/AcceptInvitePage";
 import AddWorkspacePage from "./pages/AddWorkspacePage";
 import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
+import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
+import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
 import AdminRouteGuard from "./components/AdminRouteGuard";
 import { useAuth } from "./contexts/AuthContext";
 import { useMe } from "./hooks/useMe";
@@ -47,6 +48,7 @@ import PlatformTenantsPage from "./pages/PlatformTenantsPage";
 import PlatformTenantDetailPage from "./pages/PlatformTenantDetailPage";
 import PlatformLoginFailuresPage from "./pages/PlatformLoginFailuresPage";
 import PlatformUnlockLoginPage from "./pages/PlatformUnlockLoginPage";
+import PlatformGlobalBookingBrokersPage from "./pages/PlatformGlobalBookingBrokersPage";
 
 function RedirectDriverOnboardingDetail() {
   const { id } = useParams<{ id: string }>();
@@ -144,7 +146,11 @@ function App() {
       />
       <Route
         path="/dispatch"
-        element={<DispatchPage />}
+        element={
+          <Layout>
+            <DispatchPage />
+          </Layout>
+        }
       />
       <Route
         path="/inbox"
@@ -198,7 +204,7 @@ function App() {
         path="/loads/new"
         element={
           <Layout>
-            <LoadCreatePage />
+            <LoadWorkspacePage />
           </Layout>
         }
       />
@@ -206,7 +212,7 @@ function App() {
         path="/loads/:id"
         element={
           <Layout>
-            <LoadDetailPage />
+            <LoadWorkspacePage />
           </Layout>
         }
       />
@@ -277,6 +283,8 @@ function App() {
         <Route path="users" element={<AdminUsersPage />} />
         <Route path="roles" element={<AdminRolesPage />} />
         <Route path="payroll" element={<AdminPlaceholderPage title="Payroll Settings" description="Payroll configuration and defaults." />} />
+        <Route path="dispatch-numbering" element={<AdminDispatchNumberingPage />} />
+        <Route path="broker-intake" element={<AdminBrokerIntakePage />} />
         <Route path="settings/email" element={<AdminEmailConfigPage />} />
         <Route path="integrations/smtp" element={<Navigate to="/admin/settings/email" replace />} />
         <Route path="integrations/eld" element={<AdminIntegrationsPage />} />
@@ -296,6 +304,7 @@ function App() {
         <Route index element={<PlatformHomePage />} />
         <Route path="tenants" element={<PlatformTenantsPage />} />
         <Route path="tenants/:id" element={<PlatformTenantDetailPage />} />
+        <Route path="global-booking-brokers" element={<PlatformGlobalBookingBrokersPage />} />
         <Route path="login-failures" element={<PlatformLoginFailuresPage />} />
         <Route path="testing/unlock-login" element={<PlatformUnlockLoginPage />} />
       </Route>

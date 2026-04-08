@@ -17,6 +17,7 @@ from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
+from app.models.load import Load
 from app.models.payee import (
     ChargeCategory,
     PayDocument,
@@ -45,6 +46,40 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
+
+# -----------------------------------------------------------------------------
+# Pay run line-item tracing (metadata_json)
+#
+# TRANSITIONAL RULE (first slice — not the final tracing model):
+# During generate_pay_run, trip_number / dispatch_trip_id enrichment is applied only
+# when PayEntry.reference_code is all digits and matches a Load.id for the tenant.
+# That convention is convenient for early wiring but must not be treated as the
+# long-term contract: reference_code is a free-form field and will often not be a
+# load id. Future work should resolve loads/trips by explicit linkage or by
+# trip_number / other stable keys where appropriate — see docs/PAYROLL_TRIP_TRACING.md.
+#
+# Unconditional behavior: reference_code (when non-empty) is always copied into
+# metadata_json for display and export; load/trip fields are best-effort add-ons.
+# -----------------------------------------------------------------------------
+
+
+def _pay_run_item_metadata(entry: PayEntry, load: Load | None) -> dict | None:
+    """Tracing-only payload for generated items: always reference_code; optional load/trip read-model.
+
+    Load/trip keys are only present when the caller resolved a Load for this entry
+    (see transitional numeric reference_code → load id rule in generate_pay_run).
+    """
+    ref = (entry.reference_code or "").strip()
+    meta: dict = {}
+    if ref:
+        meta["reference_code"] = ref
+    if load is not None:
+        meta["load_id"] = load.id
+        if load.trip_number:
+            meta["trip_number"] = load.trip_number
+        if load.active_dispatch_trip_id is not None:
+            meta["dispatch_trip_id"] = load.active_dispatch_trip_id
+    return meta or None
 
 
 def run_error(detail: str, code: str, status_code: int) -> HTTPException:
@@ -195,6 +230,17 @@ async def generate_pay_run(
         )
         entries_list = list(entries.scalars().all())
 
+        # Transitional: only treat all-digit reference_code as load id for batch fetch.
+        load_ids: set[int] = set()
+        for e in entries_list:
+            ref = (e.reference_code or "").strip()
+            if ref.isdigit():
+                load_ids.add(int(ref))
+        loads_by_id: dict[int, Load] = {}
+        if load_ids:
+            loads_res = await db.execute(select(Load).where(Load.tenant_id == tenant_id, Load.id.in_(load_ids)))
+            loads_by_id = {row.id: row for row in loads_res.scalars().all()}
+
         driver_ids = {e.driver_id for e in entries_list}
         driver_map = {}
         if driver_ids:
@@ -231,6 +277,9 @@ async def generate_pay_run(
             if amt is None:
                 amt = (e.quantity or Decimal("0")) * (e.rate_amount or Decimal("0"))
             amt = (amt or Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            ref_key = (e.reference_code or "").strip()
+            # Transitional: numeric ref_key interpreted as Load.id only — see module note above.
+            traced_load = loads_by_id.get(int(ref_key)) if ref_key.isdigit() else None
             item = PayRunItem(
                 tenant_id=tenant_id,
                 pay_run_id=run.id,
@@ -241,6 +290,7 @@ async def generate_pay_run(
                 unit_rate=e.rate_amount,
                 amount_signed=amt,
                 currency=run.base_currency_snapshot,
+                metadata_json=_pay_run_item_metadata(e, traced_load),
             )
             db.add(item)
             items.append(item)

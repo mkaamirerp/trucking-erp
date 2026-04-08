@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "approve": {
+    "write": [
+      "approve_verified_identity",
+      "approve_reviewed_accepted",
+      "approve_low_risk_signals",
+      "approve_other"
+    ]
+  },
+  "reject": {
+    "write": [
+      "reject_duplicate_global",
+      "reject_weak_identity",
+      "reject_not_booking_broker",
+      "reject_reviewed_declined",
+      "reject_other"
+    ]
+  },
+  "reopen": {
+    "write": [
+      "reopen_needs_recheck",
+      "reopen_new_evidence",
+      "reopen_operator",
+      "reopen_other"
+    ]
+  },
+  "operator_hint": {
+    "approve_verified_identity": "Identity verified",
+    "approve_reviewed_accepted": "Reviewed and accepted",
+    "approve_low_risk_signals": "Strong intake signals",
+    "approve_other": "Other approval",
+    "reject_duplicate_global": "Duplicate global record",
+    "reject_weak_identity": "Weak or conflicting identity",
+    "reject_not_booking_broker": "Not a booking broker",
+    "reject_reviewed_declined": "Reviewed and declined",
+    "reject_other": "Other rejection",
+    "reopen_needs_recheck": "Needs another review",
+    "reopen_new_evidence": "New evidence or correction",
+    "reopen_operator": "Reopened by operator",
+    "reopen_other": "Other reopen"
+  }
+}

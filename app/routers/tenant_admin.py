@@ -948,5 +948,47 @@ async def remove_user_from_workspace(
     return {"ok": True, "message": "User removed from this workspace"}
 
 
+class BrokerIntakeSettingsOut(BaseModel):
+    """Tenant policy: auto-create workspace brokers from approved global reference (header tiers A–C)."""
+
+    broker_auto_create_from_global: bool
+
+
+class BrokerIntakeSettingsPatchIn(BaseModel):
+    broker_auto_create_from_global: bool
+
+
+@router.get("/broker-intake-settings", response_model=BrokerIntakeSettingsOut)
+async def get_broker_intake_settings(
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return BrokerIntakeSettingsOut(broker_auto_create_from_global=bool(tenant.broker_auto_create_from_global))
+
+
+@router.patch("/broker-intake-settings", response_model=BrokerIntakeSettingsOut)
+async def patch_broker_intake_settings(
+    body: BrokerIntakeSettingsPatchIn,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    tenant = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    tenant.broker_auto_create_from_global = bool(body.broker_auto_create_from_global)
+    await db.commit()
+    await db.refresh(tenant)
+    return BrokerIntakeSettingsOut(broker_auto_create_from_global=bool(tenant.broker_auto_create_from_global))
+
+
 # Tenant-admin password reset removed: password management remains platform-side.
 # Use /api/v1/auth/forgot-password (user-initiated) for now.

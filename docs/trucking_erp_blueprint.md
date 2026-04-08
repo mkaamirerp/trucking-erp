@@ -6,7 +6,7 @@
 ## 1. Purpose
 Build an industry-grade Trucking ERP that supports:
 - Driver + employee management
-- Operations/dispatch + mileage capture
+- Operations/dispatch + mileage capture — **dispatch trip numbers** are a locked system rule (see [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md))
 - IFTA compliance automation
 - Payroll for company drivers and owner-operators (settlements)
 - Document management with storage abstraction and OCR

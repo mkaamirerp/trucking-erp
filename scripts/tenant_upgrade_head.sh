@@ -19,7 +19,11 @@ git_safe_app() {
 
 # Drift proof: print commit so we know exactly what code is running migrations
 echo "Tenant upgrade: repo at /app"
-git_safe_app rev-parse --short HEAD 2>/dev/null || true
+if COMMIT_ECHO="${TRUCKERP_APP_GIT_SHA:-${SOURCE_COMMIT:-${GIT_COMMIT:-}}}"; [ -n "$COMMIT_ECHO" ]; then
+  echo "$COMMIT_ECHO"
+else
+  git_safe_app rev-parse --short HEAD 2>/dev/null || echo "(no .git — set TRUCKERP_APP_GIT_SHA for traceability)"
+fi
 echo ""
 
 # Run preflight (read-only checks + 1 head + env gate)

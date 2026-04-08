@@ -22,6 +22,9 @@ services:
       context: .
       dockerfile: Dockerfile
       target: prod
+      args:
+        # Optional: export TRUCKERP_APP_GIT_SHA="$(git rev-parse --short HEAD)" before build — .git is not in the image context.
+        TRUCKERP_APP_GIT_SHA: ${TRUCKERP_APP_GIT_SHA:-}
     container_name: truckerp-api
     restart: unless-stopped
     mem_limit: 1536m

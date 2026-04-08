@@ -43,6 +43,8 @@ class EmailMessageAttachment(Base):
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_inline: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    #: Hex SHA-256 of attachment bytes when known (stored or downloaded).
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     download_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="metadata_only")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

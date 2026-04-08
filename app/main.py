@@ -17,6 +17,7 @@ from app.routers.admin_onboarding import router as admin_onboarding_router
 from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
 from app.routers.workspace_intake import router as workspace_intake_router
+from app.routers.platform_global_booking_brokers import router as platform_global_booking_brokers_router
 from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.platform_diagnostics import router as platform_diagnostics_router
 from app.routers.platform_testing import router as platform_testing_router
@@ -36,6 +37,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.dev_tools import router as dev_tools_router
 from app.routers.dev_tools_db import router as dev_tools_db_router
 from app.routers.tenant_admin import router as tenant_admin_router
+from app.routers.dispatch_numbering_admin import router as dispatch_numbering_admin_router
 from app.routers.admin_email_config import router as admin_email_config_router
 from app.routers.email_threads import router as email_threads_router
 from app.routers.gmail_pubsub import router as gmail_pubsub_router
@@ -104,6 +106,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(public_signup_router)
 app.include_router(workspace_intake_router, prefix="/api/v1/public")
 app.include_router(platform_tenants_router)
+app.include_router(platform_global_booking_brokers_router)
 app.include_router(platform_diagnostics_router)
 app.include_router(platform_testing_router)
 app.include_router(drivers_router, prefix="/api/v1")
@@ -130,6 +133,7 @@ if settings.allows_tenant_resolution_shortcuts():
     app.include_router(dev_tools_router)
     app.include_router(dev_tools_db_router)
 app.include_router(tenant_admin_router)
+app.include_router(dispatch_numbering_admin_router)
 app.include_router(admin_email_config_router)
 app.include_router(email_threads_router, prefix="/api/v1")
 app.include_router(gmail_pubsub_router, prefix="/api/v1")

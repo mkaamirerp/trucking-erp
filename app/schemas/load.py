@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.broker import BrokerContactOut
 from app.schemas.customs_broker import CustomsBrokerSummary, LoadCustomsSnapshotOut
@@ -109,6 +109,15 @@ class LoadBase(BaseModel):
 class LoadCreate(LoadBase):
     stops: Optional[Sequence[LoadStopCreate]] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_read_only_trip_fields(cls, data):
+        if isinstance(data, dict):
+            for k in ("trip_number", "active_dispatch_trip_id"):
+                if k in data:
+                    raise ValueError(f"{k} is read-only (set by dispatch trip allocation)")
+        return data
+
 
 class LoadUpdate(BaseModel):
     load_number: Optional[str] = Field(default=None, max_length=50)
@@ -139,6 +148,15 @@ class LoadUpdate(BaseModel):
     miles: Optional[int] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, max_length=32)
     stops: Optional[Sequence[LoadStopCreate]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_read_only_trip_fields(cls, data):
+        if isinstance(data, dict):
+            for k in ("trip_number", "active_dispatch_trip_id"):
+                if k in data:
+                    raise ValueError(f"{k} is read-only (set by dispatch trip allocation)")
+        return data
 
     @field_validator("status")
     @classmethod
@@ -193,6 +211,13 @@ class LoadNoteOut(BaseModel):
 
 class LoadResponse(LoadBase):
     id: int
+    trip_number: Optional[str] = None
+    active_dispatch_trip_id: Optional[int] = None
+    broker_match_method: Optional[str] = Field(default=None, max_length=32)
+    broker_match_confidence_tier: Optional[str] = Field(default=None, max_length=8)
+    broker_match_explanation: Optional[str] = None
+    review_required: bool = False
+    is_duplicate_of_load_id: Optional[int] = None
     driver: Optional[NestedDriver] = None
     broker: Optional[NestedBroker] = None
     broker_contact: Optional[BrokerContactOut] = None

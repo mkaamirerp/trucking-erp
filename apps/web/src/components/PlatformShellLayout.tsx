@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { PLATFORM } from "../routes";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../lib/platformAdminFetch";
 
 export default function PlatformShellLayout() {
+  const { pathname } = useLocation();
   const [apiKeyInput, setApiKeyInput] = useState(() => getPlatformAdminApiKey());
   const [authRequired, setAuthRequired] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -66,48 +67,12 @@ export default function PlatformShellLayout() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900/80">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-4 justify-between">
-          <div className="flex items-center gap-6">
-            <Link to={PLATFORM.HOME} className="text-white font-semibold tracking-tight hover:text-slate-200">
+        <div className="max-w-6xl mx-auto px-4 py-3">
+          <div className="flex flex-wrap items-center gap-4 justify-between">
+            <Link to={PLATFORM.HOME} className="text-white font-semibold tracking-tight hover:text-slate-200 shrink-0">
               Platform
             </Link>
-            <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-              <NavLink
-                to={PLATFORM.HOME}
-                end
-                className={({ isActive }) =>
-                  isActive ? "text-white" : "text-slate-400 hover:text-slate-200"
-                }
-              >
-                Home
-              </NavLink>
-              <NavLink
-                to={PLATFORM.TENANTS}
-                className={({ isActive }) =>
-                  isActive ? "text-white" : "text-slate-400 hover:text-slate-200"
-                }
-              >
-                Tenants
-              </NavLink>
-              <NavLink
-                to={PLATFORM.LOGIN_FAILURES}
-                className={({ isActive }) =>
-                  isActive ? "text-white" : "text-slate-400 hover:text-slate-200"
-                }
-              >
-                Login failures
-              </NavLink>
-              <NavLink
-                to={PLATFORM.TESTING_UNLOCK_LOGIN}
-                className={({ isActive }) =>
-                  isActive ? "text-white" : "text-slate-400 hover:text-slate-200"
-                }
-              >
-                Unlock login
-              </NavLink>
-            </nav>
-          </div>
-          <div className="flex flex-wrap items-end gap-2 text-xs max-w-xl">
+            <div className="flex flex-wrap items-end gap-2 text-xs max-w-xl flex-1 min-w-[12rem] justify-end">
             <label className="block text-slate-500 w-full">
               Platform admin key (same as PLATFORM_ADMIN_API_KEY; session only)
             </label>
@@ -134,7 +99,59 @@ export default function PlatformShellLayout() {
             >
               Clear
             </button>
+            </div>
           </div>
+
+          <nav
+            className="mt-3 flex flex-wrap gap-x-1 gap-y-1 border-t border-slate-800/80 pt-3 text-sm"
+            aria-label="Platform navigation"
+          >
+            <NavLink
+              to={PLATFORM.HOME}
+              end
+              className={({ isActive }) =>
+                `rounded px-2.5 py-1.5 ${isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"}`
+              }
+            >
+              Home
+            </NavLink>
+            <NavLink
+              to={PLATFORM.TENANTS}
+              className={() =>
+                `rounded px-2.5 py-1.5 ${
+                  pathname === PLATFORM.TENANTS || pathname.startsWith(`${PLATFORM.TENANTS}/`)
+                    ? "bg-slate-800 text-white"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                }`
+              }
+            >
+              Tenants
+            </NavLink>
+            <NavLink
+              to={PLATFORM.GLOBAL_BOOKING_BROKERS}
+              className={({ isActive }) =>
+                `rounded px-2.5 py-1.5 ${isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"}`
+              }
+            >
+              Global booking brokers
+            </NavLink>
+            <NavLink
+              to={PLATFORM.LOGIN_FAILURES}
+              className={({ isActive }) =>
+                `rounded px-2.5 py-1.5 ${isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"}`
+              }
+            >
+              Login failures
+            </NavLink>
+            <NavLink
+              to={PLATFORM.TESTING_UNLOCK_LOGIN}
+              className={({ isActive }) =>
+                `rounded px-2.5 py-1.5 ${isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"}`
+              }
+            >
+              Unlock login
+            </NavLink>
+          </nav>
         </div>
         {saveError ? (
           <div className="max-w-6xl mx-auto px-4 pb-2">

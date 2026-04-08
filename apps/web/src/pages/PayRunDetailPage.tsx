@@ -16,6 +16,18 @@ import {
 } from "@/api";
 import { hasRole, useMe } from "@/hooks/useMe";
 
+function payrollTraceLabels(metadata: Record<string, unknown> | null | undefined) {
+  const ref =
+    metadata && typeof metadata.reference_code === "string" && metadata.reference_code.trim()
+      ? metadata.reference_code.trim()
+      : "—";
+  const trip =
+    metadata && typeof metadata.trip_number === "string" && metadata.trip_number.trim()
+      ? metadata.trip_number.trim()
+      : "—";
+  return { ref, trip };
+}
+
 export default function PayRunDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -62,6 +74,56 @@ export default function PayRunDetailPage() {
     const found = payees.find((p) => p.payee_id === selectedPayeeId);
     return found?.net_amount ?? null;
   }, [payees, selectedPayeeId]);
+
+  const exportLineItemsCsv = () => {
+    if (selectedPayeeId === null || !id) return;
+    const headers = [
+      "payee_id",
+      "source_type",
+      "description",
+      "trip_number",
+      "reference_code",
+      "charge_category_code",
+      "quantity",
+      "unit_rate",
+      "amount_signed",
+      "currency",
+    ];
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const lines = [
+      headers.join(","),
+      ...items.map((item) => {
+        const meta = item.metadata_json;
+        const ref =
+          meta && typeof meta.reference_code === "string" && meta.reference_code.trim()
+            ? meta.reference_code.trim()
+            : "";
+        const trip =
+          meta && typeof meta.trip_number === "string" && meta.trip_number.trim()
+            ? meta.trip_number.trim()
+            : "";
+        return [
+          String(selectedPayeeId),
+          esc(item.source_type),
+          esc(item.description),
+          esc(trip),
+          esc(ref),
+          esc(item.charge_category_code?.trim() || ""),
+          item.quantity != null ? String(item.quantity) : "",
+          item.unit_rate != null ? String(item.unit_rate) : "",
+          String(item.amount_signed),
+          esc(item.currency),
+        ].join(",");
+      }),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pay-run-${id}-payee-${selectedPayeeId}-lines.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const onFinalize = async () => {
     if (!run || !isTenantAdmin) return;
@@ -140,28 +202,51 @@ export default function PayRunDetailPage() {
                 <Card
                   title={`Payee ${selectedPayeeId} Line Items`}
                   actions={
-                    selectedPayeeNet !== null ? (
-                      <div className="text-sm font-medium text-gray-900">
-                        Net: {Number(selectedPayeeNet).toFixed(2)} {run.base_currency_snapshot}
-                      </div>
-                    ) : undefined
+                    <div className="flex flex-wrap items-center gap-3">
+                      {selectedPayeeNet !== null ? (
+                        <div className="text-sm font-medium text-gray-900">
+                          Net: {Number(selectedPayeeNet).toFixed(2)} {run.base_currency_snapshot}
+                        </div>
+                      ) : null}
+                      {items.length > 0 ? (
+                        <Button type="button" variant="secondary" onClick={exportLineItemsCsv}>
+                          Export CSV
+                        </Button>
+                      ) : null}
+                    </div>
                   }
                 >
-                  <Table headers={["Source", "Description", "Qty", "Rate", "Amount", "Currency"]}>
-                    {items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-4 py-2 text-sm text-gray-700">{item.source_type}</td>
-                        <td className="px-4 py-2 text-sm text-gray-700">{item.description}</td>
-                        <td className="px-4 py-2 text-sm text-gray-700">
-                          {item.quantity ?? <span className="text-gray-400">—</span>}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-700">
-                          {item.unit_rate ?? <span className="text-gray-400">—</span>}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-900 font-medium">{item.amount_signed}</td>
-                        <td className="px-4 py-2 text-sm text-gray-700">{item.currency}</td>
-                      </tr>
-                    ))}
+                  <Table
+                    headers={[
+                      "Source",
+                      "Description",
+                      "Trip",
+                      "Reference",
+                      "Qty",
+                      "Rate",
+                      "Amount",
+                      "Currency",
+                    ]}
+                  >
+                    {items.map((item) => {
+                      const { ref, trip } = payrollTraceLabels(item.metadata_json);
+                      return (
+                        <tr key={item.id}>
+                          <td className="px-4 py-2 text-sm text-gray-700">{item.source_type}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{item.description}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700 font-mono text-xs">{trip}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700 font-mono text-xs">{ref}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">
+                            {item.quantity ?? <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-gray-700">
+                            {item.unit_rate ?? <span className="text-gray-400">—</span>}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-gray-900 font-medium">{item.amount_signed}</td>
+                          <td className="px-4 py-2 text-sm text-gray-700">{item.currency}</td>
+                        </tr>
+                      );
+                    })}
                   </Table>
                 </Card>
               ) : (

@@ -110,6 +110,7 @@ function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: num
       <td className="px-4 py-2 text-xs font-medium text-[#f5a623]">
         #{load.load_number}
       </td>
+      <td className="px-4 py-2 text-xs text-[#94a3b8]">{load.trip_number?.trim() || "—"}</td>
       <td className="px-4 py-2 text-xs text-[#94a3b8]">
         {formatRouteFromStops(load.stops)}
       </td>
@@ -232,6 +233,7 @@ function AssetRow({
                   <thead>
                     <tr className="border-b border-[#1e293b]">
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Load #</th>
+                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Trip #</th>
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Route (stops)</th>
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">1st pickup date</th>
                       <th className="px-4 py-2 text-left text-[#64748b] font-medium">Status</th>

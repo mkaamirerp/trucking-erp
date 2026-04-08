@@ -342,8 +342,39 @@ async def unarchive_broker(db: AsyncSession, tenant_id: int, broker_id: int) -> 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Broker not found")
     if broker.is_active and broker.archived_at is None:
         return broker
+    archived_at = broker.archived_at
     broker.is_active = True
     broker.archived_at = None
+    await db.execute(
+        update(BrokerDomain)
+        .where(
+            BrokerDomain.tenant_id == tenant_id,
+            BrokerDomain.broker_id == broker_id,
+            BrokerDomain.is_active.is_(False),
+            BrokerDomain.archived_at == archived_at,
+        )
+        .values(is_active=True, archived_at=None)
+    )
+    await db.execute(
+        update(BrokerAlias)
+        .where(
+            BrokerAlias.tenant_id == tenant_id,
+            BrokerAlias.broker_id == broker_id,
+            BrokerAlias.is_active.is_(False),
+            BrokerAlias.archived_at == archived_at,
+        )
+        .values(is_active=True, archived_at=None)
+    )
+    await db.execute(
+        update(BrokerKnownSender)
+        .where(
+            BrokerKnownSender.tenant_id == tenant_id,
+            BrokerKnownSender.broker_id == broker_id,
+            BrokerKnownSender.is_active.is_(False),
+            BrokerKnownSender.archived_at == archived_at,
+        )
+        .values(is_active=True, archived_at=None)
+    )
     await db.commit()
     await db.refresh(broker)
     return broker

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "dismiss": {
+    "write": [
+      "dup_dismiss_different_entities",
+      "dup_dismiss_record_keys_wrong",
+      "dup_dismiss_shared_vendor_ok",
+      "dup_dismiss_other"
+    ]
+  },
+  "acknowledge": {
+    "write": [
+      "dup_ack_same_broker_merge_manual",
+      "dup_ack_duplicate_rows_track_manual",
+      "dup_ack_other"
+    ]
+  },
+  "operator_hint": {
+    "dup_dismiss_different_entities": "Different brokers (same key coincidence)",
+    "dup_dismiss_record_keys_wrong": "Data entry / keying error",
+    "dup_dismiss_shared_vendor_ok": "Shared domain/email is expected",
+    "dup_dismiss_other": "Not duplicate — other",
+    "dup_ack_same_broker_merge_manual": "Same broker — merge manually later",
+    "dup_ack_duplicate_rows_track_manual": "Duplicate rows — track until merge",
+    "dup_ack_other": "Likely duplicate — other"
+  }
+}

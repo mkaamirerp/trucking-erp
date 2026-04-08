@@ -7,6 +7,12 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 
+class MicrosoftOAuthStatusOut(BaseModel):
+    """Whether Microsoft 365 OAuth is configured on the API (no secrets exposed)."""
+
+    oauth_configured: bool
+
+
 class GmailIngestionHealthOut(BaseModel):
     """Structured readiness for Gmail push → Pub/Sub → webhook → delta sync (tenant admin)."""
 

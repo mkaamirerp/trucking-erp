@@ -118,7 +118,7 @@ async def get_broker(
     return BrokerResponse.model_validate(broker)
 
 
-@router.put("/{broker_id}", response_model=BrokerResponse)
+@router.patch("/{broker_id}", response_model=BrokerResponse)
 async def update_broker(
     broker_id: int,
     payload: BrokerUpdate,

@@ -20,6 +20,7 @@ import {
 import { IntakeVerificationPanel, type IntakeKpis } from "../components/intake/IntakeVerificationPanel";
 import { OPS } from "../routes";
 import { useMe } from "../hooks/useMe";
+import { formatRoutingReason } from "../utils/emailIntakeRoutingReason";
 
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -68,11 +69,6 @@ function confidenceClass(level: string | null | undefined): string {
   if (l === "high") return "border-emerald-900/60 bg-emerald-900/20 text-emerald-300";
   if (l === "medium") return "border-amber-900/60 bg-amber-900/20 text-amber-300";
   return "border-slate-700 bg-slate-800/60 text-slate-300";
-}
-
-function formatRoutingReason(raw: string | null | undefined): string {
-  if (!raw) return "Not yet classified.";
-  return raw.replace(/^tql_pdf_not_high_confidence:/i, "TQL PDF did not meet auto rules: ").replace(/_/g, " ");
 }
 
 function ThreadMessageList({
@@ -220,7 +216,7 @@ export default function LoadInboxPage() {
           page: 1,
           size: 1,
         }),
-        listLoads({ page: 1, size: 500 }),
+        listLoads({ page: 1, size: 200 }),
       ]);
       const items = loadsPage.items ?? [];
       const startOfDay = new Date();
@@ -471,6 +467,9 @@ export default function LoadInboxPage() {
     try {
       const r = await createDraftLoadFromEmailThread(selectedThreadId);
       await applyThreadAndRefresh(r);
+      if (r.thread.linked_load_id && selectedThreadId) {
+        navigate(OPS.LOAD_WORKSPACE_INTAKE(r.thread.linked_load_id, selectedThreadId));
+      }
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : "Failed to create draft load");
     } finally {
@@ -507,6 +506,9 @@ export default function LoadInboxPage() {
       setLinkSearch("");
       setLinkResults([]);
       await applyThreadAndRefresh(r);
+      if (r.thread.linked_load_id && selectedThreadId) {
+        navigate(OPS.LOAD_WORKSPACE_INTAKE(r.thread.linked_load_id, selectedThreadId));
+      }
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : "Failed to link load");
     } finally {
@@ -554,7 +556,8 @@ export default function LoadInboxPage() {
 
   const renderThreadRow = (t: InboxThreadListItem, variant: "new_load" | "needs_review") => {
     const active = selectedThreadId === t.id;
-    const trip = t.linked_load_number || (t.linked_load_id ? `ID ${t.linked_load_id}` : "—");
+    const loadLabel = t.linked_load_number || (t.linked_load_id ? `ID ${t.linked_load_id}` : "—");
+    const tripLabel = t.linked_trip_number?.trim() || "—";
     const broker = t.linked_broker_name || participantPreview(t.participants_json);
     return (
       <button
@@ -568,7 +571,10 @@ export default function LoadInboxPage() {
         {variant === "new_load" ? (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-start justify-between gap-2">
-              <span className="text-sm font-semibold text-[#e8edf5]">Trip {trip}</span>
+              <div>
+                <span className="text-sm font-semibold text-[#e8edf5]">Load {loadLabel}</span>
+                <p className="mt-0.5 text-[11px] text-[#64748b]">Trip {tripLabel}</p>
+              </div>
               <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${confidenceClass(t.confidence_level)}`}>
                 {confidenceLabel(t.confidence_level)}
               </span>
@@ -589,12 +595,12 @@ export default function LoadInboxPage() {
                   className="cursor-pointer rounded border border-sky-900/50 bg-sky-950/30 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-sky-950/50"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate(OPS.LOAD_DETAIL(t.linked_load_id!));
+                    navigate(OPS.LOAD_WORKSPACE_INTAKE(t.linked_load_id!, t.id));
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.stopPropagation();
-                      navigate(OPS.LOAD_DETAIL(t.linked_load_id!));
+                      navigate(OPS.LOAD_WORKSPACE_INTAKE(t.linked_load_id!, t.id));
                     }
                   }}
                 >
@@ -612,7 +618,12 @@ export default function LoadInboxPage() {
               </span>
             </div>
             <p className="text-xs text-[#94a3b8]">{broker}</p>
-            <p className="line-clamp-2 text-[11px] text-[#64748b]">{formatRoutingReason(t.routing_reason)}</p>
+            <p
+              className="line-clamp-2 text-[11px] text-[#64748b]"
+              title={formatRoutingReason(t.routing_reason)}
+            >
+              {formatRoutingReason(t.routing_reason)}
+            </p>
             <div className="flex items-center justify-between gap-2 pt-1 text-[11px] text-[#64748b]">
               <span>{formatWhen(t.last_message_at || t.created_at)}</span>
               <button
@@ -789,6 +800,7 @@ export default function LoadInboxPage() {
                     <p className="mt-1 text-xs text-[#94a3b8]">
                       {t.linked_load_number ? `Load ${t.linked_load_number}` : `Load id ${t.linked_load_id ?? "—"}`}
                     </p>
+                    <p className="mt-0.5 text-[11px] text-[#64748b]">Trip {t.linked_trip_number?.trim() || "—"}</p>
                     <p className="mt-1 text-[11px] text-[#64748b]">{formatWhen(t.last_message_at || t.created_at)}</p>
                   </button>
                 );
@@ -849,8 +861,16 @@ export default function LoadInboxPage() {
                   {selectedThread.pickup_delivery_summary ? (
                     <p className="mt-0.5 truncate text-[11px] text-[#94a3b8]/90">{selectedThread.pickup_delivery_summary}</p>
                   ) : null}
+                  {selectedThread.linked_load_id ? (
+                    <p className="mt-0.5 truncate text-[11px] text-[#64748b]">
+                      Trip {selectedThread.linked_trip_number?.trim() || "—"}
+                    </p>
+                  ) : null}
                   {!selectedThread.linked_load_id && selectedThread.routing_reason ? (
-                    <p className="mt-0.5 truncate text-[11px] text-amber-200/75">
+                    <p
+                      className="mt-0.5 line-clamp-3 text-[11px] text-amber-200/75"
+                      title={formatRoutingReason(selectedThread.routing_reason)}
+                    >
                       {formatRoutingReason(selectedThread.routing_reason)}
                     </p>
                   ) : null}
@@ -865,10 +885,12 @@ export default function LoadInboxPage() {
                       Load Intake
                     </button>
                   ) : null}
-                  {selectedThread.linked_load_id ? (
+                  {selectedThread.linked_load_id && selectedThreadId ? (
                     <button
                       type="button"
-                      onClick={() => navigate(OPS.LOAD_DETAIL(selectedThread.linked_load_id!))}
+                      onClick={() =>
+                        navigate(OPS.LOAD_WORKSPACE_INTAKE(selectedThread.linked_load_id!, selectedThreadId))
+                      }
                       className="rounded border border-sky-900/50 bg-sky-950/30 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-950/50"
                     >
                       Open in Loads
@@ -961,8 +983,8 @@ export default function LoadInboxPage() {
                     <p className="mb-2 text-xs text-[#64748b]">Loading linked load for verification…</p>
                   ) : null}
                   <IntakeVerificationPanel
+                    emailThreadId={selectedThreadId}
                     threadSubject={selectedThread.subject}
-                    participantsJson={selectedThread.participants_json}
                     routingReason={formatRoutingReason(selectedThread.routing_reason)}
                     messages={messages}
                     linkedLoad={linkedLoadDetail}
@@ -982,6 +1004,16 @@ export default function LoadInboxPage() {
                     onUploadDocumentChange={handleUploadDocumentChange}
                     userEmail={me?.email ?? null}
                     onClose={() => navigate(OPS.DASHBOARD)}
+                    onIntakeActionsComplete={async () => {
+                      if (!selectedThreadId) return;
+                      const [detail, msgs] = await Promise.all([
+                        getEmailThread(selectedThreadId),
+                        getEmailThreadMessages(selectedThreadId),
+                      ]);
+                      setThreadDetail(detail);
+                      setMessages(msgs ?? []);
+                      await loadThreads({ retainSelectionId: selectedThreadId });
+                    }}
                   />
 
                   <details className="mt-6 rounded-xl border border-[#1e293b] bg-[#0d111a]">
@@ -1042,6 +1074,9 @@ export default function LoadInboxPage() {
                 >
                   <div>
                     <div className="font-medium text-[#e8edf5]">{ld.load_number}</div>
+                    <div className="text-[11px] text-[#64748b]">
+                      Trip {ld.trip_number?.trim() || "—"}
+                    </div>
                     <div className="text-[#94a3b8]">
                       {[ld.broker_load_reference, ld.broker_name_snapshot].filter(Boolean).join(" · ") || "—"}
                     </div>

@@ -61,3 +61,40 @@ def normalize_known_sender_email(raw: str) -> str:
     if not local or not domain:
         raise ValueError("invalid_known_sender_email")
     return s
+
+
+def normalize_mc_number_digits(raw: str | None) -> str | None:
+    """Digits-only MC for matching global/tenant reference (not a display formatter)."""
+    if not raw:
+        return None
+    d = "".join(c for c in str(raw).strip() if c.isdigit())
+    if len(d) < 4:
+        return None
+    return d
+
+
+def normalize_dot_number_digits(raw: str | None) -> str | None:
+    """Digits-only USDOT for matching global/tenant reference."""
+    if not raw:
+        return None
+    d = "".join(c for c in str(raw).strip() if c.isdigit())
+    if len(d) < 4:
+        return None
+    return d
+
+
+def normalize_cvor_number_digits(raw: str | None) -> str | None:
+    """9-digit CVOR (CA/ON) for global reference; ``None`` if empty.
+
+    Raises ``ValueError`` with message ``invalid_cvor_number`` if input is non-empty
+    but not exactly nine digits after digit extraction.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    d = "".join(c for c in s if c.isdigit())
+    if len(d) != 9:
+        raise ValueError("invalid_cvor_number")
+    return d

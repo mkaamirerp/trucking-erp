@@ -2,17 +2,31 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps.auth import get_current_user
+from app.deps.auth import CurrentUser, get_current_user
 from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
+from app.constants.email_intake_review_reason_codes import (
+    IntakeReviewDismissReasonWrite,
+    IntakeReviewDuplicateDismissBody,
+    IntakeReviewReopenReasonWrite,
+    IntakeReviewResolveReasonWrite,
+)
 from app.models.tenant_email_account import TenantEmailAccount
+from app.schemas.email_intake_review import (
+    DuplicateConfirmBody,
+    DuplicateLinkPriorBody,
+    EmailIntakeReviewBundleOut,
+    EmailIntakeReviewEventOut,
+    EmailIntakeReviewOut,
+)
 from app.schemas.email_threads import (
     EmailAttachmentOut,
+    EmailIntakeQrExtractionOut,
     EmailMessageOut,
     EmailThreadActionLoadOut,
     EmailThreadDraftOrLinkResponse,
@@ -20,10 +34,39 @@ from app.schemas.email_threads import (
     EmailThreadListResponse,
     EmailThreadOut,
 )
+from app.services.email_intake_qr_extractions import list_intake_qr_by_thread
 from app.services import email_threads as email_threads_service
+from app.services import email_intake_review_service as intake_review_svc
 from app.services.email_ingestion_gmail import sync_gmail_inbox_for_tenant
 
 logger = logging.getLogger(__name__)
+
+
+def _review_workflow_error(exc: ValueError) -> HTTPException:
+    code = str(exc)
+    if code == "no_review":
+        return HTTPException(status.HTTP_404_NOT_FOUND, detail="No intake review exists for this thread")
+    if code == "not_duplicate_review":
+        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=code)
+    if code in (
+        "already_resolved",
+        "already_dismissed",
+        "claimed_by_other",
+        "not_closed",
+        "resolved_use_reopen_first",
+        "invalid_state_for_dismiss",
+        "invalid_state_for_duplicate_action",
+        "thread_not_linked_to_load",
+        "linked_load_neq_suggested_prior",
+        "prior_load_id_mismatch",
+    ):
+        return HTTPException(status.HTTP_409_CONFLICT, detail=code)
+    if code == "prior_load_id_required":
+        return HTTPException(status.HTTP_400_BAD_REQUEST, detail=code)
+    if code == "no_thread":
+        return HTTPException(status.HTTP_404_NOT_FOUND, detail=code)
+    return HTTPException(status.HTTP_400_BAD_REQUEST, detail=code)
+
 
 router = APIRouter(
     prefix="/email-threads",
@@ -151,6 +194,19 @@ async def get_email_thread_detail(
     return await email_threads_service.get_email_thread_out(db, tenant_id=tenant_id, thread_id=thread_id)
 
 
+@router.get("/{thread_id}/intake-qr-extractions", response_model=list[EmailIntakeQrExtractionOut])
+async def list_email_thread_intake_qr_extractions(
+    thread_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Supplemental read: structured QR payloads persisted for this thread (intake audit / matching)."""
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    rows = await list_intake_qr_by_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    return [EmailIntakeQrExtractionOut.model_validate(r) for r in rows]
+
+
 @router.get("/{thread_id}/messages", response_model=list[EmailMessageOut])
 async def list_email_thread_messages(
     thread_id: int,
@@ -207,3 +263,201 @@ async def disregard_email_thread(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     return await email_threads_service.disregard_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+
+
+@router.get("/{thread_id}/intake-review", response_model=EmailIntakeReviewBundleOut)
+async def get_email_thread_intake_review(
+    thread_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    rev, evs = await intake_review_svc.get_review_with_events(db, tenant_id, thread_id)
+    if not rev:
+        return EmailIntakeReviewBundleOut(review=None, events=[])
+    return EmailIntakeReviewBundleOut(
+        review=EmailIntakeReviewOut.model_validate(rev),
+        events=[EmailIntakeReviewEventOut.model_validate(e) for e in evs],
+    )
+
+
+@router.post("/{thread_id}/intake-review/claim", response_model=EmailIntakeReviewOut)
+async def claim_email_thread_intake_review(
+    thread_id: int,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    if not user.tenant_user:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Claim requires tenant-user (workspace credentials) session",
+        )
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        rev = await intake_review_svc.claim_email_intake_review(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            tenant_user_id=int(user.tenant_user.id),
+        )
+        await db.commit()
+        await db.refresh(rev)
+        return EmailIntakeReviewOut.model_validate(rev)
+    except ValueError as e:
+        raise _review_workflow_error(e) from e
+
+
+@router.post("/{thread_id}/intake-review/resolve", response_model=EmailIntakeReviewOut)
+async def resolve_email_thread_intake_review(
+    thread_id: int,
+    body: IntakeReviewResolveReasonWrite,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        rev = await intake_review_svc.resolve_email_intake_review(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            reason_code=body.reason_code,
+            note=body.note,
+        )
+        await db.commit()
+        await db.refresh(rev)
+        return EmailIntakeReviewOut.model_validate(rev)
+    except ValueError as e:
+        raise _review_workflow_error(e) from e
+
+
+@router.post("/{thread_id}/intake-review/dismiss", response_model=EmailIntakeReviewOut)
+async def dismiss_email_thread_intake_review(
+    thread_id: int,
+    body: IntakeReviewDismissReasonWrite,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        rev = await intake_review_svc.dismiss_email_intake_review(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            reason_code=body.reason_code,
+            note=body.note,
+        )
+        await db.commit()
+        await db.refresh(rev)
+        return EmailIntakeReviewOut.model_validate(rev)
+    except ValueError as e:
+        raise _review_workflow_error(e) from e
+
+
+@router.post("/{thread_id}/intake-review/duplicate/link-prior", response_model=EmailThreadDraftOrLinkResponse)
+async def duplicate_intake_review_link_prior(
+    thread_id: int,
+    body: DuplicateLinkPriorBody,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        _rev, load_id = await intake_review_svc.duplicate_review_prepare_link_prior(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            prior_load_id=body.prior_load_id,
+        )
+        thread_out, load = await email_threads_service.link_existing_load_from_review_thread(
+            db, tenant_id=tenant_id, thread_id=thread_id, load_id=load_id
+        )
+        await db.commit()
+        await db.refresh(load)
+        return EmailThreadDraftOrLinkResponse(
+            thread=thread_out,
+            load=EmailThreadActionLoadOut(id=load.id, load_number=load.load_number, status=load.status),
+        )
+    except ValueError as e:
+        raise _review_workflow_error(e) from e
+
+
+@router.post("/{thread_id}/intake-review/duplicate/confirm", response_model=EmailIntakeReviewOut)
+async def duplicate_intake_review_confirm(
+    thread_id: int,
+    body: DuplicateConfirmBody,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        rev = await intake_review_svc.duplicate_review_confirm(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            note=body.note,
+        )
+        await db.commit()
+        await db.refresh(rev)
+        return EmailIntakeReviewOut.model_validate(rev)
+    except ValueError as e:
+        raise _review_workflow_error(e) from e
+
+
+@router.post("/{thread_id}/intake-review/duplicate/dismiss-false-positive", response_model=EmailIntakeReviewOut)
+async def duplicate_intake_review_dismiss_false_positive(
+    thread_id: int,
+    body: IntakeReviewDuplicateDismissBody,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        rev = await intake_review_svc.duplicate_review_dismiss_false_positive(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            note=body.note,
+        )
+        await db.commit()
+        await db.refresh(rev)
+        return EmailIntakeReviewOut.model_validate(rev)
+    except ValueError as e:
+        raise _review_workflow_error(e) from e
+
+
+@router.post("/{thread_id}/intake-review/reopen", response_model=EmailIntakeReviewOut)
+async def reopen_email_thread_intake_review(
+    thread_id: int,
+    body: IntakeReviewReopenReasonWrite,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    await email_threads_service.get_email_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    try:
+        rev = await intake_review_svc.reopen_email_intake_review(
+            db,
+            tenant_id,
+            thread_id,
+            user,
+            reason_code=body.reason_code,
+            note=body.note,
+        )
+        await db.commit()
+        await db.refresh(rev)
+        return EmailIntakeReviewOut.model_validate(rev)
+    except ValueError as e:
+        raise _review_workflow_error(e) from e

@@ -10,6 +10,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.trip_dispatch import (
+    DISPATCH_RESOURCES_REQUIRED,
+    PRE_DISPATCH_TRIP_CANCEL_STATUSES,
+    TRIP_ALLOCATED_AT_LOAD_STATUS,
+)
 from app.models.broker import Broker, BrokerContact
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
 from app.models.driver import Driver
@@ -17,6 +22,7 @@ from app.models.load import Load, LoadNote, LoadStop
 from app.models.truck import Truck
 from app.models.trailer import Trailer
 from app.schemas.load import LoadCreate, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
+from app.services import dispatch_trips as dispatch_trips_service
 from app.utils.pagination import paginate
 
 
@@ -194,6 +200,7 @@ async def list_loads(
                 Load.load_number.ilike(pat),
                 Load.broker_load_reference.ilike(pat),
                 Load.broker_name_snapshot.ilike(pat),
+                Load.trip_number.ilike(pat),
             )
         )
     if driver_id:
@@ -213,6 +220,7 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
+    old_status = (load.status or "").strip().lower()
     data = _load_data_from_payload(payload)
 
     if "driver_id" in data:
@@ -262,6 +270,27 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
 
     for key, value in data.items():
         setattr(load, key, value)
+
+    new_status = (load.status or "").strip().lower()
+    if (
+        new_status == TRIP_ALLOCATED_AT_LOAD_STATUS
+        and old_status != TRIP_ALLOCATED_AT_LOAD_STATUS
+    ):
+        if not load.driver_id or not load.truck_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "detail": "Driver and truck are required before dispatching",
+                    "code": DISPATCH_RESOURCES_REQUIRED,
+                },
+            )
+        await dispatch_trips_service.ensure_active_trip_for_freight_load(db, tenant_id, load)
+    if (
+        old_status == TRIP_ALLOCATED_AT_LOAD_STATUS
+        and new_status != TRIP_ALLOCATED_AT_LOAD_STATUS
+        and new_status in PRE_DISPATCH_TRIP_CANCEL_STATUSES
+    ):
+        await dispatch_trips_service.cancel_active_trip_for_load(db, tenant_id, load.id, load)
 
     # Full replace stops: submitted ordered list is authoritative
     if "stops" in payload.model_dump(exclude_unset=True):
@@ -320,6 +349,7 @@ async def list_loads_for_board(
                 Load.load_number.ilike(q),
                 Load.broker_load_reference.ilike(q),
                 Load.broker_name_snapshot.ilike(q),
+                Load.trip_number.ilike(q),
             )
         )
     result = await db.execute(stmt)

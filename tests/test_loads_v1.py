@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import os
+
+os.environ["ENVIRONMENT"] = "test"
+os.environ["ALLOW_TENANT_RESOLUTION_SHORTCUTS"] = "true"
+
 import uuid
-from unittest.mock import MagicMock
 
 import pytest
-from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.deps.auth import get_current_user
-from app.deps.tenant import require_tenant
+from tests.support.integration_auth import (
+    clear_current_user_and_tenant_overrides,
+    install_host_aligned_current_user_and_tenant,
+)
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 
@@ -47,7 +51,7 @@ class TestLoadSchemaValidation:
 
 @pytest.fixture(autouse=True)
 def test_bypass_env():
-    """Enable middleware test bypass for Load V1 API tests (requires platform tenant id=1)."""
+    """Enable middleware test bypass for Load V1 API tests (demo.truckerp.me must resolve in platform DB)."""
     old = os.environ.get("TEST_BYPASS_AUTH")
     os.environ["TEST_BYPASS_AUTH"] = "1"
     yield
@@ -69,22 +73,10 @@ async def client():
 
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
-    """Override deps to bypass auth and fix tenant for tests. Depends on test_bypass_env so env is set first."""
-    fake_user = MagicMock()
-    fake_user.user_id = "test-user-id"
-    fake_user.email = "test@example.com"
-    fake_user.tenant_id = 1
-    fake_user.role = "TENANT_ADMIN"
-    app.dependency_overrides[get_current_user] = lambda: fake_user
-
-    def _tenant_from_request(request: Request) -> int:
-        tid = getattr(request.state, "tenant_id", None)
-        return int(tid) if tid is not None else 1
-
-    app.dependency_overrides[require_tenant] = _tenant_from_request
+    """Bypass JWT; CurrentUser.tenant_id matches Host-resolved workspace (see integration_auth)."""
+    install_host_aligned_current_user_and_tenant(app)
     yield
-    app.dependency_overrides.pop(get_current_user, None)
-    app.dependency_overrides.pop(require_tenant, None)
+    clear_current_user_and_tenant_overrides(app)
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")

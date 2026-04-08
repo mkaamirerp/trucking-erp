@@ -13,8 +13,24 @@ from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_ingestion import EmailMessage, EmailThread
 from app.models.tenant_email_account import TenantEmailAccount
 from app.models.load import Load
+from app.schemas.email_intake_review import EmailIntakeReviewCardOut
 from app.schemas.email_threads import EmailThreadOut, email_thread_to_out
-from app.services.email_intake_pdf import guess_broker_load_reference
+from app.services.email_intake_review_service import (
+    auto_resolve_email_intake_review_on_thread_linked_load,
+    load_review_summary_for_thread,
+    sync_email_intake_review_for_thread,
+)
+from app.services.email_intake_pdf import extract_broker_mc_dot_hints, guess_broker_load_reference
+from app.core.database import AsyncSessionLocal
+from app.services.broker_intake_resolve import (
+    confidence_tier_for_match_method,
+    explanation_for_match_method,
+    fetch_latest_inbound_from_header,
+)
+from app.services.broker_intake_unified import resolve_booking_broker_for_email_intake
+from app.constants.email_intake_routing import MANUAL_CREATE_DRAFT_FROM_REVIEW, MANUAL_LINK_EXISTING_LOAD
+from app.services.email_engine.intake_service import find_duplicate_linked_load_for_thread_pdf_content
+from app.services.email_intake_qr_extractions import link_thread_qr_extractions_to_load
 from app.services.email_intake_routing import (
     _resolve_tql_broker,
     apply_intake_routing_for_gmail_thread,
@@ -120,12 +136,85 @@ async def create_draft_load_from_review_thread(
     thread = await get_email_thread(db, tenant_id, thread_id)
     _require_thread_eligible_for_manual_intake(thread)
 
-    broker_id: int | None = None
-    broker_name_snapshot: str | None = None
-    if thread_indicates_tql_affinity(thread):
-        bid, snap = await _resolve_tql_broker(db, tenant_id)
-        broker_id = bid
-        broker_name_snapshot = snap
+    from_hdr = await fetch_latest_inbound_from_header(db, tenant_id, thread_id)
+    hint_mc, hint_dot = extract_broker_mc_dot_hints(f"{thread.subject or ''}\n{thread.snippet or ''}")
+    async with AsyncSessionLocal() as platform_db:
+        resolve_res = await resolve_booking_broker_for_email_intake(
+            db,
+            tenant_id,
+            from_hdr,
+            platform_db=platform_db,
+            supplemental_mc=hint_mc,
+            supplemental_dot=hint_dot,
+        )
+    dup_of = await find_duplicate_linked_load_for_thread_pdf_content(db, tenant_id, thread_id)
+
+    if resolve_res.ambiguous:
+        broker_id = None
+        broker_name_snapshot = None
+        match_method = None
+        tier = None
+        expl = None
+        review_required = True
+    elif resolve_res.blocked_match:
+        broker_id = None
+        broker_name_snapshot = None
+        match_method = None
+        tier = None
+        expl = None
+        review_required = True
+    elif resolve_res.global_identity_disagreement:
+        broker_id = None
+        broker_name_snapshot = None
+        match_method = None
+        tier = None
+        expl = None
+        review_required = True
+    elif resolve_res.global_tier_d_requires_review:
+        broker_id = None
+        broker_name_snapshot = resolve_res.broker_label
+        match_method = resolve_res.match_method
+        tier = confidence_tier_for_match_method(match_method)
+        expl = explanation_for_match_method(match_method)
+        review_required = True
+    elif resolve_res.intake_signal_conflict:
+        broker_id = resolve_res.broker_id
+        broker_name_snapshot = resolve_res.broker_label
+        match_method = resolve_res.match_method
+        tier = confidence_tier_for_match_method(match_method)
+        expl = explanation_for_match_method(match_method)
+        review_required = True
+    elif resolve_res.global_match_no_workspace:
+        broker_id = None
+        broker_name_snapshot = resolve_res.broker_label
+        match_method = resolve_res.match_method
+        tier = confidence_tier_for_match_method(match_method)
+        expl = explanation_for_match_method(match_method)
+        review_required = True
+    elif resolve_res.broker_id is not None:
+        broker_id = resolve_res.broker_id
+        broker_name_snapshot = resolve_res.broker_label
+        match_method = resolve_res.match_method
+        tier = confidence_tier_for_match_method(match_method)
+        expl = explanation_for_match_method(match_method)
+        review_required = False
+    else:
+        broker_id = None
+        broker_name_snapshot = None
+        match_method = None
+        tier = None
+        expl = None
+        review_required = False
+        if thread_indicates_tql_affinity(thread):
+            bid, snap = await _resolve_tql_broker(db, tenant_id)
+            broker_id = bid
+            broker_name_snapshot = snap
+            match_method = "fallback_tql"
+            tier = confidence_tier_for_match_method(match_method)
+            expl = explanation_for_match_method(match_method)
+
+    if dup_of is not None:
+        review_required = True
 
     ref = guess_broker_load_reference(f"{thread.subject or ''}\n{thread.snippet or ''}")
     body_excerpt = await _latest_inbound_message_body_excerpt(db, tenant_id, thread.id)
@@ -138,15 +227,31 @@ async def create_draft_load_from_review_thread(
         broker_id=broker_id,
         broker_name_snapshot=broker_name_snapshot,
         broker_load_reference=ref,
+        broker_match_method=match_method,
+        broker_match_confidence_tier=tier,
+        broker_match_explanation=expl,
+        review_required=review_required,
+        is_duplicate_of_load_id=dup_of,
         status="draft",
         internal_notes=notes,
     )
     db.add(load)
     await db.flush()
+    await link_thread_qr_extractions_to_load(
+        db,
+        tenant_id=tenant_id,
+        thread_id=thread_id,
+        load_id=load.id,
+        linked_broker_id=broker_id,
+    )
 
     thread.linked_load_id = load.id
     thread.intake_bucket = "linked"
-    thread.routing_reason = "manual_create_draft_from_review"
+    thread.routing_reason = MANUAL_CREATE_DRAFT_FROM_REVIEW
+
+    await auto_resolve_email_intake_review_on_thread_linked_load(
+        db, tenant_id, thread_id, linked_load_id=load.id
+    )
 
     await db.commit()
     await db.refresh(thread)
@@ -170,7 +275,19 @@ async def link_existing_load_from_review_thread(
 
     thread.linked_load_id = load.id
     thread.intake_bucket = "linked"
-    thread.routing_reason = "manual_link_existing_load"
+    thread.routing_reason = MANUAL_LINK_EXISTING_LOAD
+
+    await link_thread_qr_extractions_to_load(
+        db,
+        tenant_id=tenant_id,
+        thread_id=thread_id,
+        load_id=load.id,
+        linked_broker_id=load.broker_id,
+    )
+
+    await auto_resolve_email_intake_review_on_thread_linked_load(
+        db, tenant_id, thread_id, linked_load_id=load.id
+    )
 
     await db.commit()
     await db.refresh(thread)
@@ -222,7 +339,24 @@ async def get_email_thread_out(db: AsyncSession, tenant_id: int, thread_id: int)
     if thread.linked_load_id:
         loads = await _loads_by_ids(db, tenant_id, [thread.linked_load_id])
         load = loads.get(thread.linked_load_id)
-    return email_thread_to_out(thread, linked_load=load)
+    rev = await load_review_summary_for_thread(db, tenant_id, thread_id)
+    card = (
+        EmailIntakeReviewCardOut(
+            id=rev.id,
+            primary_code=rev.primary_code,
+            detail_json=rev.detail_json,
+            status=rev.status,
+            claimed_by_tenant_user_id=int(rev.claimed_by_tenant_user_id)
+            if rev.claimed_by_tenant_user_id is not None
+            else None,
+            claimed_at=rev.claimed_at,
+            resolved_at=rev.resolved_at,
+            dismissed_at=rev.dismissed_at,
+        )
+        if rev
+        else None
+    )
+    return email_thread_to_out(thread, linked_load=load, intake_review=card)
 
 
 async def list_thread_messages(db: AsyncSession, tenant_id: int, thread_id: int) -> list[EmailMessage]:
@@ -317,6 +451,7 @@ async def upload_pdf_to_intake_thread(
             size_bytes=stored.file_size_bytes,
             is_inline=False,
             storage_key=stored.storage_key,
+            content_sha256=stored.sha256,
             download_status="stored",
         )
     )
@@ -353,6 +488,7 @@ async def recompute_gmail_intake_for_thread(db: AsyncSession, tenant_id: int, th
     if not access_token:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not refresh Gmail access token")
     await apply_intake_routing_for_gmail_thread(db, tenant_id, thread_id, access_token)
+    await sync_email_intake_review_for_thread(db, tenant_id, thread_id)
     await db.commit()
     await db.refresh(thread)
     return await get_email_thread_out(db, tenant_id, thread_id)

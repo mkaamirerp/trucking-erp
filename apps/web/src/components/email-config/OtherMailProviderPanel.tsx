@@ -1,0 +1,426 @@
+import { clsx } from "clsx";
+import type { Dispatch, SetStateAction } from "react";
+import type { EmailConfig, EmailConfigUpdatePayload } from "../../api";
+import { STATUS_BADGE, STATUS_COLORS, formatLastTested } from "./constants";
+import { isManualMailboxConnected } from "./types";
+import ProviderPanelFlash from "./ProviderPanelFlash";
+import { emailBtnFocus, emailFieldFocus } from "./focusStyle";
+
+export type OtherMailProviderPanelProps = {
+  config: EmailConfig | null;
+  form: EmailConfigUpdatePayload;
+  setForm: Dispatch<SetStateAction<EmailConfigUpdatePayload>>;
+  saving: boolean;
+  testing: boolean;
+  testingInbound: boolean;
+  testingOutbound: boolean;
+  syncingOther: boolean;
+  disconnecting: boolean;
+  panelFlash?: { variant: "success" | "error"; message: string } | null;
+  onDismissPanelFlash?: () => void;
+  onSave: () => void;
+  onTest: () => void;
+  onTestInbound: () => void;
+  onTestOutbound: () => void;
+  onSyncOther: () => void;
+  onDisconnectClick: () => void;
+};
+
+export default function OtherMailProviderPanel({
+  config,
+  form,
+  setForm,
+  saving,
+  testing,
+  testingInbound,
+  testingOutbound,
+  syncingOther,
+  disconnecting,
+  panelFlash,
+  onDismissPanelFlash,
+  onSave,
+  onTest,
+  onTestInbound,
+  onTestOutbound,
+  onSyncOther,
+  onDisconnectClick,
+}: OtherMailProviderPanelProps) {
+  const manualConnected = isManualMailboxConnected(config);
+  const showConnectedSummary = manualConnected && !!config;
+
+  return (
+    <div className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Other Mail</h2>
+      <p className="mb-5 text-sm text-[#64748b]">
+        For Yahoo, Zoho, cPanel mail, or any host that gives you IMAP and SMTP — same first-class setup flow as the OAuth
+        providers.
+      </p>
+
+      {panelFlash && onDismissPanelFlash && (
+        <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
+      )}
+
+      {!manualConnected && (
+        <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4 text-sm text-[#94a3b8]">
+          <p className="font-medium text-[#cbd5e1]">Status: Not connected</p>
+          <p className="mt-1 leading-relaxed">
+            Enter your mailbox and server details below, save, then run the tests to confirm inbound and outbound mail.
+          </p>
+        </div>
+      )}
+
+      {showConnectedSummary && config && (
+        <div className="mb-6 rounded-lg border border-emerald-900/40 bg-emerald-950/10 p-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#64748b]">Connection</h3>
+          <div className="space-y-3 text-sm">
+            <p className="text-[#e8edf5]">
+              <span className="text-[#64748b]">Mailbox </span>
+              {config.email_address}
+              {config.display_name ? ` · ${config.display_name}` : ""}
+            </p>
+            {config.reply_to && (
+              <p className="text-[#94a3b8]">
+                Reply-To: <span className="text-[#e8edf5]">{config.reply_to}</span>
+              </p>
+            )}
+            <p className="text-[#94a3b8]">
+              IMAP: <span className="text-[#e8edf5]">{config.imap_host}:{config.imap_port}</span> (
+              {config.imap_security || (config.use_ssl ? "ssl" : "starttls")}) · SMTP:{" "}
+              <span className="text-[#e8edf5]">
+                {config.smtp_host}:{config.smtp_port}
+              </span>{" "}
+              ({config.smtp_security || "starttls"})
+            </p>
+            <p className="text-[#94a3b8]">
+              Connection:{" "}
+              <span className={STATUS_COLORS[config.connection_status || config.status] ?? "text-[#94a3b8]"}>
+                {STATUS_BADGE[config.connection_status || config.status] || config.connection_status || config.status}
+              </span>
+            </p>
+            <p className="text-[#94a3b8]">
+              Last inbound test: {formatLastTested(config.last_inbound_test_at)} · Last outbound test:{" "}
+              {formatLastTested(config.last_outbound_test_at)}
+            </p>
+            <div className="rounded-lg border border-[#1e293b] bg-[#0d111a] p-3">
+              <p className="mb-2 font-medium text-[#94a3b8]">IMAP ingestion</p>
+              <ul className="space-y-1 text-[#94a3b8]">
+                <li>
+                  UIDVALIDITY / last UID:{" "}
+                  <span className="text-[#e8edf5]">
+                    {config.imap_uidvalidity != null ? String(config.imap_uidvalidity) : "—"} /{" "}
+                    {config.imap_last_seen_uid != null ? String(config.imap_last_seen_uid) : "—"}
+                  </span>
+                </li>
+                <li>
+                  Last sync:{" "}
+                  <span className="text-[#e8edf5]">
+                    {config.last_inbound_sync_at ? formatLastTested(config.last_inbound_sync_at) : "—"}
+                  </span>
+                  {config.last_sync_status && (
+                    <>
+                      {" "}
+                      <span className="text-[#64748b]">· status</span>{" "}
+                      <span className="text-[#e8edf5]">{config.last_sync_status}</span>
+                    </>
+                  )}
+                </li>
+                {config.last_sync_error && <li className="text-red-400">Sync error: {config.last_sync_error}</li>}
+              </ul>
+              <p className="mt-2 text-xs text-[#64748b]">
+                Incremental sync uses server UID state. Production may add a scheduled fallback using the same endpoint.
+              </p>
+            </div>
+            {config.last_error_message && <p className="text-sm text-red-400">{config.last_error_message}</p>}
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onTestInbound}
+                disabled={testingInbound}
+                className={clsx(
+                  emailBtnFocus,
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#3b82f6]/40 bg-[#3b82f6]/10 px-3 py-2 text-sm font-semibold text-[#93c5fd] hover:bg-[#3b82f6]/20 disabled:opacity-50",
+                )}
+              >
+                {testingInbound ? "Testing…" : "Test inbound (IMAP)"}
+              </button>
+              <button
+                type="button"
+                onClick={onTestOutbound}
+                disabled={testingOutbound}
+                className={clsx(
+                  emailBtnFocus,
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:border-[#475569] hover:text-[#e8edf5] disabled:opacity-50",
+                )}
+              >
+                {testingOutbound ? "Testing…" : "Test outbound (SMTP)"}
+              </button>
+              <button
+                type="button"
+                onClick={onSyncOther}
+                disabled={syncingOther}
+                className={clsx(
+                  emailBtnFocus,
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-sky-900/50 bg-sky-950/30 px-3 py-2 text-sm font-medium text-sky-200 hover:bg-sky-950/50 disabled:opacity-50",
+                )}
+              >
+                {syncingOther ? "Syncing…" : "Sync new mail (IMAP)"}
+              </button>
+            </div>
+            <div className="mt-3 border-t border-emerald-900/30 pt-3">
+              <button
+                type="button"
+                onClick={onDisconnectClick}
+                disabled={disconnecting}
+                className={clsx(
+                  emailBtnFocus,
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-sm font-medium text-red-300 hover:bg-red-950/35 disabled:opacity-50",
+                )}
+              >
+                {disconnecting ? "Disconnecting…" : "Disconnect mailbox"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[#64748b]">Server settings (IMAP & SMTP)</h3>
+      <div className="space-y-6">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">Mailbox email</label>
+            <input
+              type="email"
+              value={form.email_address}
+              onChange={(e) => setForm((f) => ({ ...f, email_address: e.target.value }))}
+              placeholder="mailbox@example.com"
+              className={clsx(
+                emailFieldFocus,
+                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+              )}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">From name</label>
+            <input
+              type="text"
+              value={form.display_name ?? ""}
+              onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))}
+              placeholder="Optional"
+              className={clsx(
+                emailFieldFocus,
+                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+              )}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">Reply-To (optional)</label>
+            <input
+              type="text"
+              value={form.reply_to ?? ""}
+              onChange={(e) => setForm((f) => ({ ...f, reply_to: e.target.value }))}
+              placeholder="Optional"
+              className={clsx(
+                emailFieldFocus,
+                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+              )}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="is_primary_mailbox_other"
+            checked={form.is_primary ?? true}
+            onChange={(e) => setForm((f) => ({ ...f, is_primary: e.target.checked }))}
+            className={clsx(emailFieldFocus, "h-5 w-5 rounded border-[#1e293b]")}
+          />
+          <label htmlFor="is_primary_mailbox_other" className="text-sm text-[#94a3b8]">
+            Primary mailbox for this workspace
+          </label>
+        </div>
+        <div className="grid gap-6 md:grid-cols-2">
+          <div className="rounded-lg border border-[#1e293b] p-4">
+            <h3 className="mb-3 text-sm font-semibold text-[#e8edf5]">Inbound (IMAP)</h3>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={form.imap_host ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, imap_host: e.target.value }))}
+                placeholder="IMAP host"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <input
+                type="number"
+                value={form.imap_port ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, imap_port: parseInt(e.target.value, 10) || undefined }))}
+                placeholder="Port"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <input
+                type="text"
+                value={form.imap_username ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, imap_username: e.target.value }))}
+                placeholder="Username"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <input
+                type="password"
+                value={form.imap_password ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, imap_password: e.target.value }))}
+                placeholder="App password (leave blank to keep existing)"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <div>
+                <label className="mb-1 block text-xs text-[#64748b]">IMAP security</label>
+                <select
+                  value={form.imap_security ?? "ssl"}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      imap_security: e.target.value,
+                      use_ssl: e.target.value === "ssl",
+                    }))
+                  }
+                  className={clsx(
+                    emailFieldFocus,
+                    "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]",
+                  )}
+                >
+                  <option value="ssl">SSL/TLS (e.g. port 993)</option>
+                  <option value="starttls">STARTTLS</option>
+                  <option value="none">None (not recommended)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-lg border border-[#1e293b] p-4">
+            <h3 className="mb-3 text-sm font-semibold text-[#e8edf5]">Outbound (SMTP)</h3>
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={form.smtp_host ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))}
+                placeholder="SMTP host"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <input
+                type="number"
+                value={form.smtp_port ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, smtp_port: parseInt(e.target.value, 10) || undefined }))}
+                placeholder="Port"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <input
+                type="text"
+                value={form.smtp_username ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, smtp_username: e.target.value }))}
+                placeholder="Username"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <input
+                type="password"
+                value={form.smtp_password ?? ""}
+                onChange={(e) => setForm((f) => ({ ...f, smtp_password: e.target.value }))}
+                placeholder="App password (leave blank to keep existing)"
+                className={clsx(
+                  emailFieldFocus,
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                )}
+              />
+              <div>
+                <label className="mb-1 block text-xs text-[#64748b]">SMTP security</label>
+                <select
+                  value={form.smtp_security ?? "starttls"}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      smtp_security: e.target.value,
+                      use_tls: e.target.value === "starttls",
+                    }))
+                  }
+                  className={clsx(
+                    emailFieldFocus,
+                    "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]",
+                  )}
+                >
+                  <option value="ssl">SSL (e.g. port 465)</option>
+                  <option value="starttls">STARTTLS (e.g. port 587)</option>
+                  <option value="none">None (not recommended)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !form.email_address}
+              className={clsx(
+                emailBtnFocus,
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#3b82f6] bg-[#3b82f6] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {saving ? "Saving…" : "Save settings"}
+            </button>
+            <button
+              type="button"
+              onClick={onTestInbound}
+              disabled={testingInbound}
+              className={clsx(
+                emailBtnFocus,
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#94a3b8] transition hover:border-[#475569] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {testingInbound ? "Testing…" : "Test inbound"}
+            </button>
+            <button
+              type="button"
+              onClick={onTestOutbound}
+              disabled={testingOutbound}
+              className={clsx(
+                emailBtnFocus,
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#94a3b8] transition hover:border-[#475569] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {testingOutbound ? "Testing…" : "Test outbound"}
+            </button>
+            <button
+              type="button"
+              onClick={onTest}
+              disabled={testing}
+              className={clsx(
+                emailBtnFocus,
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#94a3b8] transition hover:border-[#475569] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              {testing ? "Testing…" : "Test IMAP (legacy)"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

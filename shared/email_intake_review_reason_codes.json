@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "resolve": {
+    "write": ["resolved_reviewed", "resolved_other"]
+  },
+  "dismiss": {
+    "write": ["dismissed_not_intake", "dismissed_other"]
+  },
+  "reopen": {
+    "write": ["reopened_operator"]
+  },
+  "duplicate": {
+    "server_only": ["duplicate_link_prior", "duplicate_confirmed", "duplicate_false_positive"]
+  },
+  "system": {
+    "server_only": ["thread_linked_load"]
+  },
+  "operator_hint": {
+    "resolved_reviewed": "review complete",
+    "resolved_other": "other resolution",
+    "dismissed_not_intake": "not intake",
+    "dismissed_other": "other dismiss",
+    "reopened_operator": "reopened",
+    "duplicate_link_prior": "prior load",
+    "duplicate_confirmed": "ack duplicate",
+    "duplicate_false_positive": "not duplicate",
+    "thread_linked_load": "load linked"
+  }
+}

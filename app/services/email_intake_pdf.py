@@ -27,6 +27,21 @@ def guess_broker_load_reference(text: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
+def extract_broker_mc_dot_hints(text: str | None) -> tuple[str | None, str | None]:
+    """
+    Best-effort MC / USDOT from email subject, snippet, or PDF text (supplemental Tier D only).
+    Returns raw digit groups; normalization happens in ``broker_identity`` helpers.
+    """
+    if not text or not str(text).strip():
+        return None, None
+    t = str(text)
+    mc_m = re.search(r"\bMC(?:\s*[#:.-]*\s*)?(\d{4,8})\b", t, re.IGNORECASE)
+    mc = mc_m.group(1) if mc_m else None
+    dot_m = re.search(r"\b(?:US)?DOT(?:\s*[#:.-]*\s*)?(\d{4,10})\b", t, re.IGNORECASE)
+    dot = dot_m.group(1) if dot_m else None
+    return mc, dot
+
+
 def extract_tql_rate_con_hints(text: str) -> dict[str, float | int | str]:
     """
     Best-effort parse of common TQL / digital rate-con text (no OCR).

@@ -9,6 +9,8 @@ const adminLinks = [
   { to: ADMIN.USERS, label: "Users", icon: UsersIcon },
   { to: ADMIN.ROLES, label: "Roles & Permissions", icon: ShieldIcon },
   { to: ADMIN.PAYROLL, label: "Payroll Settings", icon: CardIcon },
+  { to: ADMIN.DISPATCH_NUMBERING, label: "Dispatch numbering", icon: HashIcon },
+  { to: ADMIN.BROKER_INTAKE, label: "Broker intake", icon: FileIcon },
   { to: ADMIN.SETTINGS_EMAIL, label: "Email", icon: MailIcon },
   { to: ADMIN.INTEGRATIONS_ELD, label: "ELD", icon: TruckIcon },
   { to: ADMIN.INTEGRATIONS_FUEL, label: "Fuel", icon: FuelIcon },
@@ -49,6 +51,16 @@ function CardIcon() {
       <rect x="3" y="6" width="18" height="12" rx="2" />
       <path d="M3 10h18" />
       <path d="M7 15h3" />
+    </svg>
+  );
+}
+function HashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.7">
+      <path d="M4 9h16" />
+      <path d="M4 15h16" />
+      <path d="M10 3 8 21" />
+      <path d="M16 3l-2 18" />
     </svg>
   );
 }

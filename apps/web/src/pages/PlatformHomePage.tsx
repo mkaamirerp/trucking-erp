@@ -43,6 +43,15 @@ export default function PlatformHomePage() {
         </li>
         <li>
           <Link
+            to={PLATFORM.GLOBAL_BOOKING_BROKERS}
+            className="block rounded-lg border border-slate-800 bg-slate-900/50 p-4 hover:border-slate-600"
+          >
+            <h2 className="font-medium text-white">Global booking brokers</h2>
+            <p className="mt-1 text-sm text-slate-400">Promotion queue and audit for platform broker reference.</p>
+          </Link>
+        </li>
+        <li>
+          <Link
             to={PLATFORM.LOGIN_FAILURES}
             className="block rounded-lg border border-slate-800 bg-slate-900/50 p-4 hover:border-slate-600"
           >

@@ -572,7 +572,8 @@ export async function login(payload: {
   });
   if (!res.ok) {
     const text = await res.text();
-    let message = "Invalid email or password";
+    // Avoid attributing 5xx / HTML bodies to invalid credentials; authErrorToMessage maps 5xx separately.
+    let message = res.status === 401 ? "Invalid email or password" : "";
     try {
       const json = text ? (JSON.parse(text) as Record<string, unknown>) : null;
       if (res.status === 429 && json && typeof json.detail === "object" && json.detail !== null) {
@@ -672,6 +673,43 @@ export async function forgotPassword(payload: { email: string; reset_base_url?: 
 }
 
 /** Set new password with token from reset email (no tenant required). */
+export type DispatchNumberingState = {
+  trip_number_prefix: string | null;
+  prefix_locked: boolean;
+};
+
+export async function getDispatchNumbering() {
+  const res = await fetchWithTenant(`${API_BASE}/admin/dispatch-numbering`);
+  return handle<DispatchNumberingState>(res);
+}
+
+export async function putDispatchNumbering(payload: { trip_number_prefix: string }) {
+  const res = await fetchWithTenant(`${API_BASE}/admin/dispatch-numbering`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<DispatchNumberingState>(res);
+}
+
+export type BrokerIntakeSettings = {
+  broker_auto_create_from_global: boolean;
+};
+
+export async function getBrokerIntakeSettings() {
+  const res = await fetchWithTenant(`${API_BASE}/admin/broker-intake-settings`);
+  return handle<BrokerIntakeSettings>(res);
+}
+
+export async function patchBrokerIntakeSettings(payload: BrokerIntakeSettings) {
+  const res = await fetchWithTenant(`${API_BASE}/admin/broker-intake-settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<BrokerIntakeSettings>(res);
+}
+
 export async function resetPassword(payload: { token: string; new_password: string }) {
   const res = await fetchPublic(`${API_BASE}/auth/reset-password`, {
     method: "POST",
@@ -794,12 +832,16 @@ export type LoadNote = {
 };
 
 export async function getLoadNotes(loadId: number) {
-  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/notes`);
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/notes`, window.location.origin);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
   return handle<LoadNote[]>(res);
 }
 
 export async function addLoadNote(loadId: number, body: string) {
-  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/notes`, {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/notes`, window.location.origin);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ body }),
@@ -842,7 +884,7 @@ export async function getBroker(id: number) {
 
 export async function updateBroker(id: number, payload: Partial<Broker>) {
   const res = await fetchWithTenant(`${API_BASE}/brokers/${id}`, {
-    method: "PUT",
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -1728,6 +1770,15 @@ export type EmailConfig = {
   gmail_automatic_ingestion_ready?: boolean | null;
   gmail_automatic_ingestion_blockers?: string[] | null;
   gmail_automatic_ingestion_warnings?: string[] | null;
+  /** Microsoft 365 Graph (when primary is OAuth Microsoft account). */
+  ms_graph_subscription_id?: string | null;
+  ms_graph_subscription_status?: string | null;
+  ms_graph_subscription_expiration_at?: string | null;
+  ms_graph_delta_cursor_present?: boolean | null;
+  ms_graph_last_notification_at?: string | null;
+  ms_graph_last_delta_sync_at?: string | null;
+  ms_graph_last_sync_status?: string | null;
+  ms_graph_last_sync_error?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1774,6 +1825,17 @@ export type EmailConfigUpdatePayload = {
   oauth_refresh_token?: string | null;
 };
 
+export type EmailIntakeReviewCard = {
+  id: number;
+  primary_code: string;
+  detail_json: Record<string, unknown> | null;
+  status: string;
+  claimed_by_tenant_user_id: number | null;
+  claimed_at: string | null;
+  resolved_at: string | null;
+  dismissed_at: string | null;
+};
+
 export type InboxThreadListItem = {
   id: number;
   provider: string;
@@ -1792,11 +1854,39 @@ export type InboxThreadListItem = {
   created_at: string;
   updated_at: string;
   linked_load_number?: string | null;
+  linked_trip_number?: string | null;
   linked_broker_name?: string | null;
   pickup_delivery_summary?: string | null;
+  intake_review?: EmailIntakeReviewCard | null;
 };
 
 export type InboxThreadDetail = InboxThreadListItem;
+
+export type EmailIntakeReviewRow = EmailIntakeReviewCard & {
+  tenant_id: number;
+  email_thread_id: number;
+  last_routing_reason_snapshot: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EmailIntakeReviewEventRow = {
+  id: number;
+  event_type: string;
+  actor_kind: string;
+  actor_tenant_user_id: number | null;
+  actor_platform_user_id: string | null;
+  old_value_json: Record<string, unknown> | null;
+  new_value_json: Record<string, unknown> | null;
+  reason_code: string | null;
+  payload_note: string | null;
+  created_at: string;
+};
+
+export type EmailIntakeReviewBundle = {
+  review: EmailIntakeReviewRow | null;
+  events: EmailIntakeReviewEventRow[];
+};
 
 export type InboxMessageAttachmentItem = {
   id: number;
@@ -1952,6 +2042,34 @@ export async function getGmailIngestionHealth(): Promise<GmailIngestionHealth> {
   return handle<GmailIngestionHealth>(res);
 }
 
+export async function getMicrosoftOAuthStatus(): Promise<{ oauth_configured: boolean }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/microsoft/oauth-status`);
+  return handle<{ oauth_configured: boolean }>(res);
+}
+
+export async function renewMicrosoftSubscription(force = false): Promise<{ ok: boolean; renewed: boolean }> {
+  const q = force ? "?force=true" : "";
+  const res = await fetchWithTenant(`${API_BASE}/admin/email-config/microsoft/renew-subscription${q}`, {
+    method: "POST",
+  });
+  return handle<{ ok: boolean; renewed: boolean }>(res);
+}
+
+export async function syncMicrosoftNow(maxPages = 25): Promise<{
+  ok: boolean;
+  tenant_id: number;
+  provider: string;
+  messages_processed: number;
+  delta_pages: number;
+  delta_cursor_advanced: boolean;
+}> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/admin/email-config/microsoft/sync-now?max_pages=${maxPages}`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
 /** Same delta sync as Pub/Sub push; `email_inbox` entitlement. Fallback only — production uses Gmail push. */
 export async function pullGmailDeltaFromInbox(maxThreads = 30): Promise<{
   ok: boolean;
@@ -1991,6 +2109,11 @@ export async function listEmailThreads(params?: {
 export async function getEmailThread(threadId: number): Promise<InboxThreadDetail> {
   const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}`);
   return handle<InboxThreadDetail>(res);
+}
+
+export async function getEmailThreadIntakeReview(threadId: number): Promise<EmailIntakeReviewBundle> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/intake-review`);
+  return handle<EmailIntakeReviewBundle>(res);
 }
 
 export async function getEmailThreadMessages(threadId: number): Promise<InboxMessageItem[]> {
@@ -2044,6 +2167,82 @@ export async function linkLoadToEmailThread(threadId: number, loadId: number): P
     body: JSON.stringify({ load_id: loadId }),
   });
   return handle<EmailThreadDraftOrLinkResult>(res);
+}
+
+/** Duplicate review: link thread to suggested prior load (or same id as review detail). */
+export async function duplicateIntakeReviewLinkPrior(
+  threadId: number,
+  body: { prior_load_id?: number | null } = {},
+): Promise<EmailThreadDraftOrLinkResult> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/intake-review/duplicate/link-prior`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prior_load_id: body.prior_load_id ?? null }),
+  });
+  return handle<EmailThreadDraftOrLinkResult>(res);
+}
+
+export async function duplicateIntakeReviewConfirm(threadId: number, note?: string | null): Promise<EmailIntakeReviewRow> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/intake-review/duplicate/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note: note ?? null }),
+  });
+  return handle<EmailIntakeReviewRow>(res);
+}
+
+export async function duplicateIntakeReviewDismissFalsePositive(
+  threadId: number,
+  note?: string | null,
+): Promise<EmailIntakeReviewRow> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/email-threads/${threadId}/intake-review/duplicate/dismiss-false-positive`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ note: note ?? null }),
+    },
+  );
+  return handle<EmailIntakeReviewRow>(res);
+}
+
+/** Resolve intake review — reason_code must be from shared JSON resolve.write set. */
+export async function resolveEmailThreadIntakeReview(
+  threadId: number,
+  body: { reason_code: string; note?: string | null },
+): Promise<EmailIntakeReviewRow> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/intake-review/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason_code: body.reason_code, note: body.note ?? null }),
+  });
+  return handle<EmailIntakeReviewRow>(res);
+}
+
+/** Dismiss intake review — reason_code from shared dismiss.write set. */
+export async function dismissEmailThreadIntakeReview(
+  threadId: number,
+  body: { reason_code: string; note?: string | null },
+): Promise<EmailIntakeReviewRow> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/intake-review/dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason_code: body.reason_code, note: body.note ?? null }),
+  });
+  return handle<EmailIntakeReviewRow>(res);
+}
+
+/** Reopen closed intake review — reason_code from shared reopen.write set. */
+export async function reopenEmailThreadIntakeReview(
+  threadId: number,
+  body: { reason_code: string; note?: string | null },
+): Promise<EmailIntakeReviewRow> {
+  const res = await fetchWithTenant(`${API_BASE}/email-threads/${threadId}/intake-review/reopen`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason_code: body.reason_code, note: body.note ?? null }),
+  });
+  return handle<EmailIntakeReviewRow>(res);
 }
 
 // Tenant-admin password reset removed: password management remains platform-side.
@@ -2102,6 +2301,7 @@ export type PayRunItem = {
   quantity?: number | null;
   unit_rate?: number | null;
   charge_category_id?: number | null;
+  charge_category_code?: string | null;
   metadata_json?: Record<string, unknown> | null;
   created_at: string;
 };
@@ -2403,6 +2603,14 @@ export type Load = {
   rate?: number | null;
   customer_rate?: number | null;
   miles?: number | null;
+  /** Denormalized from active dispatch trip; read-only in UI. */
+  trip_number?: string | null;
+  active_dispatch_trip_id?: number | null;
+  broker_match_method?: string | null;
+  broker_match_confidence_tier?: string | null;
+  broker_match_explanation?: string | null;
+  review_required?: boolean;
+  is_duplicate_of_load_id?: number | null;
   status: string;
   broker?: Broker | null;
   broker_contact?: {
@@ -2447,6 +2655,7 @@ export type DriverSummary = {
   upcoming_loads: Array<{
     id: number;
     load_number: string;
+    trip_number?: string | null;
     pickup_date?: string | null;
     delivery_date?: string | null;
     pickup_location?: string | null;
