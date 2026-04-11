@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Card from "@/components/Card";
-import Button from "@/components/Button";
-import EmptyState from "@/components/EmptyState";
 import StatusBadge from "@/components/StatusBadge";
-import { Table } from "@/components/Table";
 import { listLoads, Load } from "@/api";
 import { formatRouteFromStops, firstPickupAppointmentDate } from "@/utils/loadStops";
+import { OPS } from "@/routes";
 
 export default function LoadsListPage() {
   const navigate = useNavigate();
@@ -62,12 +59,16 @@ export default function LoadsListPage() {
     URL.revokeObjectURL(url);
   };
 
+  const btnClass =
+    "rounded-md border border-[#252a38] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[#7a8299] hover:border-[#3a4155] hover:bg-[#252a38] disabled:opacity-50";
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Header row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Loads</h1>
-          <p className="text-sm text-gray-600">Manage loads and dispatch.</p>
+          <h1 className="text-lg font-semibold text-[#e8ecf4]">Loads</h1>
+          <p className="text-[11px] text-[#7a8299]">Manage loads and dispatch.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -76,95 +77,97 @@ export default function LoadsListPage() {
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && applySearch()}
             placeholder="Search load #, trip #, broker ref…"
-            className="min-w-[200px] rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="min-w-[200px] rounded-md border border-[#252a38] bg-[#1a1e2a] px-3 py-1.5 text-sm text-[#e8ecf4] placeholder:text-[#4a5068] focus:border-amber-500 focus:outline-none"
           />
-          <Button type="button" variant="secondary" onClick={applySearch} disabled={loading}>
+          <button type="button" className={btnClass} onClick={applySearch} disabled={loading}>
             Search
-          </Button>
+          </button>
           {searchApplied ? (
-            <Button
+            <button
               type="button"
-              variant="secondary"
-              onClick={() => {
-                setSearchInput("");
-                setSearchApplied("");
-                runQuery("");
-              }}
+              className={btnClass}
+              onClick={() => { setSearchInput(""); setSearchApplied(""); runQuery(""); }}
               disabled={loading}
             >
               Clear
-            </Button>
+            </button>
           ) : null}
           {!loading && loads.length > 0 ? (
-            <Button type="button" variant="secondary" onClick={exportCsv}>
+            <button type="button" className={btnClass} onClick={exportCsv}>
               Export CSV
-            </Button>
+            </button>
           ) : null}
+          <button
+            type="button"
+            className="rounded-md bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-slate-900 hover:bg-amber-400"
+            onClick={() => navigate(OPS.LOAD_NEW)}
+          >
+            + New load
+          </button>
         </div>
       </div>
 
-      <Card title="Loads">
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
+      {/* Table card */}
+      <div className="rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm overflow-hidden">
+        {loading && (
+          <p className="px-4 py-6 text-center text-sm text-[#7a8299]">Loading…</p>
+        )}
         {error && (
-          <p className="text-sm text-red-600">
-            {error} (Backend list endpoint may be missing. Expected GET /api/v1/loads)
-          </p>
+          <p className="px-4 py-6 text-center text-sm text-red-400">{error}</p>
         )}
-        {!loading && loads.length === 0 && (
-          <EmptyState
-            title="No loads yet"
-            description="Loads will appear here when added."
-          />
+        {!loading && !error && loads.length === 0 && (
+          <p className="px-4 py-10 text-center text-sm text-[#7a8299]">No loads yet.</p>
         )}
-        {!loading && loads.length > 0 && (
-          <Table
-            headers={[
-              "Load #",
-              "Trip #",
-              "Route (stops)",
-              "First pickup date",
-              "Status",
-              "Driver",
-              "Rate",
-              "Actions",
-            ]}
-          >
-            {loads.map((load) => (
-              <tr key={load.id}>
-                <td className="px-4 py-2 text-sm font-medium text-gray-900">
-                  {load.load_number}
-                </td>
-                <td className="px-4 py-2 text-sm text-gray-700">{load.trip_number?.trim() || "—"}</td>
-                <td className="px-4 py-2 text-sm text-gray-700">
-                  {formatRouteFromStops(load.stops)}
-                </td>
-                <td className="px-4 py-2 text-sm text-gray-700">
-                  {firstPickupAppointmentDate(load.stops) || "—"}
-                </td>
-                <td className="px-4 py-2 text-sm">
-                  <StatusBadge status={load.status} />
-                </td>
-                <td className="px-4 py-2 text-sm text-gray-700">
-                  {load.driver
-                    ? `${load.driver.first_name} ${load.driver.last_name}`
-                    : "—"}
-                </td>
-                <td className="px-4 py-2 text-sm text-gray-700">
-                  {load.rate != null ? `$${load.rate}` : "—"}
-                </td>
-                <td className="px-4 py-2 text-sm">
-                  <Button
-                    variant="secondary"
-                    onClick={() => navigate(`/loads/${load.id}`)}
+        {!loading && !error && loads.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead>
+                <tr className="border-b border-[#252a38] bg-[#1e2330]">
+                  {["Load #", "Trip #", "Route", "First pickup", "Status", "Driver", "Rate"].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loads.map((load) => (
+                  <tr
+                    key={load.id}
+                    className="border-b border-[#252a38] last:border-0 cursor-pointer hover:bg-[#1e2330] transition-colors"
+                    onClick={() => navigate(OPS.LOAD_DETAIL(load.id))}
                   >
-                    View
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </Table>
+                    <td className="px-4 py-2.5 text-sm font-medium text-[#e8ecf4]">
+                      {load.load_number || <span className="text-[#4a5068]">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                      {load.trip_number?.trim() || "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-[#7a8299] max-w-[220px] truncate">
+                      {formatRouteFromStops(load.stops) || "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                      {firstPickupAppointmentDate(load.stops) || "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <StatusBadge status={load.status} />
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                      {load.driver ? `${load.driver.first_name} ${load.driver.last_name}` : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                      {load.rate != null ? `$${load.rate}` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </Card>
+      </div>
     </div>
   );
 }

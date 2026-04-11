@@ -2578,6 +2578,7 @@ export type Load = {
   broker_name_snapshot?: string | null;
   broker_contact_name_snapshot?: string | null;
   broker_contact_phone_snapshot?: string | null;
+  broker_contact_extension_snapshot?: string | null;
   broker_contact_email_snapshot?: string | null;
   broker_id?: number | null;
   broker_contact_id?: number | null;

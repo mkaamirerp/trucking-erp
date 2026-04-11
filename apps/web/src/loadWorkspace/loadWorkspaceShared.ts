@@ -120,12 +120,40 @@ export const LOAD_STATUSES = [
 
 export type DraftStop = LoadStop & { _key: string };
 
+/** Proposed values sourced from the intake pipeline for a given email thread.
+ *  Only fields that the current backend API actually populates are listed here.
+ *  All others are intentionally absent — add them when the backend exposes them. */
+export interface IntakeProposedFields {
+  /** From InboxThreadListItem.linked_broker_name. The only intake-proposed form field the backend exposes today. */
+  brokerNameSnapshot: string | null;
+  /** From InboxThreadListItem.pickup_delivery_summary. Display-only context — not wired to any form input. */
+  pickupDeliverySummary: string | null;
+}
+
+export function emptyIntakeProposed(): IntakeProposedFields {
+  return { brokerNameSnapshot: null, pickupDeliverySummary: null };
+}
+
 export const sectionTitleClass =
   "text-[10px] font-semibold tracking-[0.75px] uppercase text-gray-500 border-b border-gray-200 pb-2 mb-4";
 export const labelClass = "block text-xs font-medium text-gray-600 mb-1";
 export const inputClass =
   "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500";
 export const grid2 = "grid grid-cols-1 gap-4 sm:grid-cols-2";
+
+/** Load workspace form — compact card rhythm (light theme, mockup-inspired hierarchy). */
+export const wsSectionCard = "rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm overflow-hidden";
+export const wsSectionHeader =
+  "flex items-center justify-between gap-2 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2";
+export const wsSectionTitle = "text-[10px] font-bold uppercase tracking-[0.08em] text-[#7a8299]";
+export const wsSectionBody = "px-3.5 py-3";
+export const wsSectionMeta = "text-[10px] font-medium text-[#4a5068]";
+export const wsLabelClass =
+  "block text-[10px] font-semibold uppercase tracking-wide text-[#7a8299] mb-1";
+export const wsInputClass =
+  "w-full rounded-md border border-[#252a38] bg-[#1a1e2a] px-2.5 py-1.5 text-sm text-[#e8ecf4] shadow-sm placeholder:text-[#4a5068] focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/25";
+export const wsGrid2 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2";
+export const wsGrid3 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3";
 
 export function stopToPayload(s: DraftStop, sequence: number) {
   return {

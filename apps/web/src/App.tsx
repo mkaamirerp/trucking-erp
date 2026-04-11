@@ -200,22 +200,8 @@ function App() {
           </Layout>
         }
       />
-      <Route
-        path="/loads/new"
-        element={
-          <Layout>
-            <LoadWorkspacePage />
-          </Layout>
-        }
-      />
-      <Route
-        path="/loads/:id"
-        element={
-          <Layout>
-            <LoadWorkspacePage />
-          </Layout>
-        }
-      />
+      <Route path="/loads/new" element={<LoadWorkspacePage />} />
+      <Route path="/loads/:id" element={<LoadWorkspacePage />} />
       <Route
         path="/payroll/pay-periods"
         element={

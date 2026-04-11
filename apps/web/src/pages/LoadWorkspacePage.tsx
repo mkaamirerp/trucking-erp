@@ -2,7 +2,7 @@
  * Single load workspace route — manual create, saved load edit, or intake verify/edit.
  * Field UI is only in LoadWorkspaceForm; this page owns layout, data, save, and side panel.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Button from "@/components/Button";
 import StatusBadge from "@/components/StatusBadge";
@@ -10,6 +10,7 @@ import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
   createLoad,
+  getEmailThread,
   getEmailThreadMessages,
   getLoad,
   getLoadNotes,
@@ -25,6 +26,7 @@ import {
   type CustomsBroker,
   type Driver,
   type InboxMessageItem,
+  type InboxThreadListItem,
   type Load,
   type LoadNote,
   type Trailer,
@@ -36,11 +38,13 @@ import { LoadWorkspaceForm } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
   buildLoadPersistPayload,
   buildVerificationTabIndexMap,
+  emptyIntakeProposed,
   initialManualCreateStops,
   newDraftStop,
-  sectionTitleClass,
   stopsToDraft,
+  wsSectionTitle,
   type DraftStop,
+  type IntakeProposedFields,
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
 
@@ -66,7 +70,37 @@ function recipientPreview(raw: unknown): string {
   return "—";
 }
 
-function IntakeEmailSidePanel({
+function WorkspaceModeReadout({ mode }: { mode: LoadWorkspaceMode }) {
+  const items: { id: LoadWorkspaceMode; label: string }[] = [
+    { id: "manual", label: "Manual" },
+    { id: "intake", label: "Intake" },
+    { id: "detail", label: "Detail" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Mode</span>
+      <div
+        className="inline-flex rounded-md border border-[#252a38] bg-[#1e2330] p-0.5"
+        role="group"
+        aria-label="Workspace mode (determined by route, not clickable)"
+      >
+        {items.map((x) => (
+          <span
+            key={x.id}
+            className={`rounded px-2.5 py-1 text-[11px] font-semibold ${
+              mode === x.id ? "bg-amber-500 text-slate-900 shadow-sm" : "text-[#4a5068]"
+            }`}
+            aria-current={mode === x.id ? "true" : undefined}
+          >
+            {x.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IntakeEmailRail({
   threadId,
   loading,
   error,
@@ -77,43 +111,50 @@ function IntakeEmailSidePanel({
   error: string | null;
   messages: InboxMessageItem[];
 }) {
+  const head = messages[0];
   return (
-    <div className="sticky top-20 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className={sectionTitleClass}>Source email</div>
-      <p className="mb-3 text-xs text-gray-500">
-        Thread #{threadId}. Cross-check against fields on the right; editing is only in the load form.
-      </p>
-      <div className="max-h-[min(70vh,36rem)] overflow-auto rounded-md border border-gray-200 bg-slate-900 p-3">
-        {loading ? <div className="text-sm text-slate-400">Loading messages…</div> : null}
-        {!loading && error ? <div className="text-sm text-red-400">{error}</div> : null}
+    <div className="flex h-full min-h-0 flex-col bg-[#141720]">
+      <div className="flex shrink-0 items-center justify-between border-b border-[#252a38] px-3.5 py-2.5">
+        <span className={wsSectionTitle}>Source email</span>
+        <span className="text-[10px] text-[#4a5068]">Thread #{threadId}</span>
+      </div>
+      {head ? (
+        <div className="shrink-0 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2.5">
+          <div className="text-xs font-semibold text-[#e8ecf4]">{head.from_email || "—"}</div>
+          {head.subject ? <div className="line-clamp-2 text-[11px] text-[#7a8299]">{head.subject}</div> : null}
+          <div className="text-[10px] text-[#4a5068]">
+            {formatWhen(head.received_at || head.sent_at || head.created_at)}
+          </div>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-3">
+        {loading ? <div className="text-xs text-slate-400">Loading messages…</div> : null}
+        {!loading && error ? <div className="text-xs text-red-400">{error}</div> : null}
         {!loading && !error && messages.length === 0 ? (
-          <div className="text-sm text-slate-500">No messages in this thread.</div>
+          <div className="text-xs text-slate-500">No messages in this thread.</div>
         ) : null}
         {!loading && !error
           ? messages.map((m) => {
               const outbound = (m.direction || "").toLowerCase() === "outbound";
               return (
-                <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
+                <div key={m.id} className={`mb-3 flex ${outbound ? "justify-end" : "justify-start"}`}>
                   <article
-                    className={`w-full max-w-[820px] rounded-xl border p-3 ${
-                      outbound ? "border-blue-800 bg-slate-950" : "border-slate-700 bg-slate-950/80"
+                    className={`max-w-[min(100%,280px)] rounded-lg border px-2.5 py-2 text-[11px] leading-relaxed ${
+                      outbound ? "border-blue-900/60 bg-slate-900" : "border-slate-700 bg-slate-900/90"
                     }`}
                   >
-                    <div className="mb-2 grid gap-1 text-xs text-slate-400 md:grid-cols-2">
-                      <span>From: {m.from_email || "—"}</span>
-                      <span className="md:text-right">{formatWhen(m.received_at || m.sent_at || m.created_at)}</span>
-                      <span className="md:col-span-2">To: {recipientPreview(m.to_json)}</span>
-                      {m.subject ? <span className="md:col-span-2">Subject: {m.subject}</span> : null}
+                    <div className="mb-1.5 space-y-0.5 text-[10px] text-slate-400">
+                      <div>From: {m.from_email || "—"}</div>
+                      <div>{formatWhen(m.received_at || m.sent_at || m.created_at)}</div>
+                      {m.subject ? <div className="text-slate-300">{m.subject}</div> : null}
                     </div>
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-slate-100">
-                      {m.body_text || m.snippet || "No message body available."}
-                    </p>
+                    <p className="whitespace-pre-wrap text-slate-100">{m.body_text || m.snippet || "—"}</p>
                     {m.attachments && m.attachments.length > 0 ? (
-                      <ul className="mt-2 space-y-1 text-xs text-slate-400">
+                      <ul className="mt-1.5 space-y-0.5 text-[10px] text-slate-400">
                         {m.attachments.map((a) => (
                           <li key={a.id}>
-                            <span className="text-slate-200">{a.filename || a.external_attachment_id}</span>
-                            {a.mime_type ? <span className="text-slate-500"> · {a.mime_type}</span> : null}
+                            {a.filename || a.external_attachment_id}
+                            {a.mime_type ? ` · ${a.mime_type}` : ""}
                           </li>
                         ))}
                       </ul>
@@ -123,6 +164,56 @@ function IntakeEmailSidePanel({
               );
             })
           : null}
+      </div>
+    </div>
+  );
+}
+
+function ReferenceTextRail({
+  title,
+  hint,
+  docLines,
+  docScrollRef,
+  docLineRefs,
+  activeDocLine,
+}: {
+  title: string;
+  hint: ReactNode;
+  docLines: string[];
+  docScrollRef: RefObject<HTMLDivElement>;
+  docLineRefs: MutableRefObject<Map<number, HTMLDivElement | null>>;
+  activeDocLine: number | null;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-[#141720]">
+      <div className="shrink-0 border-b border-[#252a38] px-3.5 py-2.5">
+        <span className={wsSectionTitle}>{title}</span>
+        <p className="mt-1 text-[11px] leading-snug text-[#7a8299]">{hint}</p>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {docLines.length ? (
+          <div
+            ref={docScrollRef}
+            className="rounded-md border border-[#252a38] bg-[#1a1e2a] p-2 font-mono text-[11px] leading-snug text-[#e8ecf4]"
+          >
+            {docLines.map((line, i) => (
+              <div
+                key={i}
+                ref={(el) => {
+                  docLineRefs.current.set(i, el);
+                }}
+                className="whitespace-pre-wrap break-words rounded px-1 py-0.5"
+                style={activeDocLine === i ? { background: "rgba(245,166,35,0.2)" } : undefined}
+              >
+                {line || " "}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed border-[#252a38] bg-[#1a1e2a]/50 px-3 py-6 text-center text-xs text-[#7a8299]">
+            Nothing to show yet — use internal notes in the form.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -139,8 +230,8 @@ function ContextRow({
 }) {
   return (
     <div>
-      <dt className="text-xs text-gray-500">{label}</dt>
-      <dd className={`mt-0.5 text-gray-900 ${mono ? "font-mono text-xs break-all" : ""}`}>{value || "—"}</dd>
+      <dt className="text-xs text-[#7a8299]">{label}</dt>
+      <dd className={`mt-0.5 text-[#e8ecf4] ${mono ? "font-mono text-xs break-all" : ""}`}>{value || "—"}</dd>
     </div>
   );
 }
@@ -177,6 +268,7 @@ export default function LoadWorkspacePage() {
   const [customsMessage, setCustomsMessage] = useState<string | null>(null);
 
   const [intakeMessages, setIntakeMessages] = useState<InboxMessageItem[]>([]);
+  const [intakeThread, setIntakeThread] = useState<InboxThreadListItem | null>(null);
   const [intakeLoading, setIntakeLoading] = useState(false);
   const [intakeError, setIntakeError] = useState<string | null>(null);
 
@@ -261,6 +353,27 @@ export default function LoadWorkspacePage() {
     setLoadNumber(l.load_number || "");
     setBrokerId(l.broker_id ?? null);
     setBrokerContactId(l.broker_contact_id ?? null);
+    if (l.broker_contact) {
+      setBrokerContacts([{
+        id: l.broker_contact.id,
+        broker_id: l.broker_contact.broker_id,
+        name: l.broker_contact.name,
+        first_name: null,
+        last_name: null,
+        role: null,
+        department: null,
+        phone: l.broker_contact.phone ?? null,
+        extension: l.broker_contact.extension ?? null,
+        fax: null,
+        email: l.broker_contact.email ?? null,
+        is_primary: false,
+        notes: null,
+        is_active: true,
+        archived_at: null,
+        created_at: "",
+        updated_at: "",
+      }]);
+    }
     setBrokerNameSnapshot(l.broker_name_snapshot ?? "");
     setBrokerContactNameSnapshot(l.broker_contact_name_snapshot ?? "");
     setBrokerContactPhoneSnapshot(l.broker_contact_phone_snapshot ?? "");
@@ -357,6 +470,7 @@ export default function LoadWorkspacePage() {
   useEffect(() => {
     if (workspaceMode !== "intake" || !hasIntakeThread) {
       setIntakeMessages([]);
+      setIntakeThread(null);
       setIntakeError(null);
       setIntakeLoading(false);
       return;
@@ -364,9 +478,14 @@ export default function LoadWorkspacePage() {
     let cancelled = false;
     setIntakeLoading(true);
     setIntakeError(null);
-    getEmailThreadMessages(intakeThreadId)
-      .then((msgs) => {
-        if (!cancelled) setIntakeMessages(msgs ?? []);
+    Promise.all([
+      getEmailThreadMessages(intakeThreadId),
+      getEmailThread(intakeThreadId),
+    ])
+      .then(([msgs, thread]) => {
+        if (cancelled) return;
+        setIntakeMessages(msgs ?? []);
+        setIntakeThread(thread);
       })
       .catch((err: unknown) => {
         if (!cancelled) setIntakeError(err instanceof Error ? err.message : "Failed to load thread");
@@ -388,6 +507,15 @@ export default function LoadWorkspacePage() {
       .then((p) => setBrokerContacts(p.items || []))
       .catch(() => setBrokerContacts([]));
   }, [brokerId]);
+
+  const intakeProposed = useMemo((): IntakeProposedFields | null => {
+    if (workspaceMode !== "intake" || !intakeThread) return null;
+    return {
+      ...emptyIntakeProposed(),
+      brokerNameSnapshot: intakeThread.linked_broker_name ?? null,
+      pickupDeliverySummary: intakeThread.pickup_delivery_summary ?? null,
+    };
+  }, [workspaceMode, intakeThread]);
 
   const contextSummary = useMemo(() => {
     if (!load) return "";
@@ -650,222 +778,170 @@ export default function LoadWorkspacePage() {
   const routeSubtitle = load ? formatRouteFromStops(load.stops) : "—";
   const hasActiveDispatchTrip = load?.active_dispatch_trip_id != null;
 
-  const shellBg = workspaceMode === "manual" ? "bg-slate-50" : "bg-gray-50";
+  const lidLabel = workspaceMode === "manual" ? "#NEW" : load ? `#${load.id}` : "#—";
+  const headerTitle =
+    workspaceMode === "manual"
+      ? "New load"
+      : `${loadNumber || load!.load_number || "Load"}${
+          brokerNameSnapshot.trim() ? ` · ${brokerNameSnapshot.trim()}` : ""
+        }`;
+  const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
+  const toolBtnSecondary =
+    "rounded-md border border-[#252a38] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[#7a8299] shadow-sm hover:border-[#3a4155] hover:bg-[#252a38]";
 
   return (
-    <div className={`min-h-screen ${shellBg} text-gray-900`}>
-      <header className="sticky top-0 z-10 border-b border-gray-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            {workspaceMode === "manual" ? (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-lg font-bold tracking-tight text-gray-900">New load</h1>
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 ring-1 ring-inset ring-slate-200/80">
-                    Manual entry
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Save creates the load and opens it for ongoing edits.
-                </p>
-              </>
-            ) : workspaceMode === "intake" ? (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-lg font-bold text-gray-900">
-                    Load {loadNumber || load!.load_number}
-                  </h1>
-                  <StatusBadge status={status} />
-                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-900 ring-1 ring-inset ring-amber-200/80">
-                    Intake verify
-                  </span>
-                  {load!.review_required ? (
-                    <span
-                      className="rounded border px-2 py-0.5 text-[11px] font-semibold text-amber-900"
-                      style={{ background: "rgba(245,166,35,0.12)", borderColor: "rgba(245,166,35,0.35)" }}
-                    >
-                      Review required
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Cross-check email on the left; save updates this load.
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-lg font-bold text-gray-900">Load {loadNumber || load!.load_number}</h1>
-                  <StatusBadge status={status} />
-                  {load!.review_required ? (
-                    <span
-                      className="rounded border px-2 py-0.5 text-[11px] font-semibold text-amber-900"
-                      style={{ background: "rgba(245,166,35,0.12)", borderColor: "rgba(245,166,35,0.35)" }}
-                    >
-                      Review required
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-600">
-                  {load!.trip_number?.trim() ? (
-                    <span className="text-gray-700">
-                      Trip <span className="font-mono">{load!.trip_number.trim()}</span>
+    <div className="flex min-h-screen flex-col bg-[#0d0f14] text-[#e8ecf4]">
+      <header className="z-10 shrink-0 border-b border-[#252a38] bg-[#141720]">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+            <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
+              ← Loads
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[11px] text-[#4a5068]">{lidLabel}</div>
+              <h1 className="truncate text-[15px] font-semibold tracking-tight text-[#e8ecf4]">{headerTitle}</h1>
+              {workspaceMode === "detail" && load ? (
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[#7a8299]">
+                  {load.trip_number?.trim() ? (
+                    <span>
+                      Trip <span className="font-mono text-[#7a8299]">{load.trip_number.trim()}</span>
                     </span>
                   ) : (
-                    <span className="italic text-gray-500">No trip number yet</span>
+                    <span className="italic">No trip number</span>
                   )}
-                  <span className="text-gray-500">·</span>
-                  <span>{hasActiveDispatchTrip ? "Dispatch trip linked" : "No dispatch trip linked"}</span>
+                  <span>·</span>
+                  <span>{hasActiveDispatchTrip ? "Dispatch linked" : "No dispatch trip"}</span>
                   {routeSubtitle !== "—" ? (
                     <>
-                      <span className="text-gray-500">·</span>
-                      <span>{routeSubtitle}</span>
+                      <span>·</span>
+                      <span className="max-w-[240px] truncate sm:max-w-md">{routeSubtitle}</span>
                     </>
                   ) : null}
+                  {(load.created_at || load.updated_at) && (
+                    <>
+                      <span>·</span>
+                      <span className="text-[10px] text-[#4a5068]">
+                        {load.created_at ? `Created ${new Date(load.created_at).toLocaleString()}` : ""}
+                        {load.created_at && load.updated_at ? " · " : ""}
+                        {load.updated_at ? `Updated ${new Date(load.updated_at).toLocaleString()}` : ""}
+                      </span>
+                    </>
+                  )}
                 </div>
-                {(load!.created_at || load!.updated_at) && (
-                  <p className="mt-1 text-[11px] text-gray-500">
-                    {load!.created_at ? <>Created {new Date(load!.created_at).toLocaleString()}</> : null}
-                    {load!.created_at && load!.updated_at ? " · " : null}
-                    {load!.updated_at ? <>Updated {new Date(load!.updated_at).toLocaleString()}</> : null}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
-            {workspaceMode === "manual" && saveMessage ? (
-              <div className="w-full max-w-md rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 sm:text-right">
-                {saveMessage}
-              </div>
-            ) : workspaceMode !== "manual" && saveMessage ? (
-              <span className="text-xs text-gray-600">{saveMessage}</span>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button variant="secondary" type="button" onClick={() => navigate(OPS.LOADS)}>
-                Back to list
-              </Button>
-              {workspaceMode === "intake" ? (
-                <Button variant="secondary" type="button" onClick={() => navigate(OPS.INTAKE)}>
-                  Back to intake
-                </Button>
               ) : null}
-              <Button variant="secondary" type="button" onClick={() => navigate(OPS.DISPATCH)}>
-                Dispatch
-              </Button>
               {workspaceMode === "manual" ? (
-                <Button variant="primary" type="button" disabled={saving} onClick={() => void onCreate()}>
-                  {saving ? "Creating…" : "Create load"}
-                </Button>
-              ) : (
-                <Button variant="primary" type="button" disabled={saving} onClick={() => void onSave()}>
-                  {saving ? "Saving…" : "Save load"}
-                </Button>
-              )}
+                <p className="mt-0.5 text-[11px] text-[#7a8299]">Create saves the load and opens it for edits.</p>
+              ) : workspaceMode === "intake" ? (
+                <p className="mt-0.5 text-[11px] text-[#7a8299]">Source rail + save updates this load.</p>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {workspaceMode !== "manual" && load ? <StatusBadge status={status} /> : null}
+              {workspaceMode === "manual" ? (
+                <span className="rounded border border-[#252a38] bg-[#1e2330] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#7a8299]">
+                  Manual
+                </span>
+              ) : null}
+              {workspaceMode === "intake" ? (
+                <span className="rounded border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800">
+                  Intake
+                </span>
+              ) : null}
+              {workspaceMode === "detail" ? (
+                <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                  Detail
+                </span>
+              ) : null}
             </div>
           </div>
+          <WorkspaceModeReadout mode={workspaceMode} />
         </div>
       </header>
 
-      {workspaceMode !== "manual" && load && (load.review_required || contextSummary) ? (
-        <div
-          className="border-b border-amber-200/60 bg-amber-50/90 px-4 py-2 text-xs text-amber-950"
-          style={!load.review_required ? { background: "rgba(245,166,35,0.06)" } : undefined}
-        >
-          <div className="mx-auto max-w-7xl">
-            {load.review_required ? (
-              <span className="font-semibold">
-                Review required — verify intake / broker match before relying on this load.
-              </span>
-            ) : null}
-            {load.review_required && contextSummary ? <span className="mx-2 text-amber-800">·</span> : null}
-            {contextSummary ? <span className="text-amber-900">{contextSummary}</span> : null}
-          </div>
+      <div className="shrink-0 border-b border-[#252a38] bg-[#141720]">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Workspace</span>
+          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
+            Load directory
+          </button>
+          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.DISPATCH)}>
+            Dispatch
+          </button>
+          {workspaceMode === "intake" ? (
+            <button type="button" className={toolBtnSecondary} onClick={() => navigate(intakeQueueUrl)}>
+              Intake queue
+            </button>
+          ) : null}
+          <span className="mx-1 hidden h-5 w-px bg-[#252a38] sm:inline-block" aria-hidden />
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Actions</span>
+          {workspaceMode === "manual" ? (
+            <Button variant="primary" type="button" disabled={saving} onClick={() => void onCreate()}>
+              {saving ? "Creating…" : "Create load"}
+            </Button>
+          ) : (
+            <Button variant="primary" type="button" disabled={saving} onClick={() => void onSave()}>
+              {saving ? "Saving…" : "Save load"}
+            </Button>
+          )}
+          {saveMessage ? (
+            <span
+              className={`ml-auto max-w-full text-[11px] sm:max-w-md ${saveMessage.toLowerCase().includes("saved") || saveMessage.toLowerCase().includes("created") ? "text-emerald-700" : "text-red-700"}`}
+            >
+              {saveMessage}
+            </span>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-12">
-        <aside className="lg:col-span-4">
+      <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col overflow-hidden lg:flex-row">
+        <aside className="flex max-h-[38vh] min-h-0 shrink-0 flex-col border-b border-[#252a38] bg-[#141720] lg:max-h-none lg:w-[320px] lg:border-b-0 lg:border-r lg:border-[#252a38]">
           {workspaceMode === "intake" && hasIntakeThread ? (
-            <IntakeEmailSidePanel
+            <IntakeEmailRail
               threadId={intakeThreadId}
               loading={intakeLoading}
               error={intakeError}
               messages={intakeMessages}
             />
-          ) : workspaceMode === "manual" ? (
-            <div className="sticky top-24 rounded-xl border border-gray-200/90 bg-white p-5 shadow-sm ring-1 ring-black/[0.02]">
-              <div className={sectionTitleClass}>Rate confirmation</div>
-              <p className="mb-3 text-xs leading-relaxed text-gray-500">
-                Paste rate confirmation text here. Lines highlight as you tab through the form. Saved as{" "}
-                <code className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-700">internal_notes</code> on
-                create.
-              </p>
-              {docLines.length ? (
-                <div
-                  ref={docScrollRef}
-                  className="max-h-[min(70vh,36rem)] overflow-auto rounded-lg border border-gray-200 bg-slate-50/80 p-2 text-xs leading-snug text-gray-900 font-mono shadow-inner"
-                >
-                  {docLines.map((line, i) => (
-                    <div
-                      key={i}
-                      ref={(el) => {
-                        docLineRefs.current.set(i, el);
-                      }}
-                      className="whitespace-pre-wrap break-words px-2 py-0.5 rounded"
-                      style={activeDocLine === i ? { background: "rgba(245,166,35,0.18)" } : undefined}
-                    >
-                      {line || " "}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-lg border border-dashed border-gray-200 bg-slate-50/50 px-3 py-4 text-sm text-gray-500">
-                  Paste rate confirmation text in{" "}
-                  <span className="font-medium text-gray-700">Documents &amp; notes → Internal notes</span> to see it
-                  here.
-                </p>
-              )}
-            </div>
           ) : (
-            <div className="sticky top-20 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <div className={sectionTitleClass}>Source document (PDF excerpt)</div>
-              <p className="mb-2 text-xs text-gray-500">
-                Text stored on the load (<code className="text-[10px]">internal_notes</code>). Edit the full field under{" "}
-                <strong>Notes</strong> — this panel updates as you type.
-              </p>
-              {docLines.length ? (
-                <div
-                  ref={docScrollRef}
-                  className="max-h-[min(70vh,36rem)] overflow-auto rounded-md border border-gray-200 bg-gray-50 p-2 text-xs leading-snug text-gray-900 font-mono"
-                >
-                  {docLines.map((line, i) => (
-                    <div
-                      key={i}
-                      ref={(el) => {
-                        docLineRefs.current.set(i, el);
-                      }}
-                      className="whitespace-pre-wrap break-words px-2 py-0.5 rounded"
-                      style={activeDocLine === i ? { background: "rgba(245,166,35,0.18)" } : undefined}
-                    >
-                      {line || " "}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-gray-500">No excerpt yet — paste or save from intake under Notes.</p>
-              )}
-            </div>
+            <ReferenceTextRail
+              title={workspaceMode === "manual" ? "Rate confirmation" : "Source document"}
+              hint={
+                workspaceMode === "manual" ? (
+                  <>
+                    Mirrors <code className="rounded bg-[#252a38] px-1 text-[10px]">internal_notes</code> from the form.
+                    Tab fields to highlight lines.
+                  </>
+                ) : (
+                  <>
+                    Text from <code className="rounded bg-[#252a38] px-1 text-[10px]">internal_notes</code>. Edit under
+                    Notes in the form.
+                  </>
+                )
+              }
+              docLines={docLines}
+              docScrollRef={docScrollRef}
+              docLineRefs={docLineRefs}
+              activeDocLine={activeDocLine}
+            />
           )}
         </aside>
 
-        <main className="space-y-6 lg:col-span-8">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-[#0d0f14] p-3 lg:p-4">
+          {workspaceMode !== "manual" && load?.review_required ? (
+            <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+              <p className="text-[11px] leading-snug text-amber-300">
+                Review required — verify intake / broker match before relying on this load.
+              </p>
+            </div>
+          ) : null}
+
           {workspaceMode !== "manual" && load ? (
-            <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-100 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Load context
-              </div>
-              <div className="px-4 py-4 text-sm">
+            <details className="mb-3 rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm">
+              <summary className="cursor-pointer list-none px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#7a8299] marker:content-none [&::-webkit-details-marker]:hidden">
+                System context · trip, match, resolved labels
+              </summary>
+              <div className="border-t border-[#252a38] px-3 py-3 text-xs">
                 <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <ContextRow label="Trip number" value={load.trip_number?.trim() || "—"} mono />
                   <ContextRow label="Dispatch trip" value={hasActiveDispatchTrip ? "Linked" : "—"} />
@@ -877,7 +953,7 @@ export default function LoadWorkspacePage() {
                 ) : null}
                 {load.is_duplicate_of_load_id != null ? (
                   <p className="mt-3 text-xs">
-                    <span className="text-gray-500">Possible duplicate — </span>
+                    <span className="text-[#7a8299]">Possible duplicate — </span>
                     <Link
                       to={OPS.LOAD_DETAIL(load.is_duplicate_of_load_id)}
                       className="font-medium text-indigo-600 hover:underline"
@@ -886,8 +962,8 @@ export default function LoadWorkspacePage() {
                     </Link>
                   </p>
                 ) : null}
-                <div className="mt-4 border-t border-gray-100 pt-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Resolved labels</p>
+                <div className="mt-4 border-t border-[#252a38] pt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">Resolved labels</p>
                   <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-sm">
                     <ContextRow label="Broker" value={load.broker?.name || "—"} />
                     <ContextRow label="Broker contact" value={load.broker_contact?.name || "—"} />
@@ -908,11 +984,11 @@ export default function LoadWorkspacePage() {
                   </dl>
                 </div>
                 {contextStops.length > 0 ? (
-                  <div className="mt-4 border-t border-gray-100 pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  <div className="mt-4 border-t border-[#252a38] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">
                       Stop schedules (read-only)
                     </p>
-                    <ul className="space-y-1 text-xs text-gray-700">
+                    <ul className="space-y-1 text-xs text-[#7a8299]">
                       {contextStops.map((s, i) => (
                         <li key={s.id || `ctx-${i}`}>
                           Stop {(s.sequence ?? i) + 1}
@@ -928,8 +1004,8 @@ export default function LoadWorkspacePage() {
                   </div>
                 ) : null}
                 {(load.document_snapshot_confirmed_at || load.customs_snapshot) && (
-                  <div className="mt-4 border-t border-gray-100 pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Customs snapshot</p>
+                  <div className="mt-4 border-t border-[#252a38] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">Customs snapshot</p>
                     <dl className="space-y-1 text-xs">
                       <ContextRow
                         label="Confirmed at"
@@ -942,7 +1018,7 @@ export default function LoadWorkspacePage() {
                       <ContextRow label="Snapshot version" value={String(load.document_snapshot_version ?? 0)} />
                     </dl>
                     {load.customs_snapshot && (
-                      <ul className="mt-2 space-y-0.5 text-xs text-gray-600">
+                      <ul className="mt-2 space-y-0.5 text-xs text-[#7a8299]">
                         <li>{load.customs_snapshot.legal_name_snapshot || "—"}</li>
                         <li>{load.customs_snapshot.phone_primary_snapshot || ""}</li>
                         <li>{load.customs_snapshot.generic_email_snapshot || ""}</li>
@@ -951,11 +1027,15 @@ export default function LoadWorkspacePage() {
                   </div>
                 )}
               </div>
-            </div>
+              {contextSummary ? (
+                <p className="mt-2 border-t border-[#252a38] pt-2 text-[11px] text-amber-400/85">{contextSummary}</p>
+              ) : null}
+            </details>
           ) : null}
 
           <LoadWorkspaceForm
             mode={workspaceMode}
+            intakeProposed={intakeProposed}
             saving={saving}
             freightBrokers={freightBrokers}
             brokerContacts={brokerContacts}

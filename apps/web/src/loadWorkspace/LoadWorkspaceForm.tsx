@@ -13,19 +13,30 @@ import type {
 } from "@/api";
 import {
   LOAD_STATUSES,
-  labelClass,
-  inputClass,
-  grid2,
-  sectionTitleClass,
   docFocusForStopAddress,
   docFocusForStopAppointment,
   docFocusForStopReference,
+  wsGrid2,
+  wsGrid3,
+  wsInputClass,
+  wsLabelClass,
+  wsSectionBody,
+  wsSectionCard,
+  wsSectionHeader,
+  wsSectionMeta,
+  wsSectionTitle,
   type DraftStop,
+  type IntakeProposedFields,
   type LoadWorkspaceMode,
 } from "./loadWorkspaceShared";
 
+const L = wsLabelClass;
+const I = wsInputClass;
+
 export type LoadWorkspaceFormProps = {
   mode: LoadWorkspaceMode;
+  /** Intake-pipeline proposed values. Null in manual/detail. Only fields the backend currently exposes. */
+  intakeProposed: IntakeProposedFields | null;
   saving: boolean;
   freightBrokers: Broker[];
   brokerContacts: BrokerContact[];
@@ -109,18 +120,31 @@ export type LoadWorkspaceFormProps = {
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   const modeCreate = p.mode === "manual";
+  const isIntake = p.mode === "intake";
+  const ip = p.intakeProposed;
+
+  /** Returns blue-tint inline style when a proposed value exists for this field; {} otherwise. */
+  function prefill(proposedVal: string | null | undefined): React.CSSProperties {
+    if (!proposedVal) return {};
+    return { borderColor: "rgba(77,159,255,0.3)", backgroundColor: "rgba(77,159,255,0.04)", color: "#4d9fff" };
+  }
 
   return (
-    <div className="space-y-5">
-
-      {/* ── 1. BROKER & CONTACT ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Broker & contact</h2>
-        <div className={grid2}>
+    <div className="flex flex-col gap-2.5 pb-4">
+      {/* Broker */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Broker</span>
+          {!modeCreate && p.brokerNameSnapshot.trim() ? (
+            <span className="text-[10px] font-medium text-sky-400">Snapshot · {p.brokerNameSnapshot.trim()}</span>
+          ) : null}
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid2}>
           <div>
-            <label className={labelClass}>Broker</label>
+            <label className={L}>Broker</label>
             <select
-              className={inputClass}
+              className={I}
               value={p.brokerId ?? ""}
               onChange={(e) => {
                 const v = e.target.value;
@@ -135,9 +159,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
           <div>
-            <label className={labelClass}>Contact</label>
+            <label className={L}>Contact</label>
             <select
-              className={inputClass}
+              className={I}
               value={p.brokerContactId ?? ""}
               onChange={(e) => {
                 const v = e.target.value;
@@ -152,50 +176,51 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
           <div className="sm:col-span-2">
-            <label className={labelClass}>Broker name</label>
+            <label className={L}>Broker name</label>
             <input
-              className={inputClass}
+              className={I}
+              style={prefill(ip?.brokerNameSnapshot ?? null)}
               value={p.brokerNameSnapshot}
               onChange={(e) => p.setBrokerNameSnapshot(e.target.value)}
               placeholder="As shown on the rate confirmation"
             />
           </div>
           <div>
-            <label className={labelClass}>Contact name</label>
+            <label className={L}>Contact name</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.brokerContactNameSnapshot}
               onChange={(e) => p.setBrokerContactNameSnapshot(e.target.value)}
             />
           </div>
           <div>
-            <label className={labelClass}>Contact phone</label>
+            <label className={L}>Contact phone</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.brokerContactPhoneSnapshot}
               onChange={(e) => p.setBrokerContactPhoneSnapshot(e.target.value)}
             />
           </div>
           <div>
-            <label className={labelClass}>Extension</label>
+            <label className={L}>Extension</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.brokerContactExtensionSnapshot}
               onChange={(e) => p.setBrokerContactExtensionSnapshot(e.target.value)}
             />
           </div>
           <div>
-            <label className={labelClass}>Contact email</label>
+            <label className={L}>Contact email</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.brokerContactEmailSnapshot}
               onChange={(e) => p.setBrokerContactEmailSnapshot(e.target.value)}
             />
           </div>
           <div className="sm:col-span-2">
-            <label className={labelClass}>Broker load reference</label>
+            <label className={L}>Broker load reference</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.brokerLoadReference}
               tabIndex={p.verificationTabIndex.get("brokerLoadReference")}
               onChange={(e) => p.setBrokerLoadReference(e.target.value)}
@@ -209,36 +234,50 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             />
           </div>
         </div>
+        </div>
       </section>
 
-      {/* ── 2. STOPS ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Stops</h2>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-gray-500 flex-1">
-            {modeCreate
-              ? "Saving creates the load with this full stop list."
-              : "Saving replaces the full ordered stop list on the server (full-array PATCH)."}
-          </p>
-          <Button variant="secondary" type="button" onClick={p.addStop}>
-            Add stop
-          </Button>
+      {/* Stops */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Stops</span>
+          <span className={wsSectionMeta}>
+            {p.sortedDraftStops.length} stop{p.sortedDraftStops.length === 1 ? "" : "s"}
+          </span>
         </div>
-        <div className="space-y-4">
+        <div className={wsSectionBody}>
+        <p className="mb-2 text-[11px] text-[#7a8299]">
+          {modeCreate
+            ? "Create saves this full stop list."
+            : "Save replaces the ordered stop list on the server (full-array PATCH)."}
+        </p>
+        {isIntake && ip?.pickupDeliverySummary ? (
+          <p className="mb-2 rounded border border-sky-900/40 bg-sky-950/30 px-2.5 py-1.5 text-[11px] text-sky-400">
+            Intake context: {ip.pickupDeliverySummary}
+          </p>
+        ) : null}
+        <div className="space-y-2">
           {p.sortedDraftStops.length === 0 ? (
-            <p className="text-sm text-gray-600">No stops — add at least pickup and delivery for most workflows.</p>
+            <p className="py-4 text-center text-xs text-[#7a8299]">No stops yet — add pickup and delivery.</p>
           ) : (
-            p.sortedDraftStops.map((stop, idx) => (
+            p.sortedDraftStops.map((stop, idx) => {
+              const u = (stop.stop_type || "").toUpperCase();
+              const isPu = u === "PICKUP";
+              const isDr = u === "DELIVERY" || u === "DROP";
+              const edge = isPu ? "border-l-emerald-500" : isDr ? "border-l-rose-500" : "border-l-slate-300";
+              return (
               <div
                 key={stop._key}
-                className="rounded-lg border border-gray-200 bg-gray-50/80 p-4 shadow-inner"
+                className={`rounded-md border border-[#252a38] bg-[#1e2330] py-2.5 pl-2.5 pr-3 shadow-sm border-l-[3px] ${edge}`}
               >
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Stop {idx + 1}
-                    {stop.id <= 0 ? (
-                      <span className="ml-2 font-normal normal-case text-gray-400">· new</span>
-                    ) : null}
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span
+                    className={`inline-block rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                      isPu ? "bg-emerald-900/40 text-emerald-400" : isDr ? "bg-rose-900/40 text-rose-400" : "bg-[#252a38] text-[#7a8299]"
+                    }`}
+                  >
+                    {stop.stop_type || "STOP"} · {idx + 1}
+                    {stop.id <= 0 ? <span className="ml-1 font-normal normal-case text-[#4a5068]">· new</span> : null}
                   </span>
                   <div className="flex flex-wrap gap-1">
                     <Button
@@ -269,11 +308,11 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     </Button>
                   </div>
                 </div>
-                <div className={grid2}>
+                <div className={wsGrid2}>
                   <div>
-                    <label className={labelClass}>Stop type</label>
+                    <label className={L}>Stop type</label>
                     <select
-                      className={inputClass}
+                      className={I}
                       value={stop.stop_type}
                       onChange={(e) => p.updateStop(stop._key, { stop_type: e.target.value })}
                     >
@@ -283,9 +322,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     </select>
                   </div>
                   <div>
-                    <label className={labelClass}>Sequence</label>
+                    <label className={L}>Sequence</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       inputMode="numeric"
                       value={String(stop.sequence ?? 0)}
                       onChange={(e) =>
@@ -294,9 +333,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelClass}>Facility name</label>
+                    <label className={L}>Facility name</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.facility_name ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::facility`)}
                       onChange={(e) => p.updateStop(stop._key, { facility_name: e.target.value })}
@@ -304,9 +343,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelClass}>Street</label>
+                    <label className={L}>Street</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.street ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::street`)}
                       onChange={(e) => p.updateStop(stop._key, { street: e.target.value })}
@@ -314,9 +353,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>City</label>
+                    <label className={L}>City</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.city ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::city`)}
                       onChange={(e) => p.updateStop(stop._key, { city: e.target.value })}
@@ -324,9 +363,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>State / province</label>
+                    <label className={L}>State / province</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.state_or_province ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::state`)}
                       onChange={(e) => p.updateStop(stop._key, { state_or_province: e.target.value })}
@@ -334,9 +373,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Postal code</label>
+                    <label className={L}>Postal code</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.postal_code ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::postal`)}
                       onChange={(e) => p.updateStop(stop._key, { postal_code: e.target.value })}
@@ -344,9 +383,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Country</label>
+                    <label className={L}>Country</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       maxLength={2}
                       value={stop.country ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::country`)}
@@ -355,9 +394,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Reference number</label>
+                    <label className={L}>Reference number</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.reference_number ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::reference`)}
                       onChange={(e) => p.updateStop(stop._key, { reference_number: e.target.value })}
@@ -365,9 +404,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Appointment type</label>
+                    <label className={L}>Appointment type</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.appointment_type ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::apptType`)}
                       onChange={(e) => p.updateStop(stop._key, { appointment_type: e.target.value })}
@@ -375,9 +414,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Appointment date</label>
+                    <label className={L}>Appointment date</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       type="date"
                       value={
                         stop.appointment_date && stop.appointment_date.length >= 10
@@ -390,9 +429,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Appointment time (text)</label>
+                    <label className={L}>Appointment time (text)</label>
                     <input
-                      className={inputClass}
+                      className={I}
                       value={stop.appointment_time_text ?? ""}
                       tabIndex={p.verificationTabIndex.get(`${stop._key}::apptTime`)}
                       onChange={(e) => p.updateStop(stop._key, { appointment_time_text: e.target.value })}
@@ -400,18 +439,18 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelClass}>Stop notes</label>
+                    <label className={L}>Stop notes</label>
                     <textarea
-                      className={inputClass}
+                      className={I}
                       rows={2}
                       value={stop.notes ?? ""}
                       onChange={(e) => p.updateStop(stop._key, { notes: e.target.value })}
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className={labelClass}>Commodity notes</label>
+                    <label className={L}>Commodity notes</label>
                     <textarea
-                      className={inputClass}
+                      className={I}
                       rows={2}
                       value={stop.commodity_notes ?? ""}
                       onChange={(e) => p.updateStop(stop._key, { commodity_notes: e.target.value })}
@@ -419,27 +458,39 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                   </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
+        </div>
+        <button
+          type="button"
+          onClick={p.addStop}
+          className="mt-2 w-full rounded-md border border-dashed border-[#252a38] bg-transparent py-2 text-center text-[11px] font-medium text-[#4a5068] transition hover:border-amber-400 hover:text-amber-400"
+        >
+          + Add stop
+        </button>
         </div>
       </section>
 
-      {/* ── 3. FREIGHT & EQUIPMENT ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Freight & equipment</h2>
-        <div className={grid2}>
+      {/* Freight & equipment */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Freight & equipment</span>
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid2}>
           <div>
-            <label className={labelClass}>Mode</label>
+            <label className={L}>Mode</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.freightMode}
               onChange={(e) => p.setFreightMode(e.target.value)}
             />
           </div>
           <div>
-            <label className={labelClass}>Equipment type</label>
+            <label className={L}>Equipment type</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.equipmentType}
               tabIndex={p.verificationTabIndex.get("equipmentType")}
               onChange={(e) => p.setEquipmentType(e.target.value)}
@@ -452,9 +503,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             />
           </div>
           <div>
-            <label className={labelClass}>Trailer type</label>
+            <label className={L}>Trailer type</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.trailerType}
               tabIndex={p.verificationTabIndex.get("trailerType")}
               onChange={(e) => p.setTrailerType(e.target.value)}
@@ -477,17 +528,17 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             />
           </div>
           <div>
-            <label className={labelClass}>Trailer size</label>
+            <label className={L}>Trailer size</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.trailerSize}
               onChange={(e) => p.setTrailerSize(e.target.value)}
             />
           </div>
           <div className="sm:col-span-2">
-            <label className={labelClass}>Commodity</label>
+            <label className={L}>Commodity</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.commodity}
               tabIndex={p.verificationTabIndex.get("commodity")}
               onChange={(e) => p.setCommodity(e.target.value)}
@@ -508,9 +559,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             />
           </div>
           <div>
-            <label className={labelClass}>Est. weight (lb)</label>
+            <label className={L}>Est. weight (lb)</label>
             <input
-              className={inputClass}
+              className={I}
               inputMode="numeric"
               value={p.estimatedWeight}
               tabIndex={p.verificationTabIndex.get("estimatedWeight")}
@@ -532,9 +583,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             />
           </div>
           <div>
-            <label className={labelClass}>Hazmat</label>
+            <label className={L}>Hazmat</label>
             <select
-              className={inputClass}
+              className={I}
               value={p.hazmat}
               onChange={(e) => p.setHazmat(e.target.value as "unset" | "yes" | "no")}
             >
@@ -544,32 +595,103 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
           <div>
-            <label className={labelClass}>Temperature</label>
+            <label className={L}>Temperature</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.temperatureRequirement}
               onChange={(e) => p.setTemperatureRequirement(e.target.value)}
             />
           </div>
           <div>
-            <label className={labelClass}>Pallet / case count</label>
+            <label className={L}>Pallet / case count</label>
             <input
-              className={inputClass}
+              className={I}
               value={p.palletCaseCount}
               onChange={(e) => p.setPalletCaseCount(e.target.value)}
             />
           </div>
         </div>
+        </div>
       </section>
 
-      {/* ── 4. ASSIGNMENT ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Assignment</h2>
-        <div className={grid2}>
+      {/* Financials */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Financials</span>
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid3}>
           <div>
-            <label className={labelClass}>Driver</label>
+            <label className={L}>Load number</label>
+            <input
+              className={I}
+              value={p.loadNumber}
+              tabIndex={p.verificationTabIndex.get("loadNumber")}
+              onChange={(e) => p.setLoadNumber(e.target.value)}
+              placeholder="Internal load #"
+            />
+          </div>
+          <div>
+            <label className={L}>Linehaul rate</label>
+            <input
+              className={I}
+              inputMode="decimal"
+              value={p.rate}
+              tabIndex={p.verificationTabIndex.get("rate")}
+              onChange={(e) => p.setRate(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [p.rate, "rate", "linehaul", "$", "total", "amount"],
+                  fallbackToken: "rate",
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={L}>Customer rate</label>
+            <input
+              className={I}
+              inputMode="decimal"
+              value={p.customerRate}
+              onChange={(e) => p.setCustomerRate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={L}>Miles (loaded)</label>
+            <input
+              className={I}
+              inputMode="numeric"
+              value={p.miles}
+              onChange={(e) => p.setMiles(e.target.value)}
+            />
+          </div>
+        </div>
+        </div>
+      </section>
+
+      {/* Assignment */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Assignment</span>
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid2}>
+          <div>
+            <label className={L}>Status</label>
             <select
-              className={inputClass}
+              className={I}
+              value={p.status}
+              onChange={(e) => p.setStatus(e.target.value)}
+            >
+              {LOAD_STATUSES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={L}>Driver</label>
+            <select
+              className={I}
               value={p.driverId ?? ""}
               onChange={(e) => {
                 const v = e.target.value;
@@ -585,9 +707,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
           <div>
-            <label className={labelClass}>Truck</label>
+            <label className={L}>Truck</label>
             <select
-              className={inputClass}
+              className={I}
               value={p.truckId ?? ""}
               onChange={(e) => {
                 const v = e.target.value;
@@ -603,9 +725,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
           <div>
-            <label className={labelClass}>Trailer</label>
+            <label className={L}>Trailer</label>
             <select
-              className={inputClass}
+              className={I}
               value={p.trailerAssetId ?? ""}
               onChange={(e) => {
                 const v = e.target.value;
@@ -621,80 +743,21 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
         </div>
-      </section>
-
-      {/* ── 5. RATES & IDENTITY ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Rates & identity</h2>
-        <div className={grid2}>
-          <div>
-            <label className={labelClass}>Status</label>
-            <select
-              className={inputClass}
-              value={p.status}
-              onChange={(e) => p.setStatus(e.target.value)}
-            >
-              {LOAD_STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Load number</label>
-            <input
-              className={inputClass}
-              value={p.loadNumber}
-              tabIndex={p.verificationTabIndex.get("loadNumber")}
-              onChange={(e) => p.setLoadNumber(e.target.value)}
-              placeholder="Internal load #"
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Linehaul rate</label>
-            <input
-              className={inputClass}
-              inputMode="decimal"
-              value={p.rate}
-              tabIndex={p.verificationTabIndex.get("rate")}
-              onChange={(e) => p.setRate(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [p.rate, "rate", "linehaul", "$", "total", "amount"],
-                  fallbackToken: "rate",
-                })
-              }
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Customer rate</label>
-            <input
-              className={inputClass}
-              inputMode="decimal"
-              value={p.customerRate}
-              onChange={(e) => p.setCustomerRate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={labelClass}>Miles (loaded)</label>
-            <input
-              className={inputClass}
-              inputMode="numeric"
-              value={p.miles}
-              onChange={(e) => p.setMiles(e.target.value)}
-            />
-          </div>
         </div>
       </section>
 
-      {/* ── 6. CUSTOMS ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Customs</h2>
+      {/* Customs */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Customs</span>
+        </div>
+        <div className={wsSectionBody}>
         {p.customsMessage ? <p className="mb-3 text-sm text-gray-700">{p.customsMessage}</p> : null}
         <div className="space-y-4">
           <div>
-            <label className={labelClass}>Customs broker</label>
+            <label className={L}>Customs broker</label>
             <select
-              className={inputClass}
+              className={I}
               disabled={p.saving || p.customsBrokerLocked}
               value={p.customsBrokerId ?? ""}
               onChange={p.onCustomsBrokerChange}
@@ -711,7 +774,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 Stored on the new load. Document snapshot confirmation is available after you create the load.
               </p>
             ) : !p.customsBrokerLocked ? (
-              <p className="mt-1 text-xs text-amber-800">
+              <p className="mt-1 text-xs text-amber-400">
                 Changing this selection saves immediately (before snapshot confirm).
               </p>
             ) : null}
@@ -736,39 +799,43 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               </p>
             ))}
         </div>
+        </div>
       </section>
 
-      {/* ── 7. DOCUMENTS & NOTES ── */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h2 className={sectionTitleClass}>Documents & notes</h2>
+      {/* Notes & documents */}
+      <section className={wsSectionCard}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Notes & documents</span>
+        </div>
+        <div className={wsSectionBody}>
         <div>
-          <label className={labelClass}>Internal notes (load)</label>
+          <label className={L}>Internal notes (load)</label>
           <textarea
-            className={inputClass}
-            rows={6}
+            className={I}
+            rows={5}
             value={p.internalNotes}
             onChange={(e) => p.setInternalNotes(e.target.value)}
             placeholder="e.g. rate confirmation excerpt, intake text…"
           />
         </div>
         {p.showOperationalNotesTimeline ? (
-          <div className="mt-6 border-t border-gray-100 pt-4">
-            <p className={labelClass}>Operational notes (timeline)</p>
-            <ul className="max-h-48 space-y-2 overflow-y-auto rounded-md border border-gray-100 bg-gray-50 p-3 text-sm">
+          <div className="mt-4 border-t border-[#252a38] pt-3">
+            <p className={L}>Operational notes (timeline)</p>
+            <ul className="mt-2 max-h-44 space-y-2 overflow-y-auto rounded-md border border-[#252a38] bg-[#1a1e2a] p-2.5 text-sm">
               {p.loadNotes.length === 0 ? (
-                <li className="text-gray-500">No notes yet.</li>
+                <li className="text-xs text-[#7a8299]">No notes yet.</li>
               ) : (
                 p.loadNotes.map((n) => (
-                  <li key={n.id} className="border-b border-gray-200 pb-2 last:border-0">
-                    <p className="text-gray-900">{n.body}</p>
-                    <p className="text-xs text-gray-500">{new Date(n.created_at).toLocaleString()}</p>
+                  <li key={n.id} className="border-b border-[#252a38] pb-2 last:border-0">
+                    <p className="text-[#e8ecf4]">{n.body}</p>
+                    <p className="text-[10px] text-[#4a5068]">{new Date(n.created_at).toLocaleString()}</p>
                   </li>
                 ))
               )}
             </ul>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <input
-                className={inputClass}
+                className={`${I} min-w-[12rem] flex-1`}
                 placeholder="Add operational note…"
                 value={p.newNoteBody}
                 onChange={(e) => p.setNewNoteBody(e.target.value)}
@@ -785,6 +852,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </div>
           </div>
         ) : null}
+        </div>
       </section>
 
       <p className="text-center text-[10px] text-gray-400">UI bundle {__UI_BUILD_ID__}</p>
