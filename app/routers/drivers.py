@@ -18,6 +18,8 @@ from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
+# Operational dispatch roster: rows in `drivers` (not PersonApplication drafts). DRIVER approvals
+# materialize rows via driver_onboarding; admin may also POST here explicitly.
 
 @router.post("", response_model=DriverOut, status_code=status.HTTP_201_CREATED)
 async def create_driver(
@@ -26,6 +28,12 @@ async def create_driver(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    """Explicit operational admin create for the dispatch roster (`drivers` table).
+
+    This is not the onboarding approval path; canonical DRIVER PersonApplication approval
+    materializes or consolidates rows in the same table via driver_onboarding (see
+    `_upsert_operational_driver_for_person`).
+    """
     driver = Driver(**payload.model_dump(), tenant_id=tenant_id)
     db.add(driver)
     await db.commit()
@@ -42,6 +50,7 @@ async def list_drivers(
     q: str | None = None,
     include_inactive: bool = False,
 ):
+    """List approved operational drivers for dispatch (tenant `drivers` table)."""
     stmt = select(Driver).where(Driver.tenant_id == tenant_id).order_by(Driver.id.desc())
 
     if not include_inactive:

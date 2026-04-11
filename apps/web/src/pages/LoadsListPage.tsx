@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import StatusBadge from "@/components/StatusBadge";
 import { listLoads, Load } from "@/api";
 import { formatRouteFromStops, firstPickupAppointmentDate } from "@/utils/loadStops";
+import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
 
 export default function LoadsListPage() {
@@ -13,23 +14,33 @@ export default function LoadsListPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
 
-  const runQuery = useCallback((q: string) => {
-    setLoading(true);
+  const runQuery = useCallback((q: string, opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
     setError(null);
     listLoads({ page: 1, size: 50, search: q || undefined })
       .then((res) => setLoads(res.items || []))
-      .catch((e) => setError(e?.message || "Failed to load loads"))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!silent) setError(e?.message || "Failed to load loads");
+      })
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
     runQuery("");
   }, [runQuery]);
 
+  useOperationalRefresh({
+    intervalMs: 30_000,
+    onRefresh: () => runQuery(searchApplied, { silent: true }),
+  });
+
   const applySearch = () => {
     const q = searchInput.trim();
     setSearchApplied(q);
-    runQuery(q);
+    runQuery(q, { silent: false });
   };
 
   const exportCsv = () => {
@@ -40,7 +51,7 @@ export default function LoadsListPage() {
       ...loads.map((load) => {
         const driver = load.driver ? `${load.driver.first_name} ${load.driver.last_name}`.trim() : "";
         return [
-          esc(load.load_number),
+          esc(load.load_number ?? ""),
           esc(load.trip_number?.trim() || ""),
           esc(formatRouteFromStops(load.stops)),
           esc(firstPickupAppointmentDate(load.stops) || ""),

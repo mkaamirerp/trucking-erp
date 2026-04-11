@@ -19,10 +19,36 @@ async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
     const err = new Error(text || res.statusText);
-    (err as any).status = res.status;
+    (err as Error & { status?: number }).status = res.status;
     throw err;
   }
   return res.json();
+}
+
+/** FastAPI returns `{ "detail": { ... } }` for HTTPException with a dict detail. */
+export const LOAD_VERSION_CONFLICT = "LOAD_VERSION_CONFLICT" as const;
+
+export type LoadVersionConflictDetail = {
+  code: typeof LOAD_VERSION_CONFLICT;
+  load_id: number;
+  client_version: number;
+  server_version: number | null;
+  server_snapshot: Load | null;
+};
+
+export function parseLoadVersionConflict(err: unknown): LoadVersionConflictDetail | null {
+  if (!(err instanceof Error) || !err.message) return null;
+  try {
+    const outer = JSON.parse(err.message) as { detail?: unknown };
+    const d = outer.detail;
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const rec = d as Record<string, unknown>;
+      if (rec.code === LOAD_VERSION_CONFLICT) return d as LoadVersionConflictDetail;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export async function getPayPeriods() {
@@ -768,7 +794,7 @@ export async function getLoad(id: number) {
   return handle<Load>(res);
 }
 
-export async function createLoad(payload: Partial<Load>) {
+export async function createLoad(payload: LoadWritePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -777,7 +803,9 @@ export async function createLoad(payload: Partial<Load>) {
   return handle<Load>(res);
 }
 
-export async function updateLoad(id: number, payload: Partial<Load>) {
+export type LoadUpdatePayload = LoadWritePayload & { expected_concurrency_version: number };
+
+export async function updateLoad(id: number, payload: LoadUpdatePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -808,9 +836,11 @@ export async function listCustomsBrokers(params: {
   return handle<PagedResponse<CustomsBroker>>(res);
 }
 
-export async function confirmLoadDocumentSnapshot(loadId: number) {
+export async function confirmLoadDocumentSnapshot(loadId: number, expectedConcurrencyVersion: number) {
   const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/confirm-document-snapshot`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_concurrency_version: expectedConcurrencyVersion }),
   });
   return handle<Load>(res);
 }
@@ -2543,7 +2573,8 @@ export type LoadCustomsSnapshot = {
   confirmed_at: string;
 };
 
-export type LoadStop = {
+/** Shape returned by the API — includes server-assigned fields. */
+export type LoadStopRead = {
   id: number;
   load_id: number;
   stop_type: string;
@@ -2565,9 +2596,34 @@ export type LoadStop = {
   updated_at?: string | null;
 };
 
+/** Backward-compat alias — use LoadStopRead for read paths, LoadStopWrite for write paths. */
+export type LoadStop = LoadStopRead;
+
+/** Shape sent to the API on create/update — no server-assigned fields. */
+export type LoadStopWrite = {
+  id?: number;
+  stop_type: string;
+  sequence: number;
+  facility_name?: string | null;
+  street?: string | null;
+  city?: string | null;
+  state_or_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  reference_number?: string | null;
+  appointment_type?: string | null;
+  appointment_date?: string | null;
+  appointment_time_text?: string | null;
+  notes?: string | null;
+  commodity_notes?: string | null;
+};
+
+/** Payload shape for load create/update — stops use the write shape (no server-assigned stop fields). */
+export type LoadWritePayload = Omit<Partial<Load>, "stops"> & { stops?: LoadStopWrite[] | null };
+
 export type Load = {
   id: number;
-  load_number: string;
+  load_number: string | null;
   customs_broker_id?: number | null;
   customs_broker?: CustomsBrokerSummary | null;
   document_snapshot_confirmed_at?: string | null;
@@ -2634,6 +2690,8 @@ export type Load = {
   stops?: LoadStop[] | null;
   created_at?: string | null;
   updated_at?: string | null;
+  /** Optimistic concurrency token; required on mutating requests (CAS). */
+  concurrency_version?: number;
 };
 
 export type DriverSummary = {

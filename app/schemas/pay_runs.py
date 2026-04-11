@@ -84,3 +84,33 @@ class PayRunPayeeRow(BaseModel):
     flags: dict
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class LoadSettlementItemOut(BaseModel):
+    """A single pay run item attributed to a load, enriched with its run and period context."""
+    id: int
+    pay_run_id: int
+    pay_run_status: str
+    pay_period_start: date
+    pay_period_end: date
+    payee_id: int
+    source_type: str
+    description: str
+    amount_signed: Decimal
+    currency: str
+    quantity: Decimal | None = None
+    unit_rate: Decimal | None = None
+    charge_category_id: int | None = None
+    charge_category_code: str | None = None
+    metadata_json: dict | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LoadSettlementResponse(BaseModel):
+    load_id: int
+    items: list[LoadSettlementItemOut]
+    total_earnings: Decimal
+    total_deductions: Decimal
+    net_total: Decimal

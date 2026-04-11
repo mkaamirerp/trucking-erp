@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
-from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadNoteCreate, LoadNoteOut
+from app.schemas.load import (
+    LoadCreate,
+    LoadMutationConcurrencyBody,
+    LoadNoteCreate,
+    LoadNoteOut,
+    LoadResponse,
+    LoadUpdate,
+)
 from app.services import loads as loads_service
 
 router = APIRouter(prefix="/loads", tags=["loads"])
@@ -83,12 +90,17 @@ async def update_load(
 @router.post("/{load_id}/confirm-document-snapshot", response_model=LoadResponse)
 async def confirm_document_snapshot(
     load_id: int,
+    body: LoadMutationConcurrencyBody,
     tenant_id: int = Depends(require_tenant),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.confirm_load_customs_document_snapshot(
-        db, tenant_id, load_id, confirming_user_id=getattr(user, "user_id", None)
+        db,
+        tenant_id,
+        load_id,
+        confirming_user_id=getattr(user, "user_id", None),
+        expected_concurrency_version=body.expected_concurrency_version,
     )
     return LoadResponse.model_validate(load)
 
@@ -96,11 +108,14 @@ async def confirm_document_snapshot(
 @router.post("/{load_id}/mark-ready", response_model=LoadResponse)
 async def mark_load_ready(
     load_id: int,
+    body: LoadMutationConcurrencyBody,
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    load = await loads_service.mark_load_ready(db, tenant_id, load_id)
+    load = await loads_service.mark_load_ready(
+        db, tenant_id, load_id, expected_concurrency_version=body.expected_concurrency_version
+    )
     return LoadResponse.model_validate(load)
 
 
@@ -132,9 +147,12 @@ async def add_load_note(
 @router.delete("/{load_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_load(
     load_id: int,
+    expected_concurrency_version: int = Query(..., ge=1),
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    await loads_service.delete_load(db, tenant_id, load_id)
+    await loads_service.delete_load(
+        db, tenant_id, load_id, expected_concurrency_version=expected_concurrency_version
+    )
     return {}

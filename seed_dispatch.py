@@ -6,6 +6,9 @@ per-tenant PostgreSQL database (e.g. tenant_demo), NOT in the platform DATABASE_
 This script must use TENANT_DATABASE_URL or ALEMBIC_TENANT_DATABASE_URL from the
 same secrets the API uses — not DATABASE_URL alone.
 
+This script does not INSERT into `drivers`; it only picks an existing tenant-scoped driver (if any)
+to attach demo loads. Operational drivers come from approved onboarding or explicit admin create.
+
 Run inside the API container with secrets loaded, e.g.:
   docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && python /app/seed_dispatch.py'
 

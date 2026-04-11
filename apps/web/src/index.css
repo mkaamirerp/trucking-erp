@@ -3,6 +3,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Reserve scrollbar track so toggling overflow does not change viewport content width */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }

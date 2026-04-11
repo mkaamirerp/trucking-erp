@@ -91,6 +91,7 @@ class TestLoadCreateDraft:
         )
         assert resp.status_code == 201
         data = resp.json()
+        assert data.get("concurrency_version") == 1
         assert data["status"] == "draft"
         assert data.get("load_number", "").startswith("DRAFT-") or data.get("load_number")
         assert data.get("broker_id") is None
@@ -178,6 +179,7 @@ class TestLoadUpdateReorderStops:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
 
         up = await client.patch(
             f"/api/v1/loads/{load_id}",
@@ -187,6 +189,7 @@ class TestLoadUpdateReorderStops:
                     {"stop_type": "PICKUP", "sequence": 1, "facility_name": "A2"},
                     {"stop_type": "DROP", "sequence": 2, "facility_name": "B"},
                 ],
+                "expected_concurrency_version": cv,
             },
             headers=AUTH_HEADERS,
         )
@@ -195,6 +198,31 @@ class TestLoadUpdateReorderStops:
         assert len(data["stops"]) == 3
         names = [s["facility_name"] for s in sorted(data["stops"], key=lambda x: x["sequence"])]
         assert names == ["A", "A2", "B"]
+
+    async def test_patch_stale_concurrency_version_returns_409(self, client, override_auth_tenant) -> None:
+        cr = await client.post(
+            "/api/v1/loads",
+            json={"status": "draft", "load_number": f"L-CAS-409-{uuid.uuid4().hex[:8]}"},
+            headers=AUTH_HEADERS,
+        )
+        assert cr.status_code == 201
+        load_id = cr.json()["id"]
+        cv0 = cr.json()["concurrency_version"]
+        u1 = await client.patch(
+            f"/api/v1/loads/{load_id}",
+            json={"internal_notes": "first", "expected_concurrency_version": cv0},
+            headers=AUTH_HEADERS,
+        )
+        assert u1.status_code == 200, u1.text
+        stale = await client.patch(
+            f"/api/v1/loads/{load_id}",
+            json={"internal_notes": "second", "expected_concurrency_version": cv0},
+            headers=AUTH_HEADERS,
+        )
+        assert stale.status_code == 409, stale.text
+        detail = stale.json().get("detail")
+        assert isinstance(detail, dict)
+        assert detail.get("code") == "LOAD_VERSION_CONFLICT"
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
@@ -224,8 +252,10 @@ class TestMarkReadyFlow:
             headers=AUTH_HEADERS,
         )
         load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
         mr = await client.post(
             f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cv},
             headers=AUTH_HEADERS,
         )
         assert mr.status_code == 400
@@ -248,8 +278,10 @@ class TestMarkReadyFlow:
             headers=AUTH_HEADERS,
         )
         load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
         mr = await client.post(
             f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cv},
             headers=AUTH_HEADERS,
         )
         assert mr.status_code == 200

@@ -120,6 +120,9 @@ class LoadCreate(LoadBase):
 
 
 class LoadUpdate(BaseModel):
+    """PATCH body: must include the version the client last read (optimistic concurrency)."""
+
+    expected_concurrency_version: int = Field(..., ge=1, description="Version from last GET; required for CAS write.")
     load_number: Optional[str] = Field(default=None, max_length=50)
     customs_broker_id: Optional[int] = None
     broker_id: Optional[int] = None
@@ -209,8 +212,15 @@ class LoadNoteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LoadMutationConcurrencyBody(BaseModel):
+    """POST bodies for load endpoints that mutate the row without a full LoadUpdate."""
+
+    expected_concurrency_version: int = Field(..., ge=1)
+
+
 class LoadResponse(LoadBase):
     id: int
+    concurrency_version: int = 1
     trip_number: Optional[str] = None
     active_dispatch_trip_id: Optional[int] = None
     broker_match_method: Optional[str] = Field(default=None, max_length=32)

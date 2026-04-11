@@ -37,6 +37,10 @@ REQUIRES_DB = not os.environ.get("DATABASE_URL")
 AUTH_HEADERS = {"host": "demo.truckerp.me"}
 
 
+def _cv(data: dict) -> int:
+    return int(data["concurrency_version"])
+
+
 def _detail_code(payload: dict) -> str | None:
     """Extract error code from API JSON (FastAPI may nest detail)."""
     d = payload.get("detail")
@@ -90,7 +94,7 @@ class TestTripNumberSchema:
         from app.schemas.load import LoadUpdate
 
         with pytest.raises(ValidationError):
-            LoadUpdate(trip_number="IKL10001")
+            LoadUpdate(trip_number="IKL10001", expected_concurrency_version=1)
 
     def test_load_update_rejects_active_dispatch_trip_id(self) -> None:
         from pydantic import ValidationError
@@ -98,7 +102,7 @@ class TestTripNumberSchema:
         from app.schemas.load import LoadUpdate
 
         with pytest.raises(ValidationError):
-            LoadUpdate(active_dispatch_trip_id=99)
+            LoadUpdate(active_dispatch_trip_id=99, expected_concurrency_version=1)
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
@@ -144,6 +148,7 @@ class TestTripNumber01Early409:
                     "driver_id": driver_id,
                     "truck_id": truck_id,
                     "status": "dispatched",
+                    "expected_concurrency_version": _cv(cr.json()),
                 },
             )
             assert patch.status_code == 409
@@ -221,7 +226,12 @@ class TestTripNumberDispatchLifecycle:
         up = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"driver_id": driver_id, "truck_id": truck_id, "status": "assigned"},
+            json={
+                "driver_id": driver_id,
+                "truck_id": truck_id,
+                "status": "assigned",
+                "expected_concurrency_version": _cv(cr.json()),
+            },
         )
         assert up.status_code == 200
         data = up.json()
@@ -246,7 +256,12 @@ class TestTripNumberDispatchLifecycle:
         d1 = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"driver_id": driver_id, "truck_id": truck_id, "status": "dispatched"},
+            json={
+                "driver_id": driver_id,
+                "truck_id": truck_id,
+                "status": "dispatched",
+                "expected_concurrency_version": _cv(cr.json()),
+            },
         )
         assert d1.status_code == 200, d1.text
         body = d1.json()
@@ -263,7 +278,7 @@ class TestTripNumberDispatchLifecycle:
         d2 = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"internal_notes": "noop"},
+            json={"internal_notes": "noop", "expected_concurrency_version": _cv(body)},
         )
         assert d2.status_code == 200
         assert d2.json().get("trip_number") == tn
@@ -272,7 +287,7 @@ class TestTripNumberDispatchLifecycle:
         d3 = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"status": "dispatched"},
+            json={"status": "dispatched", "expected_concurrency_version": _cv(d2.json())},
         )
         assert d3.status_code == 200, d3.text
         assert d3.json().get("trip_number") == tn
@@ -291,11 +306,17 @@ class TestTripNumberDispatchLifecycle:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
-        await client.patch(
+        d_disp = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"driver_id": driver_id, "truck_id": truck_id, "status": "dispatched"},
+            json={
+                "driver_id": driver_id,
+                "truck_id": truck_id,
+                "status": "dispatched",
+                "expected_concurrency_version": _cv(cr.json()),
+            },
         )
+        assert d_disp.status_code == 200, d_disp.text
         r0 = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
         tn = r0.json().get("trip_number")
         assert tn
@@ -303,7 +324,7 @@ class TestTripNumberDispatchLifecycle:
         r1 = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"status": "in_transit"},
+            json={"status": "in_transit", "expected_concurrency_version": _cv(d_disp.json())},
         )
         assert r1.status_code == 200, r1.text
         assert r1.json().get("trip_number") == tn
@@ -322,15 +343,21 @@ class TestTripNumberDispatchLifecycle:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
-        await client.patch(
+        d_disp = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"driver_id": driver_id, "truck_id": truck_id, "status": "dispatched"},
+            json={
+                "driver_id": driver_id,
+                "truck_id": truck_id,
+                "status": "dispatched",
+                "expected_concurrency_version": _cv(cr.json()),
+            },
         )
+        assert d_disp.status_code == 200, d_disp.text
         r_back = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"status": "ready"},
+            json={"status": "ready", "expected_concurrency_version": _cv(d_disp.json())},
         )
         assert r_back.status_code == 200, r_back.text
         body = r_back.json()
@@ -354,7 +381,12 @@ class TestTripNumberDispatchLifecycle:
         d = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"driver_id": driver_id, "truck_id": truck_id, "status": "dispatched"},
+            json={
+                "driver_id": driver_id,
+                "truck_id": truck_id,
+                "status": "dispatched",
+                "expected_concurrency_version": _cv(cr.json()),
+            },
         )
         assert d.status_code == 200
         tn = d.json().get("trip_number")
@@ -375,6 +407,6 @@ class TestTripNumberDispatchLifecycle:
         bad = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"trip_number": "HACK99999"},
+            json={"trip_number": "HACK99999", "expected_concurrency_version": _cv(cr.json())},
         )
         assert bad.status_code == 422

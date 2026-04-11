@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,8 @@ from app.models.driver import Driver
 from app.models.load import Load, LoadNote, LoadStop
 from app.models.truck import Truck
 from app.models.trailer import Trailer
-from app.schemas.load import LoadCreate, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
+from app.core.concurrency.conflicts import load_version_conflict_exception
+from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services import dispatch_trips as dispatch_trips_service
 from app.utils.pagination import paginate
 
@@ -66,6 +67,13 @@ async def _get_trailer(db: AsyncSession, tenant_id: int, trailer_id: int) -> Tra
     return result.scalar_one_or_none()
 
 
+def _merged_scalar(load: Load, data: dict, key: str):
+    if key in data:
+        return data[key]
+    return getattr(load, key)
+
+
+
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
     stmt = select(Load).where(Load.tenant_id == tenant_id, Load.load_number == load_number)
     if exclude_id:
@@ -82,7 +90,7 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
     if isinstance(payload, LoadCreate):
         data = payload.model_dump(exclude={"stops"})
     else:
-        data = payload.model_dump(exclude_unset=True, exclude={"stops"})
+        data = payload.model_dump(exclude_unset=True, exclude={"stops", "expected_concurrency_version"})
     return data
 
 
@@ -127,9 +135,14 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
             db.add(stop)
 
     await db.commit()
-    await db.refresh(load)
-    # Re-fetch with relationships for LoadResponse (avoids async lazy-load)
-    return await get_load(db, tenant_id, load.id) or load
+    created_id = load.id
+    # Session uses expire_on_commit=False; expire so get_load re-reads row (e.g. concurrency_version).
+    db.expire_all()
+    # Re-fetch with relationships for LoadResponse (avoids async lazy-load). Do not touch `load` after expire_all.
+    out = await get_load(db, tenant_id, created_id)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
+    return out
 
 
 async def get_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | None:
@@ -220,6 +233,7 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
+    expected = payload.expected_concurrency_version
     old_status = (load.status or "").strip().lower()
     data = _load_data_from_payload(payload)
 
@@ -268,15 +282,16 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
     if "load_number" in data and data["load_number"]:
         await _ensure_unique_load_number(db, tenant_id, data["load_number"], exclude_id=load.id)
 
-    for key, value in data.items():
-        setattr(load, key, value)
+    new_status = (_merged_scalar(load, data, "status") or load.status or "").strip().lower()
+    merged_driver_id = _merged_scalar(load, data, "driver_id")
+    merged_truck_id = _merged_scalar(load, data, "truck_id")
 
-    new_status = (load.status or "").strip().lower()
+    next_aid, next_tnum = load.active_dispatch_trip_id, load.trip_number
     if (
         new_status == TRIP_ALLOCATED_AT_LOAD_STATUS
         and old_status != TRIP_ALLOCATED_AT_LOAD_STATUS
     ):
-        if not load.driver_id or not load.truck_id:
+        if not merged_driver_id or not merged_truck_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -284,40 +299,87 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
                     "code": DISPATCH_RESOURCES_REQUIRED,
                 },
             )
-        await dispatch_trips_service.ensure_active_trip_for_freight_load(db, tenant_id, load)
-    if (
+        trip = await dispatch_trips_service.ensure_active_trip_for_freight_load(db, tenant_id, load.id)
+        next_aid, next_tnum = trip.id, trip.trip_number
+    elif (
         old_status == TRIP_ALLOCATED_AT_LOAD_STATUS
         and new_status != TRIP_ALLOCATED_AT_LOAD_STATUS
         and new_status in PRE_DISPATCH_TRIP_CANCEL_STATUSES
     ):
-        await dispatch_trips_service.cancel_active_trip_for_load(db, tenant_id, load.id, load)
+        await dispatch_trips_service.cancel_active_trip_for_load(db, tenant_id, load.id, load=None)
+        next_aid, next_tnum = None, None
 
-    # Full replace stops: submitted ordered list is authoritative
+    values = {**data}
+    values["active_dispatch_trip_id"] = next_aid
+    values["trip_number"] = next_tnum
+    values["updated_at"] = func.now()
+    values["concurrency_version"] = Load.concurrency_version + 1
+
+    stmt = (
+        update(Load)
+        .where(
+            Load.id == load_id,
+            Load.tenant_id == tenant_id,
+            Load.concurrency_version == expected,
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    result = await db.execute(stmt)
+    if result.rowcount != 1:
+        await db.rollback()
+        current_load = await get_load(db, tenant_id, load_id)
+        server_snapshot = LoadResponse.model_validate(current_load).model_dump(mode="json") if current_load else None
+        raise load_version_conflict_exception(
+            load_id=load_id,
+            client_version=expected,
+            server_version=current_load.concurrency_version if current_load else None,
+            server_snapshot=server_snapshot,
+        )
+
     if "stops" in payload.model_dump(exclude_unset=True):
-        await db.execute(select(LoadStop).where(LoadStop.load_id == load.id).with_for_update())
-        for s in load.stops:
-            await db.delete(s)
+        await db.execute(
+            delete(LoadStop).where(LoadStop.load_id == load_id, LoadStop.tenant_id == tenant_id)
+        )
         await db.flush()
         stops_payload: Sequence[LoadStopCreate] = payload.stops or []
         for i, s in enumerate(stops_payload):
             stop_data = s.model_dump()
             stop_data["sequence"] = s.sequence if s.sequence is not None else i
-            stop = LoadStop(tenant_id=tenant_id, load_id=load.id, **stop_data)
+            stop = LoadStop(tenant_id=tenant_id, load_id=load_id, **stop_data)
             db.add(stop)
 
     await db.commit()
-    await db.refresh(load)
-    # Re-fetch with relationships for LoadResponse (avoids async lazy-load)
-    return await get_load(db, tenant_id, load.id) or load
-
-
-async def delete_load(db: AsyncSession, tenant_id: int, load_id: int) -> None:
-    load = await get_load(db, tenant_id, load_id)
-    if not load:
+    db.expire_all()
+    out = await get_load(db, tenant_id, load_id)
+    if out is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    return out
 
-    await db.delete(load)
-    await db.commit()
+
+async def delete_load(
+    db: AsyncSession, tenant_id: int, load_id: int, *, expected_concurrency_version: int
+) -> None:
+    stmt = delete(Load).where(
+        Load.id == load_id,
+        Load.tenant_id == tenant_id,
+        Load.concurrency_version == expected_concurrency_version,
+    )
+    result = await db.execute(stmt)
+    if result.rowcount == 1:
+        await db.commit()
+        return
+    await db.rollback()
+    current_load = await get_load(db, tenant_id, load_id)
+    if current_load is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    server_snapshot = LoadResponse.model_validate(current_load).model_dump(mode="json")
+    raise load_version_conflict_exception(
+        load_id=load_id,
+        client_version=expected_concurrency_version,
+        server_version=current_load.concurrency_version,
+        server_snapshot=server_snapshot,
+    )
 
 
 async def list_loads_for_board(
@@ -366,7 +428,9 @@ async def list_loads_for_board(
     return grouped
 
 
-async def mark_load_ready(db: AsyncSession, tenant_id: int, load_id: int) -> Load:
+async def mark_load_ready(
+    db: AsyncSession, tenant_id: int, load_id: int, *, expected_concurrency_version: int
+) -> Load:
     """Mark draft as ready. Validates minimum: broker, broker_load_reference, at least one pickup and one drop."""
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -402,11 +466,38 @@ async def mark_load_ready(db: AsyncSession, tenant_id: int, load_id: int) -> Loa
             detail="At least one drop stop is required before marking ready",
         )
 
-    load.status = "ready"
+    stmt = (
+        update(Load)
+        .where(
+            Load.id == load_id,
+            Load.tenant_id == tenant_id,
+            Load.concurrency_version == expected_concurrency_version,
+            Load.status == "draft",
+        )
+        .values(
+            status="ready",
+            concurrency_version=Load.concurrency_version + 1,
+            updated_at=func.now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    result = await db.execute(stmt)
+    if result.rowcount != 1:
+        await db.rollback()
+        current_load = await get_load(db, tenant_id, load_id)
+        server_snapshot = LoadResponse.model_validate(current_load).model_dump(mode="json") if current_load else None
+        raise load_version_conflict_exception(
+            load_id=load_id,
+            client_version=expected_concurrency_version,
+            server_version=current_load.concurrency_version if current_load else None,
+            server_snapshot=server_snapshot,
+        )
     await db.commit()
-    await db.refresh(load)
-    # Re-fetch with relationships for LoadResponse (avoids async lazy-load)
-    return await get_load(db, tenant_id, load.id) or load
+    db.expire_all()
+    out = await get_load(db, tenant_id, load_id)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    return out
 
 
 async def add_load_note(
@@ -433,7 +524,12 @@ async def list_load_notes(db: AsyncSession, tenant_id: int, load_id: int) -> lis
 
 
 async def confirm_load_customs_document_snapshot(
-    db: AsyncSession, tenant_id: int, load_id: int, *, confirming_user_id: str | None
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    confirming_user_id: str | None,
+    expected_concurrency_version: int,
 ) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -441,7 +537,11 @@ async def confirm_load_customs_document_snapshot(
     if load.document_snapshot_confirmed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Document snapshot already confirmed for this load",
+            detail={
+                "detail": "Document snapshot already confirmed for this load",
+                "code": "DOCUMENT_SNAPSHOT_ALREADY_CONFIRMED",
+                "load_id": load_id,
+            },
         )
     if load.customs_broker_id is None:
         raise HTTPException(
@@ -473,9 +573,39 @@ async def confirm_load_customs_document_snapshot(
         confirmed_at=now,
     )
     db.add(snap)
-    load.document_snapshot_confirmed_at = now
-    load.document_snapshot_confirmed_by_user_id = confirming_user_id
-    load.document_snapshot_version = int(load.document_snapshot_version or 0) + 1
+    await db.flush()
 
+    stmt = (
+        update(Load)
+        .where(
+            Load.id == load_id,
+            Load.tenant_id == tenant_id,
+            Load.concurrency_version == expected_concurrency_version,
+            Load.document_snapshot_confirmed_at.is_(None),
+        )
+        .values(
+            document_snapshot_confirmed_at=now,
+            document_snapshot_confirmed_by_user_id=confirming_user_id,
+            document_snapshot_version=Load.document_snapshot_version + 1,
+            concurrency_version=Load.concurrency_version + 1,
+            updated_at=func.now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    result = await db.execute(stmt)
+    if result.rowcount != 1:
+        await db.rollback()
+        current_load = await get_load(db, tenant_id, load_id)
+        server_snapshot = LoadResponse.model_validate(current_load).model_dump(mode="json") if current_load else None
+        raise load_version_conflict_exception(
+            load_id=load_id,
+            client_version=expected_concurrency_version,
+            server_version=current_load.concurrency_version if current_load else None,
+            server_snapshot=server_snapshot,
+        )
     await db.commit()
-    return await get_load(db, tenant_id, load.id) or load
+    db.expire_all()
+    out = await get_load(db, tenant_id, load_id)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    return out

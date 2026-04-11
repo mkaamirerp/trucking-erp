@@ -20,6 +20,7 @@ import {
   listDrivers,
   listTrailers,
   listTrucks,
+  parseLoadVersionConflict,
   updateLoad,
   type Broker,
   type BrokerContact,
@@ -32,21 +33,25 @@ import {
   type Trailer,
   type Truck,
 } from "@/api";
+import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops as sortStops } from "@/utils/loadStops";
 import { LoadWorkspaceForm } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
+  baselineSignatureFromLoad,
   buildLoadPersistPayload,
   buildVerificationTabIndexMap,
   emptyIntakeProposed,
   initialManualCreateStops,
   newDraftStop,
+  SECTION_CONFIG,
   stopsToDraft,
   wsSectionTitle,
   type DraftStop,
   type IntakeProposedFields,
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
+import { SectionSettlement } from "@/components/load/SectionSettlement";
 
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -249,7 +254,18 @@ export default function LoadWorkspacePage() {
   const hasIntakeThread = Number.isFinite(intakeThreadId) && intakeThreadId > 0;
 
   const loadIdFromRoute = !isManual && idParam ? Number(idParam) : Number.NaN;
-  const workspaceMode: LoadWorkspaceMode = isManual ? "manual" : hasIntakeThread ? "intake" : "detail";
+  const modeParam = searchParams.get("mode");
+  const workspaceMode: LoadWorkspaceMode = isManual
+    ? "manual"
+    : hasIntakeThread
+      ? "intake"
+      : modeParam === "payroll"
+        ? "payroll"
+        : modeParam === "audit"
+          ? "audit"
+          : "detail";
+
+  const sectionConfig = SECTION_CONFIG[workspaceMode];
 
   const [customsBrokers, setCustomsBrokers] = useState<CustomsBroker[]>([]);
   const [freightBrokers, setFreightBrokers] = useState<Broker[]>([]);
@@ -266,6 +282,11 @@ export default function LoadWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [customsMessage, setCustomsMessage] = useState<string | null>(null);
+  const [serverConflict, setServerConflict] = useState<{
+    serverVersion: number | null;
+    serverSnapshot: Load | null;
+  } | null>(null);
+  const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
   const [intakeMessages, setIntakeMessages] = useState<InboxMessageItem[]>([]);
   const [intakeThread, setIntakeThread] = useState<InboxThreadListItem | null>(null);
@@ -306,6 +327,12 @@ export default function LoadWorkspacePage() {
   const docScrollRef = useRef<HTMLDivElement | null>(null);
   const docLineRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
   const [activeDocLine, setActiveDocLine] = useState<number | null>(null);
+  const loadConcurrencyRef = useRef<number | null>(null);
+  const formDirtyRef = useRef(false);
+
+  useEffect(() => {
+    loadConcurrencyRef.current = load?.concurrency_version ?? null;
+  }, [load?.concurrency_version]);
 
   const docLines = useMemo(() => {
     const raw = internalNotes || "";
@@ -401,6 +428,128 @@ export default function LoadWorkspacePage() {
     setInternalNotes(l.internal_notes ?? "");
     setDraftStops(stopsToDraft(l.stops));
   }, []);
+
+  const currentFormSignature = useMemo(
+    () =>
+      JSON.stringify(
+        buildLoadPersistPayload({
+          status,
+          loadNumber,
+          brokerId,
+          brokerContactId,
+          brokerNameSnapshot,
+          brokerContactNameSnapshot,
+          brokerContactPhoneSnapshot,
+          brokerContactExtensionSnapshot,
+          brokerContactEmailSnapshot,
+          brokerLoadReference,
+          mode: freightMode,
+          equipmentType,
+          trailerType,
+          trailerSize,
+          commodity,
+          estimatedWeight,
+          hazmat,
+          temperatureRequirement,
+          palletCaseCount,
+          rate,
+          customerRate,
+          miles,
+          driverId,
+          truckId,
+          trailerId,
+          customsBrokerId,
+          internalNotes,
+          draftStops,
+        }),
+      ),
+    [
+      status,
+      loadNumber,
+      brokerId,
+      brokerContactId,
+      brokerNameSnapshot,
+      brokerContactNameSnapshot,
+      brokerContactPhoneSnapshot,
+      brokerContactExtensionSnapshot,
+      brokerContactEmailSnapshot,
+      brokerLoadReference,
+      freightMode,
+      equipmentType,
+      trailerType,
+      trailerSize,
+      commodity,
+      estimatedWeight,
+      hazmat,
+      temperatureRequirement,
+      palletCaseCount,
+      rate,
+      customerRate,
+      miles,
+      driverId,
+      truckId,
+      trailerId,
+      customsBrokerId,
+      internalNotes,
+      draftStops,
+    ],
+  );
+
+  const formDirty =
+    workspaceMode !== "manual" &&
+    baselineFormSignature !== null &&
+    currentFormSignature !== baselineFormSignature;
+
+  useEffect(() => {
+    formDirtyRef.current = formDirty;
+  }, [formDirty]);
+
+  useEffect(() => {
+    if (workspaceMode === "manual") {
+      setBaselineFormSignature(null);
+      return;
+    }
+    if (!load || loading) return;
+    setBaselineFormSignature(baselineSignatureFromLoad(load));
+  }, [workspaceMode, load, loading]);
+
+  const refreshLoadFromServer = useCallback(async () => {
+    if (workspaceMode === "manual" || !Number.isFinite(loadIdFromRoute)) return;
+    const lid = loadIdFromRoute;
+    try {
+      const remote = await getLoad(lid);
+      const localVer = loadConcurrencyRef.current;
+      if (
+        formDirtyRef.current &&
+        localVer != null &&
+        remote.concurrency_version != null &&
+        remote.concurrency_version !== localVer
+      ) {
+        setServerConflict({
+          serverVersion: remote.concurrency_version ?? null,
+          serverSnapshot: remote,
+        });
+        return;
+      }
+      if (!formDirtyRef.current) {
+        const notes = await getLoadNotes(lid).catch(() => [] as LoadNote[]);
+        setLoad(remote);
+        hydrateFromLoad(remote);
+        setLoadNotes(Array.isArray(notes) ? notes : []);
+        setServerConflict(null);
+        setSaveMessage(null);
+      }
+    } catch {
+      /* background refresh — ignore */
+    }
+  }, [workspaceMode, loadIdFromRoute, hydrateFromLoad]);
+
+  useOperationalRefresh({
+    intervalMs: null,
+    enabled: workspaceMode !== "manual" && Number.isFinite(loadIdFromRoute) && !loading,
+    isDirty: formDirty,
+    onRefresh: () => void refreshLoadFromServer(),
+  });
 
   useEffect(() => {
     if (workspaceMode === "manual") {
@@ -585,15 +734,36 @@ export default function LoadWorkspacePage() {
     }
   }
 
+  async function onReloadServerVersion() {
+    if (!load) return;
+    setSaving(true);
+    setSaveMessage(null);
+    setServerConflict(null);
+    try {
+      const [remote, notes] = await Promise.all([
+        getLoad(load.id),
+        getLoadNotes(load.id).catch(() => [] as LoadNote[]),
+      ]);
+      setLoad(remote);
+      hydrateFromLoad(remote);
+      setLoadNotes(Array.isArray(notes) ? notes : []);
+      setSaveMessage("Loaded latest from server.");
+    } catch (e: unknown) {
+      setSaveMessage((e as Error)?.message || "Could not reload");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function onSave() {
     if (!load) return;
+    const expectedVersion = load.concurrency_version ?? 1;
     setSaving(true);
     setSaveMessage(null);
     setError(null);
     try {
-      const updated = await updateLoad(
-        load.id,
-        buildLoadPersistPayload({
+      const updated = await updateLoad(load.id, {
+        ...buildLoadPersistPayload({
           status,
           loadNumber,
           brokerId,
@@ -623,12 +793,23 @@ export default function LoadWorkspacePage() {
           internalNotes,
           draftStops,
         }),
-      );
+        expected_concurrency_version: expectedVersion,
+      });
       setLoad(updated);
       hydrateFromLoad(updated);
       setSaveMessage("Saved.");
+      setServerConflict(null);
     } catch (e: unknown) {
-      setSaveMessage((e as Error)?.message || "Save failed");
+      const c = parseLoadVersionConflict(e);
+      if (c) {
+        setServerConflict({
+          serverVersion: c.server_version,
+          serverSnapshot: c.server_snapshot,
+        });
+        setSaveMessage("Load was modified elsewhere — see conflict details above.");
+      } else {
+        setSaveMessage((e as Error)?.message || "Save failed");
+      }
     } finally {
       setSaving(false);
     }
@@ -638,16 +819,32 @@ export default function LoadWorkspacePage() {
     if (!load || load.document_snapshot_confirmed_at) return;
     const v = ev.target.value;
     const next = v === "" ? null : Number(v);
+    const prev = load.customs_broker_id ?? null;
+    const expectedVersion = load.concurrency_version ?? 1;
     setCustomsBrokerId(next);
     setSaving(true);
     setCustomsMessage(null);
     try {
-      const updated = await updateLoad(load.id, { customs_broker_id: next });
+      const updated = await updateLoad(load.id, {
+        customs_broker_id: next,
+        expected_concurrency_version: expectedVersion,
+      });
       setLoad(updated);
       setCustomsBrokerId(updated.customs_broker_id ?? null);
       setCustomsMessage("Customs broker updated.");
+      setServerConflict(null);
     } catch (e: unknown) {
-      setCustomsMessage((e as Error)?.message || "Could not update customs broker");
+      setCustomsBrokerId(prev);
+      const c = parseLoadVersionConflict(e);
+      if (c) {
+        setServerConflict({
+          serverVersion: c.server_version,
+          serverSnapshot: c.server_snapshot,
+        });
+        setCustomsMessage("Load was modified elsewhere — see conflict details above.");
+      } else {
+        setCustomsMessage((e as Error)?.message || "Could not update customs broker");
+      }
     } finally {
       setSaving(false);
     }
@@ -655,15 +852,26 @@ export default function LoadWorkspacePage() {
 
   async function onConfirmSnapshot() {
     if (!load) return;
+    const expectedVersion = load.concurrency_version ?? 1;
     setSaving(true);
     setCustomsMessage(null);
     try {
-      const updated = await confirmLoadDocumentSnapshot(load.id);
+      const updated = await confirmLoadDocumentSnapshot(load.id, expectedVersion);
       setLoad(updated);
       hydrateFromLoad(updated);
       setCustomsMessage("Document snapshot confirmed.");
+      setServerConflict(null);
     } catch (e: unknown) {
-      setCustomsMessage((e as Error)?.message || "Confirm failed");
+      const c = parseLoadVersionConflict(e);
+      if (c) {
+        setServerConflict({
+          serverVersion: c.server_version,
+          serverSnapshot: c.server_snapshot,
+        });
+        setCustomsMessage("Load was modified elsewhere — see conflict details above.");
+      } else {
+        setCustomsMessage((e as Error)?.message || "Confirm failed");
+      }
     } finally {
       setSaving(false);
     }
@@ -789,6 +997,52 @@ export default function LoadWorkspacePage() {
   const toolBtnSecondary =
     "rounded-md border border-[#252a38] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[#7a8299] shadow-sm hover:border-[#3a4155] hover:bg-[#252a38]";
 
+  /** Compare the server snapshot against the current form state; return human-readable diffs. */
+  function getConflictDiffs(snap: Load): Array<{ label: string; server: string; yours: string }> {
+    const form = buildLoadPersistPayload({
+      status, loadNumber, brokerId, brokerContactId,
+      brokerNameSnapshot, brokerContactNameSnapshot, brokerContactPhoneSnapshot,
+      brokerContactExtensionSnapshot, brokerContactEmailSnapshot, brokerLoadReference,
+      mode: freightMode, equipmentType, trailerType, trailerSize,
+      commodity, estimatedWeight, hazmat, temperatureRequirement, palletCaseCount,
+      rate, customerRate, miles,
+      driverId, truckId, trailerId, customsBrokerId, internalNotes, draftStops,
+    });
+    const f = form as Record<string, unknown>;
+
+    const fmt = (v: unknown, money = false): string => {
+      if (v == null || v === "") return "—";
+      return money ? `$${v}` : String(v);
+    };
+
+    const checks: Array<{ label: string; snapKey: keyof Load; formKey: string; money?: boolean }> = [
+      { label: "Status",        snapKey: "status",                 formKey: "status" },
+      { label: "Load #",        snapKey: "load_number",            formKey: "load_number" },
+      { label: "Broker",        snapKey: "broker_name_snapshot",   formKey: "broker_name_snapshot" },
+      { label: "Broker ref",    snapKey: "broker_load_reference",  formKey: "broker_load_reference" },
+      { label: "Rate",          snapKey: "rate",                   formKey: "rate",          money: true },
+      { label: "Customer rate", snapKey: "customer_rate",          formKey: "customer_rate", money: true },
+      { label: "Miles",         snapKey: "miles",                  formKey: "miles" },
+      { label: "Driver",        snapKey: "driver_id",              formKey: "driver_id" },
+      { label: "Truck",         snapKey: "truck_id",               formKey: "truck_id" },
+      { label: "Trailer",       snapKey: "trailer_id",             formKey: "trailer_id" },
+      { label: "Equipment",     snapKey: "equipment_type",         formKey: "equipment_type" },
+      { label: "Trailer type",  snapKey: "trailer_type",           formKey: "trailer_type" },
+      { label: "Commodity",     snapKey: "commodity",              formKey: "commodity" },
+      { label: "Est. weight",   snapKey: "estimated_weight",       formKey: "estimated_weight" },
+    ];
+
+    const diffs: Array<{ label: string; server: string; yours: string }> = [];
+    for (const { label, snapKey, formKey, money } of checks) {
+      const serverVal = snap[snapKey];
+      const formVal = f[formKey];
+      if (String(serverVal ?? "") !== String(formVal ?? "")) {
+        diffs.push({ label, server: fmt(serverVal, money), yours: fmt(formVal, money) });
+      }
+    }
+    return diffs;
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-[#0d0f14] text-[#e8ecf4]">
       <header className="z-10 shrink-0 border-b border-[#252a38] bg-[#141720]">
@@ -856,6 +1110,42 @@ export default function LoadWorkspacePage() {
           </div>
           <WorkspaceModeReadout mode={workspaceMode} />
         </div>
+        {serverConflict && workspaceMode !== "manual" ? (
+          <div className="border-t border-amber-900/50 bg-amber-950/25 px-4 py-2.5">
+            <div className="mx-auto flex max-w-[1600px] flex-wrap items-start justify-between gap-3">
+              <div className="flex-1 space-y-1.5">
+                <p className="text-xs text-amber-100/95">
+                  <span className="font-semibold">Conflict:</span> Load was modified elsewhere
+                  {serverConflict.serverVersion != null ? (
+                    <span className="text-amber-200/85"> (server version {serverConflict.serverVersion})</span>
+                  ) : null}.{" "}
+                  Your open edits were not overwritten. Reload to align with the server, or dismiss to keep editing (a save
+                  may return 409 until you reload).
+                </p>
+                {serverConflict.serverSnapshot ? (() => {
+                  const diffs = getConflictDiffs(serverConflict.serverSnapshot);
+                  return diffs.length > 0 ? (
+                    <ul className="space-y-0.5">
+                      {diffs.map((d) => (
+                        <li key={d.label} className="text-[11px] text-amber-200/80">
+                          Server has: {d.label}={d.server}, your version: {d.label}={d.yours}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null;
+                })() : null}
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button type="button" variant="secondary" onClick={() => setServerConflict(null)}>
+                  Dismiss
+                </Button>
+                <Button type="button" onClick={() => void onReloadServerVersion()}>
+                  Reload server version
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </header>
 
       <div className="shrink-0 border-b border-[#252a38] bg-[#141720]">
@@ -1035,6 +1325,8 @@ export default function LoadWorkspacePage() {
 
           <LoadWorkspaceForm
             mode={workspaceMode}
+            visibleSections={sectionConfig.visible}
+            editableSections={sectionConfig.editable}
             intakeProposed={intakeProposed}
             saving={saving}
             freightBrokers={freightBrokers}
@@ -1118,6 +1410,23 @@ export default function LoadWorkspacePage() {
             addStop={addStop}
             moveStop={moveStop}
           />
+
+          {/* Settlement — visible in payroll and audit modes */}
+          {sectionConfig.visible.includes("Settlement") && load ? (
+            <SectionSettlement load={load} />
+          ) : null}
+
+          {/* AuditTimeline — visible in audit mode */}
+          {sectionConfig.visible.includes("AuditTimeline") ? (
+            <section className="mt-2.5 rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between gap-2 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2">
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#7a8299]">Audit timeline</span>
+              </div>
+              <div className="px-3.5 py-8 text-center text-xs text-[#4a5068]">
+                Audit timeline coming soon.
+              </div>
+            </section>
+          ) : null}
         </main>
       </div>
     </div>

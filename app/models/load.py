@@ -24,6 +24,9 @@ class Load(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    #: Row-level optimistic concurrency; incremented on every successful CAS update to loads.
+    #: DB has no server default (migration clears it); ORM must set on INSERT.
+    concurrency_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     load_number: Mapped[str] = mapped_column(String(50), nullable=False)
     broker_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("brokers.id", ondelete="RESTRICT"), nullable=True, index=True)
     broker_contact_id: Mapped[int | None] = mapped_column(

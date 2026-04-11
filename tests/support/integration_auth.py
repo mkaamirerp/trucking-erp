@@ -42,6 +42,8 @@ def install_host_aligned_current_user_and_tenant(app: Any, *, role: str = "TENAN
         fake_user.email = "test@example.com"
         fake_user.tenant_id = int(tid)
         fake_user.role = role
+        # Admin onboarding routes (e.g. PersonApplication approve) persist reviewed_by / approved_by.
+        fake_user.member_id = 1
         return fake_user
 
     def _tenant_from_request(request: Request) -> int:
@@ -77,6 +79,7 @@ def install_mutable_tenant_current_user_and_tenant(
         fake_user.email = email
         fake_user.tenant_id = tid
         fake_user.role = role
+        fake_user.member_id = 1
         return fake_user
 
     def _tenant_from_holder(request: Request) -> int:  # noqa: ARG001

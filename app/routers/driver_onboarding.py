@@ -32,6 +32,7 @@ from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.models.application_access_token import ApplicationAccessToken
+from app.models.driver import Driver
 from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
 from app.models.person_application import APPLICATION_TYPES, PersonApplication
@@ -71,6 +72,16 @@ def _merge_field_sources(existing: dict | None, incoming: dict | None) -> dict:
         if value:
             merged[key] = value
     return merged
+
+
+def _merge_applicant_intake_payload(existing: dict | None, incoming: dict) -> dict:
+    """Merge saved intake with incoming keys; skip blank strings so empty form fields do not erase PDF417 data."""
+    base = dict(existing or {})
+    for key, value in (incoming or {}).items():
+        if isinstance(value, str) and value.strip() == "":
+            continue
+        base[key] = value
+    return base
 
 
 async def _best_effort_pdf417_extract(
@@ -214,6 +225,68 @@ def _person_application_canonical_data(app: PersonApplication) -> dict:
     return data
 
 
+async def _upsert_operational_driver_for_person(
+    db: AsyncSession,
+    tenant_id: int,
+    person: Person,
+    driver_profile: DriverProfile,
+) -> Driver:
+    """Create or refresh the tenant `drivers` row for dispatch (approved operational roster).
+
+    PersonApplication and intake payloads are not the operational roster; this row is the
+    dispatch-facing roster entry materialized when a DRIVER application is approved (idempotent).
+    Match key: (tenant_id, person_id). If multiple rows exist (legacy duplicates), the lowest ``id``
+    is the canonical survivor and is updated in place; all other matching rows are soft-retired
+    (``is_active=False``) so only one active operational driver remains per person per tenant.
+    """
+    result = await db.scalars(
+        select(Driver)
+        .where(
+            Driver.tenant_id == tenant_id,
+            Driver.person_id == person.id,
+        )
+        .order_by(Driver.id.asc())
+    )
+    rows = list(result.all())
+    op_driver = rows[0] if rows else None
+
+    if op_driver is None:
+        op_driver = Driver(
+            tenant_id=tenant_id,
+            person_id=person.id,
+            first_name=person.first_name,
+            last_name=person.last_name,
+            email=person.email,
+            phone=person.phone,
+            is_active=True,
+            license_number=driver_profile.license_number,
+            issuing_region=driver_profile.license_region,
+            license_expiry_date=driver_profile.license_expiry,
+        )
+        db.add(op_driver)
+    else:
+        # Legacy duplicate `drivers` rows: keep lowest-id survivor active; soft-retire the rest (no hard delete).
+        for dup in rows[1:]:
+            dup.is_active = False
+
+        op_driver.tenant_id = tenant_id
+        op_driver.person_id = person.id
+        op_driver.first_name = person.first_name
+        op_driver.last_name = person.last_name
+        op_driver.email = person.email
+        op_driver.phone = person.phone
+        op_driver.is_active = True
+        if driver_profile.license_number is not None:
+            op_driver.license_number = driver_profile.license_number
+        if driver_profile.license_region is not None:
+            op_driver.issuing_region = driver_profile.license_region
+        if driver_profile.license_expiry is not None:
+            op_driver.license_expiry_date = driver_profile.license_expiry
+
+    await db.flush()
+    return op_driver
+
+
 async def _ensure_person_entities_for_application(
     db: AsyncSession,
     app: PersonApplication,
@@ -278,7 +351,7 @@ async def _ensure_person_entities_for_application(
                 )
             )
 
-    # DriverProfile: only when requested_role_code == DRIVER
+    # DriverProfile + operational Driver row: only when requested_role_code == DRIVER
     if role_code == "DRIVER":
         driver_profile_fields = {
             "license_number": data.get("driver_license_number"),
@@ -303,6 +376,10 @@ async def _ensure_person_entities_for_application(
             for field_name, value in driver_profile_fields.items():
                 if value is not None:
                     setattr(driver_profile, field_name, value)
+
+        await db.flush()
+        # PersonApplication is intake/review state only; `drivers` is the dispatch roster.
+        await _upsert_operational_driver_for_person(db, app.tenant_id, person, driver_profile)
 
     await db.flush()
     return person
@@ -380,8 +457,8 @@ def _person_application_to_out(app: PersonApplication) -> ApplicantApplicationOu
         address_region=address_region,
         address_postal=address_postal,
         address_country=address_country,
-        driver_license_number=intake.get("driver_license_number"),
-        license_region=intake.get("license_region"),
+        driver_license_number=intake.get("driver_license_number") or intake.get("license_number"),
+        license_region=intake.get("license_region") or intake.get("license_state"),
         license_expiry=license_expiry,
         notes=notes,
         submitted_at=app.submitted_at,
@@ -458,7 +535,9 @@ async def save_applicant_intake(
             status_code=status.HTTP_409_CONFLICT,
             detail="Application already submitted",
         )
-    app.intake_payload = {**(app.intake_payload or {}), **payload.intake_payload}
+    app.intake_payload = _merge_applicant_intake_payload(
+        app.intake_payload, dict(payload.intake_payload or {})
+    )
     if payload.submit:
         app.status = DriverOnboardingStatus.SUBMITTED.value
         app.submitted_at = _utcnow()
@@ -733,7 +812,11 @@ async def approve_person_application(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Canonical admin approval path for PersonApplication invite-link onboarding."""
+    """Canonical admin approval path for PersonApplication invite-link onboarding.
+
+    Approving DRIVER materializes the operational `Driver` row used by dispatch (`GET /drivers`);
+    PersonApplication itself is never the dispatch roster.
+    """
     if not is_tenant_admin(current_user.role):
         raise HTTPException(status_code=403, detail="Admin role required")
     app = await _get_person_application_admin_for_update_or_404(db, tenant_id, application_id)

@@ -28,6 +28,7 @@ import {
   type DraftStop,
   type IntakeProposedFields,
   type LoadWorkspaceMode,
+  type WorkspaceSection,
 } from "./loadWorkspaceShared";
 
 const L = wsLabelClass;
@@ -116,12 +117,21 @@ export type LoadWorkspaceFormProps = {
   removeStop: (key: string) => void;
   addStop: () => void;
   moveStop: (key: string, dir: -1 | 1) => void;
+  /** Sections to render. When omitted, all sections are shown (backwards-compatible). */
+  visibleSections?: WorkspaceSection[];
+  /** Sections that allow editing. When omitted, all visible sections are editable. */
+  editableSections?: WorkspaceSection[];
 };
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   const modeCreate = p.mode === "manual";
   const isIntake = p.mode === "intake";
   const ip = p.intakeProposed;
+
+  /** Returns true when the section should be rendered. Omitting visibleSections shows all (backwards-compatible). */
+  const vis = (s: WorkspaceSection) => !p.visibleSections || p.visibleSections.includes(s);
+  /** Returns true when the section allows editing. Omitting editableSections allows all (backwards-compatible). */
+  const editable = (s: WorkspaceSection) => !p.editableSections || p.editableSections.includes(s);
 
   /** Returns blue-tint inline style when a proposed value exists for this field; {} otherwise. */
   function prefill(proposedVal: string | null | undefined): React.CSSProperties {
@@ -131,8 +141,8 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
 
   return (
     <div className="flex flex-col gap-2.5 pb-4">
-      {/* Broker */}
-      <section className={wsSectionCard}>
+      {/* Broker — WorkspaceSection: Parties */}
+      {vis("Parties") && <section className={wsSectionCard} data-editable={editable("Parties")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Broker</span>
           {!modeCreate && p.brokerNameSnapshot.trim() ? (
@@ -235,10 +245,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </div>
         </div>
         </div>
-      </section>
+      </section>}
 
-      {/* Stops */}
-      <section className={wsSectionCard}>
+      {/* Stops — WorkspaceSection: Stops */}
+      {vis("Stops") && <section className={wsSectionCard} data-editable={editable("Stops")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Stops</span>
           <span className={wsSectionMeta}>
@@ -470,10 +480,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           + Add stop
         </button>
         </div>
-      </section>
+      </section>}
 
-      {/* Freight & equipment */}
-      <section className={wsSectionCard}>
+      {/* Freight & equipment — WorkspaceSection: Equipment */}
+      {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Freight & equipment</span>
         </div>
@@ -612,10 +622,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </div>
         </div>
         </div>
-      </section>
+      </section>}
 
-      {/* Financials */}
-      <section className={wsSectionCard}>
+      {/* Financials — WorkspaceSection: Equipment (financial/cargo parameters travel together) */}
+      {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Financials</span>
         </div>
@@ -667,10 +677,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </div>
         </div>
         </div>
-      </section>
+      </section>}
 
-      {/* Assignment */}
-      <section className={wsSectionCard}>
+      {/* Assignment — WorkspaceSection: Assignment */}
+      {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Assignment</span>
         </div>
@@ -744,10 +754,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </div>
         </div>
         </div>
-      </section>
+      </section>}
 
-      {/* Customs */}
-      <section className={wsSectionCard}>
+      {/* Customs — WorkspaceSection: Documents */}
+      {vis("Documents") && <section className={wsSectionCard} data-editable={editable("Documents")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Customs</span>
         </div>
@@ -800,10 +810,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             ))}
         </div>
         </div>
-      </section>
+      </section>}
 
-      {/* Notes & documents */}
-      <section className={wsSectionCard}>
+      {/* Notes & documents — WorkspaceSection: Notes */}
+      {vis("Notes") && <section className={wsSectionCard} data-editable={editable("Notes")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Notes & documents</span>
         </div>
@@ -853,7 +863,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </div>
         ) : null}
         </div>
-      </section>
+      </section>}
 
       <p className="text-center text-[10px] text-gray-400">UI bundle {__UI_BUILD_ID__}</p>
     </div>

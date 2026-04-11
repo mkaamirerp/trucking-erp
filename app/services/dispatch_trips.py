@@ -105,11 +105,13 @@ async def get_active_trip_for_load(db: AsyncSession, tenant_id: int, load_id: in
     )
 
 
-async def ensure_active_trip_for_freight_load(db: AsyncSession, tenant_id: int, load: Load) -> DispatchTrip:
-    """Mint trip on first dispatched; idempotent if active trip exists. Syncs load read-model fields."""
-    existing = await get_active_trip_for_load(db, tenant_id, load.id)
+async def ensure_active_trip_for_freight_load(db: AsyncSession, tenant_id: int, load_id: int) -> DispatchTrip:
+    """Mint trip on first dispatched; idempotent if active trip exists.
+
+    Does not mutate the Load ORM row — caller applies active_dispatch_trip_id / trip_number via CAS UPDATE.
+    """
+    existing = await get_active_trip_for_load(db, tenant_id, load_id)
     if existing is not None:
-        await _sync_load_read_model(db, load, existing)
         return existing
 
     row = await get_or_create_numbering_for_update(db, tenant_id)
@@ -125,12 +127,11 @@ async def ensure_active_trip_for_freight_load(db: AsyncSession, tenant_id: int, 
         trip_number=trip_number,
         job_type=JOB_TYPE_FREIGHT_LOAD,
         status=DISPATCH_TRIP_STATUS_ACTIVE,
-        load_id=load.id,
+        load_id=load_id,
         trailer_move_id=None,
     )
     db.add(trip)
     await db.flush()
-    await _sync_load_read_model(db, load, trip)
     return trip
 
 

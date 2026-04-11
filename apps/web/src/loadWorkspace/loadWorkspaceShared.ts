@@ -1,11 +1,53 @@
 /**
  * Shared helpers and UI tokens for the canonical load workspace (create + edit).
  */
-import type { Load, LoadStop } from "@/api";
+import type { Load, LoadStop, LoadStopWrite, LoadWritePayload } from "@/api";
 import { sortedStops as sortStops } from "@/utils/loadStops";
 
 /** Workspace shell mode — drives data source, save path, and chrome only; fields are identical. */
-export type LoadWorkspaceMode = "manual" | "intake" | "detail";
+export type LoadWorkspaceMode = "manual" | "intake" | "detail" | "payroll" | "audit";
+
+export type WorkspaceSection =
+  | "HeaderIdentity"
+  | "Parties"
+  | "Stops"
+  | "Equipment"
+  | "Assignment"
+  | "Documents"
+  | "Notes"
+  | "Settlement"
+  | "AuditTimeline";
+
+export const SECTION_CONFIG: Record<
+  LoadWorkspaceMode,
+  { visible: WorkspaceSection[]; editable: WorkspaceSection[]; defaultSection: WorkspaceSection }
+> = {
+  manual: {
+    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
+    editable: ["Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
+    defaultSection: "Parties",
+  },
+  intake: {
+    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Documents", "Notes"],
+    editable: ["Parties", "Stops", "Equipment", "Documents", "Notes"],
+    defaultSection: "Parties",
+  },
+  detail: {
+    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
+    editable: ["Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
+    defaultSection: "Stops",
+  },
+  payroll: {
+    visible: ["HeaderIdentity", "Assignment", "Settlement", "Documents"],
+    editable: [],
+    defaultSection: "Settlement",
+  },
+  audit: {
+    visible: ["HeaderIdentity", "Parties", "Stops", "Assignment", "Settlement", "Documents", "AuditTimeline"],
+    editable: [],
+    defaultSection: "AuditTimeline",
+  },
+};
 
 /** Single object snapshot for all editable load fields (hydrate + persist via buildLoadPersistPayload). */
 export interface WorkspaceDraftFields {
@@ -155,7 +197,7 @@ export const wsInputClass =
 export const wsGrid2 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2";
 export const wsGrid3 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3";
 
-export function stopToPayload(s: DraftStop, sequence: number) {
+export function stopToPayload(s: DraftStop, sequence: number): LoadStopWrite {
   return {
     stop_type: s.stop_type,
     sequence,
@@ -354,7 +396,7 @@ export function buildLoadPersistPayload(params: {
   customsBrokerId: number | null;
   internalNotes: string;
   draftStops: DraftStop[];
-}): Partial<Load> {
+}): LoadWritePayload {
   const sorted = [...params.draftStops].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
   const stopsPayload = sorted.map((s, i) => stopToPayload(s, i));
   const estW = params.estimatedWeight.trim();
@@ -394,8 +436,49 @@ export function buildLoadPersistPayload(params: {
   };
 }
 
+/**
+ * Stable JSON signature of the persist payload as derived from a server `Load` row.
+ * Used to detect local edits vs last server-aligned baseline (optimistic concurrency on the client).
+ */
+export function baselineSignatureFromLoad(l: Load): string {
+  let hazmat: "unset" | "yes" | "no" = "unset";
+  if (l.hazmat_flag === true) hazmat = "yes";
+  else if (l.hazmat_flag === false) hazmat = "no";
+  const payload = buildLoadPersistPayload({
+    status: l.status ?? "",
+    loadNumber: l.load_number || "",
+    brokerId: l.broker_id ?? null,
+    brokerContactId: l.broker_contact_id ?? null,
+    brokerNameSnapshot: l.broker_name_snapshot ?? "",
+    brokerContactNameSnapshot: l.broker_contact_name_snapshot ?? "",
+    brokerContactPhoneSnapshot: l.broker_contact_phone_snapshot ?? "",
+    brokerContactExtensionSnapshot: l.broker_contact_extension_snapshot ?? "",
+    brokerContactEmailSnapshot: l.broker_contact_email_snapshot ?? "",
+    brokerLoadReference: l.broker_load_reference ?? "",
+    mode: l.mode ?? "",
+    equipmentType: l.equipment_type ?? "",
+    trailerType: l.trailer_type ?? "",
+    trailerSize: l.trailer_size ?? "",
+    commodity: l.commodity ?? "",
+    estimatedWeight: l.estimated_weight != null ? String(l.estimated_weight) : "",
+    hazmat,
+    temperatureRequirement: l.temperature_requirement ?? "",
+    palletCaseCount: l.pallet_case_count ?? "",
+    rate: l.rate != null ? String(l.rate) : "",
+    customerRate: l.customer_rate != null ? String(l.customer_rate) : "",
+    miles: l.miles != null ? String(l.miles) : "",
+    driverId: l.driver_id ?? null,
+    truckId: l.truck_id ?? null,
+    trailerId: l.trailer_id ?? null,
+    customsBrokerId: l.customs_broker_id ?? null,
+    internalNotes: l.internal_notes ?? "",
+    draftStops: stopsToDraft(l.stops),
+  });
+  return JSON.stringify(payload);
+}
+
 /** Maps `WorkspaceDraftFields` into the existing persist payload shape (single call site for saves). */
-export function buildLoadPersistPayloadFromWorkspaceFields(f: WorkspaceDraftFields): Partial<Load> {
+export function buildLoadPersistPayloadFromWorkspaceFields(f: WorkspaceDraftFields): LoadWritePayload {
   return buildLoadPersistPayload({
     status: f.status,
     loadNumber: f.loadNumber,

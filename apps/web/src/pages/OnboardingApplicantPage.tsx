@@ -11,6 +11,11 @@ import {
   type PersonApplication,
 } from "../api";
 import DLUploadStep from "../components/DLUploadStep";
+import {
+  cleanIntakeText,
+  hydrateOnboardingFormFromIntake,
+  mergeIntakeForSave,
+} from "../core/hydrateOnboardingFormFromIntake";
 
 type Step = 0 | 1 | 2 | 3;
 type DlUiState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
@@ -84,25 +89,31 @@ function getIntake(app: PersonApplication | null): Record<string, any> {
   return (app?.intake_payload as any) || {};
 }
 
-function cleanDlText(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value
-    .replace(/<LF>/g, " ")
-    .replace(/<CR>/g, " ")
-    .replace(/\r/g, " ")
-    .replace(/\n/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Match `uploadPersonApplicationDlFile` — which `file_id` to pass to `/application/file` for previews. */
+function resolveDlThumbFileId(docType: DocType, intake: Record<string, any>): string | null {
+  const files = intake.files as Record<string, any> | undefined;
+  if (!files || typeof files !== "object") return null;
+  const fileMeta = files[docType];
+  if (!fileMeta || typeof fileMeta !== "object") return null;
+  const processedMeta = files[`${docType}_PROCESSED`];
+  const fileId = fileMeta.file_id ?? fileMeta.storage_key;
+  const id =
+    fileMeta.enh_file_id ??
+    processedMeta?.enh_file_id ??
+    processedMeta?.file_id ??
+    processedMeta?.storage_key ??
+    fileId;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
-function pickCleanIntakeValue(intake: Record<string, any>, prev: string, ...keys: string[]): string {
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(intake, key)) {
-      const cleaned = cleanDlText(intake[key]);
-      return cleaned;
-    }
-  }
-  return prev;
+function hasStoredDlSide(docType: DocType, intake: Record<string, any>): boolean {
+  return resolveDlThumbFileId(docType, intake) != null;
+}
+
+function parseOnboardingStep(raw: unknown): Step | null {
+  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 3) return raw as Step;
+  if (typeof raw === "string" && /^[0-3]$/.test(raw)) return Number(raw) as Step;
+  return null;
 }
 
 function formatDateAsTyped(raw: string): string {
@@ -113,38 +124,11 @@ function formatDateAsTyped(raw: string): string {
 }
 
 function hasReadableValue(value: unknown): boolean {
-  return cleanDlText(value).length > 0;
+  return cleanIntakeText(value).length > 0;
 }
 
 function shouldShowDlSource(source: unknown, edited: boolean | undefined, value: unknown): boolean {
   return Boolean(source) && !edited && hasReadableValue(value);
-}
-
-function mergeFormWithIntake(prev: Record<string, string>, intake: Record<string, any>) {
-  return {
-    ...prev,
-    first_name: pickCleanIntakeValue(intake, prev.first_name, "first_name"),
-    middle_name: pickCleanIntakeValue(intake, prev.middle_name, "middle_name"),
-    last_name: pickCleanIntakeValue(intake, prev.last_name, "last_name"),
-    email: pickCleanIntakeValue(intake, prev.email, "email"),
-    phone: pickCleanIntakeValue(intake, prev.phone, "phone"),
-    driver_license_number: pickCleanIntakeValue(intake, prev.driver_license_number, "license_number", "driver_license_number"),
-    license_region: pickCleanIntakeValue(intake, prev.license_region, "license_region", "license_state"),
-    license_expiry: pickCleanIntakeValue(intake, prev.license_expiry, "license_expiry"),
-    license_issue_date: pickCleanIntakeValue(intake, prev.license_issue_date, "license_issue_date", "issue_date"),
-    cdl_class: pickCleanIntakeValue(intake, prev.cdl_class, "license_class", "cdl_class"),
-    endorsements: pickCleanIntakeValue(intake, prev.endorsements, "endorsements"),
-    restrictions: pickCleanIntakeValue(intake, prev.restrictions, "restrictions"),
-    conditions: pickCleanIntakeValue(intake, prev.conditions, "conditions"),
-    sex: pickCleanIntakeValue(intake, prev.sex, "sex"),
-    height: pickCleanIntakeValue(intake, prev.height, "height"),
-    address_street: pickCleanIntakeValue(intake, prev.address_street, "address_line", "address_street"),
-    address_city: pickCleanIntakeValue(intake, prev.address_city, "address_city"),
-    address_region: pickCleanIntakeValue(intake, prev.address_region, "address_region"),
-    address_postal: pickCleanIntakeValue(intake, prev.address_postal, "address_postal"),
-    address_country: pickCleanIntakeValue(intake, prev.address_country, "address_country", "form_country_default"),
-    date_of_birth: pickCleanIntakeValue(intake, prev.date_of_birth, "date_of_birth"),
-  };
 }
 
 function userFacingErrorMessage(error: unknown, fallback: string): string {
@@ -343,11 +327,17 @@ export default function OnboardingApplicantPage() {
         if (cancelled) return;
         setApp(data);
         const intake = (data.intake_payload as any) || {};
-        setForm((f) => mergeFormWithIntake({
-          ...f,
-          email: data.email || intake.email || f.email,
-          phone: data.phone || intake.phone || f.phone,
-        }, intake));
+        setForm((f) =>
+          hydrateOnboardingFormFromIntake(
+            {
+              ...f,
+              email: data.email || cleanIntakeText(intake.email) || f.email,
+              phone: data.phone || cleanIntakeText(intake.phone) || f.phone,
+            },
+            intake,
+            "initial",
+          ),
+        );
         setPreviewUrl((prev) => {
           (["CDL_FRONT", "CDL_BACK"] as DocType[]).forEach((docType) => {
             const old = prev[docType];
@@ -355,8 +345,16 @@ export default function OnboardingApplicantPage() {
           });
           return { CDL_FRONT: null, CDL_BACK: null };
         });
-        setDlState({ CDL_FRONT: "IDLE", CDL_BACK: "IDLE" });
+        setDlState({
+          CDL_FRONT: hasStoredDlSide("CDL_FRONT", intake) ? "SUCCESS" : "IDLE",
+          CDL_BACK: hasStoredDlSide("CDL_BACK", intake) ? "SUCCESS" : "IDLE",
+        });
         setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
+        const restoredStep = parseOnboardingStep(intake.onboarding_step);
+        if (restoredStep !== null) setStep(restoredStep);
+        if (typeof intake.agree_info_accurate === "boolean") setAgree1(intake.agree_info_accurate);
+        if (typeof intake.agree_background_check === "boolean") setAgree2(intake.agree_background_check);
+        if (typeof intake.agree_dot_compliance === "boolean") setAgree3(intake.agree_dot_compliance);
         if (intake.jobs) setJobs(intake.jobs);
         if (intake.refs) setRefs(intake.refs);
         setSubmitted(data.status === "SUBMITTED");
@@ -369,6 +367,36 @@ export default function OnboardingApplicantPage() {
           });
           setDocUploaded((prev) => ({ ...prev, ...next }));
         }
+
+        const appId = data.id;
+        (async () => {
+          const updates: Partial<Record<DocType, string>> = {};
+          for (const docType of ["CDL_FRONT", "CDL_BACK"] as DocType[]) {
+            const fid = resolveDlThumbFileId(docType, intake);
+            if (!fid) continue;
+            try {
+              const url = await getPersonApplicationFileThumbnail({ appId, fileId: fid, onboardingToken: token });
+              updates[docType] = url;
+            } catch {
+              /* keep SUCCESS + stored file; preview may stay empty if file fetch fails */
+            }
+          }
+          if (cancelled) return;
+          if (Object.keys(updates).length > 0) {
+            setPreviewUrl((prev) => {
+              const next = { ...prev };
+              (["CDL_FRONT", "CDL_BACK"] as DocType[]).forEach((d) => {
+                const u = updates[d];
+                if (u != null) {
+                  const old = prev[d];
+                  if (old?.startsWith("blob:")) URL.revokeObjectURL(old);
+                  next[d] = u;
+                }
+              });
+              return next;
+            });
+          }
+        })();
       } catch (e: any) {
         if (!cancelled) setError(e?.message || "Could not load onboarding link");
       } finally {
@@ -414,7 +442,9 @@ export default function OnboardingApplicantPage() {
             return { ...prev, [docType]: thumbUrl };
           });
         } catch {}
-        setForm((prev) => mergeFormWithIntake(prev, (resp.intake_payload as Record<string, any>) || {}));
+        setForm((prev) =>
+          hydrateOnboardingFormFromIntake(prev, (resp.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
+        );
       }
       return ok;
     } catch (e: any) {
@@ -443,7 +473,7 @@ export default function OnboardingApplicantPage() {
       const resetApp = await resetPersonApplicationDraft({ appId: app.id, onboardingToken: token });
       const intake = (resetApp.intake_payload as Record<string, any>) || {};
       setApp(resetApp);
-      setForm(mergeFormWithIntake({ ...EMPTY_FORM }, intake));
+      setForm(hydrateOnboardingFormFromIntake({ ...EMPTY_FORM }, intake, "initial"));
       setJobs([{ ...EMPTY_JOB }]);
       setRefs([{ ...EMPTY_REF }, { ...EMPTY_REF }]);
       setDocUploaded({});
@@ -565,21 +595,18 @@ export default function OnboardingApplicantPage() {
     setShowValidationStep1(false);
     setShowValidationStep2(false);
     try {
-      const payload: Record<string, unknown> = {
-        ...((app.intake_payload as any) || {}),
-        ...form,
-        // Sync form field names to intake keys so load and backend see all license fields
-        license_number: form.driver_license_number,
-        license_state: form.license_region,
-        license_expiry: form.license_expiry,
-        license_issue_date: form.license_issue_date,
-        license_class: form.cdl_class,
-        jobs,
-        refs,
-        agree_info_accurate: agree1,
-        agree_background_check: agree2,
-        agree_dot_compliance: agree3,
-      };
+      const payload = mergeIntakeForSave(
+        ((app.intake_payload as any) || {}) as Record<string, unknown>,
+        form,
+        {
+          jobs,
+          refs,
+          agree_info_accurate: agree1,
+          agree_background_check: agree2,
+          agree_dot_compliance: agree3,
+          onboarding_step: nextStep,
+        },
+      );
       const updated = await savePersonApplicationIntake({ appId: app.id, onboardingToken: token, intakePayload: payload });
       setApp(updated);
       setStep(nextStep);
@@ -597,19 +624,17 @@ export default function OnboardingApplicantPage() {
     setSaving(true);
     setError(null);
     try {
-      const payload: Record<string, unknown> = {
-        ...((app.intake_payload as any) || {}),
-        ...form,
-        license_number: form.driver_license_number,
-        license_state: form.license_region,
-        license_expiry: form.license_expiry,
-        license_issue_date: form.license_issue_date,
-        license_class: form.cdl_class,
-        jobs, refs,
-        agree_info_accurate: agree1,
-        agree_background_check: agree2,
-        agree_dot_compliance: agree3,
-      };
+      const payload = mergeIntakeForSave(
+        ((app.intake_payload as any) || {}) as Record<string, unknown>,
+        form,
+        {
+          jobs,
+          refs,
+          agree_info_accurate: agree1,
+          agree_background_check: agree2,
+          agree_dot_compliance: agree3,
+        },
+      );
       const updated = await submitPersonApplication({ appId: app.id, onboardingToken: token, intakePayload: payload });
       setApp(updated);
       setSubmitted(true);

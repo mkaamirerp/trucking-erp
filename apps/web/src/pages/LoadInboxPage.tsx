@@ -20,6 +20,7 @@ import {
 import { IntakeVerificationPanel, type IntakeKpis } from "../components/intake/IntakeVerificationPanel";
 import { OPS } from "../routes";
 import { useMe } from "../hooks/useMe";
+import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { formatRoutingReason } from "../utils/emailIntakeRoutingReason";
 
 function formatWhen(iso: string | null | undefined): string {
@@ -246,8 +247,13 @@ export default function LoadInboxPage() {
     }
   }, [provider]);
 
-  const loadThreads = async (opts?: { keepSelection?: boolean; retainSelectionId?: number }) => {
-    setLoadingThreads(true);
+  const loadThreads = async (opts?: {
+    keepSelection?: boolean;
+    retainSelectionId?: number;
+    silent?: boolean;
+  }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoadingThreads(true);
     setThreadsError(null);
     setActionError(null);
     try {
@@ -340,10 +346,15 @@ export default function LoadInboxPage() {
       setThreadDetail(null);
       setMessages([]);
     } finally {
-      setLoadingThreads(false);
+      if (!silent) setLoadingThreads(false);
     }
     if (!pathForKpisRef.current.startsWith(OPS.EMAIL_LOAD)) void refreshIntakeKpis();
   };
+
+  useOperationalRefresh({
+    intervalMs: 15_000,
+    onRefresh: () => loadThreads({ keepSelection: true, silent: true }),
+  });
 
   useEffect(() => {
     loadThreads();

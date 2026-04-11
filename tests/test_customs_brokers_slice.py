@@ -106,24 +106,30 @@ class TestLoadCustomsConfirmAndFreeze:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
+        cv0 = cr.json()["concurrency_version"]
 
         patch = await client.patch(
             f"/api/v1/loads/{load_id}",
-            json={"customs_broker_id": customs_broker_id},
+            json={"customs_broker_id": customs_broker_id, "expected_concurrency_version": cv0},
             headers=AUTH_HEADERS,
         )
         assert patch.status_code == 200
         assert patch.json()["customs_broker_id"] == customs_broker_id
         assert patch.json().get("document_snapshot_confirmed_at") is None
+        cv1 = patch.json()["concurrency_version"]
 
         bad = await client.patch(
             f"/api/v1/loads/{load_id}",
-            json={"customs_broker_id": customs_broker_id + 99999},
+            json={"customs_broker_id": customs_broker_id + 99999, "expected_concurrency_version": cv1},
             headers=AUTH_HEADERS,
         )
         assert bad.status_code == 400
 
-        conf = await client.post(f"/api/v1/loads/{load_id}/confirm-document-snapshot", headers=AUTH_HEADERS)
+        conf = await client.post(
+            f"/api/v1/loads/{load_id}/confirm-document-snapshot",
+            json={"expected_concurrency_version": cv1},
+            headers=AUTH_HEADERS,
+        )
         assert conf.status_code == 200
         body = conf.json()
         assert body.get("document_snapshot_confirmed_at") is not None
@@ -133,19 +139,29 @@ class TestLoadCustomsConfirmAndFreeze:
         assert snap.get("fax_snapshot") == "+15559998877"
         assert snap.get("customs_broker_id_at_confirm") == customs_broker_id
 
-        again = await client.post(f"/api/v1/loads/{load_id}/confirm-document-snapshot", headers=AUTH_HEADERS)
+        cv_after_confirm = conf.json()["concurrency_version"]
+        again = await client.post(
+            f"/api/v1/loads/{load_id}/confirm-document-snapshot",
+            json={"expected_concurrency_version": cv_after_confirm},
+            headers=AUTH_HEADERS,
+        )
         assert again.status_code == 409
+        assert again.json().get("detail", {}).get("code") == "DOCUMENT_SNAPSHOT_ALREADY_CONFIRMED"
+
+        gl = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
+        assert gl.status_code == 200
+        cv_gl = gl.json()["concurrency_version"]
 
         blocked = await client.patch(
             f"/api/v1/loads/{load_id}",
-            json={"customs_broker_id": None},
+            json={"customs_broker_id": None, "expected_concurrency_version": cv_gl},
             headers=AUTH_HEADERS,
         )
         assert blocked.status_code == 400
 
-        gl = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
-        assert gl.status_code == 200
-        assert gl.json()["customs_snapshot"] is not None
+        gl2 = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
+        assert gl2.status_code == 200
+        assert gl2.json()["customs_snapshot"] is not None
 
     async def test_cannot_assign_other_tenant_customs_broker_to_load(self, client, tenant_resolver) -> None:
         tenant_resolver["tenant_id"] = 1
@@ -160,10 +176,11 @@ class TestLoadCustomsConfirmAndFreeze:
         ln = f"L-CTX-{uuid.uuid4().hex[:8]}"
         cr = await client.post("/api/v1/loads", json={"status": "draft", "load_number": ln}, headers=AUTH_HEADERS)
         load_id = cr.json()["id"]
+        cv0 = cr.json()["concurrency_version"]
 
         patch = await client.patch(
             f"/api/v1/loads/{load_id}",
-            json={"customs_broker_id": customs_broker_id},
+            json={"customs_broker_id": customs_broker_id, "expected_concurrency_version": cv0},
             headers=AUTH_HEADERS,
         )
         assert patch.status_code == 400

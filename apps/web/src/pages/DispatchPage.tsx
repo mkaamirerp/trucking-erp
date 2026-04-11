@@ -5,7 +5,7 @@
  * Delivered moved to ribbon tab, not a board column.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import {
   getDispatchBoard,
@@ -18,11 +18,11 @@ import {
   type Driver,
   type Trailer,
 } from "@/api";
-import { OPS, ADMIN } from "@/routes";
+import { OPS } from "@/routes";
 import { getTenantSlugFromHost } from "@/tenant";
 import { useWorkspaceLayout } from "@/hooks/useWorkspaceLayout";
+import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { useMe } from "@/hooks/useMe";
-import { useAuth } from "@/contexts/AuthContext";
 import { formatRouteFromStops, sortedStops, firstPickupStop, lastDropStop, formatStopCityState } from "@/utils/loadStops";
 
 const RIBBON_TABS = [
@@ -86,7 +86,22 @@ const COLUMN_COUNT_CLASS: Record<string, string> = {
   dispatched: "bg-[#0d2420] text-[#10b981] border border-[#0f302a]",
 };
 
-const COLUMN_WIDTH = 356;
+/** Load-status lanes: fixed width (stable metrics; no hover width change). */
+const LOAD_COLUMN_WIDTH = 312;
+/** Drivers side rail: wider for header + filter row + cards (not the same lane type as loads). */
+const DRIVER_COLUMN_WIDTH = 360;
+
+function displayBrokerHeadline(load: Load): string {
+  const snap = load.broker_name_snapshot?.trim();
+  if (snap) return snap;
+  const display = load.broker?.display_name?.trim();
+  if (display) return display;
+  const legal = load.broker?.legal_name?.trim();
+  if (legal) return legal;
+  const name = load.broker?.name?.trim();
+  if (name) return name;
+  return "—";
+}
 
 function formatRoute(load: Load): string {
   return formatRouteFromStops(load.stops);
@@ -95,14 +110,6 @@ function formatRoute(load: Load): string {
 function formatTripNumber(load: Load): string {
   const t = load.trip_number?.trim();
   return t || "—";
-}
-
-function uiTripStyleId(load: Load): string {
-  // UI-only: do not imply a real dispatch_trips row exists.
-  const n = String(load.id ?? "").padStart(4, "0");
-  if (load.status === "assigned") return `TRIPAS-${n}`;
-  if (load.status === "dispatched") return `TRIPSPC-${n}`;
-  return `L-${(load.load_number || "").replace(/^L-/, "")}`;
 }
 
 function uiDeadMiles(load: Load): number | null {
@@ -149,8 +156,8 @@ function LoadCard({
   return (
     <div
       className={clsx(
-        "relative rounded-xl border bg-[#141a25] border-[#242b3c] p-3 mb-3 cursor-pointer transition-all",
-        "hover:bg-[#161e2c]",
+        "relative box-border mb-1.5 min-w-0 cursor-pointer rounded-xl border border-[#242b3c] bg-[#141a25] p-2 transition-colors outline-none",
+        "hover:bg-[#161e2c] focus-visible:ring-2 focus-visible:ring-[#f5a623]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0c0f16]",
         status === "dispatched" ? "shadow-[0_0_0_1px_rgba(16,185,129,0.15),0_0_22px_rgba(16,185,129,0.08)]" : ""
       )}
       style={{
@@ -162,23 +169,24 @@ function LoadCard({
       onMouseEnter={() => setFocused(true)}
       onMouseLeave={() => setFocused(false)}
     >
-      {/* HEADER */}
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <div className="text-[14px] font-semibold text-white leading-tight">
-            {load.broker_name_snapshot || "—"}
+      {/* HEADER — broker/company is primary identifier (snapshot + FK broker fallbacks) */}
+      <div className="mb-1 flex items-start justify-between gap-1.5">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-white leading-snug truncate" title={displayBrokerHeadline(load)}>
+            {displayBrokerHeadline(load)}
           </div>
-          <div className="text-[10px] font-mono text-[#6b7280] mt-0.5">
-            #{load.status === "unassigned" ? load.load_number : uiTripStyleId(load)}
+          <div className="mt-0.5 truncate font-mono text-[10px] text-[#6b7280]">
+            #{load.load_number || "—"}
+            {load.trip_number?.trim() ? ` · ${load.trip_number.trim()}` : ""}
           </div>
         </div>
-        <span className={clsx("text-[10px] font-semibold px-2 py-0.5 rounded-md", badgeClass)}>
+        <span className={clsx("rounded-md px-1.5 py-0.5 text-[10px] font-semibold", badgeClass)}>
           {statusLabel}
         </span>
       </div>
 
       {/* ROUTE */}
-      <div className="flex items-center justify-between bg-[#0f141f] rounded-lg px-3 py-2 mb-2 border border-[#242b3c]">
+      <div className="mb-1 flex items-center justify-between rounded-lg border border-[#242b3c] bg-[#0f141f] px-2 py-1.5">
         <div>
           <div className="text-[12px] font-medium text-white">{origin}</div>
           <div className="text-[10px] text-[#6b7280]">{originState}</div>
@@ -191,14 +199,14 @@ function LoadCard({
       </div>
 
       {/* MILES */}
-      <div className="flex gap-2 mb-2">
-        <div className="flex-1 flex items-center justify-between bg-[#153452] border border-[#244b78] rounded-md px-2 py-1">
+      <div className="mb-1 flex gap-1">
+        <div className="flex flex-1 items-center justify-between rounded-md border border-[#244b78] bg-[#153452] px-1 py-1">
           <span className="text-[9px] text-[#7aa8d4] uppercase tracking-wide">Loaded</span>
           <span className="text-[11px] font-bold text-[#4d9fff]">
             {load.miles ? `${load.miles} mi` : "— mi"}
           </span>
         </div>
-        <div className="flex-1 flex items-center justify-between bg-[#2a1b1f] border border-[#3b232a] rounded-md px-2 py-1">
+        <div className="flex flex-1 items-center justify-between rounded-md border border-[#3b232a] bg-[#2a1b1f] px-1 py-1">
           <span className="text-[9px] text-[#ef4444] uppercase tracking-wide">Dead</span>
           <span className="text-[11px] font-bold text-[#ef4444]">
             {uiDeadMiles(load) != null ? `${uiDeadMiles(load)} mi` : "— mi"}
@@ -207,7 +215,7 @@ function LoadCard({
       </div>
 
       {/* META */}
-      <div className="flex items-center text-[10px] text-[#9ca3af] gap-3">
+      <div className="flex items-center gap-1.5 text-[10px] text-[#9ca3af]">
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-[#f5a623]/80" />
           <span>{load.equipment_type || "—"}</span>
@@ -224,11 +232,11 @@ function LoadCard({
       {/* FOOTER — assigned */}
       {status === "assigned" && (
         <div
-          className="flex items-center gap-2 pt-2 mt-2 border-t border-[#242b3c]"
+          className="mt-1.5 flex items-center gap-1.5 border-t border-[#242b3c] pt-1.5"
           onClick={(e) => e.stopPropagation()}
         >
           {load.driver && (
-            <div className="h-6 w-6 rounded-full bg-[#f5a623]/20 border border-[#f5a623]/60 flex items-center justify-center shrink-0">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#f5a623]/60 bg-[#f5a623]/20">
               <span className="text-[9px] font-bold text-[#f5a623]">{driverInitials}</span>
             </div>
           )}
@@ -241,26 +249,30 @@ function LoadCard({
             </div>
           </div>
           {load.trailer && (
-            <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] bg-[#101522] border border-[#242b3c] text-[#9ca3af]">
+            <span className="shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[#9ca3af]">
               {load.trailer.unit_number}
             </span>
           )}
-          {focused ? (
-            <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] bg-[#101522] border border-[#242b3c] text-[#94a3b8]">
-              View only
-            </span>
-          ) : null}
+          <span
+            className={clsx(
+              "shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[#94a3b8]",
+              !focused && "invisible"
+            )}
+            aria-hidden={!focused}
+          >
+            View only
+          </span>
         </div>
       )}
 
       {/* FOOTER — dispatched */}
       {status === "dispatched" && (
         <div
-          className="flex items-center gap-2 pt-2 mt-2 border-t border-[#242b3c]"
+          className="mt-1.5 flex items-center gap-1.5 border-t border-[#242b3c] pt-1.5"
           onClick={(e) => e.stopPropagation()}
         >
           {load.driver && (
-            <div className="h-6 w-6 rounded-full bg-[#10b981]/15 border border-[#10b981]/60 flex items-center justify-center shrink-0">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#10b981]/60 bg-[#10b981]/15">
               <span className="text-[9px] font-bold text-[#10b981]">{driverInitials}</span>
             </div>
           )}
@@ -269,15 +281,19 @@ function LoadCard({
             {load.truck ? ` · Truck ${load.truck.unit_number}` : ""}
           </span>
           {load.trailer && (
-            <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] bg-[#101522] border border-[#242b3c] text-[#9ca3af]">
+            <span className="shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[#9ca3af]">
               {load.trailer.unit_number}
             </span>
           )}
-          {focused ? (
-            <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] bg-[#101522] border border-[#242b3c] text-[#94a3b8]">
-              View only
-            </span>
-          ) : null}
+          <span
+            className={clsx(
+              "shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[#94a3b8]",
+              !focused && "invisible"
+            )}
+            aria-hidden={!focused}
+          >
+            View only
+          </span>
         </div>
       )}
     </div>
@@ -309,25 +325,30 @@ function StatusColumn({
 
   return (
     <div
-      className="flex-shrink-0 flex flex-col rounded-xl border border-[#1c2235] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
-      style={{ width: COLUMN_WIDTH, background: colBg }}
+      className="box-border flex shrink-0 flex-col rounded-xl border border-[#1c2235] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+      style={{
+        width: LOAD_COLUMN_WIDTH,
+        minWidth: LOAD_COLUMN_WIDTH,
+        maxWidth: LOAD_COLUMN_WIDTH,
+        background: colBg,
+      }}
     >
       <div
-        className="px-3 py-2.5 border-b border-[#1c2235] flex items-center justify-between"
+        className="box-border flex shrink-0 items-center justify-between border-b border-[#1c2235] px-2 py-1.5"
         style={{ background: colBg }}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span
-            className="h-2 w-2 rounded-full shrink-0"
+            className="h-2 w-2 shrink-0 rounded-full"
             style={{ backgroundColor: dot.color, boxShadow: dot.glow }}
           />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">{label.toUpperCase()}</span>
         </div>
-        <span className={clsx("text-[10px] font-medium px-2 py-0.5 rounded-full tabular-nums", countClass)}>
+        <span className={clsx("rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums", countClass)}>
           {loads.length}
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto min-h-[60px] max-h-[calc(100vh-260px)] p-3 space-y-1.5">
+      <div className="box-border min-h-0 flex-1 space-y-1 overflow-x-hidden overflow-y-auto p-2 [scrollbar-gutter:stable]">
         {loads.map((load) => (
           <LoadCard
             key={load.id}
@@ -352,11 +373,161 @@ function StatusColumn({
   );
 }
 
+// ─── Driver availability column ───────────────────────────────────────────────
+
+type DriverAvailStatus = "available" | "on_load";
+
+type DriverWithLoad = {
+  driver: Driver;
+  status: DriverAvailStatus;
+  load?: Load;
+  truckUnit?: string;
+};
+
+const ON_LOAD_STATUSES = [
+  "assigned",
+  "dispatched",
+  "arrived_pickup",
+  "in_transit",
+  "arrived_delivery",
+];
+
+function deriveDriverStatuses(
+  drivers: Driver[],
+  board: DispatchBoard | null,
+): DriverWithLoad[] {
+  const driverLoadMap = new Map<number, Load>();
+  for (const s of ON_LOAD_STATUSES) {
+    for (const load of board?.[s] ?? []) {
+      if (load.driver?.id != null) {
+        driverLoadMap.set(load.driver.id, load);
+      }
+    }
+  }
+  return drivers.map((driver) => {
+    const load = driverLoadMap.get(driver.id);
+    return load
+      ? { driver, status: "on_load", load, truckUnit: load.truck?.unit_number }
+      : { driver, status: "available" };
+  });
+}
+
+const DRIVER_STATUS_PILL: Record<DriverAvailStatus, string> = {
+  available: "bg-[#0d2e1f] text-[#10b981] border border-[#10b981]/30",
+  on_load:   "bg-[#2a1f0a] text-[#f5a623] border border-[#f5a623]/30",
+};
+
+const DRIVER_STATUS_LABEL: Record<DriverAvailStatus, string> = {
+  available: "Available",
+  on_load:   "On Load",
+};
+
+const DRIVER_ACCENT: Record<DriverAvailStatus, string> = {
+  available: "#10b981",
+  on_load:   "#f5a623",
+};
+
+function DriverCard({ item }: { item: DriverWithLoad }) {
+  const { driver, status, load, truckUnit } = item;
+  const loadRoute = load ? formatRouteFromStops(load.stops) : null;
+
+  return (
+    <div
+      className="mb-1.5 box-border rounded-lg border border-[#252a38] bg-[#1a1e2a] p-2"
+      style={{
+        borderLeftWidth: 4,
+        borderLeftStyle: "solid",
+        borderLeftColor: DRIVER_ACCENT[status],
+      }}
+    >
+      {/* Name + status pill */}
+      <div className="flex items-start justify-between gap-1.5">
+        <span className="text-[14px] font-semibold text-white leading-tight">
+          {driver.first_name} {driver.last_name}
+        </span>
+        <span className={clsx("shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold", DRIVER_STATUS_PILL[status])}>
+          {DRIVER_STATUS_LABEL[status]}
+        </span>
+      </div>
+
+      {/* Phone + truck unit */}
+      {(driver.phone || truckUnit) && (
+        <div className="mt-1 flex items-center gap-2">
+          {driver.phone && (
+            <span className="text-[11px] text-[#4a5068]">{driver.phone}</span>
+          )}
+          {truckUnit && (
+            <span className="font-mono text-[11px] text-[#4a5068]">{truckUnit}</span>
+          )}
+        </div>
+      )}
+
+      {/* Load number + route (on load only) */}
+      {load && (
+        <div className="mt-1.5 text-[10px] text-[#4a5068]">
+          {load.load_number}{loadRoute ? ` · ${loadRoute}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DriverColumn({
+  drivers,
+  board,
+}: {
+  drivers: Driver[];
+  board: DispatchBoard | null;
+}) {
+  const items = deriveDriverStatuses(drivers, board);
+  const availableCount = items.filter((d) => d.status === "available").length;
+
+  return (
+    <div
+      className="box-border flex shrink-0 flex-col rounded-xl border border-[#1c2235] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+      style={{
+        width: DRIVER_COLUMN_WIDTH,
+        minWidth: DRIVER_COLUMN_WIDTH,
+        maxWidth: DRIVER_COLUMN_WIDTH,
+        background: "#0c0f16",
+      }}
+    >
+      <div className="box-border flex shrink-0 items-center justify-between border-b border-[#1c2235] bg-[#0c0f16] px-2 py-1.5">
+        <div className="flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: "#10b981", boxShadow: "0 0 6px #10b981" }}
+          />
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9ca3af]">DRIVERS</span>
+        </div>
+        <span className="rounded-full border border-[#10b981]/30 bg-[#0d2e1f] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[#10b981]">
+          {availableCount}
+        </span>
+      </div>
+      {/* Reserved strip for driver search/filter — h-8 matches typical input row; swap for real control when wired */}
+      <div className="box-border shrink-0 border-b border-[#1c2235] px-2 py-1.5">
+        <div
+          className="flex h-8 w-full min-w-0 items-center rounded-md border border-[#2a3148] bg-[#0f131c] px-2 text-[11px] text-[#5c657a]"
+          aria-label="Driver filter row (reserved)"
+        >
+          Search drivers…
+        </div>
+      </div>
+      <div className="box-border max-h-[calc(100vh-292px)] min-h-[60px] flex-1 overflow-x-hidden overflow-y-auto p-2 [scrollbar-gutter:stable]">
+        {items.length === 0 ? (
+          <div className="text-center py-6 text-[#64748b] text-xs">—</div>
+        ) : (
+          items.map((item) => <DriverCard key={item.driver.id} item={item} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DispatchPage() {
   // React-router paths are tenant-agnostic; tenant selection is via host + cookie.
   const slug = "";
   const navigate = useNavigate();
-  const { logout, isLoggingOut } = useAuth();
   const { me } = useMe();
   const [layoutMode, setLayoutMode] = useWorkspaceLayout("dispatch", me?.user_id ?? null, "board");
 
@@ -369,7 +540,6 @@ export default function DispatchPage() {
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [trailers, setTrailers] = useState<Trailer[]>([]);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [selectedLoad, setSelectedLoad] = useState<Load | null>(null);
 
   useEffect(() => {
@@ -377,17 +547,39 @@ export default function DispatchPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const refreshBoard = useCallback(() => {
-    setLoading(true);
+  const refreshBoard = useCallback((opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setLoading(true);
     getDispatchBoard(searchDebounced || undefined)
-      .then(setBoard)
-      .catch(() => setBoard({}))
-      .finally(() => setLoading(false));
+      .then((nextBoard) => {
+        setBoard(nextBoard);
+        setSelectedLoad((sel) => {
+          if (!sel) return null;
+          for (const key of Object.keys(nextBoard)) {
+            const arr = nextBoard[key];
+            if (!Array.isArray(arr)) continue;
+            const found = arr.find((x) => x.id === sel.id);
+            if (found) return found;
+          }
+          return sel;
+        });
+      })
+      .catch(() => {
+        if (!silent) setBoard({});
+      })
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, [searchDebounced]);
 
   useEffect(() => {
     refreshBoard();
   }, [refreshBoard]);
+
+  useOperationalRefresh({
+    intervalMs: 15_000,
+    onRefresh: () => refreshBoard({ silent: true }),
+  });
 
   useEffect(() => {
     Promise.all([
@@ -424,12 +616,6 @@ export default function DispatchPage() {
     return statusesInRibbon.map((s) => ({ key: s, label: STATUS_LABELS[s] ?? s }));
   }, [statusesInRibbon]);
 
-  const handleLogout = useCallback(async () => {
-    if (isLoggingOut) return;
-    await logout();
-    navigate("/login", { replace: true });
-  }, [logout, isLoggingOut, navigate]);
-
   const openLoadWorkspace = useCallback(
     (load: Load) => {
       setSelectedLoad(load);
@@ -438,99 +624,20 @@ export default function DispatchPage() {
   );
 
   return (
-    <div className="h-full bg-[#080a0f] text-[#e8edf5] flex flex-col overflow-hidden">
-      {/* Top header — screenshot-style workspace header */}
-      <header className="h-12 border-b border-[#0d121d] bg-[#0a0d12] flex items-center px-5 gap-5 shrink-0">
-        <NavLink to={`${slug}${OPS.DASHBOARD}`} className="font-semibold text-[#f5a623] shrink-0 text-sm hover:text-[#e69518]">
-          FleetPro
-        </NavLink>
-        <nav className="flex items-center gap-5 text-sm">
-          <span className="text-white font-medium border-b-2 border-[#f5a623] pb-1">Dispatch</span>
-          <button
-            type="button"
-            onClick={() => setMapOpen((m) => !m)}
-            className={clsx("text-sm pb-1", mapOpen ? "text-white border-b-2 border-white/60" : "text-[#94a3b8] hover:text-white")}
-          >
-            Map
-          </button>
-          <NavLink to={`${slug}${OPS.LOADS}`} className="text-sm text-[#94a3b8] hover:text-white">
-            Loads
-          </NavLink>
-          <span className="text-sm text-[#94a3b8] opacity-80 select-none">Reports</span>
-        </nav>
-        <div className="ml-auto flex items-center gap-3">
-          <input
-            type="search"
-            placeholder="Search loads, brokers, drivers..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-[380px] rounded-md border border-[#1e293b] bg-[#0d1117] px-3 py-1.5 text-sm text-[#e8edf5] placeholder-[#64748b]"
-          />
-          <button
-            onClick={() => navigate(`${slug}${OPS.LOAD_NEW}`)}
-            className="rounded-md bg-[#f5a623] text-[#080a0f] px-3 py-1.5 text-sm font-semibold hover:bg-[#e69518]"
-          >
-            + New Load
-          </button>
-          {/* Keep list toggle available but de-emphasized */}
-          <button
-            onClick={() => setLayoutMode(layoutMode === "board" ? "table" : "board")}
-            className="hidden"
-          >
-            {layoutMode === "board" ? "List view" : "Board view"}
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => setUserMenuOpen((o) => !o)}
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-[#334155] bg-[#1e293b] text-[#94a3b8] hover:text-[#e8edf5] text-sm font-medium"
-              aria-haspopup="true"
-              aria-expanded={userMenuOpen}
-            >
-              {me?.user_id ? String(me.user_id).slice(-2) : "?"}
-            </button>
-            {userMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} aria-hidden="true" />
-                <div className="absolute right-0 top-full mt-1 z-50 w-48 rounded border border-[#1e293b] bg-[#0d1117] py-1 shadow-lg">
-                  <NavLink
-                    to={`${slug}${OPS.DASHBOARD}`}
-                    className="block px-3 py-2 text-xs text-[#94a3b8] hover:bg-[#1e293b] hover:text-[#e8edf5]"
-                    onClick={() => setUserMenuOpen(false)}
-                  >
-                    Profile
-                  </NavLink>
-                  <NavLink
-                    to={`${slug}${ADMIN.COMPANY_PROFILE}`}
-                    className="block px-3 py-2 text-xs text-[#94a3b8] hover:bg-[#1e293b] hover:text-[#e8edf5]"
-                    onClick={() => setUserMenuOpen(false)}
-                  >
-                    Settings
-                  </NavLink>
-                  <button
-                    onClick={() => { setUserMenuOpen(false); handleLogout(); }}
-                    disabled={isLoggingOut}
-                    className="block w-full text-left px-3 py-2 text-xs text-[#94a3b8] hover:bg-[#1e293b] hover:text-[#f87171] disabled:opacity-50"
-                  >
-                    Sign out
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#080a0f] text-[#e8edf5]">
       {/* Ribbon tabs — screenshot-like */}
-      <div className="flex gap-2 px-5 py-2 border-b border-[#0d121d] bg-[#0a0d12] shrink-0">
+      <div className="flex shrink-0 gap-2 border-b border-[#0d121d] bg-[#0a0d12] px-2 py-2">
         {RIBBON_TABS.map((tab) => (
           <button
             key={tab.key}
+            type="button"
             onClick={() => setRibbonTab(tab.key)}
             className={clsx(
-              "rounded-full px-3 py-1.5 text-xs font-medium transition",
+              "box-border min-h-[2rem] rounded-full border px-3 py-1.5 text-xs font-medium transition-colors outline-none",
+              "focus-visible:ring-2 focus-visible:ring-[#f5a623]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0d12]",
               ribbonTab === tab.key
-                ? "bg-[#f5a623] text-[#0a0c12] border border-[#f5a623]"
-                : "text-[#94a3b8] hover:bg-[#11151c] hover:text-white border border-transparent"
+                ? "border-[#f5a623] bg-[#f5a623] text-[#0a0c12]"
+                : "border-transparent text-[#94a3b8] hover:border-[#1e293b] hover:bg-[#11151c] hover:text-white"
             )}
           >
             {tab.label}
@@ -560,7 +667,7 @@ export default function DispatchPage() {
                         <tr
                           key={load.id}
                           onClick={() => openLoadWorkspace(load)}
-                          className="border-b border-[#1e293b]/50 cursor-pointer transition hover:bg-[#1e293b]/30"
+                          className="cursor-pointer border-b border-[#1e293b]/50 transition-colors hover:bg-[#1e293b]/30"
                         >
                           <td className="px-4 py-2.5 text-sm font-medium text-[#e8edf5]">#{load.load_number}</td>
                           <td className="px-4 py-2.5 text-sm text-[#94a3b8]">{formatTripNumber(load)}</td>
@@ -595,23 +702,26 @@ export default function DispatchPage() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex gap-4 overflow-x-auto overflow-y-hidden px-5 py-4 min-w-0">
+          <div className="box-border flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden px-2 py-3 [scrollbar-gutter:stable]">
             {loading ? (
-              <div className="flex items-center justify-center w-full text-[#64748b] text-sm">Loading...</div>
+              <div className="flex w-full items-center justify-center text-[#64748b] text-sm">Loading...</div>
             ) : (
-              boardColumns.map((col) => (
-                <StatusColumn
-                  key={col.key}
-                  statusKey={col.key}
-                  label={col.label}
-                  loads={board?.[col.key] ?? []}
-                  trucks={trucks}
-                  drivers={drivers}
-                  trailers={trailers}
-                  onSelectLoad={openLoadWorkspace}
-                  onEmptyAction={col.key === "unassigned" ? () => navigate(`${slug}${OPS.LOAD_NEW}`) : undefined}
-                />
-              ))
+              <>
+                <DriverColumn drivers={drivers} board={board} />
+                {boardColumns.map((col) => (
+                  <StatusColumn
+                    key={col.key}
+                    statusKey={col.key}
+                    label={col.label}
+                    loads={board?.[col.key] ?? []}
+                    trucks={trucks}
+                    drivers={drivers}
+                    trailers={trailers}
+                    onSelectLoad={openLoadWorkspace}
+                    onEmptyAction={col.key === "unassigned" ? () => navigate(`${slug}${OPS.LOAD_NEW}`) : undefined}
+                  />
+                ))}
+              </>
             )}
           </div>
         )}
@@ -646,7 +756,7 @@ export default function DispatchPage() {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-[#64748b]">
-                    {selectedLoad.broker_name_snapshot || "No broker"} · {formatRouteFromStops(selectedLoad.stops)}
+                    {displayBrokerHeadline(selectedLoad)} · {formatRouteFromStops(selectedLoad.stops)}
                   </p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
@@ -657,7 +767,7 @@ export default function DispatchPage() {
                       setSelectedLoad(null);
                       navigate(`${slug}${OPS.LOAD_DETAIL(id)}`);
                     }}
-                    className="text-xs text-[#94a3b8] hover:text-white border border-[#2b3347] rounded-md px-3 py-1.5 transition hover:border-[#475569]"
+                    className="box-border rounded-md border border-[#2b3347] px-3 py-1.5 text-xs text-[#94a3b8] transition-colors hover:border-[#475569] hover:text-white"
                   >
                     Edit load
                   </button>

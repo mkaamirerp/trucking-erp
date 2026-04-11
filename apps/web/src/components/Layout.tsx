@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import SidebarNav from "./SidebarNav";
+import TopNav from "./TopNav";
 
 type Props = {
   children: ReactNode;
@@ -7,11 +7,12 @@ type Props = {
 
 export default function Layout({ children }: Props) {
   return (
-    <div className="min-h-screen bg-[#080a0f] text-[#e8edf5]">
-      <div className="flex">
-        <SidebarNav />
-        <main className="flex-1 overflow-auto bg-transparent p-6 space-y-6">{children}</main>
-      </div>
+    <div className="flex min-h-screen flex-col bg-[#080a0f] text-[#e8edf5]">
+      <TopNav />
+      {/* flex-1 + min-h-0: children (e.g. Dispatch) can own internal scroll without main height collapse */}
+      <main className="flex min-h-0 flex-1 flex-col space-y-6 overflow-auto bg-transparent p-6 [scrollbar-gutter:stable]">
+        {children}
+      </main>
     </div>
   );
 }

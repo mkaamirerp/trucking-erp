@@ -13,7 +13,10 @@ from app.core.validators import normalize_phone_number as normalize_phone
 
 
 class PersonOut(BaseModel):
-    """Minimal person record returned on approve (people-first; no driver row)."""
+    """Minimal person record returned on approve (people-first).
+
+    Operational dispatch roster rows are `Driver` entities, created/updated on DRIVER approval.
+    """
     id: int
     tenant_id: int
     onboarding_status: str
@@ -125,7 +128,7 @@ class ApplicantApplicationOut(BaseModel):
     tenant_id: int
     person_id: Optional[int] = None
     status: str
-    source: str
+    source: Optional[str] = None
     application_type: str = "DRIVER"
     requested_role_code: str = "DRIVER"
     reviewed_at: Optional[datetime] = None
@@ -166,7 +169,7 @@ class PersonApplicationListItem(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     submitted_at: Optional[datetime] = None
-    source: str
+    source: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

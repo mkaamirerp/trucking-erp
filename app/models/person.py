@@ -1,4 +1,8 @@
-"""People-first models: Person, PersonRole, DriverProfile. Used for driver onboarding (no writes to drivers)."""
+"""People-first models: Person, PersonRole, DriverProfile.
+
+Onboarding intake/review is modeled here. The operational dispatch roster row is `Driver` in
+`app.models.driver`, materialized on canonical DRIVER application approval (see driver_onboarding router).
+"""
 
 from __future__ import annotations
 
