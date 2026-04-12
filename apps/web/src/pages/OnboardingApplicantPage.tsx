@@ -47,7 +47,7 @@ const EMPTY_REF: RefEntry = {
 const EMPTY_FORM = {
   first_name: "", middle_name: "", last_name: "", date_of_birth: "",
   ssn: "", nationality: "", email: "", phone: "", address_street: "",
-  address_city: "", address_region: "", address_postal: "", address_country: "US",
+  address_city: "", address_region: "", address_postal: "", zip_code: "", address_country: "US",
   driver_license_number: "", license_region: "", license_expiry: "", license_issue_date: "",
   cdl_class: "", endorsements: "", restrictions: "", conditions: "",
   sex: "", height: "",
@@ -525,6 +525,13 @@ export default function OnboardingApplicantPage() {
 
   function canProceedStep1(): boolean {
     const trim = (s: string) => (s || "").trim();
+    const cc = trim(form.address_country).toUpperCase();
+    const hasPostalOrZip =
+      cc === "CA"
+        ? trim(form.address_postal).length > 0
+        : cc === "US"
+          ? trim(form.zip_code).length > 0
+          : trim(form.address_postal).length > 0 || trim(form.zip_code).length > 0;
     return (
       trim(form.first_name).length > 0 &&
       trim(form.last_name).length > 0 &&
@@ -532,7 +539,7 @@ export default function OnboardingApplicantPage() {
       trim(form.phone).length > 0 &&
       trim(form.address_street).length > 0 &&
       trim(form.address_city).length > 0 &&
-      (trim(form.address_region).length > 0 || trim(form.address_postal).length > 0) &&
+      (trim(form.address_region).length > 0 || hasPostalOrZip) &&
       trim(form.address_country).length > 0
     );
   }
@@ -545,7 +552,22 @@ export default function OnboardingApplicantPage() {
     if (!(form.phone || "").trim()) missing.push("Phone");
     if (!(form.address_street || "").trim()) missing.push("Street Address");
     if (!(form.address_city || "").trim()) missing.push("City");
-    if (!(form.address_region || "").trim() && !(form.address_postal || "").trim()) missing.push("State/Region or Postal Code");
+    const cc = (form.address_country || "").trim().toUpperCase();
+    const needPostal =
+      cc === "CA"
+        ? !(form.address_postal || "").trim()
+        : cc === "US"
+          ? !(form.zip_code || "").trim()
+          : !(form.address_postal || "").trim() && !(form.zip_code || "").trim();
+    if (!(form.address_region || "").trim() && needPostal) {
+      missing.push(
+        cc === "CA"
+          ? "State/Region or Postal Code"
+          : cc === "US"
+            ? "State/Region or ZIP Code"
+            : "State/Region or Postal/ZIP Code",
+      );
+    }
     if (!(form.address_country || "").trim()) missing.push("Country");
     return `Please complete all required personal information fields before continuing. Missing: ${missing.join(", ")}.`;
   }
@@ -696,6 +718,7 @@ export default function OnboardingApplicantPage() {
         address_city: form.address_city,
         address_region: form.address_region,
         address_postal: form.address_postal,
+        zip_code: form.zip_code,
         address_country: form.address_country,
         notes: form.notes,
       };
@@ -728,6 +751,7 @@ export default function OnboardingApplicantPage() {
         address_city: form.address_city,
         address_region: form.address_region,
         address_postal: form.address_postal,
+        zip_code: form.zip_code,
         address_country: form.address_country,
         notes: form.notes,
       };
@@ -778,8 +802,12 @@ export default function OnboardingApplicantPage() {
               <Field label="Region / State">
                 <input className={inp} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder="State or Province" />
               </Field>
-              <Field label="Postal / ZIP">
-                <input className={inp} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
+              <Field label={(form.address_country || "").trim().toUpperCase() === "US" ? "ZIP Code" : (form.address_country || "").trim().toUpperCase() === "CA" ? "Postal Code" : "Postal / ZIP"}>
+                {(form.address_country || "").trim().toUpperCase() === "US" ? (
+                  <input className={inp} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="ZIP Code" />
+                ) : (
+                  <input className={inp} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
+                )}
               </Field>
               <Field label="Country">
                 <input className={`${inp} ${showValidationStep1 && !(form.address_country || "").trim() ? inpErr : ""}`} value={form.address_country} onChange={e => setF("address_country", e.target.value)} placeholder="e.g. US" />
@@ -851,7 +879,7 @@ export default function OnboardingApplicantPage() {
                 <div className="col-span-2">
                   <Field label="Country">
                     <select className={sel} value={form.address_country}
-                      onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("license_region", ""); }}>
+                      onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("license_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
                       <option value="US">🇺🇸 United States</option>
                       <option value="CA">🇨🇦 Canada</option>
                     </select>
@@ -967,10 +995,14 @@ export default function OnboardingApplicantPage() {
                   <input className={inp} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
                 </Field>
                 <Field label={form.address_country === "CA" ? "Province / Postal Code" : "State / ZIP Code"}>
-                  <DlSourceSlot visible={shouldShowDlSource(sources.address_region, edited.address_region, form.address_region) || shouldShowDlSource(sources.address_postal, edited.address_postal, form.address_postal)} confidence={sources.address_region?.confidence ?? sources.address_postal?.confidence} />
+                  <DlSourceSlot visible={shouldShowDlSource(sources.address_region, edited.address_region, form.address_region) || shouldShowDlSource(sources.address_postal, edited.address_postal, form.address_postal) || shouldShowDlSource(sources.zip_code, edited.zip_code, form.zip_code)} confidence={sources.address_region?.confidence ?? sources.address_postal?.confidence ?? sources.zip_code?.confidence} />
                   <div className="grid grid-cols-2 gap-3">
                     <input className={inp} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder={form.address_country === "CA" ? "Province" : "State"} />
-                    <input className={inp} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder={form.address_country === "CA" ? "Postal Code" : "ZIP Code"} />
+                    {form.address_country === "CA" ? (
+                      <input className={inp} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
+                    ) : (
+                      <input className={inp} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="ZIP Code" />
+                    )}
                   </div>
                 </Field>
               </div>
@@ -1066,7 +1098,7 @@ export default function OnboardingApplicantPage() {
                   </Field>
                 </div>
                 <Field label="Country">
-                  <select className={`${sel} ${showValidationStep1 && !(form.address_country || "").trim() ? inpErr : ""}`} value={form.address_country} onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); }}>
+                  <select className={`${sel} ${showValidationStep1 && !(form.address_country || "").trim() ? inpErr : ""}`} value={form.address_country} onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
                     <option value="US">🇺🇸 United States</option>
                     <option value="CA">🇨🇦 Canada</option>
                   </select>
@@ -1075,7 +1107,7 @@ export default function OnboardingApplicantPage() {
                   <input className={`${inp} ${showValidationStep1 && !(form.address_city || "").trim() ? inpErr : ""}`} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
                 </Field>
                 <Field label={form.address_country === "CA" ? "Province" : "State"}>
-                  <select className={`${sel} ${showValidationStep1 && !(form.address_region || "").trim() && !(form.address_postal || "").trim() ? inpErr : ""}`} value={form.address_region} onChange={e => setF("address_region", e.target.value)}>
+                  <select className={`${sel} ${showValidationStep1 && !(form.address_region || "").trim() && (form.address_country === "CA" ? !(form.address_postal || "").trim() : !(form.zip_code || "").trim()) ? inpErr : ""}`} value={form.address_region} onChange={e => setF("address_region", e.target.value)}>
                     <option value="">{form.address_country === "CA" ? "Select Province" : "Select State"}</option>
                     {form.address_country === "CA"
                       ? Object.entries(CA_PROVINCES).map(([code, name]) => <option key={code} value={code}>{name}</option>)
@@ -1084,7 +1116,11 @@ export default function OnboardingApplicantPage() {
                   </select>
                 </Field>
                 <Field label={form.address_country === "CA" ? "Postal Code" : "ZIP Code"}>
-                  <input className={`${inp} ${showValidationStep1 && !(form.address_region || "").trim() && !(form.address_postal || "").trim() ? inpErr : ""}`} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder={form.address_country === "CA" ? "A1A 1A1" : "00000"} />
+                  {form.address_country === "CA" ? (
+                    <input className={`${inp} ${showValidationStep1 && !(form.address_region || "").trim() && !(form.address_postal || "").trim() ? inpErr : ""}`} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="A1A 1A1" />
+                  ) : (
+                    <input className={`${inp} ${showValidationStep1 && !(form.address_region || "").trim() && !(form.zip_code || "").trim() ? inpErr : ""}`} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="00000" />
+                  )}
                 </Field>
               </div>
 

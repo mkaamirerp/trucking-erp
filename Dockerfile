@@ -27,6 +27,7 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         -o Acquire::AllowDowngradeFromInsecureRepositories=true \
     && apt-get install -y --no-install-recommends -o APT::Get::AllowUnauthenticated=true \
         libpq5 \
+        libzbar0 \
         curl \
         jq \
         git \

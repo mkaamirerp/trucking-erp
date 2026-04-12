@@ -36,6 +36,8 @@ services:
       BASE_DOMAIN: truckerp.me
       COOKIE_DOMAIN: .truckerp.me
       SECURE_COOKIES: "false"
+      # Persist tenant uploads (DL, docs) across container recreate; mirrors paths under ./storage layout.
+      LOCAL_STORAGE_DIR: /app/storage_persistent
     tmpfs:
       - /run/secrets
     # Internal port only — do not add `ports:` here; nginx reaches truckerp-api:8000 on truckerp_net.
@@ -49,6 +51,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    volumes:
+      - trucking_erp_storage:/app/storage_persistent
     networks:
       - truckerp_net
 
@@ -89,6 +93,7 @@ services:
 
 volumes:
   postgres_data:
+  trucking_erp_storage:
   letsencrypt:
   certbot_www:
 

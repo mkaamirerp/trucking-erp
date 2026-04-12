@@ -2,7 +2,8 @@
  * Single place for mapping tenant `intake_payload` keys (PDF417 + saved draft) → applicant form fields.
  *
  * Backend (`extract_pdf417_fields`) writes e.g. driver_license_number, license_number, license_region,
- * license_state, license_expiry, license_issue_date, license_class, cdl_class, endorsements, restrictions, …
+ * license_state, license_expiry, license_issue_date, license_class, cdl_class, endorsements, restrictions,
+ * address_postal, zip_code (US), …
  */
 
 export type OnboardingFormState = Record<string, string>;
@@ -68,7 +69,7 @@ export function hydrateOnboardingFormFromIntake(
   mode: HydrateIntakeMode,
 ): OnboardingFormState {
   const i = (intake || {}) as Record<string, unknown>;
-  return {
+  const base = {
     ...prev,
     first_name: pickField("first_name", prev, i, ["first_name"], mode),
     middle_name: pickField("middle_name", prev, i, ["middle_name"], mode),
@@ -90,6 +91,7 @@ export function hydrateOnboardingFormFromIntake(
     address_city: pickField("address_city", prev, i, ["address_city"], mode),
     address_region: pickField("address_region", prev, i, ["address_region"], mode),
     address_postal: pickField("address_postal", prev, i, ["address_postal"], mode),
+    zip_code: pickField("zip_code", prev, i, ["zip_code"], mode),
     address_country: pickField("address_country", prev, i, ["address_country", "form_country_default"], mode),
     // Non-PDF417 fields: still honor intake on initial load; after_dl_upload only fills if empty
     ssn: pickField("ssn", prev, i, ["ssn"], mode),
@@ -104,6 +106,19 @@ export function hydrateOnboardingFormFromIntake(
     emergency_contact_relationship: pickField("emergency_contact_relationship", prev, i, ["emergency_contact_relationship"], mode),
     emergency_contact_phone: pickField("emergency_contact_phone", prev, i, ["emergency_contact_phone"], mode),
   };
+
+  const country = cleanIntakeText(
+    readFirstNonEmptyIntake(i, ["address_country", "form_country_default"]),
+  ).toUpperCase();
+  let address_postal = String(base.address_postal ?? "");
+  let zip_code = String(base.zip_code ?? "");
+  if (country === "US" && !zip_code.trim() && address_postal.trim()) {
+    zip_code = address_postal;
+  }
+  if (country === "CA" && !address_postal.trim() && zip_code.trim()) {
+    address_postal = zip_code;
+  }
+  return { ...base, address_postal, zip_code };
 }
 
 /**
@@ -141,9 +156,22 @@ export function mergeIntakeForSave(
   extras: Record<string, unknown>,
 ): Record<string, unknown> {
   const overlay = formToIntakeNonEmptyOverlay(form);
-  return intakeWithLicenseAliases({
+  const cc = String(overlay.address_country ?? "").trim().toUpperCase();
+  if (cc === "US") {
+    const z = typeof overlay.zip_code === "string" ? overlay.zip_code.trim() : "";
+    const p = typeof overlay.address_postal === "string" ? overlay.address_postal.trim() : "";
+    if (z && !p) {
+      overlay.address_postal = z;
+    }
+  }
+  const merged = intakeWithLicenseAliases({
     ...baseIntake,
     ...overlay,
     ...extras,
   });
+  const finalCountry = String(merged.address_country ?? "").trim().toUpperCase();
+  if (finalCountry === "CA") {
+    delete merged.zip_code;
+  }
+  return merged;
 }

@@ -74,6 +74,14 @@ class BrokerResponse(BrokerBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class BrokerResolveIdentityOut(BaseModel):
+    """Tenant broker row matched by MC or USDOT digits from a rate confirmation / PDF."""
+
+    broker_id: Optional[int] = None
+    matched_by: Optional[Literal["mc", "dot"]] = None
+    broker: Optional[BrokerResponse] = None
+
+
 # --- BrokerContact ---
 
 

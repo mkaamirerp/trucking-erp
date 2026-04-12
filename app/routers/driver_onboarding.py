@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -52,7 +51,7 @@ from app.schemas.driver_onboarding import (
 )
 from app.deps.admin import is_tenant_admin
 from app.deps.entitlements import require_tenant_subscription_active
-from app.services.dl_pdf417 import extract_pdf417_fields
+from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417
 
 router = APIRouter(prefix="/api/v1/driver-onboarding", tags=["driver-onboarding"])
 
@@ -66,14 +65,6 @@ def _utcnow() -> datetime:
 
 
 
-def _merge_field_sources(existing: dict | None, incoming: dict | None) -> dict:
-    merged = dict(existing or {})
-    for key, value in (incoming or {}).items():
-        if value:
-            merged[key] = value
-    return merged
-
-
 def _merge_applicant_intake_payload(existing: dict | None, incoming: dict) -> dict:
     """Merge saved intake with incoming keys; skip blank strings so empty form fields do not erase PDF417 data."""
     base = dict(existing or {})
@@ -82,35 +73,6 @@ def _merge_applicant_intake_payload(existing: dict | None, incoming: dict) -> di
             continue
         base[key] = value
     return base
-
-
-async def _best_effort_pdf417_extract(
-    intake: dict, storage_key: str | None, tenant_slug: str
-) -> dict:
-    if not storage_key:
-        return intake
-
-    try:
-        with readable_path(storage_key, "applicant_dl", tenant_slug) as path:
-            if not path.is_file():
-                return intake
-            extracted = await asyncio.wait_for(
-                asyncio.to_thread(extract_pdf417_fields, path),
-                timeout=4.0,
-            )
-    except Exception:
-        return intake
-
-    if not extracted:
-        return intake
-
-    field_sources = _merge_field_sources(intake.get("field_sources"), extracted.pop("field_sources", None))
-    for key, value in extracted.items():
-        if value not in (None, ""):
-            intake[key] = value
-    if field_sources:
-        intake["field_sources"] = field_sources
-    return intake
 
 
 async def _get_submission(
@@ -168,6 +130,7 @@ def _payload_to_people_fields(data: dict) -> dict:
         "city": data.get("address_city"),
         "region": data.get("address_region"),
         "postal_code": data.get("address_postal"),
+        "zip_code": data.get("zip_code"),
         "country": data.get("address_country"),
         "notes": data.get("notes"),
     }
@@ -178,6 +141,20 @@ def _clean_text(value) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalize_postal_zip_for_country(
+    country: str | None, address_postal: str | None, zip_code: str | None
+) -> tuple[str | None, str | None]:
+    """Fill the sibling field for display/promotion when only one is stored (US ↔ ZIP, CA ↔ postal)."""
+    c = (country or "").strip().upper()
+    p = address_postal
+    z = zip_code
+    if c == "US" and z is None and p is not None:
+        z = p
+    if c == "CA" and p is None and z is not None:
+        p = z
+    return p, z
 
 
 def _coerce_optional_date(value) -> date | None:
@@ -210,12 +187,18 @@ def _person_application_canonical_data(app: PersonApplication) -> dict:
         "address_city": _clean_text(app.city) or _clean_text(intake.get("address_city")),
         "address_region": _clean_text(app.region) or _clean_text(intake.get("address_region")) or _clean_text(intake.get("license_region")) or _clean_text(intake.get("license_state")),
         "address_postal": _clean_text(app.postal_code) or _clean_text(intake.get("address_postal")),
+        "zip_code": _clean_text(app.zip_code) or _clean_text(intake.get("zip_code")),
         "address_country": _clean_text(app.country) or _clean_text(intake.get("address_country")),
         "notes": _clean_text(app.notes) or _clean_text(intake.get("notes")),
         "driver_license_number": _clean_text(intake.get("driver_license_number")) or _clean_text(intake.get("license_number")),
         "license_region": _clean_text(intake.get("license_region")) or _clean_text(intake.get("license_state")),
         "license_expiry": _coerce_optional_date(intake.get("license_expiry")),
     }
+    p, z = _normalize_postal_zip_for_country(
+        data.get("address_country"), data.get("address_postal"), data.get("zip_code")
+    )
+    data["address_postal"] = p
+    data["zip_code"] = z
     missing = [field for field in ("first_name", "last_name") if not data.get(field)]
     if missing:
         raise HTTPException(
@@ -430,8 +413,13 @@ def _person_application_to_out(app: PersonApplication) -> ApplicantApplicationOu
     address_city = app.city or intake.get("address_city")
     address_region = app.region or intake.get("address_region")
     address_postal = app.postal_code or intake.get("address_postal")
+    zip_code = app.zip_code or intake.get("zip_code")
     address_country = app.country or intake.get("address_country")
     notes = app.notes or intake.get("notes")
+    ap_norm, z_norm = _normalize_postal_zip_for_country(address_country, address_postal, zip_code)
+    address_postal, zip_code = ap_norm, z_norm
+    if (_clean_text(address_country) or "").upper() == "CA":
+        zip_code = None
     # Avoid passing empty string to date field (Pydantic validation error)
     raw_expiry = intake.get("license_expiry")
     license_expiry = raw_expiry if (raw_expiry and str(raw_expiry).strip()) else None
@@ -456,6 +444,7 @@ def _person_application_to_out(app: PersonApplication) -> ApplicantApplicationOu
         address_city=address_city,
         address_region=address_region,
         address_postal=address_postal,
+        zip_code=zip_code,
         address_country=address_country,
         driver_license_number=intake.get("driver_license_number") or intake.get("license_number"),
         license_region=intake.get("license_region") or intake.get("license_state"),
@@ -503,6 +492,7 @@ async def update_applicant_application(
     app.city = data.get("address_city")
     app.region = data.get("address_region")
     app.postal_code = data.get("address_postal")
+    app.zip_code = data.get("zip_code")
     app.country = data.get("address_country")
     app.notes = data.get("notes")
     intake = dict(app.intake_payload or {})
@@ -512,6 +502,8 @@ async def update_applicant_application(
         intake["license_region"] = data["license_region"]
     if data.get("license_expiry") is not None:
         intake["license_expiry"] = data["license_expiry"]
+    if data.get("zip_code") is not None:
+        intake["zip_code"] = data["zip_code"]
     app.intake_payload = intake or None
     if submit:
         app.status = DriverOnboardingStatus.SUBMITTED.value
@@ -576,6 +568,7 @@ async def reset_applicant_application(
     app.city = None
     app.region = None
     app.postal_code = None
+    app.zip_code = None
     app.country = None
     app.notes = None
     app.intake_payload = preserved_intake
@@ -615,9 +608,7 @@ async def upload_applicant_dl(
     }
     intake["files"] = files
     if doc_type == "CDL_BACK":
-        intake = await _best_effort_pdf417_extract(intake, stored.storage_key, tenant_slug)
-    intake["license_extract_status"] = "SUCCESS"
-    intake.pop("license_extract_error", None)
+        intake = await apply_stored_cdl_back_pdf417(intake, stored.storage_key, tenant_slug)
     app.intake_payload = intake
     await db.commit()
     await db.refresh(app)

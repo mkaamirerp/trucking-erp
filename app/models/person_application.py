@@ -56,6 +56,7 @@ class PersonApplication(Base):
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     region: Mapped[str | None] = mapped_column(String(100), nullable=True)
     postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    zip_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     country: Mapped[str | None] = mapped_column(String(10), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     intake_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -1,6 +1,7 @@
 /**
  * Dispatch Workspace — Layout C (table default) + Layout B (board optional)
- * Summary / navigation only: ribbon + table/board; selecting a load opens the canonical load workspace (/loads/:id).
+ * Ribbon + table/board; unassigned loads open `/loads/:id?dispatchAssign=1` (canonical workspace + assignment strip).
+ * Other statuses open the quick summary modal with a link to the full workspace.
  * Primary fields in rows/cards: Load #, Trip # (read-only), Route, Status.
  * Delivered moved to ribbon tab, not a board column.
  */
@@ -618,9 +619,13 @@ export default function DispatchPage() {
 
   const openLoadWorkspace = useCallback(
     (load: Load) => {
+      if ((load.status || "").toLowerCase() === "unassigned") {
+        navigate(`${slug}${OPS.LOAD_DETAIL(load.id)}?${OPS.LOAD_DISPATCH_ASSIGN_QUERY}=1`);
+        return;
+      }
       setSelectedLoad(load);
     },
-    [],
+    [navigate, slug],
   );
 
   return (

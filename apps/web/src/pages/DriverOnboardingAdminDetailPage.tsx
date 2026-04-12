@@ -830,6 +830,7 @@ export default function DriverOnboardingAdminDetailPage() {
                 <Field label="City" value={fmt(application.address_city)} />
                 <Field label="Province/State" value={fmt(application.address_region)} />
                 <Field label="Postal Code" value={fmt(application.address_postal)} mono />
+                <Field label="ZIP Code" value={fmt(application.zip_code)} mono />
                 <Field label="Country" value={fmt(application.address_country)} />
               </Grid>
               {isDriver && (

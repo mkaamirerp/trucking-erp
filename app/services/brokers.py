@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -278,6 +279,51 @@ async def list_brokers(
     else:
         stmt = stmt.order_by(Broker.id.desc())
     return await paginate(db, stmt, page=page, size=size)
+
+
+def _authority_digits(s: str | None) -> str | None:
+    if not s:
+        return None
+    d = re.sub(r"\D", "", str(s).strip())
+    return d if len(d) >= 4 else None
+
+
+async def resolve_broker_by_authority(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    mc_number: str | None = None,
+    dot_number: str | None = None,
+) -> tuple[Literal["mc", "dot"] | None, Broker | None]:
+    """
+    Match an active tenant broker by normalized MC or USDOT digits (booking broker authority).
+    MC is checked first when both are provided.
+    """
+    mc_d = _authority_digits(mc_number)
+    dot_d = _authority_digits(dot_number)
+    if not mc_d and not dot_d:
+        return None, None
+
+    stmt = select(Broker).where(Broker.tenant_id == tenant_id, Broker.is_active.is_(True))
+    rows = list((await db.execute(stmt)).scalars().all())
+
+    if mc_d:
+        matches = sorted(
+            [r for r in rows if r.mc_number and _authority_digits(r.mc_number) == mc_d],
+            key=lambda r: r.id,
+        )
+        if matches:
+            return "mc", matches[0]
+
+    if dot_d:
+        matches = sorted(
+            [r for r in rows if r.dot_number and _authority_digits(r.dot_number) == dot_d],
+            key=lambda r: r.id,
+        )
+        if matches:
+            return "dot", matches[0]
+
+    return None, None
 
 
 async def update_broker(db: AsyncSession, tenant_id: int, broker_id: int, payload: BrokerUpdate) -> Broker:

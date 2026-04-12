@@ -22,6 +22,7 @@ from app.schemas.broker import (
     BrokerKnownSenderCreate,
     BrokerKnownSenderOut,
     BrokerKnownSenderUpdate,
+    BrokerResolveIdentityOut,
     BrokerResponse,
     BrokerSort,
     BrokerUpdate,
@@ -65,6 +66,27 @@ async def list_brokers(
     )
     items = [BrokerResponse.model_validate(item) for item in paged["items"]]
     return {**paged, "items": items}
+
+
+@router.get("/resolve-identity", response_model=BrokerResolveIdentityOut)
+async def resolve_broker_identity(
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+    mc_number: Optional[str] = Query(None, max_length=64),
+    dot_number: Optional[str] = Query(None, max_length=64),
+):
+    """Resolve workspace broker row from MC or USDOT (e.g. after PDF parse)."""
+    matched_by, row = await brokers_service.resolve_broker_by_authority(
+        db,
+        tenant_id,
+        mc_number=mc_number,
+        dot_number=dot_number,
+    )
+    if not row:
+        return BrokerResolveIdentityOut(broker_id=None, matched_by=None, broker=None)
+    br = BrokerResponse.model_validate(row)
+    return BrokerResolveIdentityOut(broker_id=row.id, matched_by=matched_by, broker=br)
 
 
 @router.post("/{broker_id}/archive", response_model=BrokerResponse)

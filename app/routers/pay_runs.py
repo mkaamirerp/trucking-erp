@@ -30,6 +30,8 @@ from app.models.enums import SourceType, PayRunStatus, PayoutStatus, WorkerType,
 from app.core.storage import download_response
 from app.schemas.pay_documents import PayDocumentSummary
 from app.schemas.pay_runs import (
+    LoadSettlementItemOut,
+    LoadSettlementResponse,
     PayRunCreate,
     PayRunDetail,
     PayRunFinalizeResponse,
@@ -456,6 +458,79 @@ async def list_pay_run_items(
             )
         )
     return items_out
+
+
+@router.get("/loads/{load_id}/settlement", response_model=LoadSettlementResponse)
+async def get_load_settlement(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Return all pay run items attributed to a load from generated or finalized runs.
+
+    Uses JSONB containment (metadata_json @> {"load_id": N}) for a single indexed query
+    instead of fetching every run and filtering client-side.
+    """
+    stmt = (
+        select(
+            PayRunItem,
+            PayRun.status.label("pay_run_status"),
+            PayPeriod.start_date.label("pay_period_start"),
+            PayPeriod.end_date.label("pay_period_end"),
+            ChargeCategory.code.label("charge_category_code"),
+        )
+        .join(PayRun, PayRun.id == PayRunItem.pay_run_id)
+        .join(PayPeriod, PayPeriod.id == PayRun.pay_period_id)
+        .join(ChargeCategory, ChargeCategory.id == PayRunItem.charge_category_id, isouter=True)
+        .where(
+            PayRunItem.tenant_id == tenant_id,
+            PayRun.status.in_([PayRunStatus.GENERATED.value, PayRunStatus.FINALIZED.value]),
+            PayRunItem.metadata_json.contains({"load_id": load_id}),
+        )
+        .order_by(PayRun.id.asc(), PayRunItem.id.asc())
+    )
+    rows = (await db.execute(stmt)).all()
+
+    items: list[LoadSettlementItemOut] = []
+    total_earnings = Decimal("0.00")
+    total_deductions = Decimal("0.00")
+
+    for row in rows:
+        item: PayRunItem = row[0]
+        amt = (item.amount_signed or Decimal("0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if amt >= 0:
+            total_earnings += amt
+        else:
+            total_deductions += amt
+        items.append(
+            LoadSettlementItemOut(
+                id=item.id,
+                pay_run_id=item.pay_run_id,
+                pay_run_status=row.pay_run_status,
+                pay_period_start=row.pay_period_start,
+                pay_period_end=row.pay_period_end,
+                payee_id=item.payee_id,
+                source_type=item.source_type,
+                description=item.description,
+                amount_signed=amt,
+                currency=item.currency,
+                quantity=item.quantity,
+                unit_rate=item.unit_rate,
+                charge_category_id=item.charge_category_id,
+                charge_category_code=row.charge_category_code,
+                metadata_json=item.metadata_json,
+                created_at=item.created_at,
+            )
+        )
+
+    net_total = (total_earnings + total_deductions).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return LoadSettlementResponse(
+        load_id=load_id,
+        items=items,
+        total_earnings=total_earnings.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        total_deductions=total_deductions.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        net_total=net_total,
+    )
 
 
 @router.get("/documents", response_model=list[PayDocumentSummary])

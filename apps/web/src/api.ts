@@ -122,6 +122,26 @@ export async function listDocuments() {
   return handle<PayDocument[]>(res);
 }
 
+export type LoadSettlementItem = PayRunItem & {
+  pay_run_id: number;
+  pay_run_status: string;
+  pay_period_start: string;
+  pay_period_end: string;
+};
+
+export type LoadSettlementResponse = {
+  load_id: number;
+  items: LoadSettlementItem[];
+  total_earnings: number;
+  total_deductions: number;
+  net_total: number;
+};
+
+export async function getLoadSettlement(loadId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/payroll/loads/${loadId}/settlement`);
+  return handle<LoadSettlementResponse>(res);
+}
+
 // ---- Public signup ----
 export async function checkSlugAvailability(slug: string) {
   const url = new URL(`${PUBLIC_API_BASE}/check-slug-availability`, window.location.origin);
@@ -803,6 +823,91 @@ export async function createLoad(payload: LoadWritePayload) {
   return handle<Load>(res);
 }
 
+export type LoadDocumentParseReference = { kind: string; value: string };
+
+export type LoadDocumentParseStop = {
+  stop_type: string;
+  sequence: number;
+  facility_name?: string | null;
+  street?: string | null;
+  city?: string | null;
+  state_or_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  reference_number?: string | null;
+  appointment_type?: string | null;
+  appointment_date?: string | null;
+  appointment_time_text?: string | null;
+  notes?: string | null;
+};
+
+export type LoadDocumentParseExtracted = {
+  broker_name_snapshot?: string | null;
+  broker_contact_name_snapshot?: string | null;
+  broker_contact_phone_snapshot?: string | null;
+  broker_contact_email_snapshot?: string | null;
+  broker_load_reference?: string | null;
+  /** Digits as extracted from PDF — resolve tenant broker via /brokers/resolve-identity */
+  broker_mc_number_snapshot?: string | null;
+  broker_dot_number_snapshot?: string | null;
+  mode?: string | null;
+  equipment_type?: string | null;
+  trailer_type?: string | null;
+  trailer_size?: string | null;
+  commodity?: string | null;
+  estimated_weight?: number | null;
+  temperature_requirement?: string | null;
+  rate?: number | null;
+  customer_rate?: number | null;
+  miles?: number | null;
+  customs_broker_name?: string | null;
+  references: LoadDocumentParseReference[];
+  stops: LoadDocumentParseStop[];
+};
+
+export type LoadDocumentParseResponse = {
+  document: { filename: string };
+  extracted: LoadDocumentParseExtracted;
+  raw_text: string;
+  warnings: string[];
+  field_confidence: Record<string, string>;
+  context?: Record<string, unknown>;
+};
+
+/** Multipart PDF upload — hydrates workspace fields only; does not create a load. */
+export async function parseLoadWorkspaceDocument(
+  file: File,
+  opts?: { emailThreadId?: number | null; loadId?: number | null },
+) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (opts?.emailThreadId != null && Number.isFinite(opts.emailThreadId)) {
+    fd.append("email_thread_id", String(opts.emailThreadId));
+  }
+  if (opts?.loadId != null && Number.isFinite(opts.loadId)) {
+    fd.append("load_id", String(opts.loadId));
+  }
+  const res = await fetchWithTenant(`${API_BASE}/loads/parse-document`, {
+    method: "POST",
+    body: fd,
+  });
+  return handle<LoadDocumentParseResponse>(res);
+}
+
+export type BrokerResolveIdentity = {
+  broker_id: number | null;
+  matched_by: "mc" | "dot" | null;
+  broker: Broker | null;
+};
+
+export async function resolveBrokerIdentity(params: { mc_number?: string; dot_number?: string }) {
+  const url = new URL(`${API_BASE}/brokers/resolve-identity`, window.location.origin);
+  if (params.mc_number?.trim()) url.searchParams.set("mc_number", params.mc_number.trim());
+  if (params.dot_number?.trim()) url.searchParams.set("dot_number", params.dot_number.trim());
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<BrokerResolveIdentity>(res);
+}
+
 export type LoadUpdatePayload = LoadWritePayload & { expected_concurrency_version: number };
 
 export async function updateLoad(id: number, payload: LoadUpdatePayload) {
@@ -1249,15 +1354,30 @@ export async function getDriverSummary(id: number) {
   return handle<DriverSummary>(res);
 }
 
-export async function listDrivers(params: { limit?: number; offset?: number; include_inactive?: boolean } = {}) {
+export async function listDrivers(
+  params: { limit?: number; offset?: number; include_inactive?: boolean; q?: string } = {},
+) {
   const sp = new URLSearchParams();
   if (params.limit != null) sp.set("limit", String(params.limit));
   if (params.offset != null) sp.set("offset", String(params.offset));
   if (params.include_inactive != null) sp.set("include_inactive", String(params.include_inactive));
+  if (params.q != null && params.q.trim() !== "") sp.set("q", params.q.trim());
   const qs = sp.toString();
   const url = `${API_BASE}/drivers${qs ? `?${qs}` : ""}`;
   const res = await fetchWithTenant(url);
   return handle<Driver[]>(res);
+}
+
+export type DriverAssignmentHints = { truck_id: number | null; trailer_id: number | null };
+
+export async function getDriverAssignmentHints(driverId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/drivers/${driverId}/assignment-hints`);
+  return handle<DriverAssignmentHints>(res);
+}
+
+export async function getTruckSuggestedTrailer(truckId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${truckId}/suggested-trailer`);
+  return handle<{ trailer_id: number | null }>(res);
 }
 
 export async function createDriverOnboardingSubmission(payload: DriverOnboardingSubmissionCreate) {
@@ -1352,6 +1472,7 @@ export type ApplicantApplication = {
   address_city?: string | null;
   address_region?: string | null;
   address_postal?: string | null;
+  zip_code?: string | null;
   address_country?: string | null;
   driver_license_number?: string | null;
   license_region?: string | null;
@@ -1375,6 +1496,7 @@ export type ApplicantApplicationUpdatePayload = {
   address_city?: string;
   address_region?: string;
   address_postal?: string;
+  zip_code?: string;
   address_country?: string;
   driver_license_number?: string;
   license_region?: string;
@@ -2750,6 +2872,7 @@ export type DriverOnboardingSubmission = {
   address_city?: string | null;
   address_region?: string | null;
   address_postal?: string | null;
+  zip_code?: string | null;
   address_country?: string | null;
   driver_license_number?: string | null;
   license_region?: string | null;
@@ -2768,6 +2891,7 @@ export type DriverOnboardingSubmissionCreate = {
   address_city?: string;
   address_region?: string;
   address_postal?: string;
+  zip_code?: string;
   address_country?: string;
   driver_license_number?: string;
   license_region?: string;

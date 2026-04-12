@@ -47,6 +47,7 @@ class DriverOnboardingSubmission(Base):
     address_city: Mapped[str | None] = mapped_column(Text, nullable=True)
     address_region: Mapped[str | None] = mapped_column(Text, nullable=True)
     address_postal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    zip_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     address_country: Mapped[str | None] = mapped_column(Text, nullable=True)
     driver_license_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     license_region: Mapped[str | None] = mapped_column(Text, nullable=True)

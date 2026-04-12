@@ -1,15 +1,13 @@
 /**
  * Settlement section — read-only payroll view for a load.
  *
- * Fetches pay run items whose metadata_json.load_id matches this load.
- * There is no /payroll/items?load_id= endpoint; we scan all pay runs and filter
- * client-side. Acceptable given typical pay run counts (~5-30 per tenant).
+ * Calls GET /api/v1/payroll/loads/{load_id}/settlement — a single indexed query that
+ * joins pay_run_items to pay_runs/pay_periods via JSONB containment. Replaces the
+ * previous fan-out pattern (listPayRuns + N × getPayRunItems).
  */
 import { useEffect, useState } from "react";
-import { getPayRunItems, listPayRuns, type Load, type PayRunItem, type PayRunSummary } from "@/api";
+import { getLoadSettlement, type Load, type LoadSettlementItem } from "@/api";
 import { wsSectionBody, wsSectionCard, wsSectionHeader, wsSectionTitle } from "@/loadWorkspace/loadWorkspaceShared";
-
-type SettlementItem = PayRunItem & { pay_run_id: number };
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -25,7 +23,8 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 }
 
 export function SectionSettlement({ load }: { load: Load }) {
-  const [items, setItems] = useState<SettlementItem[]>([]);
+  const [items, setItems] = useState<LoadSettlementItem[]>([]);
+  const [net, setNet] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,25 +33,12 @@ export function SectionSettlement({ load }: { load: Load }) {
     setLoading(true);
     setError(null);
 
-    async function fetchItems() {
-      const runs: PayRunSummary[] = await listPayRuns();
-      // Only fetch items for runs that are generated or finalized — skips empty drafts
-      const relevant = runs.filter((r) => r.status === "generated" || r.status === "finalized");
-      const results = await Promise.all(
-        relevant.map((r) =>
-          getPayRunItems(r.id).then((its) =>
-            its
-              .filter((item) => item.metadata_json?.load_id === load.id)
-              .map((item) => ({ ...item, pay_run_id: r.id })),
-          ),
-        ),
-      );
-      return results.flat();
-    }
-
-    fetchItems()
-      .then((found) => {
-        if (!cancelled) setItems(found);
+    getLoadSettlement(load.id)
+      .then((res) => {
+        if (!cancelled) {
+          setItems(res.items);
+          setNet(res.net_total);
+        }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load settlement data");
@@ -68,7 +54,6 @@ export function SectionSettlement({ load }: { load: Load }) {
 
   const earnings = items.filter((i) => i.amount_signed >= 0);
   const deductions = items.filter((i) => i.amount_signed < 0);
-  const net = items.reduce((sum, i) => sum + i.amount_signed, 0);
 
   return (
     <section className={wsSectionCard}>
@@ -118,6 +103,8 @@ export function SectionSettlement({ load }: { load: Load }) {
                           {item.quantity != null && item.unit_rate != null
                             ? ` · ${item.quantity} × ${fmt(item.unit_rate)}`
                             : ""}
+                          {" · "}
+                          {item.pay_period_start} – {item.pay_period_end}
                         </p>
                       </div>
                       <span className="shrink-0 font-mono text-[12px] text-emerald-400">

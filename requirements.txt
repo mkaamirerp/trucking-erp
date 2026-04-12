@@ -10,6 +10,7 @@ PyJWT==2.12.0
 itsdangerous>=2.0.0
 Pillow
 zxing-cpp
+pyzbar>=0.1.9
 boto3==1.42.68
 botocore==1.42.69
 cryptography>=42.0.0

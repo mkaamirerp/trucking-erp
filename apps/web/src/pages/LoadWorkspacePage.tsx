@@ -12,8 +12,10 @@ import {
   createLoad,
   getEmailThread,
   getEmailThreadMessages,
+  getDriverAssignmentHints,
   getLoad,
   getLoadNotes,
+  getTruckSuggestedTrailer,
   listBrokers,
   listBrokerContacts,
   listCustomsBrokers,
@@ -21,6 +23,8 @@ import {
   listTrailers,
   listTrucks,
   parseLoadVersionConflict,
+  parseLoadWorkspaceDocument,
+  resolveBrokerIdentity,
   updateLoad,
   type Broker,
   type BrokerContact,
@@ -29,6 +33,7 @@ import {
   type InboxMessageItem,
   type InboxThreadListItem,
   type Load,
+  type LoadDocumentParseStop,
   type LoadNote,
   type Trailer,
   type Truck,
@@ -36,6 +41,8 @@ import {
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops as sortStops } from "@/utils/loadStops";
+import { matchBrokerContactFromParsed } from "@/utils/matchBrokerFromSnapshot";
+import { DispatchAssignmentStrip } from "@/loadWorkspace/DispatchAssignmentStrip";
 import { LoadWorkspaceForm } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
   baselineSignatureFromLoad,
@@ -224,6 +231,39 @@ function ReferenceTextRail({
   );
 }
 
+function extractedStopsToDraft(stops: LoadDocumentParseStop[]): DraftStop[] {
+  const ts = Date.now();
+  return stops.map((s, i) => {
+    const t = (s.stop_type || "").toLowerCase();
+    let stop_type: DraftStop["stop_type"] = "DELIVERY";
+    if (t === "pickup") stop_type = "PICKUP";
+    else if (t === "drop") stop_type = "DROP";
+    else if (t === "delivery") stop_type = "DELIVERY";
+    return {
+      id: 0,
+      load_id: 0,
+      stop_type,
+      sequence: s.sequence ?? i,
+      facility_name: s.facility_name ?? null,
+      street: s.street ?? null,
+      city: s.city ?? null,
+      state_or_province: s.state_or_province ?? null,
+      postal_code: s.postal_code ?? null,
+      country: s.country ?? null,
+      reference_number: s.reference_number ?? null,
+      appointment_type: s.appointment_type ?? null,
+      appointment_date: s.appointment_date ?? null,
+      appointment_time_text: s.appointment_time_text ?? null,
+      scheduled_at: null,
+      notes: s.notes ?? null,
+      commodity_notes: null,
+      created_at: null,
+      updated_at: null,
+      _key: `pdf-${ts}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+    };
+  });
+}
+
 function ContextRow({
   label,
   value,
@@ -267,6 +307,10 @@ export default function LoadWorkspacePage() {
 
   const sectionConfig = SECTION_CONFIG[workspaceMode];
 
+  const dispatchAssignRaw = searchParams.get(OPS.LOAD_DISPATCH_ASSIGN_QUERY);
+  const dispatchAssignContext =
+    dispatchAssignRaw !== null && dispatchAssignRaw !== "0" && dispatchAssignRaw !== "false";
+
   const [customsBrokers, setCustomsBrokers] = useState<CustomsBroker[]>([]);
   const [freightBrokers, setFreightBrokers] = useState<Broker[]>([]);
   const [brokerContacts, setBrokerContacts] = useState<BrokerContact[]>([]);
@@ -274,6 +318,14 @@ export default function LoadWorkspacePage() {
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [trailers, setTrailers] = useState<Trailer[]>([]);
   const [load, setLoad] = useState<Load | null>(null);
+
+  const showDispatchAssignmentStrip =
+    workspaceMode === "detail" &&
+    !isManual &&
+    load != null &&
+    (load.status || "").toLowerCase() === "unassigned" &&
+    dispatchAssignContext;
+
   const [loadNotes, setLoadNotes] = useState<LoadNote[]>([]);
   const [newNoteBody, setNewNoteBody] = useState("");
 
@@ -324,6 +376,9 @@ export default function LoadWorkspacePage() {
   const [trailerId, setTrailerId] = useState<number | null>(null);
   const [customsBrokerId, setCustomsBrokerId] = useState<number | null>(null);
   const [internalNotes, setInternalNotes] = useState("");
+  const [parseBusy, setParseBusy] = useState(false);
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
   const docLineRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
   const [activeDocLine, setActiveDocLine] = useState<number | null>(null);
@@ -543,6 +598,103 @@ export default function LoadWorkspacePage() {
       /* background refresh — ignore */
     }
   }, [workspaceMode, loadIdFromRoute, hydrateFromLoad]);
+
+  const canWorkspaceParsePdf =
+    workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail";
+
+  const onParseWorkspacePdf = useCallback(
+    async (file: File) => {
+      if (!canWorkspaceParsePdf) return;
+      setParseBusy(true);
+      setParseWarnings([]);
+      setSaveMessage(null);
+      try {
+        const res = await parseLoadWorkspaceDocument(file, {
+          emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
+          loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
+        });
+        const ex = res.extracted;
+        const brokerNameSnap = ex.broker_name_snapshot?.trim() ?? "";
+        if (brokerNameSnap) {
+          setBrokerNameSnapshot(brokerNameSnap);
+        }
+        const mcSnap = ex.broker_mc_number_snapshot?.trim() ?? "";
+        const dotSnap = ex.broker_dot_number_snapshot?.trim() ?? "";
+        if (mcSnap || dotSnap) {
+          let resolvedBrokerId: number | null = null;
+          try {
+            const resolved = await resolveBrokerIdentity({
+              mc_number: mcSnap || undefined,
+              dot_number: dotSnap || undefined,
+            });
+            resolvedBrokerId = resolved.broker_id ?? null;
+          } catch {
+            resolvedBrokerId = null;
+          }
+          setBrokerId(resolvedBrokerId);
+          setBrokerContactId(null);
+          if (resolvedBrokerId != null) {
+            try {
+              const paged = await listBrokerContacts(resolvedBrokerId, {
+                page: 1,
+                size: 200,
+                include_archived: false,
+              });
+              const items = paged.items || [];
+              setBrokerContacts(items);
+              const matchedContact = matchBrokerContactFromParsed(items, {
+                name: ex.broker_contact_name_snapshot,
+                email: ex.broker_contact_email_snapshot,
+                phone: ex.broker_contact_phone_snapshot,
+              });
+              if (matchedContact) setBrokerContactId(matchedContact.id);
+            } catch {
+              setBrokerContacts([]);
+            }
+          } else {
+            setBrokerContacts([]);
+          }
+        }
+        if (ex.broker_contact_name_snapshot?.trim()) {
+          setBrokerContactNameSnapshot(ex.broker_contact_name_snapshot.trim());
+        }
+        if (ex.broker_contact_phone_snapshot?.trim()) {
+          setBrokerContactPhoneSnapshot(ex.broker_contact_phone_snapshot.trim());
+        }
+        if (ex.broker_contact_email_snapshot?.trim()) {
+          setBrokerContactEmailSnapshot(ex.broker_contact_email_snapshot.trim());
+        }
+        if (ex.broker_load_reference?.trim()) setBrokerLoadReference(ex.broker_load_reference.trim());
+        if (ex.mode?.trim()) setFreightMode(ex.mode.trim());
+        if (ex.equipment_type?.trim()) setEquipmentType(ex.equipment_type.trim());
+        if (ex.trailer_type?.trim()) setTrailerType(ex.trailer_type.trim());
+        if (ex.trailer_size?.trim()) setTrailerSize(ex.trailer_size.trim());
+        if (ex.commodity?.trim()) setCommodity(ex.commodity.trim());
+        if (ex.estimated_weight != null) setEstimatedWeight(String(ex.estimated_weight));
+        if (ex.temperature_requirement?.trim()) {
+          setTemperatureRequirement(ex.temperature_requirement.trim());
+        }
+        if (ex.rate != null) setRate(String(ex.rate));
+        if (ex.customer_rate != null) setCustomerRate(String(ex.customer_rate));
+        if (ex.miles != null) setMiles(String(Math.round(ex.miles)));
+        let notesBody = res.raw_text?.trim() || "";
+        if (ex.customs_broker_name?.trim()) {
+          const cline = `Customs broker (from document): ${ex.customs_broker_name.trim()}`;
+          notesBody = notesBody ? `${notesBody}\n\n---\n${cline}` : cline;
+        }
+        setInternalNotes(notesBody);
+        if (ex.stops?.length) setDraftStops(extractedStopsToDraft(ex.stops));
+        setParseWarnings(res.warnings ?? []);
+        setSaveMessage("Parsed PDF — review fields before saving.");
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "PDF parse failed";
+        setSaveMessage(msg);
+      } finally {
+        setParseBusy(false);
+      }
+    },
+    [canWorkspaceParsePdf, hasIntakeThread, intakeThreadId, isManual, loadIdFromRoute],
+  );
 
   useOperationalRefresh({
     intervalMs: null,
@@ -814,6 +966,85 @@ export default function LoadWorkspacePage() {
       setSaving(false);
     }
   }
+
+  const applyDriverAssignmentHints = useCallback(async (did: number) => {
+    try {
+      const h = await getDriverAssignmentHints(did);
+      setTruckId(h.truck_id ?? null);
+      let nextTrailer = h.trailer_id ?? null;
+      if (h.truck_id != null && nextTrailer == null) {
+        const t = await getTruckSuggestedTrailer(h.truck_id);
+        nextTrailer = t.trailer_id ?? null;
+      }
+      setTrailerId(nextTrailer);
+    } catch {
+      /* hints are optional */
+    }
+  }, []);
+
+  const onDispatchStripDriverSelect = useCallback(
+    (id: number | null) => {
+      setDriverId(id);
+      if (id != null) void applyDriverAssignmentHints(id);
+      else {
+        setTruckId(null);
+        setTrailerId(null);
+      }
+    },
+    [applyDriverAssignmentHints],
+  );
+
+  const onDispatchStripTruckSelect = useCallback((id: number | null) => {
+    setTruckId(id);
+    if (id == null) return;
+    getTruckSuggestedTrailer(id)
+      .then((t) => {
+        if (t.trailer_id != null) setTrailerId(t.trailer_id);
+      })
+      .catch(() => {});
+  }, []);
+
+  const onDispatchStripTrailerSelect = useCallback((id: number | null) => {
+    setTrailerId(id);
+  }, []);
+
+  const onDispatchAssign = useCallback(async () => {
+    if (!load || driverId == null) return;
+    const expectedVersion = load.concurrency_version ?? 1;
+    setSaving(true);
+    setSaveMessage(null);
+    setError(null);
+    try {
+      const updated = await updateLoad(load.id, {
+        expected_concurrency_version: expectedVersion,
+        status: "assigned",
+        driver_id: driverId,
+        truck_id: truckId,
+        trailer_id: trailerId,
+      });
+      setLoad(updated);
+      hydrateFromLoad(updated);
+      setSaveMessage("Load assigned (trip number starts at Dispatched).");
+      setServerConflict(null);
+      const sp = new URLSearchParams(searchParams);
+      sp.delete(OPS.LOAD_DISPATCH_ASSIGN_QUERY);
+      const next = sp.toString() ? `?${sp.toString()}` : "";
+      navigate({ pathname: location.pathname, search: next }, { replace: true });
+    } catch (e: unknown) {
+      const c = parseLoadVersionConflict(e);
+      if (c) {
+        setServerConflict({
+          serverVersion: c.server_version,
+          serverSnapshot: c.server_snapshot,
+        });
+        setSaveMessage("Load was modified elsewhere — see conflict details above.");
+      } else {
+        setSaveMessage((e as Error)?.message || "Assignment failed");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [load, driverId, truckId, trailerId, hydrateFromLoad, searchParams, navigate, location.pathname]);
 
   async function onCustomsBrokerSelect(ev: React.ChangeEvent<HTMLSelectElement>) {
     if (!load || load.document_snapshot_confirmed_at) return;
@@ -1106,6 +1337,11 @@ export default function LoadWorkspacePage() {
                   Detail
                 </span>
               ) : null}
+              {showDispatchAssignmentStrip ? (
+                <span className="rounded border border-[#f5a623]/40 bg-[#f5a623]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#f5d7a0]">
+                  Dispatch · Assign
+                </span>
+              ) : null}
             </div>
           </div>
           <WorkspaceModeReadout mode={workspaceMode} />
@@ -1148,6 +1384,22 @@ export default function LoadWorkspacePage() {
         ) : null}
       </header>
 
+      {showDispatchAssignmentStrip ? (
+        <DispatchAssignmentStrip
+          drivers={drivers}
+          trucks={trucks}
+          trailers={trailers}
+          driverId={driverId}
+          truckId={truckId}
+          trailerId={trailerId}
+          onDriverSelect={onDispatchStripDriverSelect}
+          onTruckSelect={onDispatchStripTruckSelect}
+          onTrailerSelect={onDispatchStripTrailerSelect}
+          onAssign={() => void onDispatchAssign()}
+          saving={saving}
+        />
+      ) : null}
+
       <div className="shrink-0 border-b border-[#252a38] bg-[#141720]">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-2">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Workspace</span>
@@ -1164,6 +1416,28 @@ export default function LoadWorkspacePage() {
           ) : null}
           <span className="mx-1 hidden h-5 w-px bg-[#252a38] sm:inline-block" aria-hidden />
           <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Actions</span>
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            aria-hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void onParseWorkspacePdf(f);
+            }}
+          />
+          {canWorkspaceParsePdf ? (
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={saving || parseBusy || loading}
+              onClick={() => pdfInputRef.current?.click()}
+            >
+              {parseBusy ? "Parsing…" : "Upload & parse PDF"}
+            </Button>
+          ) : null}
           {workspaceMode === "manual" ? (
             <Button variant="primary" type="button" disabled={saving} onClick={() => void onCreate()}>
               {saving ? "Creating…" : "Create load"}
@@ -1173,6 +1447,11 @@ export default function LoadWorkspacePage() {
               {saving ? "Saving…" : "Save load"}
             </Button>
           )}
+          {parseWarnings.length > 0 ? (
+            <span className="max-w-[200px] truncate text-[10px] text-amber-500/95" title={parseWarnings.join(" · ")}>
+              {parseWarnings.join(" · ")}
+            </span>
+          ) : null}
           {saveMessage ? (
             <span
               className={`ml-auto max-w-full text-[11px] sm:max-w-md ${saveMessage.toLowerCase().includes("saved") || saveMessage.toLowerCase().includes("created") ? "text-emerald-700" : "text-red-700"}`}

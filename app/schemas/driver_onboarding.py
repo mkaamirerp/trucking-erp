@@ -44,6 +44,7 @@ class DriverOnboardingSubmissionBase(BaseModel):
     address_city: Optional[str] = None
     address_region: Optional[str] = None
     address_postal: Optional[str] = None
+    zip_code: Optional[str] = None
     address_country: Optional[str] = None
     driver_license_number: Optional[str] = None
     license_region: Optional[str] = None
@@ -103,6 +104,7 @@ class ApplicantApplicationUpdate(BaseModel):
     address_city: Optional[str] = None
     address_region: Optional[str] = None
     address_postal: Optional[str] = None
+    zip_code: Optional[str] = None
     address_country: Optional[str] = None
     driver_license_number: Optional[str] = None
     license_region: Optional[str] = None
@@ -144,6 +146,7 @@ class ApplicantApplicationOut(BaseModel):
     address_city: Optional[str] = None
     address_region: Optional[str] = None
     address_postal: Optional[str] = None
+    zip_code: Optional[str] = None
     address_country: Optional[str] = None
     driver_license_number: Optional[str] = None
     license_region: Optional[str] = None

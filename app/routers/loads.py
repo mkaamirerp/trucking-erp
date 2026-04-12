@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
@@ -16,7 +16,9 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
+from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.services import loads as loads_service
+from app.services.load_document_parse import parse_load_workspace_from_pdf_bytes
 
 router = APIRouter(prefix="/loads", tags=["loads"])
 
@@ -60,6 +62,37 @@ async def list_loads(
     )
     items = [LoadResponse.model_validate(item) for item in paged["items"]]
     return {**paged, "items": items}
+
+
+_MAX_PARSE_PDF_BYTES = 20 * 1024 * 1024
+
+
+@router.post("/parse-document", response_model=LoadDocumentParseResponse)
+async def parse_load_workspace_document(
+    file: UploadFile = File(...),
+    email_thread_id: int | None = Form(None),
+    load_id: int | None = Form(None),
+    _tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+):
+    """
+    Extract normalized load fields from an uploaded PDF for workspace hydration only.
+    Does not create or update a load row. Optional thread/load ids are echo-only context.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+    if len(data) > _MAX_PARSE_PDF_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
+    raw = parse_load_workspace_from_pdf_bytes(
+        data,
+        filename=file.filename,
+        email_thread_id=email_thread_id,
+        load_id=load_id,
+    )
+    return LoadDocumentParseResponse.model_validate(raw)
 
 
 @router.get("/{load_id}", response_model=LoadResponse)

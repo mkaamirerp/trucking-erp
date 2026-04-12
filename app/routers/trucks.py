@@ -5,11 +5,14 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
+from app.models.load import Load
+from app.schemas.dispatch_hints import TruckSuggestedTrailerOut
 from app.schemas.truck import TruckCreate, TruckResponse, TruckUpdate
 from app.services import trucks as trucks_service
 
@@ -52,6 +55,31 @@ async def list_trucks(
     )
     items = [TruckResponse.model_validate(item) for item in paged["items"]]
     return {**paged, "items": items}
+
+
+@router.get("/{truck_id}/suggested-trailer", response_model=TruckSuggestedTrailerOut)
+async def get_truck_suggested_trailer(
+    truck_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    truck = await trucks_service.get_truck(db, tenant_id, truck_id)
+    if not truck:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Truck not found")
+
+    stmt = (
+        select(Load.trailer_id)
+        .where(
+            Load.tenant_id == tenant_id,
+            Load.truck_id == truck_id,
+            Load.trailer_id.isnot(None),
+        )
+        .order_by(Load.updated_at.desc())
+        .limit(1)
+    )
+    tid = (await db.execute(stmt)).scalar_one_or_none()
+    return TruckSuggestedTrailerOut(trailer_id=tid)
 
 
 @router.get("/{truck_id}", response_model=TruckResponse)

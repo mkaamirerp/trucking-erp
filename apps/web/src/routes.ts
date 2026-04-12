@@ -22,6 +22,8 @@ export const OPS = {
   /** Manual load creation — canonical workspace in create mode; then continue at LOAD_DETAIL. */
   LOAD_NEW: "/loads/new",
   LOAD_DETAIL: (id: number | string) => `/loads/${id}`,
+  /** Query param on `/loads/:id` — dispatch board opens workspace with assignment strip (unassigned only). */
+  LOAD_DISPATCH_ASSIGN_QUERY: "dispatchAssign",
   /** Query param on `/loads/:id` for intake email side panel (thread id). */
   LOAD_INTAKE_THREAD_QUERY: "intakeThread",
   /** Load workspace with intake context (same page as LOAD_DETAIL, plus query). */
