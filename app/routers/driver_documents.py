@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""Tenant-scoped driver document HTTP API (``/api/v1/driver-documents``).
+
+These routes are keyed by **driver_id** and predate the people-first nested
+shape documented in ``.cursor/rules/people-first-api.md``. They remain the
+**supported** surface for driver compliance uploads in this codebase; new work
+should be aware of both the aspirational people-first contract and this live
+router until a migration consolidates document CRUD under ``/people/...``.
+"""
+
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query, status

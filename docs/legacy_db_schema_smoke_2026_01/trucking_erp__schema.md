@@ -1,7 +1,7 @@
 # Schema: trucking_erp
 
-- Generated (UTC): `2026-04-13 01:04:29Z`
-- Postgres container: `truckerp-postgres`
+- Generated (UTC): `2026-01-06 07:42:56Z`
+- Postgres container: `trucking_erp-truckerp-postgres-1`
 
 ## alembic_version
 

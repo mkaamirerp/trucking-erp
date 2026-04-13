@@ -9,42 +9,10 @@ digraph TruckingERP {
 
     Platform -> PlatformTables;
 
-    // Tenant DBs
-    TenantActive [label=<
+    // Tenant DB (per workspace; demo shown)
+    TenantDemo [label=<
         <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" STYLE="filled" BGCOLOR="lightgreen">
-        <TR><TD COLSPAN="2"><B>tenant_smoke_active\n(Tenant DB)</B></TD></TR>
-        <TR>
-            <TD VALIGN="TOP" BGCOLOR="lightyellow">
-                <B>Tenant Operational Tables</B><BR/>
-                drivers<BR/>
-                employees<BR/>
-                employee_roles<BR/>
-                driver_documents<BR/>
-                driver_document_files<BR/>
-                driver_phones / driver_phones_old<BR/>
-                pay_profiles<BR/>
-                pay_periods<BR/>
-                pay_entries<BR/>
-                pay_runs<BR/>
-                pay_run_items<BR/>
-                trucks<BR/>
-                tenants
-            </TD>
-            <TD VALIGN="TOP" BGCOLOR="lightcyan">
-                <B>Platform Subset</B><BR/>
-                platform_tenants<BR/>
-                platform_users<BR/>
-                tenant_subscriptions<BR/>
-                platform_audit_log<BR/>
-                plans / plan_features (optional subset)
-            </TD>
-        </TR>
-        </TABLE>
-    >];
-
-    TenantProvision [label=<
-        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" STYLE="filled" BGCOLOR="lightgreen">
-        <TR><TD COLSPAN="2"><B>tenant_smoke_provision\n(Tenant DB)</B></TD></TR>
+        <TR><TD COLSPAN="2"><B>tenant_demo\n(Tenant DB)</B></TD></TR>
         <TR>
             <TD VALIGN="TOP" BGCOLOR="lightyellow">
                 <B>Tenant Operational Tables</B><BR/>
@@ -75,6 +43,5 @@ digraph TruckingERP {
     >];
 
     // Connections
-    PlatformTables -> TenantActive [label="Provision / Links", style=dashed];
-    PlatformTables -> TenantProvision [label="Provision / Links", style=dashed];
+    PlatformTables -> TenantDemo [label="Provision / Links", style=dashed];
 }

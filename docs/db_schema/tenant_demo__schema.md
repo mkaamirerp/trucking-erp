@@ -1,4 +1,4 @@
-# Schema: trucking_erp
+# Schema: tenant_demo
 
 - Generated (UTC): `2026-04-13 01:04:29Z`
 - Postgres container: `truckerp-postgres`

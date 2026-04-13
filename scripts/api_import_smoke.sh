@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Pre-deploy / post-up gate: ensure the API image can import app.main (catches import-time errors
 # like NameError before marking the backend healthy). Does not rebuild or touch nginx.
+# ("smoke" here means a quick import health check — not tenant_smoke_* databases.)
 #
 # Usage (after truckerp-api container is up):  bash scripts/api_import_smoke.sh
 # Env: TRUCKERP_API_CONTAINER (default truckerp-api), API_IMPORT_SMOKE_MAX_WAIT (default 120)

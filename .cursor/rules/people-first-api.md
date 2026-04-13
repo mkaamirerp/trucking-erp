@@ -62,7 +62,7 @@ You usually want **both**: nested for "this person's X" and global for complianc
 ### Driver as alias only
 
 - **Allowed:** `GET /drivers` as alias for `GET /people?role=DRIVER` (returns people who are drivers).
-- **Banned:** `POST /drivers`, `/driver-documents`, `/driver-phones` as top-level identity routes.
+- **Do not add new** top-level identity routes such as `POST /drivers` or parallel `/driver-phones`-style shims. **`/driver-documents` remains live** in the main app (grandfathered); see **Live repository note** below — do not “clean this up” casually.
 
 ## Naming
 
@@ -74,7 +74,13 @@ You usually want **both**: nested for "this person's X" and global for complianc
 1. **person_id** is the universal human FK. Phones, documents, roles, profiles key off `person_id`.
 2. Enforce **tenant**: always scope by `tenant_id`; use composite FKs where applicable.
 3. For role-specific endpoints (e.g. driver-profile, driver documents), **verify person has that role** when required; do not assume `person_id` implies driver.
-4. **Ban** top-level routes like `/driver-documents/{person_id}` or `/driver-phones`. Use `/people/{person_id}/documents` and `/people/{person_id}/phones` instead.
+4. **Target API shape:** Prefer `/people/{person_id}/documents` and `/people/{person_id}/phones` instead of growing new top-level driver-keyed identity routes.
 5. **Naming:** Use PersonDocument (not DriverDocument), PersonDocumentFile, person_documents schemas, save_document_upload_local. Avoid `type` as a parameter name (use doc_type with alias "document_type").
 6. **REST:** Use PATCH for deactivate/update (e.g. PATCH `/people/{person_id}/documents/{id}` with `{ "is_active": false }`), not POST .../deactivate.
 7. **Helpers:** Prefer _get_person(db, person_id, tenant_id) returning Person to avoid double queries.
+
+## Live repository note (policy vs code)
+
+The main app still exposes **supported** tenant routes under **`/api/v1/driver-documents`** (including body and path variants keyed by **`driver_id`**, not `person_id`). That surface is **grandfathered** until an intentional migration moves document CRUD under `/people/...` and retires the old paths.
+
+**Rule for contributors:** do **not** treat the “ban” language above as permission to delete or bypass `app/routers/driver_documents.py` without an explicit migration + API contract change. New *features* should default to people-first nesting; extending the legacy router requires a deliberate security/tenant review (same bar as any other tenant mutation).

@@ -1,3 +1,18 @@
+#!/usr/bin/env bash
+# =============================================================================
+# ARCHIVED — DO NOT USE ON CURRENT PROD COMPOSE WITHOUT REVIEW
+# =============================================================================
+# Historical helper from an older local/dev layout. It:
+# - Injects TENANT_DATABASE_URL into compose (current prod file uses SSM; no
+#   tenant URL in YAML by design).
+# - Defaulted to obsolete DB name tenant_smoke_active (canonical demo DB is
+#   tenant_demo — see docs/DATABASES_PLATFORM_AND_DEMO.md).
+# - Assumes docker network truckerp_net and API hostname truckerp-api.
+#
+# Kept only for archaeology. Prefer: scripts/reload_api.sh, tenant routing
+# checks in ops runbooks, and scripts/export_schema_docs.sh for schema dumps.
+# =============================================================================
+
 set -euo pipefail
 
 FILE=""
