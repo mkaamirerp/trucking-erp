@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+# =============================================================================
+# LEGACY — ARCHIVED — DO NOT USE FOR CURRENT PRODUCTION (Docker + SSM)
+# =============================================================================
+# Former repo-root script; kept under scripts/legacy_operational/ for archaeology
+# only. It does NOT match the standard TruckERP production model:
+#   - API: docker compose -f docker-compose.yml (scripts/reload_api.sh), secrets
+#     from SSM via scripts/start_api_with_ssm.sh → /run/secrets/truckerp.env —
+#     not ad-hoc DATABASE_URL in /etc/truckerp for the compose-based API.
+#   - Postgres: container truckerp-postgres, platform DB trucking_erp; see
+#     docs/DATABASES_PLATFORM_AND_DEMO.md for demo tenant naming.
+#
+# This script writes /etc/truckerp, alters systemd, restarts truckerp.service,
+# uses default test_password-style URLs, and POSTs provision — catastrophic if
+# run blindly on a live host. Read the entire file before any use.
+# =============================================================================
+
 set -Eeuo pipefail
 
 SERVICE="truckerp.service"

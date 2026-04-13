@@ -23,8 +23,9 @@ Main current dependencies:
    - Runs compile and guard checks scoped to `alembic/versions`.
 2. `scripts/ci_check_alembic_down_revision.sh`
    - Scans `alembic/versions` (alongside platform/tenant trees) for `down_revision=None` hygiene.
-3. `erp_audit.sh`
-   - Audits for `alembic.ini`, `alembic/env.py`, `alembic/versions` and runs root Alembic checks.
+3. **`scripts/legacy_operational/erp_audit.sh`** (archived; former root `erp_audit.sh`)
+   - Historical host-side audit that referenced `alembic.ini`, `alembic/env.py`, `alembic/versions` and root Alembic checks. **Not** part of the Docker + SSM production path — kept for archaeology only (see script banner).
+   - For current hygiene, use `scripts/ci_check_alembic_down_revision.sh`, `scripts/ci_check_alembic_platform_tenant_ids.sh`, and containerized Alembic per runbooks.
 
 ## Retirement preconditions
 

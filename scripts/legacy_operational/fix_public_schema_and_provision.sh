@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# =============================================================================
+# LEGACY — ARCHIVED — DO NOT USE FOR CURRENT PRODUCTION (Docker + SSM)
+# =============================================================================
+# Former repo-root script; kept under scripts/legacy_operational/ for archaeology
+# only. It does NOT match the standard TruckERP production model:
+#   - Defaults (e.g. PG_CONTAINER=shared-postgres, .env-based PLATFORM_DB) are
+#     not the compose service truckerp-postgres / platform DB trucking_erp.
+#   - API + secrets: use Docker + SSM paths above, not ad-hoc localhost provision
+#     against an unknown stack.
+#
+# Probes tenant registry via guessed table/column names and may drive provision;
+# high blast radius — read fully before any use.
+# =============================================================================
+
 set -euo pipefail
 
 TENANT_ID="${TENANT_ID:-1}"

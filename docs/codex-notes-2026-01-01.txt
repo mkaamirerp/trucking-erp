@@ -1,5 +1,8 @@
 Codex handoff notes (2026-01-01)
 ---------------------------------
+(Historical snapshot — not the current production runbook. Production API is
+Docker + SSM; see .cursor/rules and docs/DATABASES_PLATFORM_AND_DEMO.md.)
+---------------------------------
 - Frontend lives at apps/web (React+Vite+Tailwind). npm install done; npm run build passes. Dev server: `cd apps/web && npm run dev -- --host --port 5173` (API on :8000). Use headers in API calls: `X-Tenant-ID: 1`, `X-Tenant-Roles: TENANT_ADMIN`.
 - Backend endpoints added:
   - /api/v1/me for roles (reads X-Tenant-Roles and X-User-Id headers).

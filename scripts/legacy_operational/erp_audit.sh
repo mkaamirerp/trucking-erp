@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+# =============================================================================
+# LEGACY — ARCHIVED — DO NOT USE FOR CURRENT PRODUCTION (Docker + SSM)
+# =============================================================================
+# Former repo-root script; kept under scripts/legacy_operational/ for archaeology
+# only. It does NOT match the standard TruckERP production model:
+#   - Spins temporary host uvicorn + expects $HOME/trucking_erp/venv and a
+#     Postgres container default trucking_erp_db — not truckerp-api image + SSM.
+#   - For real checks use scripts under scripts/ (tenant_upgrade_head.sh,
+#     ci_check_alembic_*.sh, db_full_audit.sh, etc.) and containerized Alembic.
+#
+# Original script header follows. Read entire file before any use.
+# =============================================================================
+
 set -Eeuo pipefail
 
 # ============================================================

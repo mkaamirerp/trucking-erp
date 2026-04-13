@@ -13,3 +13,15 @@ and can **conflict** with current production guidance (Docker Compose + SSM, `te
 **Do not run** anything here against production unless you have read the script and verified it matches your environment.
 
 Active maintenance scripts live under `scripts/` (repo root) and `tools/`.
+
+## Scripts in this folder (archived from repo root)
+
+| File | Former purpose (summary) |
+|------|---------------------------|
+| `fix_tenant_routing.sh` | Legacy compose patch + tenant smoke URL (see its header). |
+| `one_go_truckerp_auto.sh` | systemd + `/etc/truckerp` + provision (host model). |
+| `fix_truckerp_one_code_auto.sh` | Same class: root, env file, restart, provision. |
+| `fix_public_schema_and_provision.sh` | Docker `shared-postgres` + registry probe + provision. |
+| `erp_audit.sh` | Long host-based audit (temp uvicorn, old container defaults). |
+
+**`change_db_password_everywhere.sh`** only scans `scripts/*.sh` (top-level `scripts/` only), not this directory — archived copies are **not** URL-rewrite targets unless that script is extended later.
