@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# =============================================================================
+# HISTORICAL / NON-CANONICAL — LOCAL BOOTSTRAP ONLY
+# =============================================================================
+# One-off helper from an early phase (hardcoded PROJECT_DIR, old commit message).
+# Not part of Docker + SSM production setup. Safe to ignore if your clone already
+# has git remotes and .gitignore; review before running on an existing tree.
+# =============================================================================
+
 set -e
 
 PROJECT_DIR="/home/admin/trucking_erp"

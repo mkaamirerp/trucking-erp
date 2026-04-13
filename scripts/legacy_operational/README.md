@@ -23,5 +23,12 @@ Active maintenance scripts live under `scripts/` (repo root) and `tools/`.
 | `fix_truckerp_one_code_auto.sh` | Same class: root, env file, restart, provision. |
 | `fix_public_schema_and_provision.sh` | Docker `shared-postgres` + registry probe + provision. |
 | `erp_audit.sh` | Long host-based audit (temp uvicorn, old container defaults). |
+| `deep_audit_v2.sh` | Read-only capture whose body/summary taught host uvicorn + `shared-postgres` (archived; see script banner). |
 
 **`change_db_password_everywhere.sh`** only scans `scripts/*.sh` (top-level `scripts/` only), not this directory — archived copies are **not** URL-rewrite targets unless that script is extended later.
+
+## Next audit backlog (not archived — review before changing behavior)
+
+| Script | Why revisit |
+|--------|-------------|
+| **`change_db_password_everywhere.sh`** (repo root) | Defaults still encode an older mental model (`PG_CONTAINER=shared-postgres`, host `venv` uvicorn restart). Behavior was intentionally untouched in recent cleanups; a future pass should align **comments/defaults/docs** with Docker + `truckerp-postgres` + API container without breaking callers who rely on overrides. |

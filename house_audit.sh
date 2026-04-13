@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# =============================================================================
+# HOST SNAPSHOT TOOL — NOT THE CANONICAL DOCKER + SSM RUNBOOK
+# =============================================================================
+# This script collects read-only host + Docker state to a temp file. It is
+# useful for ad hoc triage on a machine that looks like THIS repo layout, but:
+#   - Production operations are defined by docker compose + SSM (see
+#     scripts/reload_api.sh, scripts/start_api_with_ssm.sh, docs).
+#   - Paths are hardcoded (e.g. /home/admin/trucking_erp) — wrong on other hosts.
+#   - Some steps use sudo (ss) — may fail or prompt depending on user/sudoers.
+#   - systemd / host nginx sections reflect “what might exist on a host”, not
+#     the single source of truth for the compose-based API container.
+#
+# For canonical recovery and deploy steps, follow repo runbooks — not this dump.
+# =============================================================================
+
 set -euo pipefail
 
 ts="$(date -u +%Y%m%d_%H%M%S)"

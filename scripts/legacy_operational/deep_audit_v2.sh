@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# =============================================================================
+# LEGACY — ARCHIVED — DO NOT USE FOR CURRENT PRODUCTION (Docker + SSM)
+# =============================================================================
+# Former repo-root script; kept under scripts/legacy_operational/ for archaeology
+# only. The body and closing summary describe an obsolete stack (host uvicorn,
+# hard-coded PID 365700, container name shared-postgres, host nginx as canonical).
+# That contradicts the standard TruckERP model: docker compose, truckerp-api,
+# truckerp-postgres, SSM → /run/secrets/truckerp.env (see docs and .cursor rules).
+#
+# Do not treat any section of the generated report as truth for ops sign-off.
+# Prefer: docker compose ps, docker logs truckerp-api, scripts/reload_api.sh,
+# scripts/export_schema_docs.sh, and tenant/platform runbooks.
+# =============================================================================
+
 set -euo pipefail
 
 TS="$(date +%Y%m%d_%H%M%S)"
