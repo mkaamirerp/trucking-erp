@@ -1,0 +1,43 @@
+---
+description: People-first anti-drift — operational role rows are projections, not shadow master records when linked to person_id.
+globs: "app/routers/drivers.py,app/routers/people_workspace.py,app/policies/**,app/models/person.py,app/models/driver.py"
+alwaysApply: false
+---
+
+# People-first operational projections (anti-drift)
+
+## Framing (not driver-only)
+
+- **People** = canonical maintained master record (People workspace).
+- **Application / onboarding pages** = **workflow only**; they do not own long-term person truth.
+- **Role-specific operational tables** (e.g. `drivers` for dispatch roster) = **operational projections** tied with `person_id`, not a second master copy of person core or role profile data.
+
+`drivers` was the **first concrete PATCH target** because drift showed up there; the **design pattern** is general for any future operational table linked to a person.
+
+## Rule when `person_id` is set on an operational row
+
+- Do **not** allow PATCH/PUT to freely change fields that **duplicate** People-owned or People-workspace role-profile fields.
+- Edits to those fields belong in **People** (and role profile paths there).
+- The operational row should only accept **true operational / role-roster** fields (status, hire/termination on roster, assignment hints, etc.).
+
+## Implementation pattern
+
+1. Per operational table, maintain an explicit set of **canonical-on-People** field names (aligned with the API schema for that table).
+2. On write, if `person_id` (or equivalent link) is set and the payload touches any of those keys → **409 Conflict** with a clear message: use People workspace; list `blocked_fields`.
+3. Optionally include `pattern: "people_first_operational_projection"` and `operational_table` in the detail for generic clients.
+4. When **no** person link (legacy row), legacy broader PATCH may remain allowed — document per route.
+
+## Role-attached configuration (not operational projection)
+
+- **People workspace** may edit **role-attached** truth that lives in extension tables (e.g. `driver_person_extensions` via `PATCH /api/v1/people/{id}/driver-role-configuration`). That is **not** the same as operational `drivers` rows: extensions hold classification/config; `drivers` remain dispatch projections when `person_id` is set.
+
+## Code reference
+
+- Shared helpers: `app/policies/people_first_operational_projection.py`
+- First enforcement: `PATCH /api/v1/drivers/{id}` in `app/routers/drivers.py`
+- Role-attached driver config from People: `app/routers/people_workspace.py` (`driver-role-configuration`)
+
+## Do not
+
+- Treat this as “driver application architecture” — workflow is not the center; **people + roles** are.
+- Add broad reverse-sync from operational rows back into People as the default fix — prefer **block + redirect**.

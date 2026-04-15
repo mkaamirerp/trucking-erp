@@ -1,0 +1,43 @@
+---
+description: After implementing deployable code, rebuild/restart and prove live containers match — no half-cooked “done” reports.
+globs: "app/**,apps/web/**,scripts/reload*.sh,docker-compose.yml"
+alwaysApply: true
+---
+
+# Implementation → deploy → verify (MANDATORY)
+
+## Rule
+
+When you **finish changing or implementing** code that affects **production Docker surfaces** (API image, nginx-baked `apps/web/dist`, compose):
+
+1. **Do not** tell the user the work is “complete,” “live,” “deployed,” or “accepted” based only on the **git working tree**.
+2. **Do** run the canonical reload path and **prove** the **running** API container and **running** nginx bundle contain the change (grep route in container, grep UI string in `/usr/share/nginx/html/assets/*.js`, or equivalent).
+3. If you cannot run Docker/npm on the host, **say explicitly** that deploy was not run and list the exact commands the operator must run.
+
+## Backend (API)
+
+After any `app/` change that ships in `truckerp-api`:
+
+```bash
+/home/admin/trucking_erp/scripts/reload_api.sh
+```
+
+Then verify, e.g. `docker exec truckerp-api grep -n 'audit-log' /app/app/routers/people_workspace.py` or hit a health/read endpoint.
+
+## Frontend (static in nginx image)
+
+After any `apps/web/` change that users see in the browser:
+
+```bash
+/home/admin/trucking_erp/scripts/reload_nginx_web.sh
+```
+
+`docker compose restart truckerp-nginx` **does not** pick up new JS — the image must be rebuilt after `npm run build`.
+
+Then verify the new string/route exists in the **served** bundle or behavior.
+
+## Reporting
+
+Until reload + verification against **running** containers is done, phrase status as: **“coded in repo; not verified live on this host”** — not “implemented” as if production already matches.
+
+See also: `.cursor/rules/post-code-change-mandatory.mdc`, `.cursor/rules/rebuild-restart-commands.mdc`.

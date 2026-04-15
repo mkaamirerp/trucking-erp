@@ -6,10 +6,35 @@ import {
   PersonApplicationListItem,
 } from "../api";
 
-type StatusFilter = "ALL" | "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
+/** Matches API person_applications.current_workflow_lane (complete rows omitted from list). */
+type QueueTab = "ALL" | "SUBMITTED" | "PROCESSING" | "HR_PAYROLL" | "REJECTED";
+type QueueBucket = Exclude<QueueTab, "ALL">;
 type SortMode = "created_desc" | "submitted_desc" | "name_asc";
 
-const STATUS_ORDER: StatusFilter[] = ["ALL", "DRAFT", "SUBMITTED", "APPROVED", "REJECTED"];
+const QUEUE_TAB_ORDER: QueueTab[] = ["ALL", "SUBMITTED", "PROCESSING", "HR_PAYROLL", "REJECTED"];
+
+const QUEUE_TAB_LABEL: Record<QueueTab, string> = {
+  ALL: "All",
+  SUBMITTED: "Submitted",
+  PROCESSING: "Processing",
+  HR_PAYROLL: "HR / Payroll",
+  REJECTED: "Rejected",
+};
+
+function queueBucketFromLane(item: PersonApplicationListItem): QueueBucket {
+  const lane = (item.current_workflow_lane || "processing").toLowerCase();
+  switch (lane) {
+    case "submitted":
+      return "SUBMITTED";
+    case "hr_payroll":
+      return "HR_PAYROLL";
+    case "rejected":
+      return "REJECTED";
+    case "processing":
+    default:
+      return "PROCESSING";
+  }
+}
 
 const APPLICATION_TYPES = [
   "DRIVER",
@@ -55,12 +80,14 @@ function initials(item: PersonApplicationListItem) {
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("");
 }
 
-function statusBadgeClass(status: string) {
-  switch (status) {
+function queueBadgeClass(bucket: QueueBucket) {
+  switch (bucket) {
     case "SUBMITTED":
       return "bg-blue-500/10 text-blue-300 border border-blue-400/20";
-    case "APPROVED":
-      return "bg-emerald-500/10 text-emerald-300 border border-emerald-400/20";
+    case "PROCESSING":
+      return "bg-slate-500/10 text-slate-300 border border-slate-400/20";
+    case "HR_PAYROLL":
+      return "bg-violet-500/10 text-violet-200 border border-violet-400/25";
     case "REJECTED":
       return "bg-rose-500/10 text-rose-300 border border-rose-400/20";
     default:
@@ -70,7 +97,7 @@ function statusBadgeClass(status: string) {
 
 export default function DriverOnboardingAdminListPage() {
   const [items, setItems] = useState<PersonApplicationListItem[]>([]);
-  const [status, setStatus] = useState<StatusFilter>("ALL");
+  const [queueTab, setQueueTab] = useState<QueueTab>("ALL");
   const [query, setQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("created_desc");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -155,20 +182,26 @@ export default function DriverOnboardingAdminListPage() {
     load();
   }, []);
 
-  const counts = useMemo(() => ({
-    ALL: items.length,
-    DRAFT: items.filter((item) => item.status === "DRAFT").length,
-    SUBMITTED: items.filter((item) => item.status === "SUBMITTED").length,
-    APPROVED: items.filter((item) => item.status === "APPROVED").length,
-    REJECTED: items.filter((item) => item.status === "REJECTED").length,
-  }), [items]);
+  const counts = useMemo(() => {
+    const base: Record<QueueTab, number> = {
+      ALL: items.length,
+      SUBMITTED: 0,
+      PROCESSING: 0,
+      HR_PAYROLL: 0,
+      REJECTED: 0,
+    };
+    for (const item of items) {
+      base[queueBucketFromLane(item)] += 1;
+    }
+    return base;
+  }, [items]);
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     let next = [...items];
 
-    if (status !== "ALL") {
-      next = next.filter((item) => item.status === status);
+    if (queueTab !== "ALL") {
+      next = next.filter((item) => queueBucketFromLane(item) === queueTab);
     }
 
     if (normalizedQuery) {
@@ -199,10 +232,10 @@ export default function DriverOnboardingAdminListPage() {
     });
 
     return next;
-  }, [items, query, sortMode, status]);
+  }, [items, query, sortMode, queueTab]);
 
   const allVisibleSelected = filteredItems.length > 0 && filteredItems.every((item) => selectedIds.includes(item.id));
-  const hasFilters = status !== "ALL" || query.trim().length > 0;
+  const hasFilters = queueTab !== "ALL" || query.trim().length > 0;
 
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
@@ -225,7 +258,7 @@ export default function DriverOnboardingAdminListPage() {
   };
 
   const resetFilters = () => {
-    setStatus("ALL");
+    setQueueTab("ALL");
     setQuery("");
   };
 
@@ -244,7 +277,7 @@ export default function DriverOnboardingAdminListPage() {
         <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
           <div>
             <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[#f5a623] before:inline-block before:h-px before:w-5 before:bg-[#f5a623] before:content-['']">
-              Driver Onboarding
+              Onboarding
             </div>
             <h2 className="font-['Barlow_Condensed'] text-5xl font-extrabold leading-none tracking-tight text-[#e8edf5]">
               Applications
@@ -264,24 +297,24 @@ export default function DriverOnboardingAdminListPage() {
         </div>
 
         <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-5">
-          {STATUS_ORDER.map((key) => {
+          {QUEUE_TAB_ORDER.map((key) => {
             const accent =
               key === "ALL" ? "#94a3b8" :
-              key === "DRAFT" ? "#94a3b8" :
               key === "SUBMITTED" ? "#3b82f6" :
-              key === "APPROVED" ? "#22d3a0" :
+              key === "PROCESSING" ? "#94a3b8" :
+              key === "HR_PAYROLL" ? "#a78bfa" :
               "#f43f5e";
-            const active = status === key;
+            const active = queueTab === key;
             return (
               <button
                 key={key}
                 type="button"
-                onClick={() => setStatus(key)}
+                onClick={() => setQueueTab(key)}
                 className={`relative overflow-hidden rounded-xl border px-5 py-4 text-left transition ${active ? "bg-[#161b27]" : "bg-[#111520] hover:bg-[#161b27]"} ${active ? "border-white/20" : "border-[#1c2235]"}`}
                 style={{ boxShadow: active ? `inset 0 0 0 1px ${accent}40` : undefined }}
               >
                 <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#7c8ba1]">
-                  {key === "ALL" ? "All" : key.charAt(0) + key.slice(1).toLowerCase()}
+                  {QUEUE_TAB_LABEL[key]}
                 </div>
                 <div className="font-['Barlow_Condensed'] text-4xl font-extrabold leading-none" style={{ color: active ? accent : "#e8edf5" }}>
                   {counts[key]}
@@ -463,6 +496,8 @@ export default function DriverOnboardingAdminListPage() {
               <tbody>
                 {filteredItems.map((item, index) => {
                   const nameMissing = !item.first_name && !item.last_name;
+                  const bucket = queueBucketFromLane(item);
+                  const queueLabel = QUEUE_TAB_LABEL[bucket];
                   return (
                     <tr
                       key={item.id}
@@ -497,9 +532,9 @@ export default function DriverOnboardingAdminListPage() {
                         <span className="font-mono text-xs text-[#94a3b8]">{item.application_type || "DRIVER"}</span>
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.08em] ${statusBadgeClass(item.status)}`}>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.08em] ${queueBadgeClass(bucket)}`}>
                           <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                          {item.status}
+                          {queueLabel}
                         </span>
                       </td>
                       <td className="px-4 py-4 align-top">

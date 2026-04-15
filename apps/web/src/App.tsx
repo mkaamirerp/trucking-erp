@@ -23,6 +23,7 @@ import LoadWorkspacePage from "./pages/LoadWorkspacePage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
+import PeopleWorkspacePage from "./pages/PeopleWorkspacePage";
 import OnboardingApplicantPage from "./pages/OnboardingApplicantPage";
 import ToolsDiagnosticsPage from "./pages/ToolsDiagnosticsPage";
 import AdminLayout from "./components/AdminLayout";
@@ -250,6 +251,7 @@ function App() {
           </Layout>
         }
       />
+      <Route path="/operations/people/*" element={<Layout><PeopleWorkspacePage /></Layout>} />
       <Route path="/operations/driver-onboarding-review" element={<Layout><DriverOnboardingAdminListPage /></Layout>} />
       <Route path="/operations/driver-onboarding-review/:id" element={<Layout><DriverOnboardingAdminDetailPage /></Layout>} />
       {/* Redirect legacy /admin/driver-onboarding to operations namespace */}

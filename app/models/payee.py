@@ -101,6 +101,10 @@ class CompensationProfile(Base):
     )
     allow_negative_settlement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
+    participates_in_fuel_discount_program: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow, server_default="now()"
     )

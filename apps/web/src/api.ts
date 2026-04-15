@@ -1440,6 +1440,8 @@ export type PersonApplicationListItem = {
   id: number;
   tenant_id: number;
   status: string;
+  /** pending | pending_downstream | complete */
+  setup_status?: string;
   application_type?: string;
   requested_role_code?: string;
   first_name?: string | null;
@@ -1449,6 +1451,10 @@ export type PersonApplicationListItem = {
   submitted_at?: string | null;
   source?: string | null;
   created_at: string;
+  /** submitted | processing | hr_payroll | complete | rejected — admin queue routing (API excludes complete). */
+  current_workflow_lane?: string;
+  /** Set when admin opens detail / starts review (SUBMITTED only until approve/reject). */
+  reviewed_at?: string | null;
 };
 
 export type ApplicantApplication = {
@@ -1463,6 +1469,12 @@ export type ApplicantApplication = {
   reviewed_by_user_id?: number | null;
   approved_at?: string | null;
   approved_by_user_id?: number | null;
+  onboarded_at?: string | null;
+  onboarded_by_user_id?: number | null;
+  /** pending | pending_downstream | complete */
+  setup_status?: string;
+  /** submitted | processing | hr_payroll | complete | rejected */
+  current_workflow_lane?: string;
   rejection_reason?: string | null;
   first_name?: string | null;
   last_name?: string | null;
@@ -1482,10 +1494,41 @@ export type ApplicantApplication = {
   created_at: string;
   updated_at: string;
   intake_payload?: Record<string, unknown> | null;
+  /** Admin GET: frozen intake JSON at applicant submit (evidence). */
+  intake_submitted_snapshot?: Record<string, unknown> | null;
+  /** Admin GET: audit entries for review-field edits. */
+  intake_review_audit?: Array<{ at?: string; by_user_id?: number; changed_keys?: string[] }> | null;
+  /** When true, applicant may upload step-4 documents after submit (document-resume token). */
+  document_resume_active?: boolean;
 };
 
 /** Used by OnboardingApplicantPage (same shape as ApplicantApplication). */
 export type PersonApplication = ApplicantApplication;
+
+/** Admin PATCH body for correcting structured applicant fields (review workspace). */
+export type PersonApplicationReviewPatchPayload = {
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address_street?: string | null;
+  address_city?: string | null;
+  address_region?: string | null;
+  address_postal?: string | null;
+  zip_code?: string | null;
+  address_country?: string | null;
+  notes?: string | null;
+  driver_license_number?: string | null;
+  license_region?: string | null;
+  license_expiry?: string | null;
+  middle_name?: string | null;
+  date_of_birth?: string | null;
+  license_issue_date?: string | null;
+  cdl_class?: string | null;
+  endorsements?: string | null;
+  restrictions?: string | null;
+  conditions?: string | null;
+};
 
 export type ApplicantApplicationUpdatePayload = {
   first_name?: string;
@@ -1530,6 +1573,268 @@ export async function getPersonApplicationForAdmin(id: number): Promise<Applican
   return handle<ApplicantApplication>(res);
 }
 
+/** Idempotent: while SUBMITTED, sets reviewed_at so the admin queue moves the row to Processing. */
+export async function markAdminReviewEngaged(applicationId: number): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/mark-admin-review-engaged`,
+    { method: "POST" },
+  );
+  return handle<ApplicantApplication>(res);
+}
+
+// ---- People workspace (maintained `people` master; tenant admin + admin_sensitive) ----
+
+export type PersonRoleSummary = {
+  role_code: string;
+  is_primary: boolean;
+  is_active: boolean;
+};
+
+export type DriverProfileSummary = {
+  license_number?: string | null;
+  license_region?: string | null;
+  license_expiry?: string | null;
+  is_active: boolean;
+};
+
+export type DriverPersonExtensionSummary = {
+  employment_relationship_type: string;
+  driver_operating_subtype: string;
+  is_team_driver: boolean;
+  provides_own_truck: boolean;
+  provides_own_trailer: boolean;
+  equipment_contribution_type: string;
+  insurance_commercial_approved: boolean;
+};
+
+export type OperationalDriverSummary = {
+  driver_id: number;
+  is_active: boolean;
+  first_name: string;
+  last_name: string;
+  payee_id?: number | null;
+};
+
+export type CompensationSummary = {
+  payee_id?: number | null;
+  worker_type?: string | null;
+  gross_calc_type?: string | null;
+  hourly_rate?: string | null;
+  cpm_loaded?: string | null;
+  cpm_empty?: string | null;
+  percent_rate?: string | null;
+  salary_amount?: string | null;
+  flat_amount?: string | null;
+  settlement_frequency?: string | null;
+  participates_in_fuel_discount_program?: boolean | null;
+  dispatch_fee_enabled?: boolean | null;
+  dispatch_fee_rate?: string | null;
+  dispatch_fee_basis?: string | null;
+};
+
+export type LinkedPersonApplicationSummary = {
+  id: number;
+  status: string;
+  setup_status?: string | null;
+};
+
+export type PeopleListItem = {
+  id: number;
+  tenant_id: number;
+  first_name: string;
+  last_name: string;
+  phone?: string | null;
+  email?: string | null;
+  city?: string | null;
+  region?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PeopleDetail = PeopleListItem & {
+  street_address?: string | null;
+  postal_code?: string | null;
+  zip_code?: string | null;
+  country?: string | null;
+  notes?: string | null;
+  platform_user_id?: string | null;
+  roles: PersonRoleSummary[];
+  driver_profile?: DriverProfileSummary | null;
+  driver_person_extension?: DriverPersonExtensionSummary | null;
+  operational_drivers: OperationalDriverSummary[];
+  compensation: CompensationSummary;
+  latest_application?: LinkedPersonApplicationSummary | null;
+};
+
+export type PeopleCorePatchPayload = {
+  first_name?: string;
+  last_name?: string;
+  phone?: string | null;
+  email?: string | null;
+  street_address?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postal_code?: string | null;
+  zip_code?: string | null;
+  country?: string | null;
+  notes?: string | null;
+  is_active?: boolean;
+};
+
+export type DriverProfilePatchPayload = {
+  license_number?: string | null;
+  license_region?: string | null;
+  license_expiry?: string | null;
+  is_active?: boolean;
+};
+
+export type PeoplePatchResult = {
+  person: PeopleDetail;
+  synced_operational_driver_ids: number[];
+};
+
+/** People workspace maintenance corrections (subset of tenant_audit_logs). */
+export type PeopleAuditLogEntry = {
+  id: number;
+  action: string;
+  created_at: string;
+  actor_user_id?: number | null;
+  actor_email?: string | null;
+  ip?: string | null;
+  user_agent?: string | null;
+  changed_keys: string[];
+  snapshot: Record<string, unknown>;
+};
+
+export async function listPersonWorkspaceAuditLog(
+  personId: number,
+  params: { limit?: number; offset?: number } = {},
+): Promise<PeopleAuditLogEntry[]> {
+  const url = new URL(`${API_BASE}/people/${personId}/audit-log`, window.location.origin);
+  if (params.limit != null) url.searchParams.set("limit", String(params.limit));
+  if (params.offset != null) url.searchParams.set("offset", String(params.offset));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PeopleAuditLogEntry[]>(res);
+}
+
+export async function listPeopleForWorkspace(params: {
+  q?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<PeopleListItem[]> {
+  const url = new URL(`${API_BASE}/people`, window.location.origin);
+  if (params.q?.trim()) url.searchParams.set("q", params.q.trim());
+  if (params.limit != null) url.searchParams.set("limit", String(params.limit));
+  if (params.offset != null) url.searchParams.set("offset", String(params.offset));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PeopleListItem[]>(res);
+}
+
+export async function getPersonWorkspaceDetail(personId: number): Promise<PeopleDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}`);
+  return handle<PeopleDetail>(res);
+}
+
+export async function patchPersonWorkspaceCore(
+  personId: number,
+  payload: PeopleCorePatchPayload,
+): Promise<PeoplePatchResult> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<PeoplePatchResult>(res);
+}
+
+export async function patchPersonDriverProfile(
+  personId: number,
+  payload: DriverProfilePatchPayload,
+): Promise<PeoplePatchResult> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}/driver-profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<PeoplePatchResult>(res);
+}
+
+export type PersonApplicationDocumentRequestPayload = {
+  doc_types: string[];
+  subject: string;
+  body: string;
+};
+
+export type PersonApplicationDocumentRequestResult = {
+  email_sent: boolean;
+  email_error?: string | null;
+};
+
+/** Admin: combined document request email + rotate applicant resume token. */
+export async function requestPersonApplicationDocuments(
+  applicationId: number,
+  payload: PersonApplicationDocumentRequestPayload,
+): Promise<PersonApplicationDocumentRequestResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/request-documents`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return handle<PersonApplicationDocumentRequestResult>(res);
+}
+
+/** Admin: upload a step-4 document on behalf of the applicant. */
+export async function adminUploadPersonApplicationDocument(params: {
+  applicationId: number;
+  docType: string;
+  file: File;
+}): Promise<ApplicantApplication> {
+  const form = new FormData();
+  form.append("doc_type", params.docType);
+  form.append("file", params.file);
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${params.applicationId}/document-upload`,
+    { method: "POST", body: form },
+  );
+  return handle<ApplicantApplication>(res);
+}
+
+/** Admin: mark document accepted or clear acceptance. */
+export async function setPersonApplicationDocumentAccepted(params: {
+  applicationId: number;
+  docType: string;
+  accepted: boolean;
+}): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${params.applicationId}/documents/accept`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: params.docType, accepted: params.accepted }),
+    },
+  );
+  return handle<ApplicantApplication>(res);
+}
+
+export async function patchPersonApplicationReviewFields(
+  applicationId: number,
+  payload: PersonApplicationReviewPatchPayload,
+): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/review-fields`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return handle<ApplicantApplication>(res);
+}
+
 /** Fetch application file (DL or document) for admin review. Returns object URL for preview. */
 export async function getAdminApplicationFileUrl(applicationId: number, fileId: string): Promise<string> {
   const url = new URL(`${API_BASE}/driver-onboarding/applications/${applicationId}/file`, window.location.origin);
@@ -1538,6 +1843,32 @@ export async function getAdminApplicationFileUrl(applicationId: number, fileId: 
   if (!res.ok) throw new Error("File not found");
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+export type CombinedDriverApproveReadiness = {
+  applies: boolean;
+  ready: boolean;
+  blocking_code?: string | null;
+  detail?: string | null;
+};
+
+/** Combined tenant: create Person (+ driver entities) while SUBMITTED so admin setup cards can be used before approve. */
+export async function materializePersonForCombinedSetup(applicationId: number): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/materialize-person-for-combined-setup`,
+    { method: "POST" },
+  );
+  return handle<ApplicantApplication>(res);
+}
+
+/** Combined + DRIVER+DRIVER + SUBMITTED: whether required in-page setup is complete (Approve allowed). */
+export async function getCombinedDriverApproveReadiness(
+  applicationId: number,
+): Promise<CombinedDriverApproveReadiness> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/combined-driver-approve-readiness`,
+  );
+  return handle<CombinedDriverApproveReadiness>(res);
 }
 
 export async function approvePersonApplicationForAdmin(id: number): Promise<ApplicantApplication> {
@@ -1559,7 +1890,182 @@ export async function rejectPersonApplicationForAdmin(
   return handle<ApplicantApplication>(res);
 }
 
-/** Get person application by invite token (used by OnboardingApplicantPage). */
+export async function completePersonApplicationOnboarding(id: number): Promise<ApplicantApplication> {
+  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/applications/${id}/complete-onboarding`, {
+    method: "POST",
+  });
+  return handle<ApplicantApplication>(res);
+}
+
+/** Combined-mode driver compensation (payees + compensation_profiles). */
+export type DriverCompensationSetupOut = {
+  payee_id: number | null;
+  worker_type: string | null;
+  gross_calc_type: string | null;
+  percent_rate: string | null;
+  cpm_loaded: string | null;
+  cpm_empty: string | null;
+  hourly_rate: string | null;
+  salary_amount: string | null;
+  flat_amount: string | null;
+  settlement_frequency: string | null;
+  participates_in_fuel_discount_program: boolean;
+  dispatch_fee_enabled: boolean;
+  dispatch_fee_rate: string;
+  dispatch_fee_basis: string;
+  employment_relationship_type: string | null;
+};
+
+export type DriverCompensationSetupWrite = {
+  gross_calc_type: "CPM" | "PERCENT_REVENUE" | "FLAT_PER_LOAD" | "HOURLY" | "SALARY";
+  percent_rate?: string | null;
+  cpm_loaded?: string | null;
+  cpm_empty?: string | null;
+  hourly_rate?: string | null;
+  salary_amount?: string | null;
+  flat_amount?: string | null;
+  settlement_frequency: string;
+  participates_in_fuel_discount_program: boolean;
+  dispatch_fee_enabled: boolean;
+  dispatch_fee_rate: string;
+  dispatch_fee_basis: string;
+};
+
+export async function getApplicationDriverCompensationSetup(
+  applicationId: number,
+): Promise<DriverCompensationSetupOut> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/driver-compensation-setup`,
+  );
+  return handle<DriverCompensationSetupOut>(res);
+}
+
+export async function putApplicationDriverCompensationSetup(
+  applicationId: number,
+  payload: DriverCompensationSetupWrite,
+): Promise<DriverCompensationSetupOut> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/driver-onboarding/applications/${applicationId}/driver-compensation-setup`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return handle<DriverCompensationSetupOut>(res);
+}
+
+/** People workspace: same payload/read model as onboarding compensation (payees + compensation_profiles). */
+export async function getPersonWorkspaceCompensationSetup(personId: number): Promise<DriverCompensationSetupOut> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}/compensation-setup`);
+  return handle<DriverCompensationSetupOut>(res);
+}
+
+export async function patchPersonWorkspaceCompensationSetup(
+  personId: number,
+  payload: DriverCompensationSetupWrite,
+): Promise<PeoplePatchResult> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}/compensation-setup`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<PeoplePatchResult>(res);
+}
+
+export type PersonSetupUiMode = "combined" | "segmented";
+
+export async function patchPersonSetupUiMode(person_setup_ui_mode: PersonSetupUiMode): Promise<{ person_setup_ui_mode: string }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/person-setup-ui-mode`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ person_setup_ui_mode }),
+  });
+  return handle<{ person_setup_ui_mode: string }>(res);
+}
+
+/** Phase 3A driver extension (tenant admin + admin_sensitive). */
+export type DriverPersonExtensionWrite = {
+  employment_relationship_type: string;
+  driver_operating_subtype: string;
+  is_team_driver: boolean;
+  team_role_type: string | null;
+  provides_own_truck: boolean;
+  provides_own_trailer: boolean;
+  equipment_contribution_type: string;
+  insurance_commercial_approved: boolean;
+};
+
+export type DriverPersonExtensionOut = DriverPersonExtensionWrite & {
+  id: number;
+  tenant_id: number;
+  person_id: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Returns null when no extension row exists (person must exist). */
+export async function getDriverPersonExtension(personId: number): Promise<DriverPersonExtensionOut | null> {
+  const res = await fetchWithTenant(`${API_BASE}/driver-person-extensions/${personId}`);
+  if (res.status === 404) {
+    const text = await res.text();
+    let detail = "";
+    try {
+      detail = String((JSON.parse(text) as { detail?: unknown }).detail ?? "");
+    } catch {
+      /* ignore */
+    }
+    if (detail === "Person not found") {
+      throw new Error("Person not found for driver configuration.");
+    }
+    if (detail === "Driver extension not found") return null;
+    throw new Error(text || "Not found");
+  }
+  return handle<DriverPersonExtensionOut>(res);
+}
+
+export async function putDriverPersonExtension(
+  personId: number,
+  payload: DriverPersonExtensionWrite,
+): Promise<DriverPersonExtensionOut> {
+  const res = await fetchWithTenant(`${API_BASE}/driver-person-extensions/${personId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<DriverPersonExtensionOut>(res);
+}
+
+/**
+ * People workspace: role-attached driver configuration (`driver_person_extensions`).
+ * Returns null when no row exists yet (person must exist).
+ */
+export async function getPersonWorkspaceDriverRoleConfiguration(
+  personId: number,
+): Promise<DriverPersonExtensionOut | null> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}/driver-role-configuration`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  const raw: unknown = await res.json();
+  if (raw == null) return null;
+  return raw as DriverPersonExtensionOut;
+}
+
+export async function patchPersonWorkspaceDriverRoleConfiguration(
+  personId: number,
+  payload: DriverPersonExtensionWrite,
+): Promise<PeoplePatchResult> {
+  const res = await fetchWithTenant(`${API_BASE}/people/${personId}/driver-role-configuration`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<PeoplePatchResult>(res);
+}
+
+/** Get person application by invite token (used on OnboardingApplicantPage). */
 export async function getPersonApplicationByOnboardingToken(token: string): Promise<PersonApplication> {
   return getApplicantApplication(token);
 }
@@ -1751,6 +2257,8 @@ export type CompanyProfile = {
   company_phone_is_fallback: boolean;
   company_email_is_fallback: boolean;
   address_is_fallback: boolean;
+  /** Present when API returns tenant person setup mode (combined vs segmented). */
+  person_setup_ui_mode?: PersonSetupUiMode | string;
 };
 
 export async function getCompanyProfile(): Promise<CompanyProfile> {

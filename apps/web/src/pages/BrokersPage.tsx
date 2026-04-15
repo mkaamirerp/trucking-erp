@@ -141,7 +141,7 @@ export default function BrokersPage() {
   const totalPages = Math.max(1, Math.ceil(total / size));
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 text-[#e8edf5]">
+    <div className="mx-auto max-w-7xl px-4 py-8 text-[#e8edf5]">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>

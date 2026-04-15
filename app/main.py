@@ -11,6 +11,8 @@ from app.routers.fleet import router as fleet_router
 from app.core.config import enforce_test_bypass_auth_policy, settings
 from app.routers.health import router as health_router
 from app.routers.drivers import router as drivers_router
+from app.routers.driver_person_extension import router as driver_person_extension_router
+from app.routers.people_workspace import router as people_workspace_router
 from app.routers.driver_phones import router as driver_phones_router
 from app.routers.driver_documents import router as driver_documents_router
 from app.routers.admin_onboarding import router as admin_onboarding_router
@@ -110,6 +112,8 @@ app.include_router(platform_global_booking_brokers_router)
 app.include_router(platform_diagnostics_router)
 app.include_router(platform_testing_router)
 app.include_router(drivers_router, prefix="/api/v1")
+app.include_router(driver_person_extension_router, prefix="/api/v1")
+app.include_router(people_workspace_router)
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(driver_phones_router, prefix="/api/v1")
 app.include_router(driver_documents_router, prefix="/api/v1")

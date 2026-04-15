@@ -19,10 +19,15 @@ from app.schemas.dispatch_hints import DriverAssignmentHintsOut
 from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate, DriverListOut, driver_row_to_list_out
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
+from app.policies.people_first_operational_projection import (
+    drivers_patch_blocked_canonical_fields,
+    people_first_operational_patch_conflict_detail,
+)
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
-# Operational dispatch roster: rows in `drivers` (not PersonApplication drafts). DRIVER approvals
-# materialize rows via driver_onboarding; admin may also POST here explicitly.
+# Operational dispatch roster: projection rows for dispatch (see people-first rule:
+# `app/policies/people_first_operational_projection.py` and `.cursor/rules/people-first-operational-projections.mdc`).
+# Materialized via onboarding/workflow or explicit POST; not a second master for person truth when person_id is set.
 
 @router.post("", response_model=DriverOut, status_code=status.HTTP_201_CREATED)
 async def create_driver(
@@ -188,12 +193,28 @@ async def update_driver(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    """Update dispatch roster fields. If ``person_id`` is set, master-data fields are blocked (People workspace)."""
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
     driver = result.scalar_one_or_none()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
     data = payload.model_dump(exclude_unset=True)
+
+    if driver.person_id is not None:
+        blocked = drivers_patch_blocked_canonical_fields(set(data.keys()))
+        if blocked:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=people_first_operational_patch_conflict_detail(
+                    person_id=int(driver.person_id),
+                    blocked_fields=blocked,
+                    operational_table="drivers",
+                    workspace_edit_hint="person core fields and driver profile (license)",
+                    operational_fields_hint="is_active, hire_date, termination_date",
+                    stable_api_code="use_people_workspace_for_driver_master_data",
+                ),
+            )
 
     # ✅ Cross-field validation with existing DB values (important for PATCH)
     merged = {

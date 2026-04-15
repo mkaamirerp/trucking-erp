@@ -283,6 +283,7 @@ export default function OnboardingApplicantPage() {
   const [step, setStep] = useState<Step>(0);
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [documentResumeActive, setDocumentResumeActive] = useState(false);
 
   const [dlState, setDlState] = useState<Record<DocType, DlUiState>>({ CDL_FRONT: "IDLE", CDL_BACK: "IDLE" });
   const [dlMessage, setDlMessage] = useState<Record<DocType, string>>({ CDL_FRONT: "", CDL_BACK: "" });
@@ -350,14 +351,21 @@ export default function OnboardingApplicantPage() {
           CDL_BACK: hasStoredDlSide("CDL_BACK", intake) ? "SUCCESS" : "IDLE",
         });
         setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
-        const restoredStep = parseOnboardingStep(intake.onboarding_step);
-        if (restoredStep !== null) setStep(restoredStep);
         if (typeof intake.agree_info_accurate === "boolean") setAgree1(intake.agree_info_accurate);
         if (typeof intake.agree_background_check === "boolean") setAgree2(intake.agree_background_check);
         if (typeof intake.agree_dot_compliance === "boolean") setAgree3(intake.agree_dot_compliance);
         if (intake.jobs) setJobs(intake.jobs);
         if (intake.refs) setRefs(intake.refs);
-        setSubmitted(data.status === "SUBMITTED");
+        setSubmitted(data.status === "SUBMITTED" || data.status === "APPROVED");
+        const resume = !!(data as { document_resume_active?: boolean }).document_resume_active;
+        setDocumentResumeActive(resume);
+        // Document-resume links must open step 3 only; saved onboarding_step is often 0 and would override.
+        if ((data.status === "SUBMITTED" || data.status === "APPROVED") && resume) {
+          setStep(3);
+        } else {
+          const restoredStep = parseOnboardingStep(intake.onboarding_step);
+          if (restoredStep !== null) setStep(restoredStep);
+        }
         const docs = intake.documents as Record<string, { original_filename?: string }> | undefined;
         if (docs && typeof docs === "object") {
           const next: Record<string, string> = {};
@@ -641,7 +649,7 @@ export default function OnboardingApplicantPage() {
   }
 
   async function handleSubmit() {
-    if (!app || submitted) return;
+    if (!app || (submitted && !documentResumeActive)) return;
     if (!agree1 || !agree2 || !agree3) { setError("Please check all agreement boxes before submitting."); return; }
     setSaving(true);
     setError(null);
@@ -659,7 +667,8 @@ export default function OnboardingApplicantPage() {
       );
       const updated = await submitPersonApplication({ appId: app.id, onboardingToken: token, intakePayload: payload });
       setApp(updated);
-      setSubmitted(true);
+      setSubmitted(updated.status === "SUBMITTED" || updated.status === "APPROVED");
+      setDocumentResumeActive(!!(updated as { document_resume_active?: boolean }).document_resume_active);
     } catch (e: any) {
       setError(e?.message || "Submit failed");
     } finally {
@@ -685,7 +694,7 @@ export default function OnboardingApplicantPage() {
     </div>
   );
 
-  if (submitted) return (
+  if (submitted && !documentResumeActive) return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
       <div className="text-center max-w-md">
         <div className="text-7xl mb-6">{isDriver ? "🚛" : "✓"}</div>
@@ -832,20 +841,30 @@ export default function OnboardingApplicantPage() {
     );
   }
 
+  const resumeDocsOnly = documentResumeActive && submitted;
+
   return (
     <div className="min-h-screen bg-gray-900 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:24px_24px] p-4 sm:p-8">
       <div className="mx-auto max-w-3xl">
         <div className="mb-8">
           <h1 className="text-3xl font-black uppercase tracking-widest text-white">Driver <span className="text-orange-400">Onboarding</span></h1>
-          <p className="text-gray-500 text-sm mt-1">Complete all steps to submit your application</p>
+          <p className="text-gray-500 text-sm mt-1">
+            {resumeDocsOnly ? "Upload requested documents and resubmit" : "Complete all steps to submit your application"}
+          </p>
         </div>
 
-        <ProgressBar step={step} />
+        {!resumeDocsOnly && <ProgressBar step={step} />}
+
+        {resumeDocsOnly && (
+          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            Your application is on file. Use this secure link to upload the documents we requested, then resubmit when finished.
+          </div>
+        )}
 
         {error && <div className="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">{error}</div>}
 
         {/* ── STEP 1: LICENSE UPLOAD ── */}
-        {step === 0 && (
+        {!resumeDocsOnly && step === 0 && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1029,7 +1048,7 @@ export default function OnboardingApplicantPage() {
         )}
 
         {/* ── STEP 2: PERSONAL INFO ── */}
-        {step === 1 && (
+        {!resumeDocsOnly && step === 1 && (
           <div className="space-y-8">
             <div>
               <h2 className="text-2xl font-black text-white uppercase tracking-wide">Personal <span className="text-orange-400">Information</span></h2>
@@ -1186,7 +1205,7 @@ export default function OnboardingApplicantPage() {
         )}
 
         {/* ── STEP 3: WORK HISTORY & REFERENCES ── */}
-        {step === 2 && (
+        {!resumeDocsOnly && step === 2 && (
           <div className="space-y-8">
             <div>
               <h2 className="text-2xl font-black text-white uppercase tracking-wide">Work History & <span className="text-orange-400">References</span></h2>
@@ -1271,7 +1290,7 @@ export default function OnboardingApplicantPage() {
         )}
 
         {/* ── STEP 4: DOCUMENTS & SUBMIT ── */}
-        {step === 3 && (
+        {(resumeDocsOnly || step === 3) && (
           <div className="space-y-8">
             <div>
               <h2 className="text-2xl font-black text-white uppercase tracking-wide">Required <span className="text-orange-400">Documents</span></h2>
@@ -1336,10 +1355,12 @@ export default function OnboardingApplicantPage() {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => setStep(2)} className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800">← Back</button>
+              {!resumeDocsOnly && (
+                <button type="button" onClick={() => setStep(2)} className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800">← Back</button>
+              )}
               <button onClick={handleSubmit} disabled={saving || !agree1 || !agree2 || !agree3}
                 className="rounded-xl bg-green-500 px-8 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-green-500/20">
-                {saving ? "Submitting…" : "Submit Application ✓"}
+                {saving ? "Submitting…" : resumeDocsOnly ? "Resubmit documents ✓" : "Submit Application ✓"}
               </button>
             </div>
           </div>

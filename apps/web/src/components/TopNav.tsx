@@ -15,6 +15,7 @@ const dispatchLinks = [
 ];
 
 const fleetLinks = [
+  { label: "People", to: OPS.PEOPLE },
   { label: "Drivers", to: OPS.DRIVER_ONBOARDING_APPLICANT },
   { label: "Review", to: OPS.DRIVER_ONBOARDING_REVIEW },
   { label: "Fleet", to: OPS.FLEET },
@@ -65,6 +66,7 @@ function usePageLabel(): string {
   if (pathname.startsWith("/loads")) return "Loads";
   if (pathname.startsWith("/inbox")) return "Email";
   if (pathname.startsWith("/intake")) return "Intake";
+  if (pathname.startsWith("/operations/people")) return "People";
   if (pathname.startsWith("/operations/driver-onboarding")) return "Onboarding Review";
   if (pathname.startsWith("/driver-onboarding")) return "Drivers";
   if (pathname.startsWith("/fleet")) return "Fleet";

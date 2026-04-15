@@ -7,11 +7,15 @@ Onboarding intake/review is modeled here. The operational dispatch roster row is
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.driver_person_extension import DriverPersonExtension
 
 
 class Person(Base):
@@ -53,6 +57,12 @@ class Person(Base):
     )
     driver_profile: Mapped["DriverProfile | None"] = relationship(
         "DriverProfile",
+        back_populates="person",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    driver_person_extension: Mapped["DriverPersonExtension | None"] = relationship(
+        "DriverPersonExtension",
         back_populates="person",
         uselist=False,
         cascade="all, delete-orphan",

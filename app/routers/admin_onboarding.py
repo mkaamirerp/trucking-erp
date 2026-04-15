@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants.person_application_workflow import WORKFLOW_LANE_PROCESSING
 from app.core.database import get_db
 from app.deps.auth import CurrentUser, get_current_user
 from app.deps.entitlements import require_entitlement
@@ -89,8 +90,9 @@ async def create_invite_link(
     )
     tenant_region = tenant.company_profile.address_region if tenant and tenant.company_profile else None
 
+    # Workflow (form) vs approval role: distinct columns. MVP default assigns the same string to both.
     application_type = body.application_type
-    requested_role_code = application_type  # MVP: same as application_type
+    requested_role_code = application_type
 
     # Create person_application as DRAFT; application_type controls form, requested_role_code used on approval
     app = PersonApplication(
@@ -98,6 +100,7 @@ async def create_invite_link(
         application_type=application_type,
         requested_role_code=requested_role_code,
         status=DriverOnboardingStatus.DRAFT.value,
+        current_workflow_lane=WORKFLOW_LANE_PROCESSING,
         source="invite_link",
         email=(body.email or "").strip() or None,
         phone=(body.phone or "").strip() or None,
@@ -121,6 +124,7 @@ async def create_invite_link(
         token_hash=token_hash,
         expires_at=expires_at,
         revoked_at=None,
+        purpose="invite",
     )
     db.add(access)
     await db.commit()

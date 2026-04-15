@@ -18,7 +18,10 @@ os.environ.setdefault("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
 from app.core.db_url import to_async_pg_url
 from app.main import app
 from app.models.driver import Driver
+from app.models.driver_person_extension import DriverPersonExtension
+from app.models.payee import CompensationProfile, Payee
 from app.models.person import DriverProfile, Person, PersonRole
+from app.constants.person_onboarding import SETUP_STATUS_COMPLETE, SETUP_STATUS_PENDING_DOWNSTREAM
 from app.models.person_application import PersonApplication
 from app.schemas.driver_onboarding import DriverOnboardingStatus
 from tests.support.integration_auth import (
@@ -119,11 +122,13 @@ class TestOperationalDriverOnApproval:
         await tenant_session.refresh(app_row)
         app_id = int(app_row.id)
 
-        r = await client.post(
-            f"/api/v1/driver-onboarding/applications/{app_id}/approve",
+        r_mat = await client.post(
+            f"/api/v1/driver-onboarding/applications/{app_id}/materialize-person-for-combined-setup",
             headers=AUTH_HEADERS,
         )
-        assert r.status_code == 200, r.text
+        assert r_mat.status_code == 200, r_mat.text
+        mat = r_mat.json()
+        assert mat.get("person_id") is not None
 
         person_id = (await tenant_session.scalar(select(PersonApplication.person_id).where(PersonApplication.id == app_id)))
         assert person_id is not None
@@ -138,6 +143,62 @@ class TestOperationalDriverOnApproval:
             )
         )
         assert prof is not None
+
+        tenant_session.add(
+            DriverPersonExtension(
+                tenant_id=demo_tenant_id,
+                person_id=person.id,
+                employment_relationship_type="company_driver",
+                driver_operating_subtype="long_haul",
+                is_team_driver=False,
+                team_role_type=None,
+                provides_own_truck=False,
+                provides_own_trailer=False,
+                equipment_contribution_type="company_equipment",
+                insurance_commercial_approved=False,
+            )
+        )
+        await tenant_session.commit()
+
+        r_comp = await client.put(
+            f"/api/v1/driver-onboarding/applications/{app_id}/driver-compensation-setup",
+            headers=AUTH_HEADERS,
+            json={
+                "gross_calc_type": "CPM",
+                "cpm_loaded": "0.55",
+                "settlement_frequency": "BIWEEKLY",
+                "participates_in_fuel_discount_program": False,
+                "dispatch_fee_enabled": False,
+                "dispatch_fee_rate": "0",
+                "dispatch_fee_basis": "GROSS",
+            },
+        )
+        assert r_comp.status_code == 200, r_comp.text
+
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applications/{app_id}/approve",
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 200, r.text
+
+        fresh = (
+            await tenant_session.execute(select(PersonApplication).where(PersonApplication.id == app_id))
+        ).scalar_one()
+        assert fresh.approved_at is not None
+        assert fresh.approved_by_user_id is not None
+        assert getattr(fresh, "setup_status", None) == SETUP_STATUS_PENDING_DOWNSTREAM
+
+        r2 = await client.post(
+            f"/api/v1/driver-onboarding/applications/{app_id}/complete-onboarding",
+            headers=AUTH_HEADERS,
+        )
+        assert r2.status_code == 200, r2.text
+        after_onboard = (
+            await tenant_session.execute(select(PersonApplication).where(PersonApplication.id == app_id))
+        ).scalar_one()
+        assert after_onboard.setup_status == SETUP_STATUS_COMPLETE
+        assert after_onboard.onboarded_at is not None
+        assert after_onboard.onboarded_by_user_id is not None
 
         drv = await tenant_session.scalar(
             select(Driver).where(Driver.tenant_id == demo_tenant_id, Driver.person_id == person.id)
@@ -159,6 +220,17 @@ class TestOperationalDriverOnApproval:
         ids = {int(x["id"]) for x in listed.json()}
         assert drv.id in ids
 
+        if drv.payee_id:
+            await tenant_session.execute(
+                delete(CompensationProfile).where(CompensationProfile.payee_id == drv.payee_id)
+            )
+            await tenant_session.execute(delete(Payee).where(Payee.id == drv.payee_id))
+        await tenant_session.execute(
+            delete(DriverPersonExtension).where(
+                DriverPersonExtension.tenant_id == demo_tenant_id,
+                DriverPersonExtension.person_id == person.id,
+            )
+        )
         await tenant_session.execute(delete(Driver).where(Driver.id == drv.id))
         await tenant_session.execute(delete(DriverProfile).where(DriverProfile.id == prof.id))
         await tenant_session.execute(delete(PersonRole).where(PersonRole.person_id == person.id, PersonRole.tenant_id == demo_tenant_id))

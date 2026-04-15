@@ -89,6 +89,10 @@ class PlatformTenant(Base):
     tenant_auth_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="platform", server_default="platform")
     #: When true (default), a global booking-broker match may auto-create a tenant `brokers` row. Opt out for suggest-only.
     broker_auto_create_from_global: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    #: People-level onboarding UI: combined (single surface) vs segmented (downstream HR/payroll/ops). Not driver-only.
+    person_setup_ui_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="combined", default="combined"
+    )
 
     members = relationship("PlatformTenantMember", back_populates="tenant", cascade="all, delete-orphan")
     subscriptions = relationship("PlatformSubscription", back_populates="tenant", cascade="all, delete-orphan")

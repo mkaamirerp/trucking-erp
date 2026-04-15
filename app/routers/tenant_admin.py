@@ -12,7 +12,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
@@ -45,6 +45,12 @@ from app.utils.auth_identity import normalize_auth_email
 from app.utils.rate_limit import clear_login_unlock_throttles_for_tenant_email
 from app.utils.email import send_user_invite_email
 from app.utils.password import hash_password
+
+from app.constants.person_onboarding import normalize_person_setup_ui_mode
+from app.services.person_application_onboarding import (
+    reconcile_person_application_lanes_for_tenant_ui_mode,
+    set_tenant_person_setup_ui_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,18 @@ class CompanyProfileOut(BaseModel):
     company_phone_is_fallback: bool = False
     company_email_is_fallback: bool = False
     address_is_fallback: bool = False
+    #: People-level onboarding UI: combined vs segmented (see docs/HR_PAYROLL_ONBOARDING_LOGIC_ANCHOR.md).
+    person_setup_ui_mode: str = "combined"
+
+
+class PersonSetupUiModeOut(BaseModel):
+    person_setup_ui_mode: str
+
+
+class PersonSetupUiModePatch(BaseModel):
+    """Admin write: only allowed enum values (422 from FastAPI if not exact)."""
+
+    person_setup_ui_mode: Literal["combined", "segmented"]
 
 
 def _has_full_address(addr: dict) -> bool:
@@ -237,7 +255,31 @@ async def get_company_profile(
         company_phone_is_fallback=phone_is_fallback,
         company_email_is_fallback=email_is_fallback,
         address_is_fallback=address_is_fallback,
+        person_setup_ui_mode=normalize_person_setup_ui_mode(getattr(tenant, "person_setup_ui_mode", None)),
     )
+
+
+@router.patch("/person-setup-ui-mode", response_model=PersonSetupUiModeOut)
+async def patch_person_setup_ui_mode(
+    body: PersonSetupUiModePatch,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update tenant person_setup_ui_mode (combined vs segmented). Tenant admin; platform DB."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    try:
+        mode = await set_tenant_person_setup_ui_mode(db, tenant_id, body.person_setup_ui_mode)
+    except ValueError as exc:
+        if str(exc) == "tenant_not_found":
+            raise HTTPException(status_code=404, detail="Tenant not found") from exc
+        raise
+    await db.commit()
+    async for tenant_db in open_tenant_session_by_id(int(tenant_id)):
+        await reconcile_person_application_lanes_for_tenant_ui_mode(tenant_db, db, int(tenant_id))
+        await tenant_db.commit()
+    return PersonSetupUiModeOut(person_setup_ui_mode=mode)
 
 
 # ---- Tenant users (list, invite, suspend, reactivate) ----

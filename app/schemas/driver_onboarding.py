@@ -95,7 +95,10 @@ class DriverOnboardingApproveResponse(BaseModel):
 # ---- PersonApplication (invite-link) schemas ----
 
 class ApplicantApplicationUpdate(BaseModel):
-    """Update person application by invite token."""
+    """Update person application by invite token.
+
+    CDL/license fields are persisted only for DRIVER workflow applications.
+    """
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
@@ -124,6 +127,39 @@ class ApplicantIntakeRequest(BaseModel):
     submit: bool = False
 
 
+class PersonApplicationReviewPatch(BaseModel):
+    """Admin corrections during review (SUBMITTED/APPROVED). Does not replace files or agreement flags."""
+
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = None
+    email: Optional[str] = Field(None, max_length=255)
+    address_street: Optional[str] = None
+    address_city: Optional[str] = Field(None, max_length=100)
+    address_region: Optional[str] = Field(None, max_length=100)
+    address_postal: Optional[str] = Field(None, max_length=20)
+    zip_code: Optional[str] = Field(None, max_length=20)
+    address_country: Optional[str] = Field(None, max_length=10)
+    notes: Optional[str] = None
+    driver_license_number: Optional[str] = Field(None, max_length=100)
+    license_region: Optional[str] = Field(None, max_length=100)
+    license_expiry: Optional[date] = None
+    middle_name: Optional[str] = Field(None, max_length=100)
+    date_of_birth: Optional[date] = None
+    license_issue_date: Optional[date] = None
+    cdl_class: Optional[str] = Field(None, max_length=20)
+    endorsements: Optional[str] = None
+    restrictions: Optional[str] = None
+    conditions: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("phone")
+    @classmethod
+    def v_phone(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_phone(v)
+
+
 class ApplicantApplicationOut(BaseModel):
     """Person application as returned to applicant/admin."""
     id: int
@@ -131,12 +167,28 @@ class ApplicantApplicationOut(BaseModel):
     person_id: Optional[int] = None
     status: str
     source: Optional[str] = None
-    application_type: str = "DRIVER"
-    requested_role_code: str = "DRIVER"
+    application_type: str = Field(
+        default="DRIVER",
+        description="Workflow key: which applicant form/steps run (e.g. DRIVER vs DISPATCHER).",
+    )
+    requested_role_code: str = Field(
+        default="DRIVER",
+        description="Role assigned on admin approval (MVP default often matches application_type; distinct column).",
+    )
     reviewed_at: Optional[datetime] = None
     reviewed_by_user_id: Optional[int] = None
     approved_at: Optional[datetime] = None
     approved_by_user_id: Optional[int] = None
+    onboarded_at: Optional[datetime] = None
+    onboarded_by_user_id: Optional[int] = None
+    setup_status: str = Field(
+        default="pending",
+        description="People-level setup lifecycle: pending | pending_downstream | complete (distinct from application status).",
+    )
+    current_workflow_lane: str = Field(
+        default="processing",
+        description="Queue routing: submitted | processing | hr_payroll | complete | rejected (distinct from status/setup_status).",
+    )
     rejection_reason: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -156,8 +208,30 @@ class ApplicantApplicationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     intake_payload: Optional[dict[str, Any]] = None
+    #: Admin-only: frozen applicant intake at submit (omit on applicant-facing responses if unset).
+    intake_submitted_snapshot: Optional[dict[str, Any]] = None
+    #: Admin-only: audit entries for review edits.
+    intake_review_audit: Optional[list[dict[str, Any]]] = None
+    #: True when the applicant request used a document-resume token (post-submit uploads).
+    document_resume_active: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PersonApplicationDocumentRequest(BaseModel):
+    doc_types: list[str] = Field(..., min_length=1, description="Keys matching step-4 document types")
+    subject: str = Field(..., min_length=1, max_length=500)
+    body: str = Field(..., min_length=1, max_length=16000)
+
+
+class PersonApplicationDocumentRequestResponse(BaseModel):
+    email_sent: bool
+    email_error: str | None = None
+
+
+class PersonApplicationDocumentAcceptBody(BaseModel):
+    doc_type: str = Field(..., min_length=1, max_length=64)
+    accepted: bool = Field(..., description="True = admin accepted; False = clear acceptance")
 
 
 class PersonApplicationListItem(BaseModel):
@@ -165,8 +239,16 @@ class PersonApplicationListItem(BaseModel):
     id: int
     tenant_id: int
     status: str
-    application_type: str = "DRIVER"
-    requested_role_code: str = "DRIVER"
+    setup_status: str = Field(
+        default="pending",
+        description="People-level onboarding setup state (pending | pending_downstream | complete).",
+    )
+    current_workflow_lane: str = Field(
+        default="processing",
+        description="Admin queue bucket key: submitted | processing | hr_payroll | complete | rejected.",
+    )
+    application_type: str = Field(default="DRIVER", description="Applicant workflow (form) key.")
+    requested_role_code: str = Field(default="DRIVER", description="Role to assign when approved.")
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
@@ -174,6 +256,10 @@ class PersonApplicationListItem(BaseModel):
     submitted_at: Optional[datetime] = None
     source: Optional[str] = None
     created_at: datetime
+    reviewed_at: Optional[datetime] = Field(
+        default=None,
+        description="First admin engagement (detail open / review started). Used to split Submitted vs Processing on the admin queue.",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

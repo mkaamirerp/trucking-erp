@@ -213,6 +213,11 @@ async def send_onboarding_invite_email(*, to: str, invite_link: str) -> None:
     await send_email(to=to, subject=subject, body=body)
 
 
+async def send_onboarding_document_request_email(*, to: str, subject: str, body: str) -> None:
+    """Admin-composed document request / reminder (single combined message)."""
+    await send_email(to=to, subject=subject.strip()[:500], body=body)
+
+
 async def send_test_email(to: Optional[str] = None, subject: Optional[str] = None, body: Optional[str] = None) -> None:
     _config.validate_basic()
 

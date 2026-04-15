@@ -85,6 +85,7 @@ async def main() -> int:
             token_hash=token_hash,
             expires_at=expires_at,
             revoked_at=None,
+            purpose="invite",
         )
         db.add(access)
         await db.commit()

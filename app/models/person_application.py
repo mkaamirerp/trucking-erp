@@ -8,6 +8,7 @@ For MVP invite creation both are set to the same value.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -46,6 +47,14 @@ class PersonApplication(Base):
     reviewed_by_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarded_by_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: pending | pending_downstream | complete (people-level setup lifecycle; not the same as status).
+    setup_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending", default="pending")
+    #: Current queue / ownership (submitted|processing|hr_payroll|complete|rejected); not historical truth.
+    current_workflow_lane: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="processing", default="processing"
+    )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -60,6 +69,10 @@ class PersonApplication(Base):
     country: Mapped[str | None] = mapped_column(String(10), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     intake_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Frozen copy of structured intake when applicant submitted (evidence; not overwritten by admin edits).
+    intake_submitted_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Append-only audit entries: [{at, by_user_id, changed_keys: [...]}, ...]
+    intake_review_audit: Mapped[Any] = mapped_column(JSONB, nullable=False, server_default="[]")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

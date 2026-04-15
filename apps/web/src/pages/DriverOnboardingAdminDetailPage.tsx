@@ -1,13 +1,26 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  adminUploadPersonApplicationDocument,
   approvePersonApplicationForAdmin,
+  completePersonApplicationOnboarding,
   getAdminApplicationFileUrl,
+  getCombinedDriverApproveReadiness,
+  getCompanyProfile,
   getPersonApplicationForAdmin,
+  markAdminReviewEngaged,
+  materializePersonForCombinedSetup,
+  patchPersonApplicationReviewFields,
   rejectPersonApplicationForAdmin,
+  requestPersonApplicationDocuments,
+  setPersonApplicationDocumentAccepted,
   type ApplicantApplication,
+  type CombinedDriverApproveReadiness,
+  type PersonApplicationReviewPatchPayload,
 } from "../api";
+import DriverCompensationSetupAdminPanel from "../components/DriverCompensationSetupAdminPanel";
+import DriverPersonExtensionAdminPanel from "../components/DriverPersonExtensionAdminPanel";
 
 type WorkHistoryEntry = {
   company_name?: string;
@@ -36,6 +49,12 @@ type IntakeDocMeta = {
   file_id?: string;
   original_filename?: string;
   uploaded_at?: string;
+  workflow_status?: string;
+  requested_at?: string;
+  requested_by_member_id?: number;
+  accepted_at?: string;
+  accepted_by_member_id?: number;
+  uploaded_by?: string;
 };
 
 type IntakeFileMeta = {
@@ -76,6 +95,54 @@ type IntakePayload = {
   agree_dot_compliance?: boolean;
 };
 
+function isoInputDate(v?: string | null): string {
+  if (!v) return "";
+  const s = String(v);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+function buildReviewDraft(a: ApplicantApplication): PersonApplicationReviewPatchPayload {
+  const p = (a.intake_payload || {}) as IntakePayload;
+  return {
+    first_name: a.first_name ?? "",
+    last_name: a.last_name ?? "",
+    phone: a.phone ?? "",
+    email: a.email ?? "",
+    address_street: a.address_street ?? "",
+    address_city: a.address_city ?? "",
+    address_region: a.address_region ?? "",
+    address_postal: a.address_postal ?? "",
+    zip_code: a.zip_code ?? "",
+    address_country: a.address_country ?? "",
+    notes: a.notes ?? "",
+    driver_license_number: a.driver_license_number ?? "",
+    license_region: a.license_region ?? "",
+    license_expiry: isoInputDate(a.license_expiry),
+    middle_name: typeof p.middle_name === "string" ? p.middle_name : "",
+    date_of_birth: isoInputDate(p.date_of_birth as string | undefined),
+    license_issue_date: isoInputDate(p.license_issue_date as string | undefined),
+    cdl_class: typeof p.cdl_class === "string" ? p.cdl_class : "",
+    endorsements: typeof p.endorsements === "string" ? p.endorsements : "",
+    restrictions: typeof p.restrictions === "string" ? p.restrictions : "",
+    conditions: typeof p.conditions === "string" ? p.conditions : "",
+  };
+}
+
+function diffReviewPatch(
+  baseline: PersonApplicationReviewPatchPayload,
+  edited: PersonApplicationReviewPatchPayload,
+): PersonApplicationReviewPatchPayload {
+  const out: PersonApplicationReviewPatchPayload = {};
+  (Object.keys(edited) as (keyof PersonApplicationReviewPatchPayload)[]).forEach((k) => {
+    const prev = baseline[k];
+    const cur = edited[k];
+    if (String(prev ?? "") !== String(cur ?? "")) {
+      (out as Record<string, unknown>)[k as string] = cur;
+    }
+  });
+  return out;
+}
+
 const C = {
   bg: "#0d0e11",
   surface: "#16181e",
@@ -106,6 +173,14 @@ const DOC_META: Record<string, { label: string; icon: string; required: boolean 
   certificates: { label: "Certificates & Training", icon: "🏆", required: false },
   void_cheque: { label: "Void Cheque / Direct Deposit", icon: "📜", required: false },
 };
+
+function docSlotStatus(meta?: IntakeDocMeta): "missing" | "requested" | "uploaded" | "accepted" {
+  if (!meta) return "missing";
+  if (meta.workflow_status === "accepted" || meta.accepted_at) return "accepted";
+  if (meta.storage_key || meta.file_id) return "uploaded";
+  if (meta.requested_at) return "requested";
+  return "missing";
+}
 
 const fmt = (v?: string | null) => (v && String(v).trim() ? v : "—");
 
@@ -167,6 +242,37 @@ function StatusBadge({ status }: { status: string }) {
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: cfg.color, boxShadow: `0 0 6px ${cfg.color}` }} />
       {cfg.label}
     </span>
+  );
+}
+
+function DriverSetupTabBtn({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        fontFamily: "'Bebas Neue', sans-serif",
+        fontSize: 11,
+        letterSpacing: "0.1em",
+        padding: "6px 14px",
+        borderRadius: 6,
+        border: active ? `1px solid ${C.accent}99` : `1px solid ${C.border}`,
+        cursor: "pointer",
+        background: active ? "rgba(245,166,35,0.14)" : C.surf2,
+        color: active ? C.accent : C.muted,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -246,35 +352,54 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function Panel({ title, icon, children, defaultOpen = true }: {
+function Panel({ title, icon, children, defaultOpen = true, headerRight }: {
   title: string;
   icon: string;
   children: ReactNode;
   defaultOpen?: boolean;
+  headerRight?: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 10 }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
+      <div
         style={{
-          width: "100%",
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          padding: "13px 18px",
           display: "flex",
-          alignItems: "center",
-          gap: 9,
+          alignItems: "stretch",
           borderBottom: open ? `1px solid ${C.border}` : "none",
         }}
       >
-        <span style={{ fontSize: 15 }}>{icon}</span>
-        <span style={{ flex: 1, textAlign: "left", fontFamily: "'Bebas Neue', sans-serif", fontSize: 15, letterSpacing: "0.1em", color: C.text }}>
-          {title}
-        </span>
-        <span style={{ color: C.muted, fontSize: 11, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: "13px 18px",
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+          }}
+        >
+          <span style={{ fontSize: 15 }}>{icon}</span>
+          <span style={{ flex: 1, textAlign: "left", fontFamily: "'Bebas Neue', sans-serif", fontSize: 15, letterSpacing: "0.1em", color: C.text }}>
+            {title}
+          </span>
+          <span style={{ color: C.muted, fontSize: 11, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+        </button>
+        {headerRight ? (
+          <div
+            style={{ display: "flex", alignItems: "center", paddingRight: 14, flexShrink: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {headerRight}
+          </div>
+        ) : null}
+      </div>
       {open && <div style={{ padding: "16px 18px" }}>{children}</div>}
     </div>
   );
@@ -286,12 +411,14 @@ function Btn({
   onClick,
   disabled,
   loading,
+  title,
 }: {
   label: ReactNode;
   variant: "approve" | "reject" | "ghost";
   onClick: () => void;
   disabled?: boolean;
   loading?: boolean;
+  title?: string;
 }) {
   const s = {
     approve: { background: `linear-gradient(135deg,${C.green},#27ae60)`, color: "#000", border: "none" },
@@ -301,6 +428,8 @@ function Btn({
 
   return (
     <button
+      type="button"
+      title={title}
       onClick={onClick}
       disabled={disabled || loading}
       style={{
@@ -425,34 +554,73 @@ function DocsGrid({
   docs,
   applicationId,
   onViewFile,
+  canAdminAct,
+  onAdminUpload,
+  onAcceptToggle,
 }: {
   docs?: Record<string, IntakeDocMeta>;
   applicationId: number;
   onViewFile: (applicationId: number, fileId: string, filename?: string) => void;
+  canAdminAct: boolean;
+  onAdminUpload: (docType: string, file: File) => Promise<void>;
+  onAcceptToggle: (docType: string, accepted: boolean) => Promise<void>;
 }) {
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [acceptBusy, setAcceptBusy] = useState<string | null>(null);
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
       {Object.entries(DOC_META).map(([key, meta]) => {
-        const uploaded = docs?.[key];
-        const fileId = uploaded?.storage_key || uploaded?.file_id;
+        const slot = docs?.[key];
+        const status = docSlotStatus(slot);
+        const fileId = slot?.storage_key || slot?.file_id;
+        const border =
+          status === "accepted"
+            ? `${C.green}88`
+            : status === "uploaded"
+              ? `${C.green}55`
+              : status === "requested"
+                ? `${C.accent}66`
+                : C.border;
+        const statusTag =
+          status === "accepted" ? (
+            <Tag label="Accepted" variant="green" />
+          ) : status === "uploaded" ? (
+            <Tag label="Uploaded" variant="green" />
+          ) : status === "requested" ? (
+            <Tag label="Requested" variant="orange" />
+          ) : (
+            <Tag label="Missing" variant={meta.required ? "red" : "default"} />
+          );
         return (
-          <div key={key} style={{ background: C.surf2, border: `1px solid ${uploaded ? `${C.green}55` : C.border}`, borderRadius: 10, padding: "13px 15px", display: "flex", alignItems: "flex-start", gap: 11 }}>
+          <div
+            key={key}
+            style={{
+              background: C.surf2,
+              border: `1px solid ${border}`,
+              borderRadius: 10,
+              padding: "13px 15px",
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 11,
+            }}
+          >
             <span style={{ fontSize: 20, flexShrink: 0 }}>{meta.icon}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 5 }}>{meta.label}</div>
-              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
                 {meta.required ? <Tag label="Required" variant="red" /> : <Tag label="Optional" />}
-                {uploaded ? <Tag label="Uploaded" variant="green" /> : <Tag label="Missing" variant={meta.required ? "red" : "default"} />}
+                {statusTag}
               </div>
-              {uploaded?.original_filename && (
+              {slot?.original_filename && (
                 <div style={{ fontSize: 10, color: C.muted, marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {uploaded.original_filename}
+                  {slot.original_filename}
                 </div>
               )}
               {fileId && (
                 <button
                   type="button"
-                  onClick={() => onViewFile(applicationId, fileId, uploaded?.original_filename)}
+                  onClick={() => onViewFile(applicationId, fileId, slot?.original_filename)}
                   style={{
                     marginTop: 8,
                     fontSize: 11,
@@ -466,6 +634,100 @@ function DocsGrid({
                 >
                   View document →
                 </button>
+              )}
+              {canAdminAct && (
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: C.muted,
+                      cursor: uploadingKey === key ? "wait" : "pointer",
+                      border: `1px dashed ${C.border}`,
+                      borderRadius: 6,
+                      padding: "6px 8px",
+                      textAlign: "center",
+                    }}
+                  >
+                    <input
+                      type="file"
+                      accept=".pdf,image/*"
+                      className="sr-only"
+                      style={{ position: "absolute", width: 0, height: 0, opacity: 0 }}
+                      disabled={uploadingKey === key}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!f) return;
+                        setUploadingKey(key);
+                        try {
+                          await onAdminUpload(key, f);
+                        } finally {
+                          setUploadingKey(null);
+                        }
+                      }}
+                    />
+                    {uploadingKey === key ? "Uploading…" : "Admin upload"}
+                  </label>
+                  {status === "uploaded" && (
+                    <button
+                      type="button"
+                      disabled={acceptBusy === key}
+                      onClick={async () => {
+                        setAcceptBusy(key);
+                        try {
+                          await onAcceptToggle(key, true);
+                        } finally {
+                          setAcceptBusy(null);
+                        }
+                      }}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        padding: "5px 8px",
+                        borderRadius: 6,
+                        border: `1px solid ${C.green}55`,
+                        background: "rgba(46,204,113,0.12)",
+                        color: C.green,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Mark accepted
+                    </button>
+                  )}
+                  {status === "accepted" && (
+                    <button
+                      type="button"
+                      disabled={acceptBusy === key}
+                      onClick={async () => {
+                        setAcceptBusy(key);
+                        try {
+                          await onAcceptToggle(key, false);
+                        } finally {
+                          setAcceptBusy(null);
+                        }
+                      }}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        padding: "5px 8px",
+                        borderRadius: 6,
+                        border: `1px solid ${C.border}`,
+                        background: "transparent",
+                        color: C.muted,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Clear acceptance
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -526,6 +788,21 @@ export default function DriverOnboardingAdminDetailPage() {
   const [rejectReason, setRejectReason] = useState("");
   const [actionNotice, setActionNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [fileViewer, setFileViewer] = useState<{ url: string; title: string; isPdf: boolean; isImage: boolean } | null>(null);
+  const [personSetupUiMode, setPersonSetupUiMode] = useState<"combined" | "segmented" | null>(null);
+  const [reviewDraft, setReviewDraft] = useState<PersonApplicationReviewPatchPayload | null>(null);
+  const [reviewBaseline, setReviewBaseline] = useState<PersonApplicationReviewPatchPayload | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [requestDocSelection, setRequestDocSelection] = useState<Record<string, boolean>>({});
+  const [requestSubject, setRequestSubject] = useState("");
+  const [requestBody, setRequestBody] = useState("");
+  const [requestSending, setRequestSending] = useState(false);
+  /** Header tabs: switch Driver extension vs Compensation when both panels exist. */
+  const [driverSetupTab, setDriverSetupTab] = useState<"driver" | "compensation">("driver");
+  const [approveReadiness, setApproveReadiness] = useState<CombinedDriverApproveReadiness | null>(null);
+  const [onboardingCompleteLoading, setOnboardingCompleteLoading] = useState(false);
+  const [readinessNonce, setReadinessNonce] = useState(0);
+  const bumpApproveReadiness = useCallback(() => setReadinessNonce((n) => n + 1), []);
 
   useEffect(() => {
     const load = async () => {
@@ -533,8 +810,17 @@ export default function DriverOnboardingAdminDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await getPersonApplicationForAdmin(Number(id));
+        const [data, co] = await Promise.all([
+          getPersonApplicationForAdmin(Number(id)),
+          getCompanyProfile().catch(() => null),
+        ]);
         setApplication(data);
+        const raw = co?.person_setup_ui_mode;
+        if (raw === "combined" || raw === "segmented") {
+          setPersonSetupUiMode(raw);
+        } else {
+          setPersonSetupUiMode("combined");
+        }
       } catch (err: any) {
         setError(err?.message || "Unable to load application.");
       } finally {
@@ -543,6 +829,106 @@ export default function DriverOnboardingAdminDetailPage() {
     };
     void load();
   }, [id]);
+
+  /** SUBMITTED + no prior engagement → mark reviewed so the admin queue shows Processing (not Submitted). */
+  useEffect(() => {
+    if (!application?.id) return;
+    if (application.status !== "SUBMITTED") return;
+    if (application.reviewed_at) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await markAdminReviewEngaged(application.id);
+        if (!cancelled) setApplication(next);
+      } catch {
+        /* non-fatal */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [application?.id, application?.status, application?.reviewed_at]);
+
+  useEffect(() => {
+    if (!application) {
+      setReviewDraft(null);
+      setReviewBaseline(null);
+      return;
+    }
+    if (application.status === "SUBMITTED" || application.status === "APPROVED") {
+      const d = buildReviewDraft(application);
+      setReviewDraft(d);
+      setReviewBaseline(d);
+    } else {
+      setReviewDraft(null);
+      setReviewBaseline(null);
+    }
+  }, [application]);
+
+  useEffect(() => {
+    setDriverSetupTab("driver");
+  }, [application?.id]);
+
+  useEffect(() => {
+    if (!application?.id || personSetupUiMode !== "combined") return;
+    if (application.status !== "SUBMITTED") return;
+    const isDd =
+      (application.application_type || "DRIVER") === "DRIVER" &&
+      (application.requested_role_code || "DRIVER").trim().toUpperCase() === "DRIVER";
+    if (!isDd || application.person_id != null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await materializePersonForCombinedSetup(application.id);
+        if (!cancelled) setApplication(next);
+      } catch {
+        /* Saving review corrections can also materialize the person. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    application?.id,
+    application?.status,
+    application?.person_id,
+    application?.application_type,
+    application?.requested_role_code,
+    personSetupUiMode,
+  ]);
+
+  useEffect(() => {
+    if (!application || personSetupUiMode !== "combined") {
+      setApproveReadiness(null);
+      return;
+    }
+    if (application.status !== "SUBMITTED") {
+      setApproveReadiness(null);
+      return;
+    }
+    const isDd =
+      (application.application_type || "DRIVER") === "DRIVER" &&
+      (application.requested_role_code || "DRIVER").trim().toUpperCase() === "DRIVER";
+    if (!isDd) {
+      setApproveReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    void getCombinedDriverApproveReadiness(application.id).then((r) => {
+      if (!cancelled) setApproveReadiness(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    application?.id,
+    application?.status,
+    application?.person_id,
+    application?.application_type,
+    application?.requested_role_code,
+    personSetupUiMode,
+    readinessNonce,
+  ]);
 
   const base: CSSProperties = {
     minHeight: "100vh",
@@ -577,12 +963,65 @@ export default function DriverOnboardingAdminDetailPage() {
   const cfg = STATUS_CFG[application.status] ?? STATUS_CFG.DRAFT;
   const isSubmitted = application.status === "SUBMITTED";
   const isDriver = (application.application_type || "DRIVER") === "DRIVER";
+  const requestedRole = (application.requested_role_code || "DRIVER").trim().toUpperCase();
+  const tenantCombined = personSetupUiMode === "combined";
+  const isDriverDriverSetup = isDriver && requestedRole === "DRIVER";
+  /** Combined tenant: setup tabs/cards on this page (not gated on SUBMITTED vs APPROVED). Segmented: hidden entirely. */
+  const showCombinedSetupChrome =
+    tenantCombined &&
+    isDriverDriverSetup &&
+    application.status !== "REJECTED" &&
+    (application.status === "SUBMITTED" || application.status === "APPROVED");
+  const showDriverSetupTabs = showCombinedSetupChrome && application.person_id != null;
+  const driverConfigurationEditable = showCombinedSetupChrome && application.person_id != null;
+  const reviewWorkspaceOpen =
+    !!reviewDraft && (application.status === "SUBMITTED" || application.status === "APPROVED");
+  const approveCombinedBlocked =
+    Boolean(
+      isSubmitted &&
+        tenantCombined &&
+        isDriverDriverSetup &&
+        approveReadiness?.applies &&
+        !approveReadiness.ready,
+    );
+  const showMarkOnboardingComplete =
+    application.status === "APPROVED" &&
+    tenantCombined &&
+    isDriverDriverSetup &&
+    (application.setup_status ?? "") !== "complete";
+  const ri: CSSProperties = {
+    padding: "8px 10px",
+    borderRadius: 8,
+    border: `1px solid ${C.border}`,
+    background: C.surf2,
+    color: C.text,
+    fontSize: 13,
+  };
 
   const showNotice = (type: "success" | "error", message: string) => {
     setActionNotice({ type, message });
     window.setTimeout(() => {
       setActionNotice((current) => (current?.message === message ? null : current));
     }, 3500);
+  };
+
+  const saveReviewCorrections = async () => {
+    if (!application || !reviewDraft || !reviewBaseline) return;
+    const patch = diffReviewPatch(reviewBaseline, reviewDraft);
+    if (Object.keys(patch).length === 0) {
+      showNotice("error", "No changes to save.");
+      return;
+    }
+    setReviewSaving(true);
+    try {
+      const next = await patchPersonApplicationReviewFields(application.id, patch);
+      setApplication(next);
+      showNotice("success", "Corrections saved.");
+    } catch (err: unknown) {
+      showNotice("error", err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setReviewSaving(false);
+    }
   };
 
   const handleViewFile = async (appId: number, fileId: string, filename?: string) => {
@@ -609,6 +1048,7 @@ export default function DriverOnboardingAdminDetailPage() {
     try {
       const next = await approvePersonApplicationForAdmin(application.id);
       setApplication(next);
+      setApproveReadiness(null);
       setShowReject(false);
       setRejectReason("");
       showNotice("success", "Application approved.");
@@ -616,6 +1056,21 @@ export default function DriverOnboardingAdminDetailPage() {
       showNotice("error", err?.message || "Unable to approve application.");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const markOnboardingComplete = async () => {
+    if (!application) return;
+    setOnboardingCompleteLoading(true);
+    setActionNotice(null);
+    try {
+      const next = await completePersonApplicationOnboarding(application.id);
+      setApplication(next);
+      showNotice("success", "Onboarding marked complete.");
+    } catch (err: unknown) {
+      showNotice("error", err instanceof Error ? err.message : "Could not complete onboarding.");
+    } finally {
+      setOnboardingCompleteLoading(false);
     }
   };
 
@@ -633,6 +1088,57 @@ export default function DriverOnboardingAdminDetailPage() {
       showNotice("error", err?.message || "Unable to reject application.");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const reloadApplication = async () => {
+    if (!id) return;
+    const data = await getPersonApplicationForAdmin(Number(id));
+    setApplication(data);
+  };
+
+  const openRequestDocumentsModal = () => {
+    if (!application) return;
+    const docs = ((application.intake_payload || {}) as IntakePayload).documents;
+    const sel: Record<string, boolean> = {};
+    for (const key of Object.keys(DOC_META)) {
+      const dm = DOC_META[key];
+      const st = docSlotStatus(docs?.[key]);
+      sel[key] = !!(dm?.required && st !== "uploaded" && st !== "accepted");
+    }
+    setRequestDocSelection(sel);
+    setRequestSubject("Documents needed for your application");
+    setRequestBody(
+      "Hello,\n\nWe need you to upload some documents so we can continue processing your application. When you are finished, resubmit from the onboarding page using the link below.\n\nThank you,",
+    );
+    setRequestModalOpen(true);
+  };
+
+  const sendDocumentRequest = async () => {
+    if (!application) return;
+    const doc_types = Object.entries(requestDocSelection).filter(([, v]) => v).map(([k]) => k);
+    if (doc_types.length === 0) {
+      showNotice("error", "Select at least one document type.");
+      return;
+    }
+    setRequestSending(true);
+    try {
+      const res = await requestPersonApplicationDocuments(application.id, {
+        doc_types,
+        subject: requestSubject.trim(),
+        body: requestBody.trim(),
+      });
+      setRequestModalOpen(false);
+      await reloadApplication();
+      if (res.email_sent) {
+        showNotice("success", "Request sent and applicant link updated.");
+      } else {
+        showNotice("error", res.email_error || "Token updated but email was not sent.");
+      }
+    } catch (err: unknown) {
+      showNotice("error", err instanceof Error ? err.message : "Request failed.");
+    } finally {
+      setRequestSending(false);
     }
   };
 
@@ -732,6 +1238,119 @@ export default function DriverOnboardingAdminDetailPage() {
         </div>
       )}
 
+      {requestModalOpen && application && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Request documents"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 2900,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+          onClick={() => setRequestModalOpen(false)}
+        >
+          <div
+            style={{
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              maxWidth: 520,
+              width: "100%",
+              maxHeight: "90vh",
+              overflow: "auto",
+              padding: "20px 22px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, letterSpacing: 2, color: C.accent, marginBottom: 12 }}>
+              Request documents
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
+              One combined email. Required items that still need follow-up are preselected; add optional items as needed.
+              A new applicant link is issued when you send (previous links stop working).
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {Object.entries(DOC_META).map(([key, dm]) => (
+                <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 13, color: C.text }}>
+                  <input
+                    type="checkbox"
+                    checked={!!requestDocSelection[key]}
+                    onChange={(e) =>
+                      setRequestDocSelection((prev) => ({ ...prev, [key]: e.target.checked }))
+                    }
+                  />
+                  <span>
+                    <strong>{dm.label}</strong>
+                    {dm.required ? <span style={{ color: C.red, fontSize: 10, marginLeft: 6 }}>REQUIRED</span> : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Email subject</div>
+              <input
+                value={requestSubject}
+                onChange={(e) => setRequestSubject(e.target.value)}
+                style={{ ...ri, width: "100%", boxSizing: "border-box" }}
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", marginBottom: 4 }}>Email body</div>
+              <textarea
+                value={requestBody}
+                onChange={(e) => setRequestBody(e.target.value)}
+                rows={8}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  ...ri,
+                  resize: "vertical",
+                  minHeight: 140,
+                }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setRequestModalOpen(false)}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  border: `1px solid ${C.border}`,
+                  background: "transparent",
+                  color: C.muted,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void sendDocumentRequest()}
+                disabled={requestSending}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: C.accent,
+                  color: "#000",
+                  fontWeight: 700,
+                  cursor: requestSending ? "wait" : "pointer",
+                }}
+              >
+                {requestSending ? "Sending…" : "Send email"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ background: C.surface, borderBottom: `2px solid ${C.accent}`, padding: "0 28px", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ maxWidth: 1060, margin: "0 auto", height: 64, display: "flex", alignItems: "center", gap: 14 }}>
           <button
@@ -749,12 +1368,33 @@ export default function DriverOnboardingAdminDetailPage() {
               {[application.first_name, p.middle_name, application.last_name].filter(Boolean).join(" ") || "Unnamed applicant"}
             </span>
             <StatusBadge status={application.status} />
+            {showDriverSetupTabs && (
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <DriverSetupTabBtn active={driverSetupTab === "driver"} onClick={() => setDriverSetupTab("driver")}>
+                  Driver setup
+                </DriverSetupTabBtn>
+                <DriverSetupTabBtn active={driverSetupTab === "compensation"} onClick={() => setDriverSetupTab("compensation")}>
+                  Compensation
+                </DriverSetupTabBtn>
+              </div>
+            )}
             <span style={{ fontSize: 11, color: C.muted2 }}>{application.application_type || "DRIVER"}</span>
             <span style={{ fontSize: 11, color: C.muted2 }}>#{application.id}</span>
           </div>
           {isSubmitted && (
             <div style={{ display: "flex", gap: 8, width: 260, flexShrink: 0 }}>
-              <Btn label="APPROVE" variant="approve" onClick={approve} loading={actionLoading} />
+              <Btn
+                label="APPROVE"
+                variant="approve"
+                onClick={approve}
+                loading={actionLoading}
+                disabled={approveCombinedBlocked}
+                title={
+                  approveCombinedBlocked
+                    ? (approveReadiness?.detail ?? "Complete Driver and Compensation setup on this page before approving.")
+                    : undefined
+                }
+              />
               <Btn label="REJECT" variant="reject" onClick={() => setShowReject((current) => !current)} disabled={actionLoading} />
             </div>
           )}
@@ -771,6 +1411,158 @@ export default function DriverOnboardingAdminDetailPage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 10, alignItems: "start" }}>
           <div>
+            {reviewWorkspaceOpen && reviewDraft && (
+              <Panel title="Admin · Review corrections" icon="✏️" defaultOpen>
+                <div style={{ fontSize: 12, color: C.muted2, lineHeight: 1.55, marginBottom: 14 }}>
+                  Correct structured fields before or after approval. Uploaded files, agreements, work history, and
+                  references stay as the applicant submitted them. A frozen snapshot is kept when the applicant first
+                  submitted (or on first admin edit for older records); each save appends an audit entry.
+                </div>
+                <Grid>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>First name</span>
+                    <input value={reviewDraft.first_name ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, first_name: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Last name</span>
+                    <input value={reviewDraft.last_name ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, last_name: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Phone</span>
+                    <input value={reviewDraft.phone ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, phone: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Email</span>
+                    <input value={reviewDraft.email ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, email: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Street</span>
+                    <input value={reviewDraft.address_street ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, address_street: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>City</span>
+                    <input value={reviewDraft.address_city ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, address_city: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Province / state</span>
+                    <input value={reviewDraft.address_region ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, address_region: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Postal</span>
+                    <input value={reviewDraft.address_postal ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, address_postal: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>ZIP</span>
+                    <input value={reviewDraft.zip_code ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, zip_code: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Country</span>
+                    <input value={reviewDraft.address_country ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, address_country: e.target.value } : d))} style={ri} />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Internal notes</span>
+                    <input value={reviewDraft.notes ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, notes: e.target.value } : d))} style={ri} />
+                  </label>
+                </Grid>
+                {isDriver && (
+                  <>
+                    <Divider />
+                    <SectionLabel>License & CDL (structured)</SectionLabel>
+                    <Grid>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>License number</span>
+                        <input value={reviewDraft.driver_license_number ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, driver_license_number: e.target.value } : d))} style={{ ...ri, fontFamily: "'Courier New', monospace" }} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Issuing region</span>
+                        <input value={reviewDraft.license_region ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, license_region: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Expiry</span>
+                        <input type="date" value={reviewDraft.license_expiry ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, license_expiry: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Middle name</span>
+                        <input value={reviewDraft.middle_name ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, middle_name: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Date of birth</span>
+                        <input type="date" value={reviewDraft.date_of_birth ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, date_of_birth: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>License issue date</span>
+                        <input type="date" value={reviewDraft.license_issue_date ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, license_issue_date: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>CDL class</span>
+                        <input value={reviewDraft.cdl_class ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, cdl_class: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Endorsements</span>
+                        <input value={reviewDraft.endorsements ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, endorsements: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Restrictions</span>
+                        <input value={reviewDraft.restrictions ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, restrictions: e.target.value } : d))} style={ri} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, gridColumn: "1 / -1" }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Conditions</span>
+                        <input value={reviewDraft.conditions ?? ""} onChange={(e) => setReviewDraft((d) => (d ? { ...d, conditions: e.target.value } : d))} style={ri} />
+                      </label>
+                    </Grid>
+                  </>
+                )}
+                <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => void saveReviewCorrections()}
+                    disabled={reviewSaving}
+                    style={{
+                      padding: "10px 18px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: C.accent,
+                      color: "#0d0e11",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      cursor: reviewSaving ? "wait" : "pointer",
+                    }}
+                  >
+                    {reviewSaving ? "Saving…" : "Save corrections"}
+                  </button>
+                  {application.status === "APPROVED" && (
+                    <span style={{ fontSize: 11, color: C.muted }}>Saving also refreshes the linked person / driver profile from corrected values.</span>
+                  )}
+                </div>
+                {(application.intake_submitted_snapshot && Object.keys(application.intake_submitted_snapshot).length > 0) || (application.intake_review_audit && application.intake_review_audit.length > 0) ? (
+                  <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {application.intake_submitted_snapshot && Object.keys(application.intake_submitted_snapshot).length > 0 && (
+                      <details style={{ fontSize: 12, color: C.muted2 }}>
+                        <summary style={{ cursor: "pointer", color: C.muted }}>Original submission snapshot (frozen JSON)</summary>
+                        <pre style={{ marginTop: 8, padding: 10, background: C.bg, borderRadius: 8, overflow: "auto", maxHeight: 220, fontSize: 11, color: C.text }}>
+                          {JSON.stringify(application.intake_submitted_snapshot, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                    {application.intake_review_audit && application.intake_review_audit.length > 0 && (
+                      <details style={{ fontSize: 12, color: C.muted2 }}>
+                        <summary style={{ cursor: "pointer", color: C.muted }}>Review edit audit ({application.intake_review_audit.length})</summary>
+                        <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.5 }}>
+                          {application.intake_review_audit.slice(-8).map((row, i) => (
+                            <li key={i}>
+                              {(row.at || "").replace("T", " ").slice(0, 19)} — user #{row.by_user_id ?? "?"}{" "}
+                              {Array.isArray(row.changed_keys) && row.changed_keys.length > 0
+                                ? `(${row.changed_keys.join(", ")})`
+                                : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
+                ) : null}
+              </Panel>
+            )}
             {isDriver && (
             <Panel title="Step 1 — Driver's License" icon="🪪">
               <Grid>
@@ -810,19 +1602,33 @@ export default function DriverOnboardingAdminDetailPage() {
             )}
 
             <Panel title={isDriver ? "Step 2 — Personal Information" : "Contact & Address"} icon="👤">
-              <SectionLabel>Basic Info</SectionLabel>
-              <Grid>
-                <Field label="First Name" value={fmt(application.first_name)} />
-                <Field label="Middle Name" value={fmt(p.middle_name)} />
-                <Field label="Last Name" value={fmt(application.last_name)} />
-                <Field label="Date of Birth" value={fmtDate(p.date_of_birth)} />
-                <Field label="SSN" value={last4(p.ssn)} mono />
-                <Field label="Nationality" value={fmt(p.nationality)} />
-                <Field label="Sex" value={fmt(p.sex)} />
-                <Field label="Height" value={fmt(p.height)} />
-              </Grid>
-              <Divider />
-              <SectionLabel>Contact & Address</SectionLabel>
+              {isDriver ? (
+                <>
+                  <SectionLabel>Basic Info</SectionLabel>
+                  <Grid>
+                    <Field label="First Name" value={fmt(application.first_name)} />
+                    <Field label="Middle Name" value={fmt(p.middle_name)} />
+                    <Field label="Last Name" value={fmt(application.last_name)} />
+                    <Field label="Date of Birth" value={fmtDate(p.date_of_birth)} />
+                    <Field label="SSN" value={last4(p.ssn)} mono />
+                    <Field label="Nationality" value={fmt(p.nationality)} />
+                    <Field label="Sex" value={fmt(p.sex)} />
+                    <Field label="Height" value={fmt(p.height)} />
+                  </Grid>
+                  <Divider />
+                  <SectionLabel>Contact & Address</SectionLabel>
+                </>
+              ) : (
+                <>
+                  <SectionLabel>Name</SectionLabel>
+                  <Grid>
+                    <Field label="First Name" value={fmt(application.first_name)} />
+                    <Field label="Last Name" value={fmt(application.last_name)} />
+                  </Grid>
+                  <Divider />
+                  <SectionLabel>Contact & Address</SectionLabel>
+                </>
+              )}
               <Grid>
                 <Field label="Email" value={fmt(application.email)} />
                 <Field label="Phone" value={fmt(application.phone)} mono />
@@ -870,8 +1676,56 @@ export default function DriverOnboardingAdminDetailPage() {
                 : <div style={{ fontSize: 13, color: C.muted2, padding: "6px 0" }}>No references recorded.</div>}
             </Panel>
 
-            <Panel title="Step 4 — Uploaded Documents" icon="📁">
-              <DocsGrid docs={p.documents} applicationId={application.id} onViewFile={handleViewFile} />
+            <Panel
+              title="Step 4 — Uploaded Documents"
+              icon="📁"
+              headerRight={
+                isSubmitted || application.status === "APPROVED" ? (
+                  <button
+                    type="button"
+                    onClick={() => openRequestDocumentsModal()}
+                    style={{
+                      fontFamily: "'Bebas Neue', sans-serif",
+                      fontSize: 13,
+                      letterSpacing: "0.08em",
+                      padding: "8px 14px",
+                      borderRadius: 8,
+                      border: `1px solid ${C.accent}`,
+                      background: `linear-gradient(135deg, rgba(245,166,35,0.2), rgba(245,166,35,0.08))`,
+                      color: C.accent,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Request documents
+                  </button>
+                ) : null
+              }
+            >
+              <DocsGrid
+                docs={p.documents}
+                applicationId={application.id}
+                onViewFile={handleViewFile}
+                canAdminAct={isSubmitted || application.status === "APPROVED"}
+                onAdminUpload={async (docType, file) => {
+                  await adminUploadPersonApplicationDocument({
+                    applicationId: application.id,
+                    docType,
+                    file,
+                  });
+                  await reloadApplication();
+                  showNotice("success", "Document uploaded.");
+                }}
+                onAcceptToggle={async (docType, accepted) => {
+                  await setPersonApplicationDocumentAccepted({
+                    applicationId: application.id,
+                    docType,
+                    accepted,
+                  });
+                  await reloadApplication();
+                  showNotice("success", accepted ? "Marked accepted." : "Acceptance cleared.");
+                }}
+              />
             </Panel>
 
             <Panel title="Step 4 — Agreements & Certifications" icon="✍️">
@@ -911,8 +1765,50 @@ export default function DriverOnboardingAdminDetailPage() {
                 <Field label="Created" value={fmtDT(application.created_at)} />
                 <Field label="Submitted" value={fmtDT(application.submitted_at)} />
                 <Field label="Last Updated" value={fmtDT(application.updated_at)} />
+                <Field label="Setup status" value={fmt(application.setup_status) || "—"} mono />
               </div>
             </div>
+
+            {showCombinedSetupChrome && !application.person_id && application.status === "SUBMITTED" && (
+              <div
+                style={{
+                  background: C.surface,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 12,
+                  padding: "14px 16px",
+                  marginBottom: 10,
+                  fontSize: 12,
+                  color: C.muted2,
+                  lineHeight: 1.5,
+                }}
+              >
+                Linking this application to a tenant person record so Driver setup and Compensation can be saved
+                (combined onboarding mode).
+              </div>
+            )}
+
+            {showDriverSetupTabs && (
+              <>
+                {driverSetupTab === "driver" && (
+                  <DriverPersonExtensionAdminPanel
+                    key={`dpe-${application.person_id}-${application.status}`}
+                    mode="onboarding"
+                    personId={application.person_id!}
+                    editable={driverConfigurationEditable}
+                    onAfterPersist={bumpApproveReadiness}
+                  />
+                )}
+                {driverSetupTab === "compensation" && (
+                  <DriverCompensationSetupAdminPanel
+                    key={`dcs-${application.id}-${application.person_id}`}
+                    mode="application"
+                    applicationId={application.id}
+                    editable={driverConfigurationEditable}
+                    onAfterPersist={bumpApproveReadiness}
+                  />
+                )}
+              </>
+            )}
 
             {(application.reviewed_at || application.reviewed_by_user_id || application.approved_at || application.approved_by_user_id) && (
               <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 10 }}>
@@ -931,9 +1827,52 @@ export default function DriverOnboardingAdminDetailPage() {
               <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: isSubmitted ? 14 : 0 }}>
                 `PersonApplication` is now the canonical admin review object. Legacy `DriverOnboardingSubmission` approval remains in place temporarily for compatibility only.
               </div>
+              {approveCombinedBlocked && approveReadiness?.detail && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#fca5a5",
+                    background: "rgba(232,56,13,0.12)",
+                    border: `1px solid ${C.red}44`,
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    marginBottom: 12,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  <strong style={{ color: C.text }}>Approve is blocked:</strong> {approveReadiness.detail} You can still save review corrections and setup cards.
+                </div>
+              )}
+              {application.status === "APPROVED" && personSetupUiMode === "segmented" && (application.setup_status ?? "") === "pending_downstream" && (
+                <div style={{ fontSize: 12, color: C.muted2, marginBottom: 12, lineHeight: 1.5 }}>
+                  <strong style={{ color: C.text }}>Downstream setup pending.</strong> HR/Payroll will finish onboarding later; this page does not own those fields in segmented mode.
+                </div>
+              )}
+              {showMarkOnboardingComplete && (
+                <div style={{ marginBottom: 12 }}>
+                  <Btn
+                    label="MARK ONBOARDING COMPLETE"
+                    variant="approve"
+                    onClick={() => void markOnboardingComplete()}
+                    loading={onboardingCompleteLoading}
+                    title="Confirms required combined-mode setup is finished (separate from Approve)."
+                  />
+                </div>
+              )}
               {isSubmitted && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <Btn label="APPROVE APPLICATION" variant="approve" onClick={approve} loading={actionLoading} />
+                  <Btn
+                    label="APPROVE APPLICATION"
+                    variant="approve"
+                    onClick={approve}
+                    loading={actionLoading}
+                    disabled={approveCombinedBlocked}
+                    title={
+                      approveCombinedBlocked
+                        ? (approveReadiness?.detail ?? "Complete Driver and Compensation setup before approving.")
+                        : undefined
+                    }
+                  />
                   <Btn label={showReject ? "CANCEL REJECT" : "REJECT APPLICATION"} variant={showReject ? "ghost" : "reject"} onClick={() => setShowReject((current) => !current)} disabled={actionLoading} />
                   {showReject && (
                     <>

@@ -13,6 +13,9 @@ export const OPS = {
   DRIVER_ONBOARDING_APPLICANT: "/driver-onboarding",
   DRIVER_ONBOARDING_REVIEW: "/operations/driver-onboarding-review",
   DRIVER_ONBOARDING_REVIEW_DETAIL: (id: number | string) => `/operations/driver-onboarding-review/${id}`,
+  /** People — maintained person master (directory + core edit). */
+  PEOPLE: "/operations/people",
+  PEOPLE_DETAIL: (id: number | string) => `/operations/people/${id}`,
   DISPATCH: "/dispatch",
   FLEET: "/fleet",
   /** Freight brokers (MC / intake identity), not customs brokers. */
