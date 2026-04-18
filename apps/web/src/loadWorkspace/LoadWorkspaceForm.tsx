@@ -256,7 +256,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </span>
         </div>
         <div className={wsSectionBody}>
-        <p className="mb-2 text-[11px] text-[#7a8299]">
+        <p className="mb-2 text-[11px] text-[var(--trk-text-muted)]">
           {modeCreate
             ? "Create saves this full stop list."
             : "Save replaces the ordered stop list on the server (full-array PATCH)."}
@@ -268,7 +268,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         ) : null}
         <div className="space-y-2">
           {p.sortedDraftStops.length === 0 ? (
-            <p className="py-4 text-center text-xs text-[#7a8299]">No stops yet — add pickup and delivery.</p>
+            <p className="py-4 text-center text-xs text-[var(--trk-text-muted)]">No stops yet — add pickup and delivery.</p>
           ) : (
             p.sortedDraftStops.map((stop, idx) => {
               const u = (stop.stop_type || "").toUpperCase();
@@ -278,16 +278,16 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               return (
               <div
                 key={stop._key}
-                className={`rounded-md border border-[#252a38] bg-[#1e2330] py-2.5 pl-2.5 pr-3 shadow-sm border-l-[3px] ${edge}`}
+                className={`rounded-md border border-[var(--trk-border)] bg-[#1e2330] py-2.5 pl-2.5 pr-3 shadow-sm border-l-[3px] ${edge}`}
               >
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                      isPu ? "bg-emerald-900/40 text-emerald-400" : isDr ? "bg-rose-900/40 text-rose-400" : "bg-[#252a38] text-[#7a8299]"
+                      isPu ? "bg-emerald-900/40 text-emerald-400" : isDr ? "bg-rose-900/40 text-rose-400" : "bg-[var(--trk-border)] text-[var(--trk-text-muted)]"
                     }`}
                   >
                     {stop.stop_type || "STOP"} · {idx + 1}
-                    {stop.id <= 0 ? <span className="ml-1 font-normal normal-case text-[#4a5068]">· new</span> : null}
+                    {stop.id <= 0 ? <span className="ml-1 font-normal normal-case text-[var(--trk-text-muted)]">· new</span> : null}
                   </span>
                   <div className="flex flex-wrap gap-1">
                     <Button
@@ -475,7 +475,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         <button
           type="button"
           onClick={p.addStop}
-          className="mt-2 w-full rounded-md border border-dashed border-[#252a38] bg-transparent py-2 text-center text-[11px] font-medium text-[#4a5068] transition hover:border-amber-400 hover:text-amber-400"
+          className="mt-2 w-full rounded-md border border-dashed border-[var(--trk-border)] bg-transparent py-2 text-center text-[11px] font-medium text-[var(--trk-text-muted)] transition hover:border-amber-400 hover:text-amber-400"
         >
           + Add stop
         </button>
@@ -829,16 +829,16 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           />
         </div>
         {p.showOperationalNotesTimeline ? (
-          <div className="mt-4 border-t border-[#252a38] pt-3">
+          <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
             <p className={L}>Operational notes (timeline)</p>
-            <ul className="mt-2 max-h-44 space-y-2 overflow-y-auto rounded-md border border-[#252a38] bg-[#1a1e2a] p-2.5 text-sm">
+            <ul className="mt-2 max-h-44 space-y-2 overflow-y-auto rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] p-2.5 text-sm">
               {p.loadNotes.length === 0 ? (
-                <li className="text-xs text-[#7a8299]">No notes yet.</li>
+                <li className="text-xs text-[var(--trk-text-muted)]">No notes yet.</li>
               ) : (
                 p.loadNotes.map((n) => (
-                  <li key={n.id} className="border-b border-[#252a38] pb-2 last:border-0">
-                    <p className="text-[#e8ecf4]">{n.body}</p>
-                    <p className="text-[10px] text-[#4a5068]">{new Date(n.created_at).toLocaleString()}</p>
+                  <li key={n.id} className="border-b border-[var(--trk-border)] pb-2 last:border-0">
+                    <p className="text-[var(--trk-text)]">{n.body}</p>
+                    <p className="text-[10px] text-[var(--trk-text-muted)]">{new Date(n.created_at).toLocaleString()}</p>
                   </li>
                 ))
               )}

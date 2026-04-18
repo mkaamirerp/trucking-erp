@@ -50,7 +50,7 @@ function formatBytes(n: number | null | undefined): string {
 }
 
 function fieldClass() {
-  return "w-full rounded-lg border border-[#334155] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder:text-[#64748b] focus:border-[#f5a623] focus:outline-none focus:ring-1 focus:ring-[#f5a623]/40";
+  return "w-full rounded-lg border border-[#334155] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder:text-[#64748b] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/40";
 }
 
 type Props = {
@@ -275,12 +275,12 @@ export function IntakeVerificationPanel({
   );
 
   return (
-    <div className="relative flex flex-col gap-5 text-[#e8edf5]">
+    <div className="relative flex flex-col gap-5 text-[var(--trk-text)]">
       {onClose ? (
         <button
           type="button"
           onClick={onClose}
-          className="absolute left-1/2 top-0 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[#334155] bg-[#0d111a] text-lg leading-none text-[#94a3b8] hover:bg-[#1e293b] hover:text-[#e8edf5]"
+          className="absolute left-1/2 top-0 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[#334155] bg-[#0d111a] text-lg leading-none text-[var(--trk-text-muted)] hover:bg-[#1e293b] hover:text-[var(--trk-text)]"
           aria-label="Close intake"
         >
           ×
@@ -290,13 +290,13 @@ export function IntakeVerificationPanel({
       <div className={`flex flex-col gap-4 ${onClose ? "pt-10" : ""}`}>
         <div className="flex flex-col gap-4 border-b border-[#1e293b] pb-5">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-end">
-            {userEmail ? <p className="text-xs text-[#94a3b8] sm:order-first sm:mr-auto sm:pt-2 sm:text-left">{userEmail}</p> : null}
+            {userEmail ? <p className="text-xs text-[var(--trk-text-muted)] sm:order-first sm:mr-auto sm:pt-2 sm:text-left">{userEmail}</p> : null}
             <input ref={uploadRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={onUploadDocumentChange} />
             <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={onManualEntry}
-                className="rounded-lg border border-[#475569] bg-transparent px-3 py-2 text-sm font-medium text-[#e8edf5] hover:bg-[#1e293b]"
+                className="rounded-lg border border-[#475569] bg-transparent px-3 py-2 text-sm font-medium text-[var(--trk-text)] hover:bg-[#1e293b]"
               >
                 + Manual entry
               </button>
@@ -322,7 +322,7 @@ export function IntakeVerificationPanel({
 
         {linkedLoad ? (
           <div className="flex flex-col gap-2 rounded-xl border border-[#334155] bg-[#0d111a] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-[#e8edf5]">
+            <p className="text-sm text-[var(--trk-text)]">
               Linked load{" "}
               <span className="font-mono font-semibold text-[#93c5fd]">{linkedLoad.load_number}</span>
               {linkedLoad.trip_number?.trim() ? (
@@ -336,7 +336,7 @@ export function IntakeVerificationPanel({
                   ? navigate(OPS.LOAD_WORKSPACE_INTAKE(linkedLoad.id, emailThreadId))
                   : navigate(OPS.LOAD_DETAIL(linkedLoad.id))
               }
-              className="shrink-0 rounded-lg border border-[#f5a623]/50 bg-[#f5a623]/10 px-3 py-2 text-xs font-semibold text-[#f5a623] hover:bg-[#f5a623]/20"
+              className="shrink-0 rounded-lg border border-[var(--trk-heading)]/50 bg-[var(--trk-heading)]/10 px-3 py-2 text-xs font-semibold text-[var(--trk-heading)] hover:bg-[var(--trk-heading)]/20"
             >
               Open load workspace
             </button>
@@ -654,7 +654,7 @@ export function IntakeVerificationPanel({
                 {pdf ? (
                   <>
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <span className="truncate text-sm font-semibold text-[#e8edf5]">{pdf.att.filename || "attachment.pdf"}</span>
+                      <span className="truncate text-sm font-semibold text-[var(--trk-text)]">{pdf.att.filename || "attachment.pdf"}</span>
                       <span className="text-xs text-[#64748b]">{formatBytes(pdf.att.size_bytes)}</span>
                     </div>
                     <p className="mt-1 text-xs font-medium text-emerald-400/90">Parsed successfully</p>
@@ -686,7 +686,7 @@ export function IntakeVerificationPanel({
                 type="button"
                 onClick={onReparse}
                 disabled={!canReparse || recomputingIntake}
-                className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
                 title={!canReparse ? "Re-parse uses Gmail intake rules on this thread" : "Re-run PDF / intake classification"}
               >
                 {recomputingIntake ? "Re-parsing…" : "Re-parse"}

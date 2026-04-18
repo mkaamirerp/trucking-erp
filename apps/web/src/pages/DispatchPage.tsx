@@ -59,19 +59,19 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
 
 const CARD_BADGE_CLASS: Record<string, string> = {
   unassigned: "bg-[#1c2233] text-[#9ca3af] border border-[#2b3347]",
-  assigned:   "bg-[#f5a623] text-[#0a0c12] border border-[#f5a623]",
+  assigned:   "bg-[var(--trk-heading)] text-[#0a0c12] border border-[var(--trk-heading)]",
   dispatched: "bg-[#0d1f1a] text-[#34d399] border border-[#10b981]/40",
 };
 
 const CARD_ACCENT_COLOR: Record<string, string> = {
   unassigned: "#4b5563",
-  assigned:   "#f5a623",
+  assigned:   "var(--trk-heading)",
   dispatched: "#10b981",
 };
 
 const COLUMN_DOT: Record<string, { color: string; glow: string }> = {
   unassigned: { color: "#4b5563", glow: "0 0 6px #4b5563" },
-  assigned:   { color: "#f5a623", glow: "0 0 6px #f5a623" },
+  assigned:   { color: "var(--trk-heading)", glow: "0 0 6px var(--trk-heading)" },
   dispatched: { color: "#10b981", glow: "0 0 6px #10b981" },
 };
 
@@ -82,8 +82,8 @@ const COLUMN_BG: Record<string, string> = {
 };
 
 const COLUMN_COUNT_CLASS: Record<string, string> = {
-  unassigned: "bg-[#1c2235] text-[#6b7280] border border-[#252a38]",
-  assigned:   "bg-[#2a1f0a] text-[#f5a623] border border-[#3d2d0e]",
+  unassigned: "bg-[var(--trk-border)] text-[#6b7280] border border-[var(--trk-border)]",
+  assigned:   "bg-[#2a1f0a] text-[var(--trk-heading)] border border-[#3d2d0e]",
   dispatched: "bg-[#0d2420] text-[#10b981] border border-[#0f302a]",
 };
 
@@ -158,7 +158,7 @@ function LoadCard({
     <div
       className={clsx(
         "relative box-border mb-1.5 min-w-0 cursor-pointer rounded-xl border border-[#242b3c] bg-[#141a25] p-2 transition-colors outline-none",
-        "hover:bg-[#161e2c] focus-visible:ring-2 focus-visible:ring-[#f5a623]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0c0f16]",
+        "hover:bg-[#161e2c] focus-visible:ring-2 focus-visible:ring-[var(--trk-heading)]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0c0f16]",
         status === "dispatched" ? "shadow-[0_0_0_1px_rgba(16,185,129,0.15),0_0_22px_rgba(16,185,129,0.08)]" : ""
       )}
       style={{
@@ -218,7 +218,7 @@ function LoadCard({
       {/* META */}
       <div className="flex items-center gap-1.5 text-[10px] text-[#9ca3af]">
         <span className="inline-flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-[#f5a623]/80" />
+          <span className="h-2 w-2 rounded-full bg-[var(--trk-heading)]/80" />
           <span>{load.equipment_type || "—"}</span>
         </span>
         <span className="inline-flex items-center gap-1">
@@ -237,12 +237,12 @@ function LoadCard({
           onClick={(e) => e.stopPropagation()}
         >
           {load.driver && (
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#f5a623]/60 bg-[#f5a623]/20">
-              <span className="text-[9px] font-bold text-[#f5a623]">{driverInitials}</span>
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--trk-heading)]/60 bg-[var(--trk-heading)]/20">
+              <span className="text-[9px] font-bold text-[var(--trk-heading)]">{driverInitials}</span>
             </div>
           )}
           <div className="min-w-0 flex-1 leading-tight">
-            <div className="text-[11px] text-[#94a3b8] truncate">
+            <div className="text-[11px] text-[var(--trk-text-muted)] truncate">
               {load.driver ? `${load.driver.first_name} ${load.driver.last_name}` : "—"}
             </div>
             <div className="text-[10px] text-[#6b7280] truncate">
@@ -256,7 +256,7 @@ function LoadCard({
           )}
           <span
             className={clsx(
-              "shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[#94a3b8]",
+              "shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[var(--trk-text-muted)]",
               !focused && "invisible"
             )}
             aria-hidden={!focused}
@@ -277,7 +277,7 @@ function LoadCard({
               <span className="text-[9px] font-bold text-[#10b981]">{driverInitials}</span>
             </div>
           )}
-          <span className="text-[11px] text-[#94a3b8] truncate flex-1">
+          <span className="text-[11px] text-[var(--trk-text-muted)] truncate flex-1">
             {load.driver ? `${load.driver.first_name} ${load.driver.last_name}` : "—"}
             {load.truck ? ` · Truck ${load.truck.unit_number}` : ""}
           </span>
@@ -288,7 +288,7 @@ function LoadCard({
           )}
           <span
             className={clsx(
-              "shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[#94a3b8]",
+              "shrink-0 rounded-md border border-[#242b3c] bg-[#101522] px-1.5 py-0.5 text-[10px] text-[var(--trk-text-muted)]",
               !focused && "invisible"
             )}
             aria-hidden={!focused}
@@ -326,7 +326,7 @@ function StatusColumn({
 
   return (
     <div
-      className="box-border flex shrink-0 flex-col rounded-xl border border-[#1c2235] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+      className="box-border flex shrink-0 flex-col rounded-xl border border-[var(--trk-border)] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
       style={{
         width: LOAD_COLUMN_WIDTH,
         minWidth: LOAD_COLUMN_WIDTH,
@@ -335,7 +335,7 @@ function StatusColumn({
       }}
     >
       <div
-        className="box-border flex shrink-0 items-center justify-between border-b border-[#1c2235] px-2 py-1.5"
+        className="box-border flex shrink-0 items-center justify-between border-b border-[var(--trk-border)] px-2 py-1.5"
         style={{ background: colBg }}
       >
         <div className="flex items-center gap-1.5">
@@ -363,7 +363,7 @@ function StatusColumn({
         {loads.length === 0 && (
           <div className="text-center py-6 text-[#64748b] text-xs">
             {statusKey === "unassigned" && onEmptyAction ? (
-              <button onClick={onEmptyAction} className="text-[#f5a623] hover:underline">New Load</button>
+              <button onClick={onEmptyAction} className="text-[var(--trk-heading)] hover:underline">New Load</button>
             ) : (
               "—"
             )}
@@ -415,7 +415,7 @@ function deriveDriverStatuses(
 
 const DRIVER_STATUS_PILL: Record<DriverAvailStatus, string> = {
   available: "bg-[#0d2e1f] text-[#10b981] border border-[#10b981]/30",
-  on_load:   "bg-[#2a1f0a] text-[#f5a623] border border-[#f5a623]/30",
+  on_load:   "bg-[#2a1f0a] text-[var(--trk-heading)] border border-[var(--trk-heading)]/30",
 };
 
 const DRIVER_STATUS_LABEL: Record<DriverAvailStatus, string> = {
@@ -425,7 +425,7 @@ const DRIVER_STATUS_LABEL: Record<DriverAvailStatus, string> = {
 
 const DRIVER_ACCENT: Record<DriverAvailStatus, string> = {
   available: "#10b981",
-  on_load:   "#f5a623",
+  on_load:   "var(--trk-heading)",
 };
 
 function DriverCard({ item }: { item: DriverWithLoad }) {
@@ -434,7 +434,7 @@ function DriverCard({ item }: { item: DriverWithLoad }) {
 
   return (
     <div
-      className="mb-1.5 box-border rounded-lg border border-[#252a38] bg-[#1a1e2a] p-2"
+      className="mb-1.5 box-border rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] p-2"
       style={{
         borderLeftWidth: 4,
         borderLeftStyle: "solid",
@@ -455,17 +455,17 @@ function DriverCard({ item }: { item: DriverWithLoad }) {
       {(driver.phone || truckUnit) && (
         <div className="mt-1 flex items-center gap-2">
           {driver.phone && (
-            <span className="text-[11px] text-[#4a5068]">{driver.phone}</span>
+            <span className="text-[11px] text-[var(--trk-text-muted)]">{driver.phone}</span>
           )}
           {truckUnit && (
-            <span className="font-mono text-[11px] text-[#4a5068]">{truckUnit}</span>
+            <span className="font-mono text-[11px] text-[var(--trk-text-muted)]">{truckUnit}</span>
           )}
         </div>
       )}
 
       {/* Load number + route (on load only) */}
       {load && (
-        <div className="mt-1.5 text-[10px] text-[#4a5068]">
+        <div className="mt-1.5 text-[10px] text-[var(--trk-text-muted)]">
           {load.load_number}{loadRoute ? ` · ${loadRoute}` : ""}
         </div>
       )}
@@ -485,7 +485,7 @@ function DriverColumn({
 
   return (
     <div
-      className="box-border flex shrink-0 flex-col rounded-xl border border-[#1c2235] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+      className="box-border flex shrink-0 flex-col rounded-xl border border-[var(--trk-border)] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
       style={{
         width: DRIVER_COLUMN_WIDTH,
         minWidth: DRIVER_COLUMN_WIDTH,
@@ -493,7 +493,7 @@ function DriverColumn({
         background: "#0c0f16",
       }}
     >
-      <div className="box-border flex shrink-0 items-center justify-between border-b border-[#1c2235] bg-[#0c0f16] px-2 py-1.5">
+      <div className="box-border flex shrink-0 items-center justify-between border-b border-[var(--trk-border)] bg-[#0c0f16] px-2 py-1.5">
         <div className="flex items-center gap-1.5">
           <span
             className="h-2 w-2 shrink-0 rounded-full"
@@ -506,7 +506,7 @@ function DriverColumn({
         </span>
       </div>
       {/* Reserved strip for driver search/filter — h-8 matches typical input row; swap for real control when wired */}
-      <div className="box-border shrink-0 border-b border-[#1c2235] px-2 py-1.5">
+      <div className="box-border shrink-0 border-b border-[var(--trk-border)] px-2 py-1.5">
         <div
           className="flex h-8 w-full min-w-0 items-center rounded-md border border-[#2a3148] bg-[#0f131c] px-2 text-[11px] text-[#5c657a]"
           aria-label="Driver filter row (reserved)"
@@ -629,7 +629,7 @@ export default function DispatchPage() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#080a0f] text-[#e8edf5]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--trk-bg)] text-[var(--trk-text)]">
       {/* Ribbon tabs — screenshot-like */}
       <div className="flex shrink-0 gap-2 border-b border-[#0d121d] bg-[#0a0d12] px-2 py-2">
         {RIBBON_TABS.map((tab) => (
@@ -639,10 +639,10 @@ export default function DispatchPage() {
             onClick={() => setRibbonTab(tab.key)}
             className={clsx(
               "box-border min-h-[2rem] rounded-full border px-3 py-1.5 text-xs font-medium transition-colors outline-none",
-              "focus-visible:ring-2 focus-visible:ring-[#f5a623]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0d12]",
+              "focus-visible:ring-2 focus-visible:ring-[var(--trk-heading)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0d12]",
               ribbonTab === tab.key
-                ? "border-[#f5a623] bg-[#f5a623] text-[#0a0c12]"
-                : "border-transparent text-[#94a3b8] hover:border-[#1e293b] hover:bg-[#11151c] hover:text-white"
+                ? "border-[var(--trk-heading)] bg-[var(--trk-heading)] text-[#0a0c12]"
+                : "border-transparent text-[var(--trk-text-muted)] hover:border-[#1e293b] hover:bg-[#11151c] hover:text-white"
             )}
           >
             {tab.label}
@@ -650,7 +650,7 @@ export default function DispatchPage() {
         ))}
       </div>
 
-      <main className="flex-1 flex overflow-hidden min-h-0 bg-[#080a0f]">
+      <main className="flex-1 flex overflow-hidden min-h-0 bg-[var(--trk-bg)]">
         {layoutMode === "table" ? (
           <div className="flex-1 overflow-auto p-4">
             <div className="rounded-lg border border-[#1e293b] bg-[#0d1117] overflow-hidden">
@@ -674,9 +674,9 @@ export default function DispatchPage() {
                           onClick={() => openLoadWorkspace(load)}
                           className="cursor-pointer border-b border-[#1e293b]/50 transition-colors hover:bg-[#1e293b]/30"
                         >
-                          <td className="px-4 py-2.5 text-sm font-medium text-[#e8edf5]">#{load.load_number}</td>
-                          <td className="px-4 py-2.5 text-sm text-[#94a3b8]">{formatTripNumber(load)}</td>
-                          <td className="px-4 py-2.5 text-sm text-[#94a3b8]">{formatRoute(load)}</td>
+                          <td className="px-4 py-2.5 text-sm font-medium text-[var(--trk-text)]">#{load.load_number}</td>
+                          <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{formatTripNumber(load)}</td>
+                          <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{formatRoute(load)}</td>
                           <td className="px-4 py-2.5">
                             <span className={clsx("inline-flex px-2 py-0.5 rounded text-[11px] font-medium border", STATUS_BADGE_CLASS[load.status])}>
                               {STATUS_LABELS[load.status] ?? load.status}
@@ -691,7 +691,7 @@ export default function DispatchPage() {
                           {ribbonTab === "active" ? (
                             <span>
                               No loads ·{" "}
-                              <button onClick={() => navigate(`${slug}${OPS.LOAD_NEW}`)} className="text-[#f5a623] hover:underline">
+                              <button onClick={() => navigate(`${slug}${OPS.LOAD_NEW}`)} className="text-[var(--trk-heading)] hover:underline">
                                 New Load
                               </button>
                             </span>
@@ -772,7 +772,7 @@ export default function DispatchPage() {
                       setSelectedLoad(null);
                       navigate(`${slug}${OPS.LOAD_DETAIL(id)}`);
                     }}
-                    className="box-border rounded-md border border-[#2b3347] px-3 py-1.5 text-xs text-[#94a3b8] transition-colors hover:border-[#475569] hover:text-white"
+                    className="box-border rounded-md border border-[#2b3347] px-3 py-1.5 text-xs text-[var(--trk-text-muted)] transition-colors hover:border-[#475569] hover:text-white"
                   >
                     Edit load
                   </button>
@@ -814,7 +814,7 @@ export default function DispatchPage() {
                       <div
                         className="h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
                         style={selectedLoad.driver
-                          ? { background: "#1e3a5f", color: "#60a5fa" }
+                          ? { background: "#1e3a5f", color: "var(--trk-accent)" }
                           : { background: "#1c2233", color: "#4b5563" }}
                       >
                         {selectedLoad.driver
@@ -829,7 +829,7 @@ export default function DispatchPage() {
                             : "Unassigned"}
                         </p>
                         {selectedLoad.driver?.phone && (
-                          <p className="text-[10px] text-[#94a3b8]">{selectedLoad.driver.phone}</p>
+                          <p className="text-[10px] text-[var(--trk-text-muted)]">{selectedLoad.driver.phone}</p>
                         )}
                       </div>
                     </div>
@@ -921,7 +921,7 @@ export default function DispatchPage() {
                             <p className="text-xs font-medium text-white">{s.facility_name}</p>
                           )}
                           {(s.street || s.city) && (
-                            <p className="text-xs text-[#94a3b8]">
+                            <p className="text-xs text-[var(--trk-text-muted)]">
                               {[s.street, s.city, s.state_or_province, s.postal_code, s.country]
                                 .filter(Boolean)
                                 .join(", ")}
@@ -952,7 +952,7 @@ export default function DispatchPage() {
                   {selectedLoad.internal_notes?.trim() && (
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">Internal notes</p>
-                      <pre className="whitespace-pre-wrap text-xs text-[#94a3b8] font-mono max-h-48 overflow-y-auto rounded-lg border border-[#1e293b] bg-[#0c101a] p-3 leading-relaxed">
+                      <pre className="whitespace-pre-wrap text-xs text-[var(--trk-text-muted)] font-mono max-h-48 overflow-y-auto rounded-lg border border-[#1e293b] bg-[#0c101a] p-3 leading-relaxed">
                         {selectedLoad.internal_notes.trim()}
                       </pre>
                     </div>
@@ -971,7 +971,7 @@ function ModalRow({ label, value, mono }: { label: string; value: string; mono?:
   return (
     <div className="flex items-baseline justify-between gap-4">
       <span className="text-[11px] text-[#64748b] shrink-0">{label}</span>
-      <span className={clsx("text-right break-all", mono ? "font-mono text-[11px] text-[#94a3b8]" : "text-xs text-[#e2e8f0]")}>
+      <span className={clsx("text-right break-all", mono ? "font-mono text-[11px] text-[var(--trk-text-muted)]" : "text-xs text-[#e2e8f0]")}>
         {value}
       </span>
     </div>

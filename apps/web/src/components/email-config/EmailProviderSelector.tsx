@@ -51,7 +51,7 @@ function MicrosoftIcon() {
 function MailIcon() {
   return (
     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#334155]" aria-hidden="true">
-      <svg viewBox="0 0 24 24" className="h-6 w-6 text-[#94a3b8]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false">
+      <svg viewBox="0 0 24 24" className="h-6 w-6 text-[var(--trk-text-muted)]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false">
         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
         <path d="M22 6l-10 7L2 6" />
       </svg>
@@ -150,12 +150,12 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                 emailSelectorFocus,
                 "relative flex h-full min-h-[158px] w-full flex-col rounded-xl border p-4 text-left transition-all duration-200 ease-out",
                 isActive
-                  ? "border-[#3b82f6] bg-[#0f1828] shadow-[0_0_0_2px_rgba(59,130,246,0.28),0_12px_40px_rgba(0,0,0,0.45)] ring-2 ring-[#60a5fa]/35"
+                  ? "border-[#3b82f6] bg-[#0f1828] shadow-[0_0_0_2px_rgba(59,130,246,0.28),0_12px_40px_rgba(0,0,0,0.45)] ring-2 ring-[var(--trk-accent)]/35"
                   : "border-[#1e293b] bg-[#0a0e14] hover:border-[#334155] hover:bg-[#0c1018]",
               ].join(" ")}
             >
               {tag && id === "gmail" && (
-                <span className="absolute right-2 top-2 rounded bg-[#3b82f6]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#60a5fa]">
+                <span className="absolute right-2 top-2 rounded bg-[#3b82f6]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-accent)]">
                   {tag}
                 </span>
               )}
@@ -165,7 +165,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                   <div className="min-w-0 flex-1">
                     <span
                       className={
-                        isActive ? "text-base font-semibold text-[#f8fafc]" : "text-base font-semibold text-[#94a3b8]"
+                        isActive ? "text-base font-semibold text-[#f8fafc]" : "text-base font-semibold text-[var(--trk-text-muted)]"
                       }
                       aria-hidden="true"
                     >
@@ -178,7 +178,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                       {badgeText}
                     </span>
                     {isActive && (
-                      <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wide text-[#60a5fa]" aria-hidden="true">
+                      <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-accent)]" aria-hidden="true">
                         Selected · panel below
                       </p>
                     )}

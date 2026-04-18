@@ -15,12 +15,12 @@ import DriverPersonExtensionAdminPanel from "../components/DriverPersonExtension
 import { OPS } from "../routes";
 
 const C = {
-  bg: "#080a0f",
-  card: "#111520",
-  border: "#1c2235",
-  text: "#e8edf5",
-  muted: "#94a3b8",
-  accent: "#f5a623",
+  bg: "var(--trk-bg)",
+  card: "var(--trk-surface)",
+  border: "var(--trk-border)",
+  text: "var(--trk-text)",
+  muted: "var(--trk-text-muted)",
+  accent: "var(--trk-heading)",
 };
 
 function fmt(v: string | null | undefined) {
@@ -63,12 +63,12 @@ function PeopleListView() {
   }, [load]);
 
   return (
-    <div className="min-h-screen overflow-x-hidden text-[#e8edf5]" style={{ background: C.bg, margin: -24 }}>
+    <div className="min-h-screen overflow-x-hidden text-[var(--trk-text)]" style={{ background: C.bg, margin: -24 }}>
       <div className="relative px-8 py-8">
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
             <div
-              className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[#f5a623]"
+              className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--trk-heading)]"
               style={{ color: C.accent }}
             >
               Operations
@@ -96,7 +96,7 @@ function PeopleListView() {
           <button
             type="button"
             onClick={() => void load()}
-            className="rounded-lg px-5 py-2.5 text-sm font-semibold text-[#080a0f]"
+            className="rounded-lg px-5 py-2.5 text-sm font-semibold text-[var(--trk-bg)]"
             style={{ background: C.accent }}
           >
             Search
@@ -388,7 +388,7 @@ function PersonDetailView() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden pb-12 text-[#e8edf5]" style={{ background: C.bg, margin: -24 }}>
+    <div className="min-h-screen overflow-x-hidden pb-12 text-[var(--trk-text)]" style={{ background: C.bg, margin: -24 }}>
       <div className="relative px-8 py-8">
         <button
           type="button"
@@ -535,7 +535,7 @@ function PersonDetailView() {
                   type="button"
                   disabled={saving}
                   onClick={() => void onSave()}
-                  className="rounded-lg px-6 py-2.5 text-sm font-bold text-[#080a0f] disabled:opacity-50"
+                  className="rounded-lg px-6 py-2.5 text-sm font-bold text-[var(--trk-bg)] disabled:opacity-50"
                   style={{ background: C.accent }}
                 >
                   {saving ? "Saving…" : "Save core fields"}
@@ -557,7 +557,7 @@ function PersonDetailView() {
                 <ul className="space-y-2 text-xs" style={{ color: C.muted }}>
                   {detail.roles.map((r) => (
                     <li key={`${r.role_code}-${r.is_primary}`}>
-                      <span className="font-mono text-[#e8edf5]">{r.role_code}</span>
+                      <span className="font-mono text-[var(--trk-text)]">{r.role_code}</span>
                       {r.is_primary ? " · primary" : ""}
                       {r.is_active ? "" : " · inactive"}
                     </li>
@@ -623,7 +623,7 @@ function PersonDetailView() {
                       type="button"
                       disabled={savingDriver}
                       onClick={() => void onSaveDriverProfile()}
-                      className="rounded-lg px-5 py-2 text-sm font-bold text-[#080a0f] disabled:opacity-50"
+                      className="rounded-lg px-5 py-2 text-sm font-bold text-[var(--trk-bg)] disabled:opacity-50"
                       style={{ background: C.accent }}
                     >
                       {savingDriver ? "Saving…" : "Save license"}
@@ -766,7 +766,7 @@ function PersonDetailView() {
                       </div>
                       {a.changed_keys.length > 0 && (
                         <div className="mt-2 text-[11px]" style={{ color: "#64748b" }}>
-                          Fields: <span className="font-mono text-[#94a3b8]">{a.changed_keys.join(", ")}</span>
+                          Fields: <span className="font-mono text-[var(--trk-text-muted)]">{a.changed_keys.join(", ")}</span>
                         </div>
                       )}
                       {Object.keys(a.snapshot).length > 0 && (

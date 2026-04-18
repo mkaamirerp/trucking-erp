@@ -134,13 +134,13 @@ export default function AdminUsersPage() {
 
   if (loading && users.length === 0) {
     return (
-      <div className="flex items-center justify-center py-12 text-[#94a3b8]">Loading users...</div>
+      <div className="flex items-center justify-center py-12 text-[var(--trk-text-muted)]">Loading users...</div>
     );
   }
 
   return (
     <div className="space-y-8">
-      <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[#e8edf5]">Users</h1>
+      <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">Users</h1>
       <p className="text-sm text-[#64748b] -mt-4">
         Click a user&apos;s name or row to open details and sign-in security.
       </p>
@@ -158,7 +158,7 @@ export default function AdminUsersPage() {
       />
 
       <div className={`rounded-xl border border-[#334155] bg-[#0a0e14]/50 p-6 ${!canInvite ? "opacity-60" : ""}`}>
-        <h2 className="mb-4 text-lg font-semibold text-[#e8edf5]">
+        <h2 className="mb-4 text-lg font-semibold text-[var(--trk-text)]">
           Invite user
           {!canInvite && (
             <span className="ml-2 text-sm font-normal text-[#64748b]">(Read-only: invite disabled)</span>
@@ -184,7 +184,7 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={inviteUsername}
                 onChange={(e) => setInviteUsername(e.target.value)}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[#e8edf5] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Display name"
               />
             </div>
@@ -196,7 +196,7 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[#e8edf5] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="user@company.com"
               />
             </div>
@@ -207,7 +207,7 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={invitePhone}
                 onChange={(e) => setInvitePhone(e.target.value)}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[#e8edf5] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="+1 (optional)"
               />
             </div>
@@ -219,7 +219,7 @@ export default function AdminUsersPage() {
                 value={inviteAccessLevel}
                 onChange={(e) => setInviteAccessLevel(e.target.value)}
                 disabled={!canInvite}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[#e8edf5] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="READ_ONLY">Read only</option>
                 <option value="FULL_ACCESS">Full access</option>
@@ -279,10 +279,10 @@ export default function AdminUsersPage() {
                     onClick={() => setDetailUser(u)}
                     title="View user details"
                   >
-                    <td className="px-4 py-3 font-medium text-[#e8edf5]">{u.username}</td>
-                    <td className="px-4 py-3 text-[#94a3b8]">{u.email}</td>
-                    <td className="px-4 py-3 text-[#94a3b8]">{u.phone ?? "—"}</td>
-                    <td className="px-4 py-3 text-[#94a3b8]">{u.access_level}</td>
+                    <td className="px-4 py-3 font-medium text-[var(--trk-text)]">{u.username}</td>
+                    <td className="px-4 py-3 text-[var(--trk-text-muted)]">{u.email}</td>
+                    <td className="px-4 py-3 text-[var(--trk-text-muted)]">{u.phone ?? "—"}</td>
+                    <td className="px-4 py-3 text-[var(--trk-text-muted)]">{u.access_level}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex w-fit rounded px-2 py-0.5 text-xs font-medium ${
@@ -290,7 +290,7 @@ export default function AdminUsersPage() {
                             ? "bg-emerald-900/40 text-emerald-400"
                             : st === "suspended"
                               ? "bg-amber-900/40 text-amber-400"
-                              : "bg-[#334155] text-[#94a3b8]"
+                              : "bg-[#334155] text-[var(--trk-text-muted)]"
                         }`}
                       >
                         {u.membership_status}

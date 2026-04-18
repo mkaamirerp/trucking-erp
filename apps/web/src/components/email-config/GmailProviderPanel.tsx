@@ -29,7 +29,7 @@ export type GmailProviderPanelProps = {
 
 function CheckRow({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <li className="flex items-start gap-2 text-sm text-[#94a3b8]">
+    <li className="flex items-start gap-2 text-sm text-[var(--trk-text-muted)]">
       <span className={`mt-0.5 shrink-0 font-medium ${ok ? "text-emerald-400" : "text-[#64748b]"}`} aria-hidden="true">
         {ok ? "✓" : "—"}
       </span>
@@ -93,7 +93,7 @@ export default function GmailProviderPanel({
         {panelFlash && onDismissPanelFlash && (
           <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
         )}
-        <p className="mb-4 text-sm text-[#94a3b8]">
+        <p className="mb-4 text-sm text-[var(--trk-text-muted)]">
           After you sign in, TruckERP can keep your inbox in sync automatically once automatic mail is turned on.
         </p>
         <button
@@ -136,8 +136,8 @@ export default function GmailProviderPanel({
 
       <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4">
         <SectionTitle>Connection</SectionTitle>
-        <p className="text-sm text-[#94a3b8]">
-          Signed in as: <span className="font-medium text-[#e8edf5]">{config.oauth_account_email || config.email_address}</span>
+        <p className="text-sm text-[var(--trk-text-muted)]">
+          Signed in as: <span className="font-medium text-[var(--trk-text)]">{config.oauth_account_email || config.email_address}</span>
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wide text-[#64748b]">Status</span>
@@ -152,7 +152,7 @@ export default function GmailProviderPanel({
             {(config.last_error_message.includes("invalid_grant") ||
               config.last_error_message.includes("token refresh failed") ||
               config.last_error_message.includes("oauth2.googleapis.com/token")) && (
-              <p className="text-xs leading-relaxed text-[#94a3b8]">
+              <p className="text-xs leading-relaxed text-[var(--trk-text-muted)]">
                 Try <span className="font-medium text-[#cbd5e1]">Reconnect / Sign in again</span> below, or contact support
                 if this keeps happening.
               </p>
@@ -172,27 +172,27 @@ export default function GmailProviderPanel({
         <p className={`text-lg font-semibold ${autoLive ? "text-emerald-200" : "text-amber-100"}`}>
           {autoLive ? "Live" : "Not ready yet"}
         </p>
-        <p className="mt-1 text-sm text-[#94a3b8]">
+        <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
           {autoLive
             ? "New messages from Google can flow into TruckERP without running a manual sync."
             : "Sign-in is only the first step. Finish the steps below or use “Turn on automatic new-mail alerts” when available."}
         </p>
-        <dl className="mt-4 space-y-2 text-sm text-[#94a3b8]">
+        <dl className="mt-4 space-y-2 text-sm text-[var(--trk-text-muted)]">
           <div className="flex flex-wrap gap-x-2 gap-y-1">
             <dt className="text-[#64748b]">Last Google signal</dt>
-            <dd className="text-[#e8edf5]">
+            <dd className="text-[var(--trk-text)]">
               {config.last_gmail_webhook_at ? formatLastTested(config.last_gmail_webhook_at) : "None yet"}
             </dd>
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-1">
             <dt className="text-[#64748b]">Last sync into TruckERP</dt>
-            <dd className="text-[#e8edf5]">
+            <dd className="text-[var(--trk-text)]">
               {config.last_inbound_sync_at ? formatLastTested(config.last_inbound_sync_at) : "—"}
             </dd>
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-1">
             <dt className="text-[#64748b]">Renewal due</dt>
-            <dd className="text-[#e8edf5]">{renewalDue ?? "—"}</dd>
+            <dd className="text-[var(--trk-text)]">{renewalDue ?? "—"}</dd>
           </div>
         </dl>
         {(config.gmail_automatic_ingestion_blockers?.length ?? 0) > 0 && (
@@ -252,7 +252,7 @@ export default function GmailProviderPanel({
             onClick={onConnectGmail}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:border-[#475569] hover:text-[#e8edf5]",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#475569] hover:text-[var(--trk-text)]",
             )}
           >
             Reconnect / Sign in again
@@ -280,12 +280,12 @@ export default function GmailProviderPanel({
         <summary
           className={clsx(
             emailModalBtnFocus,
-            "cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-[#94a3b8] hover:text-[#e8edf5]",
+            "cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-[var(--trk-text-muted)] hover:text-[var(--trk-text)]",
           )}
         >
           Advanced — manual sync & subscription tools
         </summary>
-        <div className="space-y-4 border-t border-[#1e293b] px-4 py-4 text-sm text-[#94a3b8]">
+        <div className="space-y-4 border-t border-[#1e293b] px-4 py-4 text-sm text-[var(--trk-text-muted)]">
           <p className="text-xs leading-relaxed text-[#64748b]">
             For troubleshooting. Routine renewal is handled automatically in production where possible.
           </p>
@@ -318,7 +318,7 @@ export default function GmailProviderPanel({
               disabled={registeringWatch || renewingWatch}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#334155] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {renewingWatch ? "…" : "Extend subscription (if due soon)"}
@@ -335,14 +335,14 @@ export default function GmailProviderPanel({
               Force extend subscription
             </button>
           </div>
-          <div className="rounded border border-[#1e293b] bg-[#0a0e14] p-3 text-xs leading-relaxed text-[#94a3b8]">
+          <div className="rounded border border-[#1e293b] bg-[#0a0e14] p-3 text-xs leading-relaxed text-[var(--trk-text-muted)]">
             <p className="mb-2 font-medium text-[#cbd5e1]">Support checklist</p>
             {loadingGmailHealth && <p>Loading…</p>}
             {!loadingGmailHealth && gmailHealth && (
               <>
                 <p className="mb-2 text-[#64748b]">
                   Automatic pipeline:{" "}
-                  <span className="text-[#e8edf5]">{gmailHealth.automatic_ingestion_ready ? "ready" : "not ready"}</span>
+                  <span className="text-[var(--trk-text)]">{gmailHealth.automatic_ingestion_ready ? "ready" : "not ready"}</span>
                 </p>
                 <ol className="list-decimal space-y-2 pl-5">
                   {gmailHealth.proof_steps.map((s, i) => (

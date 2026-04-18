@@ -18,7 +18,7 @@ const OUTPUT_H = 880;
 const HANDLE_R = 18;
 const HANDLE_HIT = 32;
 const MIN_GAP = 24;
-const CORNER_COLORS = ["#f5a623", "#34d399", "#60a5fa", "#f472b6"];
+const CORNER_COLORS = ["var(--trk-heading)", "#34d399", "var(--trk-accent)", "#f472b6"];
 const CORNER_LABELS = ["TL", "TR", "BR", "BL"];
 const LOUPE_SIZE = 148;
 const LOUPE_SAMPLE = 56;
@@ -679,7 +679,7 @@ export default function DLCornerTool({
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 12 }}>
         <div>
-          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#f5a623", marginBottom: 2 }}>
+          <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--trk-heading)", marginBottom: 2 }}>
             Step - Adjust Card Corners
           </div>
           <div style={{ fontSize: "1rem", fontWeight: 700, color: "#f1f5f9" }}>{label}</div>
@@ -733,7 +733,7 @@ export default function DLCornerTool({
         >
           Right
         </button>
-        <span style={{ fontSize: "0.8rem", fontWeight: 700, color: rotation !== 0 ? "#f5a623" : "#475569", minWidth: 48, textAlign: "right", fontVariantNumeric: "tabular-nums", marginLeft: "auto" }}>
+        <span style={{ fontSize: "0.8rem", fontWeight: 700, color: rotation !== 0 ? "var(--trk-heading)" : "#475569", minWidth: 48, textAlign: "right", fontVariantNumeric: "tabular-nums", marginLeft: "auto" }}>
           {rotation}°
         </span>
         {rotation !== 0 && (
@@ -773,7 +773,7 @@ export default function DLCornerTool({
           disabled={processing || !ready}
           style={{
             marginLeft: "auto",
-            background: processing ? "#2a2d45" : "linear-gradient(135deg, #f5a623, #e8951f)",
+            background: processing ? "#2a2d45" : "linear-gradient(135deg, var(--trk-heading), #e8951f)",
             border: "none",
             borderRadius: 8,
             color: processing ? "#64748b" : "#0d0f18",
@@ -782,7 +782,7 @@ export default function DLCornerTool({
             fontWeight: 800,
             cursor: processing ? "not-allowed" : "pointer",
             letterSpacing: "0.02em",
-            boxShadow: processing ? "none" : "0 2px 16px #f5a62344",
+            boxShadow: processing ? "none" : "0 2px 16px var(--trk-heading)44",
             display: "flex",
             alignItems: "center",
             gap: 8,

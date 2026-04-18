@@ -184,16 +184,16 @@ export const inputClass =
 export const grid2 = "grid grid-cols-1 gap-4 sm:grid-cols-2";
 
 /** Load workspace form — compact card rhythm (light theme, mockup-inspired hierarchy). */
-export const wsSectionCard = "rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm overflow-hidden";
+export const wsSectionCard = "rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden";
 export const wsSectionHeader =
-  "flex items-center justify-between gap-2 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2";
-export const wsSectionTitle = "text-[10px] font-bold uppercase tracking-[0.08em] text-[#7a8299]";
+  "flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[#1e2330] px-3.5 py-2";
+export const wsSectionTitle = "text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]";
 export const wsSectionBody = "px-3.5 py-3";
-export const wsSectionMeta = "text-[10px] font-medium text-[#4a5068]";
+export const wsSectionMeta = "text-[10px] font-medium text-[var(--trk-text-muted)]";
 export const wsLabelClass =
-  "block text-[10px] font-semibold uppercase tracking-wide text-[#7a8299] mb-1";
+  "block text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] mb-1";
 export const wsInputClass =
-  "w-full rounded-md border border-[#252a38] bg-[#1a1e2a] px-2.5 py-1.5 text-sm text-[#e8ecf4] shadow-sm placeholder:text-[#4a5068] focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/25";
+  "w-full rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] px-2.5 py-1.5 text-sm text-[var(--trk-text)] shadow-sm placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/25";
 export const wsGrid2 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2";
 export const wsGrid3 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3";
 

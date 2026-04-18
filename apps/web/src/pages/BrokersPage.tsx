@@ -6,8 +6,8 @@ import { parseBrokerBulkInput } from "@/utils/brokerBulkImport";
 import Button from "@/components/Button";
 
 const INPUT =
-  "w-full rounded border border-[#334155] bg-[#080a0f] px-2.5 py-1.5 text-sm text-[#e8edf5] placeholder:text-[#64748b] focus:border-[#f5a623] focus:ring-0 focus:outline-none";
-const LABEL = "block text-xs text-[#94a3b8] mb-1";
+  "w-full rounded border border-[#334155] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[#64748b] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
+const LABEL = "block text-xs text-[var(--trk-text-muted)] mb-1";
 const SECTION_TITLE = "text-xs font-semibold uppercase tracking-wide text-[#64748b] mb-3 mt-5 first:mt-0";
 
 type AddForm = {
@@ -141,11 +141,11 @@ export default function BrokersPage() {
   const totalPages = Math.max(1, Math.ceil(total / size));
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 text-[#e8edf5]">
+    <div className="mx-auto max-w-7xl px-4 py-8 text-[var(--trk-text)]">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[#f5a623]">Freight brokers</h1>
+          <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-heading)]">Freight brokers</h1>
           <p className="mt-1 text-sm text-[#64748b]">{total} broker{total !== 1 ? "s" : ""}</p>
         </div>
         <Button type="button" variant="primary" onClick={() => { setShowAdd((v) => !v); setAddMsg(null); }}>
@@ -156,7 +156,7 @@ export default function BrokersPage() {
       {/* Add broker form */}
       {showAdd && (
         <form onSubmit={onAdd} className="mb-6 rounded-xl border border-[#1a2231] bg-[#0d111a] p-5">
-          <h2 className="mb-4 text-sm font-semibold text-[#e8edf5]">New broker</h2>
+          <h2 className="mb-4 text-sm font-semibold text-[var(--trk-text)]">New broker</h2>
 
           {/* Identity */}
           <p className={SECTION_TITLE}>Identity</p>
@@ -282,7 +282,7 @@ export default function BrokersPage() {
             placeholder="Search name, MC, domain, alias, sender…"
           />
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-[#94a3b8]">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--trk-text-muted)]">
           <input type="checkbox" checked={includeArchived} onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }} className="rounded border-[#334155]" />
           Show archived
         </label>
@@ -306,17 +306,17 @@ export default function BrokersPage() {
             <tbody className="divide-y divide-[#1a2231]">
               {items.map((b) => (
                 <tr key={b.id} className="hover:bg-[#141924]/60">
-                  <td className="px-4 py-2.5 font-medium text-[#e8edf5]">
+                  <td className="px-4 py-2.5 font-medium text-[var(--trk-text)]">
                     {(b.display_name || b.legal_name || b.name).trim()}
                   </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-[#94a3b8]">{b.mc_number ?? "—"}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-[var(--trk-text-muted)]">{b.mc_number ?? "—"}</td>
                   <td className="px-4 py-2.5">
                     {b.is_active === false
                       ? <span className="rounded bg-[#422006] px-2 py-0.5 text-xs text-[#fdba74]">Archived</span>
                       : <span className="rounded bg-[#052e16] px-2 py-0.5 text-xs text-[#86efac]">Active</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    <Link to={OPS.BROKER_DETAIL(b.id)} className="text-sm font-medium text-[#f5a623] hover:underline">Open →</Link>
+                    <Link to={OPS.BROKER_DETAIL(b.id)} className="text-sm font-medium text-[var(--trk-heading)] hover:underline">Open →</Link>
                   </td>
                 </tr>
               ))}
@@ -341,7 +341,7 @@ export default function BrokersPage() {
       <div className="mt-8 border-t border-[#1a2231] pt-4">
         <button
           type="button"
-          className="text-xs text-[#64748b] hover:text-[#94a3b8]"
+          className="text-xs text-[#64748b] hover:text-[var(--trk-text-muted)]"
           onClick={() => setShowBulk((v) => !v)}
         >
           {showBulk ? "▾" : "▸"} Bulk import
@@ -363,7 +363,7 @@ export default function BrokersPage() {
                 {bulkRunning ? "Importing…" : "Import"}
               </Button>
               {bulkDone && (
-                <span className="text-xs text-[#94a3b8]">
+                <span className="text-xs text-[var(--trk-text-muted)]">
                   <span className="text-emerald-400">{bulkDone.ok}</span> created
                   {bulkDone.fail > 0 && <>, <span className="text-rose-400">{bulkDone.fail}</span> failed</>}
                   {bulkDone.lastError && bulkDone.fail > 0 && (

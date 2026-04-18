@@ -18,7 +18,7 @@ export default function AdminRouteGuard({ children }: Props) {
   // Wait for /me; never redirect when me is null (could be transient state on hard refresh)
   if (loading || !me) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-[#94a3b8]">
+      <div className="flex min-h-screen items-center justify-center text-sm text-[var(--trk-text-muted)]">
         Loading...
       </div>
     );

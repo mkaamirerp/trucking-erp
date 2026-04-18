@@ -561,7 +561,7 @@ export default function AdminEmailConfigPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12 text-[#94a3b8]" role="status" aria-live="polite" aria-busy="true">
+      <div className="flex justify-center py-12 text-[var(--trk-text-muted)]" role="status" aria-live="polite" aria-busy="true">
         Loading email settings…
       </div>
     );
@@ -570,7 +570,7 @@ export default function AdminEmailConfigPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[#e8edf5]">
+        <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">
           Email Configuration
         </h1>
         <p className="mt-1 text-sm text-[#64748b]">
@@ -690,16 +690,16 @@ export default function AdminEmailConfigPage() {
             className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-[#1e293b] bg-[#0d111a] p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 id={disconnectTitleId} className="font-semibold text-[#e8edf5]">
+            <h3 id={disconnectTitleId} className="font-semibold text-[var(--trk-text)]">
               Disconnect this mailbox?
             </h3>
-            <p className="mt-2 text-sm text-[#94a3b8]">Email sync and sending for this tenant may stop.</p>
+            <p className="mt-2 text-sm text-[var(--trk-text-muted)]">Email sync and sending for this tenant may stop.</p>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 data-disconnect-cancel="true"
                 onClick={() => setShowDisconnectConfirm(false)}
-                className={`min-h-[44px] rounded-lg border border-[#334155] px-4 py-2.5 text-sm font-medium text-[#94a3b8] hover:bg-[#1e293b] ${emailModalBtnFocus}`}
+                className={`min-h-[44px] rounded-lg border border-[#334155] px-4 py-2.5 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[#1e293b] ${emailModalBtnFocus}`}
               >
                 Cancel
               </button>

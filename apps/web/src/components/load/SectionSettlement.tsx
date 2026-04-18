@@ -16,8 +16,8 @@ function fmt(n: number) {
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-2 py-1">
-      <span className="text-[11px] text-[#7a8299]">{label}</span>
-      <span className={`text-[12px] text-[#e8ecf4] ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className="text-[11px] text-[var(--trk-text-muted)]">{label}</span>
+      <span className={`text-[12px] text-[var(--trk-text)] ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -60,12 +60,12 @@ export function SectionSettlement({ load }: { load: Load }) {
       <div className={wsSectionHeader}>
         <span className={wsSectionTitle}>Settlement</span>
         {load.trip_number ? (
-          <span className="font-mono text-[10px] text-[#4a5068]">{load.trip_number}</span>
+          <span className="font-mono text-[10px] text-[var(--trk-text-muted)]">{load.trip_number}</span>
         ) : null}
       </div>
       <div className={wsSectionBody}>
         {/* Load-level context */}
-        <div className="mb-4 space-y-0 divide-y divide-[#252a38] rounded-md border border-[#252a38] px-3">
+        <div className="mb-4 space-y-0 divide-y divide-[var(--trk-border)] rounded-md border border-[var(--trk-border)] px-3">
           <Row
             label="Driver"
             value={
@@ -81,24 +81,24 @@ export function SectionSettlement({ load }: { load: Load }) {
         </div>
 
         {loading ? (
-          <p className="py-4 text-center text-xs text-[#7a8299]">Loading pay items…</p>
+          <p className="py-4 text-center text-xs text-[var(--trk-text-muted)]">Loading pay items…</p>
         ) : error ? (
           <p className="rounded-md border border-red-900/40 bg-red-950/20 px-3 py-2 text-xs text-red-400">{error}</p>
         ) : items.length === 0 ? (
-          <p className="rounded-md border border-dashed border-[#252a38] px-3 py-4 text-center text-xs text-[#4a5068]">
+          <p className="rounded-md border border-dashed border-[var(--trk-border)] px-3 py-4 text-center text-xs text-[var(--trk-text-muted)]">
             No pay run items found for this load.
           </p>
         ) : (
           <div className="space-y-3">
             {earnings.length > 0 && (
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">Earnings</p>
-                <div className="divide-y divide-[#252a38] rounded-md border border-[#252a38] px-3">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Earnings</p>
+                <div className="divide-y divide-[var(--trk-border)] rounded-md border border-[var(--trk-border)] px-3">
                   {earnings.map((item) => (
                     <div key={item.id} className="flex items-baseline justify-between gap-2 py-1.5">
                       <div className="min-w-0">
-                        <p className="truncate text-[12px] text-[#e8ecf4]">{item.description}</p>
-                        <p className="text-[10px] text-[#4a5068]">
+                        <p className="truncate text-[12px] text-[var(--trk-text)]">{item.description}</p>
+                        <p className="text-[10px] text-[var(--trk-text-muted)]">
                           {item.source_type.replace(/_/g, " ")}
                           {item.quantity != null && item.unit_rate != null
                             ? ` · ${item.quantity} × ${fmt(item.unit_rate)}`
@@ -118,13 +118,13 @@ export function SectionSettlement({ load }: { load: Load }) {
 
             {deductions.length > 0 && (
               <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">Deductions</p>
-                <div className="divide-y divide-[#252a38] rounded-md border border-[#252a38] px-3">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Deductions</p>
+                <div className="divide-y divide-[var(--trk-border)] rounded-md border border-[var(--trk-border)] px-3">
                   {deductions.map((item) => (
                     <div key={item.id} className="flex items-baseline justify-between gap-2 py-1.5">
                       <div className="min-w-0">
-                        <p className="truncate text-[12px] text-[#e8ecf4]">{item.description}</p>
-                        <p className="text-[10px] text-[#4a5068]">{item.source_type.replace(/_/g, " ")}</p>
+                        <p className="truncate text-[12px] text-[var(--trk-text)]">{item.description}</p>
+                        <p className="text-[10px] text-[var(--trk-text-muted)]">{item.source_type.replace(/_/g, " ")}</p>
                       </div>
                       <span className="shrink-0 font-mono text-[12px] text-red-400">
                         {fmt(item.amount_signed)}
@@ -135,8 +135,8 @@ export function SectionSettlement({ load }: { load: Load }) {
               </div>
             )}
 
-            <div className="flex items-center justify-between border-t border-[#252a38] pt-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#7a8299]">Net driver pay</span>
+            <div className="flex items-center justify-between border-t border-[var(--trk-border)] pt-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Net driver pay</span>
               <span className={`font-mono text-sm font-bold ${net >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {fmt(net)}
               </span>

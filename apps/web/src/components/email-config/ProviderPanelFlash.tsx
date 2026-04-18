@@ -22,7 +22,7 @@ export default function ProviderPanelFlash({ variant, message, onDismiss }: Prop
       <button
         type="button"
         onClick={onDismiss}
-        className={`flex h-11 min-w-11 shrink-0 items-center justify-center rounded text-lg leading-none text-[#94a3b8] transition hover:bg-white/5 hover:text-[#e8edf5] ${emailBtnFocus}`}
+        className={`flex h-11 min-w-11 shrink-0 items-center justify-center rounded text-lg leading-none text-[var(--trk-text-muted)] transition hover:bg-white/5 hover:text-[var(--trk-text)] ${emailBtnFocus}`}
         aria-label="Dismiss this message"
       >
         <span aria-hidden="true">×</span>

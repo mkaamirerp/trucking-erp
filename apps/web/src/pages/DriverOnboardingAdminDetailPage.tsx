@@ -148,16 +148,16 @@ const C = {
   surface: "#16181e",
   surf2: "#1e2029",
   border: "#2a2d36",
-  accent: "#f5a623",
+  accent: "var(--trk-heading)",
   red: "#e8380d",
-  green: "#2ecc71",
+  green: "var(--trk-success)",
   text: "#e8e9ec",
   muted: "#72747e",
   muted2: "#3a3d4a",
 };
 
 const STATUS_CFG: Record<string, { label: string; color: string; glow: string }> = {
-  DRAFT: { label: "Draft", color: "#94a3b8", glow: "rgba(148,163,184,0.15)" },
+  DRAFT: { label: "Draft", color: "var(--trk-text-muted)", glow: "rgba(148,163,184,0.15)" },
   SUBMITTED: { label: "Submitted", color: C.accent, glow: "rgba(245,166,35,0.2)" },
   APPROVED: { label: "Approved", color: C.green, glow: "rgba(46,204,113,0.2)" },
   REJECTED: { label: "Rejected", color: C.red, glow: "rgba(232,56,13,0.2)" },

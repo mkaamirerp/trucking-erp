@@ -86,7 +86,7 @@ function ThreadMessageList({
   return (
     <>
       {loadingMessages && selectedThreadId ? (
-        <div className="text-sm text-[#94a3b8]">Loading messages…</div>
+        <div className="text-sm text-[var(--trk-text-muted)]">Loading messages…</div>
       ) : null}
       {!loadingMessages && messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : null}
       {!loadingMessages && !messagesError && selectedThreadId && messages.length === 0 ? (
@@ -102,17 +102,17 @@ function ThreadMessageList({
                     outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[#1e293b] bg-[#0d111a]"
                   }`}
                 >
-                  <div className="mb-2 grid gap-1 text-xs text-[#94a3b8] md:grid-cols-2">
+                  <div className="mb-2 grid gap-1 text-xs text-[var(--trk-text-muted)] md:grid-cols-2">
                     <span>From: {m.from_email || "—"}</span>
                     <span className="md:text-right">{formatWhen(m.received_at || m.sent_at || m.created_at)}</span>
                     <span className="md:col-span-2">To: {recipientPreview(m.to_json)}</span>
                     {m.subject ? <span className="md:col-span-2">Subject: {m.subject}</span> : null}
                   </div>
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-[#e8edf5]">
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-[var(--trk-text)]">
                     {m.body_text || m.snippet || "No message body available."}
                   </p>
                   {m.attachments && m.attachments.length > 0 ? (
-                    <ul className="mt-2 space-y-1 text-xs text-[#94a3b8]">
+                    <ul className="mt-2 space-y-1 text-xs text-[var(--trk-text-muted)]">
                       {m.attachments.map((a) => (
                         <li key={a.id}>
                           <span className="text-[#cbd5e1]">{a.filename || a.external_attachment_id}</span>
@@ -123,7 +123,7 @@ function ThreadMessageList({
                     </ul>
                   ) : null}
                   {m.has_attachments && (!m.attachments || m.attachments.length === 0) ? (
-                    <p className="mt-2 text-xs text-[#94a3b8]">Has attachments (metadata pending or inline-only).</p>
+                    <p className="mt-2 text-xs text-[var(--trk-text-muted)]">Has attachments (metadata pending or inline-only).</p>
                   ) : null}
                 </article>
               </div>
@@ -583,14 +583,14 @@ export default function LoadInboxPage() {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <span className="text-sm font-semibold text-[#e8edf5]">Load {loadLabel}</span>
+                <span className="text-sm font-semibold text-[var(--trk-text)]">Load {loadLabel}</span>
                 <p className="mt-0.5 text-[11px] text-[#64748b]">Trip {tripLabel}</p>
               </div>
               <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${confidenceClass(t.confidence_level)}`}>
                 {confidenceLabel(t.confidence_level)}
               </span>
             </div>
-            <div className="text-xs text-[#94a3b8]">{broker}</div>
+            <div className="text-xs text-[var(--trk-text-muted)]">{broker}</div>
             <div className="line-clamp-2 text-xs text-[#64748b]">
               {t.pickup_delivery_summary || t.snippet || "No route summary yet."}
             </div>
@@ -623,12 +623,12 @@ export default function LoadInboxPage() {
         ) : (
           <div className="flex flex-col gap-1">
             <div className="flex items-start justify-between gap-2">
-              <span className="line-clamp-2 text-sm font-medium text-[#e8edf5]">{threadIntakePrimaryLabel(t)}</span>
+              <span className="line-clamp-2 text-sm font-medium text-[var(--trk-text)]">{threadIntakePrimaryLabel(t)}</span>
               <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${confidenceClass(t.confidence_level)}`}>
                 {confidenceLabel(t.confidence_level)}
               </span>
             </div>
-            <p className="text-xs text-[#94a3b8]">{broker}</p>
+            <p className="text-xs text-[var(--trk-text-muted)]">{broker}</p>
             <p
               className="line-clamp-2 text-[11px] text-[#64748b]"
               title={formatRoutingReason(t.routing_reason)}
@@ -655,11 +655,11 @@ export default function LoadInboxPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="max-w-2xl">
-          <h1 className="text-xl font-semibold text-[#e8edf5]">{pageTitle}</h1>
+          <h1 className="text-xl font-semibold text-[var(--trk-text)]">{pageTitle}</h1>
           <p className="text-sm text-[#64748b]">{pageSubtitle}</p>
           {isEmailLoadRoute ? (
             <details className="mt-2 text-xs text-[#64748b] marker:text-[#475569]">
-              <summary className="cursor-pointer text-[#94a3b8] hover:text-[#cbd5e1]">Ingestion &amp; troubleshooting</summary>
+              <summary className="cursor-pointer text-[var(--trk-text-muted)] hover:text-[#cbd5e1]">Ingestion &amp; troubleshooting</summary>
               <p className="mt-2 leading-relaxed">
                 New Gmail is classified and routed via backend sync (push → delta → route). Use Refresh to reload this list
                 from the server. Pull new mail is optional if push was delayed or you are debugging.
@@ -667,7 +667,7 @@ export default function LoadInboxPage() {
             </details>
           ) : (
             <p className="mt-2 text-xs text-[#64748b]">
-              Open <strong className="text-[#94a3b8]">Email load</strong> for sync, queues, and ingestion tools. This screen
+              Open <strong className="text-[var(--trk-text-muted)]">Email load</strong> for sync, queues, and ingestion tools. This screen
               focuses on verification and draft load creation.
             </p>
           )}
@@ -676,7 +676,7 @@ export default function LoadInboxPage() {
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]"
+            className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
           >
             <option value="">All providers</option>
             <option value="gmail">Gmail</option>
@@ -688,7 +688,7 @@ export default function LoadInboxPage() {
               setStatus(v);
               if (v !== "active") setQueueFocus("intake");
             }}
-            className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]"
+            className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
           >
             <option value="active">Active threads</option>
             <option value="">All statuses</option>
@@ -699,7 +699,7 @@ export default function LoadInboxPage() {
             <select
               value={queueFocus}
               onChange={(e) => setQueueFocus(e.target.value as "intake" | "linked")}
-              className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]"
+              className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
             >
               <option value="intake">Queues: New loads + Needs review</option>
               <option value="linked">Linked threads</option>
@@ -708,7 +708,7 @@ export default function LoadInboxPage() {
           <button
             type="button"
             onClick={() => loadThreads({ keepSelection: true })}
-            className="rounded border border-[#334155] px-3 py-2 text-sm text-[#e8edf5] hover:bg-[#0f1420]"
+            className="rounded border border-[#334155] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[#0f1420]"
           >
             Refresh list
           </button>
@@ -740,7 +740,7 @@ export default function LoadInboxPage() {
         <section className="flex flex-col rounded-xl border border-[#1e293b] bg-[#0a0e14]">
           <div className="border-b border-[#1e293b] px-4 py-3 text-sm font-semibold text-[#cbd5e1]">Queues</div>
           <div className="max-h-[560px] flex-1 overflow-auto">
-            {loadingThreads && <div className="px-4 py-6 text-sm text-[#94a3b8]">Loading…</div>}
+            {loadingThreads && <div className="px-4 py-6 text-sm text-[var(--trk-text-muted)]">Loading…</div>}
             {!loadingThreads && threadsError && <div className="px-4 py-6 text-sm text-red-400">{threadsError}</div>}
             {!loadingThreads &&
               !threadsError &&
@@ -760,7 +760,7 @@ export default function LoadInboxPage() {
             {!loadingThreads && !threadsError && isBandView && (
               <>
                 <div className="border-b border-[#1e293b] bg-[#0d111a] px-3 py-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#94a3b8]">New loads</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">New loads</p>
                   <p className="text-[11px] text-[#64748b]">Auto-created loads with trip numbers; verify in Loads.</p>
                 </div>
                 {bandNewLoads.length === 0 ? (
@@ -770,7 +770,7 @@ export default function LoadInboxPage() {
                 )}
 
                 <div className="border-b border-t border-[#1e293b] bg-[#0d111a] px-3 py-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#94a3b8]">Needs review</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">Needs review</p>
                   <p className="text-[11px] text-[#64748b]">Rate cons and broker mail — verify, link, or ignore.</p>
                 </div>
                 {bandNeedsReview.length === 0 ? (
@@ -780,7 +780,7 @@ export default function LoadInboxPage() {
                 )}
 
                 <div className="border-b border-t border-[#1e293b] bg-[#0d111a] px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[#94a3b8]">Other synced mail</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Other synced mail</p>
                   <p className="text-[11px] text-[#64748b]">
                     Non–broker-intake threads (still in Gmail). Open from here or disregard.
                   </p>
@@ -807,8 +807,8 @@ export default function LoadInboxPage() {
                       active ? "bg-[#131a27]" : "hover:bg-[#0f1420]"
                     }`}
                   >
-                    <p className="truncate text-sm font-semibold text-[#e8edf5]">{t.subject || "(No subject)"}</p>
-                    <p className="mt-1 text-xs text-[#94a3b8]">
+                    <p className="truncate text-sm font-semibold text-[var(--trk-text)]">{t.subject || "(No subject)"}</p>
+                    <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
                       {t.linked_load_number ? `Load ${t.linked_load_number}` : `Load id ${t.linked_load_id ?? "—"}`}
                     </p>
                     <p className="mt-0.5 text-[11px] text-[#64748b]">Trip {t.linked_trip_number?.trim() || "—"}</p>
@@ -830,12 +830,12 @@ export default function LoadInboxPage() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className="truncate text-sm font-semibold text-[#e8edf5]">{t.subject || "(No subject)"}</p>
+                      <p className="truncate text-sm font-semibold text-[var(--trk-text)]">{t.subject || "(No subject)"}</p>
                       {t.unread_count > 0 && (
-                        <span className="rounded-full bg-[#f5a623]/20 px-2 py-0.5 text-xs text-[#f5a623]">{t.unread_count}</span>
+                        <span className="rounded-full bg-[var(--trk-heading)]/20 px-2 py-0.5 text-xs text-[var(--trk-heading)]">{t.unread_count}</span>
                       )}
                     </div>
-                    <p className="mt-1 truncate text-xs text-[#94a3b8]">{participantPreview(t.participants_json)}</p>
+                    <p className="mt-1 truncate text-xs text-[var(--trk-text-muted)]">{participantPreview(t.participants_json)}</p>
                     <p className="mt-1 truncate text-xs text-[#64748b]">{t.snippet || "No snippet"}</p>
                     <div className="mt-2 flex items-center justify-between text-[11px] text-[#64748b]">
                       <span>{formatWhen(t.last_message_at || t.created_at)}</span>
@@ -858,7 +858,7 @@ export default function LoadInboxPage() {
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-sm font-semibold text-[#e8edf5]">
+                  <h2 className="truncate text-sm font-semibold text-[var(--trk-text)]">
                     {selectedThread.intake_bucket === "needs_review" || selectedThread.intake_bucket === "background"
                       ? threadIntakePrimaryLabel(selectedThread)
                       : selectedThread.subject || "(No subject)"}
@@ -870,7 +870,7 @@ export default function LoadInboxPage() {
                     {selectedThread.confidence_level ? ` · ${confidenceLabel(selectedThread.confidence_level)}` : ""}
                   </p>
                   {selectedThread.pickup_delivery_summary ? (
-                    <p className="mt-0.5 truncate text-[11px] text-[#94a3b8]/90">{selectedThread.pickup_delivery_summary}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-[var(--trk-text-muted)]/90">{selectedThread.pickup_delivery_summary}</p>
                   ) : null}
                   {selectedThread.linked_load_id ? (
                     <p className="mt-0.5 truncate text-[11px] text-[#64748b]">
@@ -951,7 +951,7 @@ export default function LoadInboxPage() {
                     onChange={handleUploadDocumentChange}
                   />
                   <p className="mb-3 text-xs text-[#64748b]">
-                    Read and triage mail here. Open <span className="text-[#94a3b8]">Load Intake</span> for verify, form,
+                    Read and triage mail here. Open <span className="text-[var(--trk-text-muted)]">Load Intake</span> for verify, form,
                     and create-load.
                   </p>
                   <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[#1e293b] pb-4">
@@ -976,7 +976,7 @@ export default function LoadInboxPage() {
                       disabled={
                         !(selectedThread.provider === "gmail" && selectedThread.status === "active") || recomputingIntake
                       }
-                      className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {recomputingIntake ? "Re-parsing…" : "Re-parse"}
                     </button>
@@ -1055,7 +1055,7 @@ export default function LoadInboxPage() {
           aria-label="Link existing load"
         >
           <div className="w-full max-w-md rounded-xl border border-[#1e293b] bg-[#0a0e14] p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-[#e8edf5]">Link Existing Load</h3>
+            <h3 className="text-sm font-semibold text-[var(--trk-text)]">Link Existing Load</h3>
             <p className="mt-1 text-xs text-[#64748b]">Search by load number, broker reference, or broker name.</p>
             <div className="mt-3 flex gap-2">
               <input
@@ -1063,13 +1063,13 @@ export default function LoadInboxPage() {
                 onChange={(e) => setLinkSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && runLinkSearch()}
                 placeholder="Search…"
-                className="flex-1 rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]"
+                className="flex-1 rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
               />
               <button
                 type="button"
                 onClick={runLinkSearch}
                 disabled={linkLoading}
-                className="rounded border border-[#334155] px-3 py-2 text-sm text-[#e8edf5] hover:bg-[#0f1420] disabled:opacity-50"
+                className="rounded border border-[#334155] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[#0f1420] disabled:opacity-50"
               >
                 {linkLoading ? "…" : "Search"}
               </button>
@@ -1084,11 +1084,11 @@ export default function LoadInboxPage() {
                   className="flex items-center justify-between gap-2 border-b border-[#111827] px-3 py-2 text-xs"
                 >
                   <div>
-                    <div className="font-medium text-[#e8edf5]">{ld.load_number}</div>
+                    <div className="font-medium text-[var(--trk-text)]">{ld.load_number}</div>
                     <div className="text-[11px] text-[#64748b]">
                       Trip {ld.trip_number?.trim() || "—"}
                     </div>
-                    <div className="text-[#94a3b8]">
+                    <div className="text-[var(--trk-text-muted)]">
                       {[ld.broker_load_reference, ld.broker_name_snapshot].filter(Boolean).join(" · ") || "—"}
                     </div>
                   </div>
@@ -1110,7 +1110,7 @@ export default function LoadInboxPage() {
                   setLinkModalOpen(false);
                   setLinkResults([]);
                 }}
-                className="rounded border border-[#334155] px-3 py-1.5 text-xs text-[#e8edf5] hover:bg-[#0f1420]"
+                className="rounded border border-[#334155] px-3 py-1.5 text-xs text-[var(--trk-text)] hover:bg-[#0f1420]"
               >
                 Cancel
               </button>

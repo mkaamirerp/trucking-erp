@@ -43,13 +43,13 @@ const TRAILER_STATUS_OPTIONS = [
 ] as const;
 
 const FORM_INPUT_CLS =
-  "w-full rounded border border-[#334155] bg-[#080a0f] px-2.5 py-1.5 text-sm text-[#e8edf5] focus:border-[#f5a623] focus:ring-0 focus:outline-none";
-const FORM_LABEL_CLS = "block text-xs font-medium text-[#94a3b8] mb-1";
+  "w-full rounded border border-[#334155] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
+const FORM_LABEL_CLS = "block text-xs font-medium text-[var(--trk-text-muted)] mb-1";
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <fieldset>
-      <legend className="text-sm font-semibold text-[#e8edf5] mb-3">{title}</legend>
+      <legend className="text-sm font-semibold text-[var(--trk-text)] mb-3">{title}</legend>
       <div className="grid grid-cols-2 gap-3">{children}</div>
     </fieldset>
   );
@@ -67,7 +67,7 @@ function FormField({
   return (
     <div className="col-span-2 sm:col-span-1">
       <label className={FORM_LABEL_CLS}>
-        {label} {required && <span className="text-[#f5a623]">*</span>}
+        {label} {required && <span className="text-[var(--trk-heading)]">*</span>}
       </label>
       {children}
     </div>
@@ -107,14 +107,14 @@ function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: num
       className="border-t border-[#1e293b] hover:bg-[#0f1419]/50 cursor-pointer"
       onClick={() => onNavigate(load.id)}
     >
-      <td className="px-4 py-2 text-xs font-medium text-[#f5a623]">
+      <td className="px-4 py-2 text-xs font-medium text-[var(--trk-heading)]">
         #{load.load_number}
       </td>
-      <td className="px-4 py-2 text-xs text-[#94a3b8]">{load.trip_number?.trim() || "—"}</td>
-      <td className="px-4 py-2 text-xs text-[#94a3b8]">
+      <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">{load.trip_number?.trim() || "—"}</td>
+      <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
         {formatRouteFromStops(load.stops)}
       </td>
-      <td className="px-4 py-2 text-xs text-[#94a3b8]">
+      <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
         {formatDate(firstPickupAppointmentDate(load.stops))}
       </td>
       <td className="px-4 py-2 text-xs">
@@ -122,10 +122,10 @@ function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: num
           {STATUS_LABELS[load.status ?? ""] ?? load.status ?? "—"}
         </span>
       </td>
-      <td className="px-4 py-2 text-xs text-[#94a3b8]">
+      <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
         {load.truck ? `Truck ${load.truck.unit_number}` : "—"}
       </td>
-      <td className="px-4 py-2 text-xs text-[#94a3b8]">
+      <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
         {load.trailer ? `Trailer ${load.trailer.unit_number}` : "—"}
       </td>
       <td className="px-4 py-2 text-xs text-[#64748b]">
@@ -168,25 +168,25 @@ function AssetRow({
           <button
             type="button"
             onClick={onToggle}
-            className="text-[#64748b] hover:text-[#e8edf5] text-sm font-mono"
+            className="text-[#64748b] hover:text-[var(--trk-text)] text-sm font-mono"
             aria-expanded={expanded}
           >
             {expanded ? "▼" : "▶"}
           </button>
         </td>
-        <td className="px-4 py-2 text-sm font-semibold text-[#e8edf5]">
+        <td className="px-4 py-2 text-sm font-semibold text-[var(--trk-text)]">
           {asset.unit_number}
         </td>
-        <td className="px-4 py-2 text-sm text-[#94a3b8]">
+        <td className="px-4 py-2 text-sm text-[var(--trk-text-muted)]">
           {"vin" in asset ? (asset.vin ?? "—") : "—"}
         </td>
-        <td className="px-4 py-2 text-sm text-[#94a3b8]">
+        <td className="px-4 py-2 text-sm text-[var(--trk-text-muted)]">
           {asset.make && asset.model ? `${asset.make} ${asset.model}` : asset.make ?? asset.model ?? "—"}
         </td>
-        <td className="px-4 py-2 text-sm text-[#94a3b8]">
+        <td className="px-4 py-2 text-sm text-[var(--trk-text-muted)]">
           {"trailer_type" in asset ? (asset.trailer_type ?? "—") : "—"}
         </td>
-        <td className="px-4 py-2 text-sm text-[#94a3b8]">
+        <td className="px-4 py-2 text-sm text-[var(--trk-text-muted)]">
           {asset.plate_number ?? "—"}
         </td>
         <td className="px-4 py-2 text-sm">
@@ -207,17 +207,17 @@ function AssetRow({
           <button
             type="button"
             onClick={onEdit}
-            className="text-[#f5a623] hover:underline text-xs font-medium"
+            className="text-[var(--trk-heading)] hover:underline text-xs font-medium"
           >
             Edit
           </button>
         </td>
       </tr>
       {expanded && (
-        <tr className="border-t border-[#1e293b] bg-[#080a0f]">
+        <tr className="border-t border-[#1e293b] bg-[var(--trk-bg)]">
           <td colSpan={8} className="px-4 py-3">
             <div className="rounded border border-[#1e293b] bg-[#0d1117] overflow-hidden">
-              <div className="px-4 py-2 border-b border-[#1e293b] text-xs font-semibold text-[#94a3b8]">
+              <div className="px-4 py-2 border-b border-[#1e293b] text-xs font-semibold text-[var(--trk-text-muted)]">
                 Assignment history — loads this {isTruck ? "truck" : "trailer"} was assigned to
               </div>
               {loadHistoryLoading ? (
@@ -320,7 +320,7 @@ export default function FleetPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[#e8edf5]">Fleet</h1>
+          <h1 className="text-xl font-semibold text-[var(--trk-text)]">Fleet</h1>
           <p className="text-sm text-[#64748b]">
             Trucks and trailers — add assets, view assignment history.
           </p>
@@ -334,8 +334,8 @@ export default function FleetPage() {
           className={clsx(
             "px-4 py-2 text-sm font-medium rounded-t border-b-2 -mb-px transition-colors",
             tab === "trucks"
-              ? "border-[#f5a623] text-[#f5a623]"
-              : "border-transparent text-[#64748b] hover:text-[#94a3b8]"
+              ? "border-[var(--trk-heading)] text-[var(--trk-heading)]"
+              : "border-transparent text-[#64748b] hover:text-[var(--trk-text-muted)]"
           )}
         >
           Trucks ({trucks.length})
@@ -346,8 +346,8 @@ export default function FleetPage() {
           className={clsx(
             "px-4 py-2 text-sm font-medium rounded-t border-b-2 -mb-px transition-colors",
             tab === "trailers"
-              ? "border-[#f5a623] text-[#f5a623]"
-              : "border-transparent text-[#64748b] hover:text-[#94a3b8]"
+              ? "border-[var(--trk-heading)] text-[var(--trk-heading)]"
+              : "border-transparent text-[#64748b] hover:text-[var(--trk-text-muted)]"
           )}
         >
           Trailers ({trailers.length})
@@ -363,7 +363,7 @@ export default function FleetPage() {
       {tab === "trucks" && (
         <div className="rounded-lg border border-[#1e293b] bg-[#0d1117] overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e293b]">
-            <span className="text-sm font-semibold text-[#e8edf5]">Trucks</span>
+            <span className="text-sm font-semibold text-[var(--trk-text)]">Trucks</span>
             <button
               type="button"
               onClick={() => {
@@ -373,7 +373,7 @@ export default function FleetPage() {
                 setEditTrailer(null);
                 setAddError(null);
               }}
-              className="px-3 py-1.5 rounded bg-[#f5a623] text-[#080a0f] text-sm font-medium hover:bg-[#e59520]"
+              className="px-3 py-1.5 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520]"
             >
               + Add Truck
             </button>
@@ -435,7 +435,7 @@ export default function FleetPage() {
       {tab === "trailers" && (
         <div className="rounded-lg border border-[#1e293b] bg-[#0d1117] overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e293b]">
-            <span className="text-sm font-semibold text-[#e8edf5]">Trailers</span>
+            <span className="text-sm font-semibold text-[var(--trk-text)]">Trailers</span>
             <button
               type="button"
               onClick={() => {
@@ -445,7 +445,7 @@ export default function FleetPage() {
                 setEditTrailer(null);
                 setAddError(null);
               }}
-              className="px-3 py-1.5 rounded bg-[#f5a623] text-[#080a0f] text-sm font-medium hover:bg-[#e59520]"
+              className="px-3 py-1.5 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520]"
             >
               + Add Trailer
             </button>
@@ -708,11 +708,11 @@ function AddTruckForm({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
-          <h2 className="text-lg font-semibold text-[#e8edf5]">Add Truck Asset</h2>
+          <h2 className="text-lg font-semibold text-[var(--trk-text)]">Add Truck Asset</h2>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 text-[#64748b] hover:text-[#e8edf5] rounded hover:bg-[#1e293b]"
+            className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]"
             aria-label="Close"
           >
             ✕
@@ -931,14 +931,14 @@ function AddTruckForm({
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 rounded bg-[#f5a623] text-[#080a0f] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50"
+              className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50"
             >
               {saving ? "Adding…" : "Add Truck"}
             </button>
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 rounded border border-[#334155] text-[#94a3b8] text-sm hover:bg-[#1e293b]"
+              className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]"
             >
               Cancel
             </button>
@@ -1056,11 +1056,11 @@ function AddTrailerForm({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
-          <h2 className="text-lg font-semibold text-[#e8edf5]">Add Trailer Asset</h2>
+          <h2 className="text-lg font-semibold text-[var(--trk-text)]">Add Trailer Asset</h2>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 text-[#64748b] hover:text-[#e8edf5] rounded hover:bg-[#1e293b]"
+            className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]"
             aria-label="Close"
           >
             ✕
@@ -1178,10 +1178,10 @@ function AddTrailerForm({
 
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
           <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[#f5a623] text-[#080a0f] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
               {saving ? "Adding…" : "Add Trailer"}
             </button>
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[#94a3b8] text-sm hover:bg-[#1e293b]">
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]">
               Cancel
             </button>
           </div>
@@ -1326,11 +1326,11 @@ function EditTruckForm({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
-          <h2 className="text-lg font-semibold text-[#e8edf5]">Edit Truck — {truck.unit_number}</h2>
+          <h2 className="text-lg font-semibold text-[var(--trk-text)]">Edit Truck — {truck.unit_number}</h2>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 text-[#64748b] hover:text-[#e8edf5] rounded hover:bg-[#1e293b]"
+            className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]"
             aria-label="Close"
           >
             ✕
@@ -1441,10 +1441,10 @@ function EditTruckForm({
           </div>
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
           <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[#f5a623] text-[#080a0f] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
               {saving ? "Saving…" : "Save"}
             </button>
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[#94a3b8] text-sm hover:bg-[#1e293b]">
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]">
               Cancel
             </button>
           </div>
@@ -1561,8 +1561,8 @@ function EditTrailerForm({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
-          <h2 className="text-lg font-semibold text-[#e8edf5]">Edit Trailer — {trailer.unit_number}</h2>
-          <button type="button" onClick={onCancel} className="p-2 text-[#64748b] hover:text-[#e8edf5] rounded hover:bg-[#1e293b]" aria-label="Close">✕</button>
+          <h2 className="text-lg font-semibold text-[var(--trk-text)]">Edit Trailer — {trailer.unit_number}</h2>
+          <button type="button" onClick={onCancel} className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]" aria-label="Close">✕</button>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 overflow-y-auto">
           <div className="flex-1 px-6 py-5 space-y-6">
@@ -1626,8 +1626,8 @@ function EditTrailerForm({
           </div>
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
           <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[#f5a623] text-[#080a0f] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[#94a3b8] text-sm hover:bg-[#1e293b]">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]">Cancel</button>
           </div>
         </form>
       </div>

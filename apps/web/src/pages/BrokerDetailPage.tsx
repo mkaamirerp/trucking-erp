@@ -19,13 +19,13 @@ import Button from "@/components/Button";
 // ─── Shared style tokens ────────────────────────────────────────────────────
 
 const INPUT =
-  "w-full rounded border border-[#334155] bg-[#080a0f] px-2.5 py-1.5 text-sm text-[#e8edf5] placeholder:text-[#64748b] focus:border-[#f5a623] focus:ring-0 focus:outline-none";
+  "w-full rounded border border-[#334155] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[#64748b] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
 const TEXTAREA = `${INPUT} min-h-[72px] resize-y`;
-const LABEL = "block text-xs text-[#94a3b8] mb-1";
+const LABEL = "block text-xs text-[var(--trk-text-muted)] mb-1";
 const SECTION = "rounded-xl border border-[#1a2231] bg-[#0d111a] p-5";
-const SECTION_HEADING = "text-sm font-semibold text-[#e8edf5] mb-4";
+const SECTION_HEADING = "text-sm font-semibold text-[var(--trk-text)] mb-4";
 const SUBSECTION_HEADING = "text-xs font-semibold uppercase tracking-wide text-[#64748b] mb-2";
-const READ_ONLY_VALUE = "min-h-[38px] rounded border border-transparent bg-transparent px-0 py-1.5 text-sm text-[#e8edf5]";
+const READ_ONLY_VALUE = "min-h-[38px] rounded border border-transparent bg-transparent px-0 py-1.5 text-sm text-[var(--trk-text)]";
 
 // ─── Root page ───────────────────────────────────────────────────────────────
 
@@ -117,16 +117,16 @@ export default function BrokerDetailPage() {
     return (
       <div className="p-8 text-rose-400">
         Invalid id.{" "}
-        <Link to={OPS.BROKERS} className="text-[#f5a623]">
+        <Link to={OPS.BROKERS} className="text-[var(--trk-heading)]">
           Back
         </Link>
       </div>
     );
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 text-[#e8edf5]">
+    <div className="mx-auto max-w-5xl px-4 py-8 text-[var(--trk-text)]">
       <div className="mb-5">
-        <Link to={OPS.BROKERS} className="text-sm text-[#f5a623] hover:underline">
+        <Link to={OPS.BROKERS} className="text-sm text-[var(--trk-heading)] hover:underline">
           ← Freight brokers
         </Link>
       </div>
@@ -211,7 +211,7 @@ function Header({
 
   return (
     <div className="border-b border-[#1a2231] pb-5">
-      <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[#f5a623]">{label}</h1>
+      <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-heading)]">{label}</h1>
 
       <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
@@ -271,17 +271,17 @@ function MetaChip({
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[#94a3b8]">
+    <span className="inline-flex items-center gap-1.5 text-[var(--trk-text-muted)]">
       <span className="text-xs uppercase tracking-wide text-[#64748b]">{label}</span>
       {editing ? (
         <input
-          className="w-28 rounded border border-[#334155] bg-[#080a0f] px-2 py-1 text-sm text-[#e8edf5] focus:border-[#f5a623] focus:outline-none"
+          className="w-28 rounded border border-[#334155] bg-[var(--trk-bg)] px-2 py-1 text-sm text-[var(--trk-text)] focus:border-[var(--trk-heading)] focus:outline-none"
           value={value}
           onChange={onChange}
           placeholder="—"
         />
       ) : (
-        <span className="font-medium text-[#e8edf5]">{value?.trim() || "—"}</span>
+        <span className="font-medium text-[var(--trk-text)]">{value?.trim() || "—"}</span>
       )}
     </span>
   );
@@ -534,13 +534,13 @@ function ContactsSection({
           <tbody className="divide-y divide-[#1a2231]">
             {active.map((c) => (
               <tr key={c.id} className="hover:bg-[#141924]/60">
-                <td className="whitespace-nowrap px-3 py-2 font-medium text-[#e8edf5]">{c.name}</td>
-                <td className="px-3 py-2 text-[#94a3b8]">{c.role ?? "—"}</td>
-                <td className="px-3 py-2 text-[#94a3b8]">{c.department ?? "—"}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-[#94a3b8]">{c.phone ?? "—"}</td>
-                <td className="px-3 py-2 text-[#94a3b8]">{c.extension ?? "—"}</td>
-                <td className="px-3 py-2 text-[#94a3b8]">{c.fax ?? "—"}</td>
-                <td className="px-3 py-2 text-[#94a3b8]">{c.email ?? "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2 font-medium text-[var(--trk-text)]">{c.name}</td>
+                <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.role ?? "—"}</td>
+                <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.department ?? "—"}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-[var(--trk-text-muted)]">{c.phone ?? "—"}</td>
+                <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.extension ?? "—"}</td>
+                <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.fax ?? "—"}</td>
+                <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.email ?? "—"}</td>
                 <td className="px-3 py-2 text-center">
                   {c.is_primary && (
                     <span className="rounded bg-[#1e3a5f] px-1.5 py-0.5 text-[10px] text-[#93c5fd]">primary</span>
@@ -586,7 +586,7 @@ function ContactsSection({
           </div>
         </div>
         <div className="mt-3 flex items-center gap-4">
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-[#94a3b8]">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--trk-text-muted)]">
             <input
               type="checkbox"
               checked={form.is_primary}
@@ -631,8 +631,8 @@ function EmailRulesSection({
       <h2 className={SECTION_HEADING}>Email matching rules</h2>
       <p className="mb-5 text-xs text-[#64748b]">
         Precedence when an email arrives:{" "}
-        <span className="text-[#94a3b8]">known sender</span> (exact From address) → <span className="text-[#94a3b8]">domain</span> →{" "}
-        <span className="text-[#94a3b8]">alias</span>
+        <span className="text-[var(--trk-text-muted)]">known sender</span> (exact From address) → <span className="text-[var(--trk-text-muted)]">domain</span> →{" "}
+        <span className="text-[var(--trk-text-muted)]">alias</span>
       </p>
 
       <div className="grid gap-5 sm:grid-cols-3">
@@ -691,7 +691,7 @@ function EmailRulesSection({
               Add
             </Button>
           </div>
-          <label className="mb-3 flex cursor-pointer items-center gap-1.5 text-xs text-[#94a3b8]">
+          <label className="mb-3 flex cursor-pointer items-center gap-1.5 text-xs text-[var(--trk-text-muted)]">
             <input type="checkbox" checked={domPrimary} onChange={(e) => setDomPrimary(e.target.checked)} className="rounded border-[#334155]" />
             Mark as primary
           </label>

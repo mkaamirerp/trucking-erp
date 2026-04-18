@@ -71,15 +71,15 @@ export default function LoadsListPage() {
   };
 
   const btnClass =
-    "rounded-md border border-[#252a38] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[#7a8299] hover:border-[#3a4155] hover:bg-[#252a38] disabled:opacity-50";
+    "rounded-md border border-[var(--trk-border)] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] hover:border-[#3a4155] hover:bg-[var(--trk-border)] disabled:opacity-50";
 
   return (
     <div className="space-y-4">
       {/* Header row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-[#e8ecf4]">Loads</h1>
-          <p className="text-[11px] text-[#7a8299]">Manage loads and dispatch.</p>
+          <h1 className="text-lg font-semibold text-[var(--trk-text)]">Loads</h1>
+          <p className="text-[11px] text-[var(--trk-text-muted)]">Manage loads and dispatch.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -88,7 +88,7 @@ export default function LoadsListPage() {
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && applySearch()}
             placeholder="Search load #, trip #, broker ref…"
-            className="min-w-[200px] rounded-md border border-[#252a38] bg-[#1a1e2a] px-3 py-1.5 text-sm text-[#e8ecf4] placeholder:text-[#4a5068] focus:border-amber-500 focus:outline-none"
+            className="min-w-[200px] rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] px-3 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none"
           />
           <button type="button" className={btnClass} onClick={applySearch} disabled={loading}>
             Search
@@ -119,25 +119,25 @@ export default function LoadsListPage() {
       </div>
 
       {/* Table card */}
-      <div className="rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm overflow-hidden">
+      <div className="rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
         {loading && (
-          <p className="px-4 py-6 text-center text-sm text-[#7a8299]">Loading…</p>
+          <p className="px-4 py-6 text-center text-sm text-[var(--trk-text-muted)]">Loading…</p>
         )}
         {error && (
           <p className="px-4 py-6 text-center text-sm text-red-400">{error}</p>
         )}
         {!loading && !error && loads.length === 0 && (
-          <p className="px-4 py-10 text-center text-sm text-[#7a8299]">No loads yet.</p>
+          <p className="px-4 py-10 text-center text-sm text-[var(--trk-text-muted)]">No loads yet.</p>
         )}
         {!loading && !error && loads.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
-                <tr className="border-b border-[#252a38] bg-[#1e2330]">
+                <tr className="border-b border-[var(--trk-border)] bg-[#1e2330]">
                   {["Load #", "Trip #", "Route", "First pickup", "Status", "Driver", "Rate"].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]"
+                      className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]"
                     >
                       {h}
                     </th>
@@ -148,28 +148,28 @@ export default function LoadsListPage() {
                 {loads.map((load) => (
                   <tr
                     key={load.id}
-                    className="border-b border-[#252a38] last:border-0 cursor-pointer hover:bg-[#1e2330] transition-colors"
+                    className="border-b border-[var(--trk-border)] last:border-0 cursor-pointer hover:bg-[#1e2330] transition-colors"
                     onClick={() => navigate(OPS.LOAD_DETAIL(load.id))}
                   >
-                    <td className="px-4 py-2.5 text-sm font-medium text-[#e8ecf4]">
-                      {load.load_number || <span className="text-[#4a5068]">—</span>}
+                    <td className="px-4 py-2.5 text-sm font-medium text-[var(--trk-text)]">
+                      {load.load_number || <span className="text-[var(--trk-text-muted)]">—</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
                       {load.trip_number?.trim() || "—"}
                     </td>
-                    <td className="px-4 py-2.5 text-sm text-[#7a8299] max-w-[220px] truncate">
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)] max-w-[220px] truncate">
                       {formatRouteFromStops(load.stops) || "—"}
                     </td>
-                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
                       {firstPickupAppointmentDate(load.stops) || "—"}
                     </td>
                     <td className="px-4 py-2.5">
                       <StatusBadge status={load.status} />
                     </td>
-                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
                       {load.driver ? `${load.driver.first_name} ${load.driver.last_name}` : "—"}
                     </td>
-                    <td className="px-4 py-2.5 text-sm text-[#7a8299]">
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
                       {load.rate != null ? `$${load.rate}` : "—"}
                     </td>
                   </tr>

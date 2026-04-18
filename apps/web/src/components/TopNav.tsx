@@ -99,8 +99,8 @@ function TopNavLink({ label, to }: { label: string; to: string }) {
         clsx(
           "box-border inline-flex min-h-[2.25rem] items-end border-b-2 px-3 py-1 text-sm font-medium leading-none transition-colors whitespace-nowrap",
           isActive
-            ? "border-[#f5a623] text-[#e8ecf4]"
-            : "border-transparent text-[#7a8299] hover:text-[#e8ecf4]"
+            ? "border-[var(--trk-heading)] text-[var(--trk-text)]"
+            : "border-transparent text-[var(--trk-text-muted)] hover:text-[var(--trk-text)]"
         )
       }
     >
@@ -112,7 +112,7 @@ function TopNavLink({ label, to }: { label: string; to: string }) {
 function NavGroup({ label, links }: { label: string; links: { label: string; to: string }[] }) {
   return (
     <div className="flex flex-col justify-end">
-      <div className="px-3 pb-[3px] text-[9px] font-semibold uppercase tracking-widest text-[#4a5068]">
+      <div className="px-3 pb-[3px] text-[9px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)]">
         {label}
       </div>
       <div className="flex items-center">
@@ -125,7 +125,7 @@ function NavGroup({ label, links }: { label: string; links: { label: string; to:
 }
 
 function Divider() {
-  return <div className="mx-2 h-8 w-px shrink-0 bg-[#252a38]" />;
+  return <div className="mx-2 h-8 w-px shrink-0 bg-[var(--trk-border)]" />;
 }
 
 function SettingsDropdown() {
@@ -144,17 +144,17 @@ function SettingsDropdown() {
     <div className="relative flex items-center" onMouseEnter={open_} onMouseLeave={close_}>
       <button
         type="button"
-        className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-[#7a8299] transition-colors hover:text-[#e8ecf4]"
+        className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-[var(--trk-text-muted)] transition-colors hover:text-[var(--trk-text)]"
       >
         <GearIcon />
         <span>Settings</span>
         <ChevronDownIcon />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-0.5 flex gap-5 rounded-xl border border-[#252a38] bg-[#141720] px-5 py-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+        <div className="absolute right-0 top-full z-50 mt-0.5 flex gap-5 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] px-5 py-4 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
           {settingsGroups.map((group) => (
             <div key={group.label} className="flex min-w-[148px] flex-col">
-              <div className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-[#4a5068]">
+              <div className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)]">
                 {group.label}
               </div>
               {group.items.map((item) => (
@@ -166,8 +166,8 @@ function SettingsDropdown() {
                     clsx(
                       "rounded px-2 py-1.5 text-sm transition-colors",
                       isActive
-                        ? "bg-[#1c1f2b] text-[#f5a623]"
-                        : "text-[#7a8299] hover:bg-[#1c1f2b] hover:text-[#e8ecf4]"
+                        ? "bg-[var(--trk-surface-2)] text-[var(--trk-heading)]"
+                        : "text-[var(--trk-text-muted)] hover:bg-[var(--trk-surface-2)] hover:text-[var(--trk-text)]"
                     )
                   }
                 >
@@ -187,23 +187,23 @@ function TenantPill({ me }: { me: ReturnType<typeof useMe>["me"] }) {
   const email = (me?.email as string) ?? "";
   const initials = (slug || email).slice(0, 2).toUpperCase();
   return (
-    <div className="flex items-center gap-2 border-l border-[#252a38] pl-3">
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#252a38] text-[10px] font-bold text-[#f5a623]">
+    <div className="flex items-center gap-2 border-l border-[var(--trk-border)] pl-3">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--trk-border)] text-[10px] font-bold text-[var(--trk-heading)]">
         {initials}
       </div>
-      {slug && <span className="text-xs text-[#4a5068]">{slug}</span>}
+      {slug && <span className="text-xs text-[var(--trk-text-muted)]">{slug}</span>}
     </div>
   );
 }
 
 function BreadcrumbBar({ pageLabel }: { pageLabel: string }) {
   return (
-    <div className="flex h-8 items-center border-b border-[#252a38] bg-[#141720] px-5">
-      <span className="text-xs text-[#4a5068]">FleetPro</span>
+    <div className="flex h-8 items-center border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-5">
+      <span className="text-xs text-[var(--trk-text-muted)]">FleetPro</span>
       {pageLabel && (
         <>
-          <span className="mx-2 text-xs text-[#252a38]">/</span>
-          <span className="text-xs text-[#7a8299]">{pageLabel}</span>
+          <span className="mx-2 text-xs text-[var(--trk-border)]">/</span>
+          <span className="text-xs text-[var(--trk-text-muted)]">{pageLabel}</span>
         </>
       )}
     </div>
@@ -262,14 +262,14 @@ export default function TopNav() {
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-[#252a38] bg-[#0d0f14]">
+      <header className="sticky top-0 z-40 border-b border-[var(--trk-border)] bg-[var(--trk-bg)]">
         <div className="flex h-14 items-center px-4">
           {/* Logo */}
-          <div className="mr-4 flex shrink-0 items-center gap-2.5 border-r border-[#252a38] pr-5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#f5a623] font-['Barlow_Condensed'] text-sm font-extrabold tracking-tight text-[#080a0f]">
+          <div className="mr-4 flex shrink-0 items-center gap-2.5 border-r border-[var(--trk-border)] pr-5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--trk-heading)] font-['Barlow_Condensed'] text-sm font-extrabold tracking-tight text-[var(--trk-bg)]">
               FP
             </div>
-            <span className="font-['Barlow_Condensed'] text-[17px] font-bold tracking-wide text-[#e8ecf4]">
+            <span className="font-['Barlow_Condensed'] text-[17px] font-bold tracking-wide text-[var(--trk-text)]">
               FleetPro
             </span>
           </div>
@@ -310,7 +310,7 @@ export default function TopNav() {
               type="button"
               onClick={handleLogout}
               disabled={isLoggingOut}
-              className="ml-2 rounded px-3 py-1.5 text-sm text-[#7a8299] transition-colors hover:bg-[#1c1f2b] hover:text-[#f87171] disabled:opacity-50"
+              className="ml-2 rounded px-3 py-1.5 text-sm text-[var(--trk-text-muted)] transition-colors hover:bg-[var(--trk-surface-2)] hover:text-[var(--trk-danger)] disabled:opacity-50"
             >
               {isLoggingOut ? "Signing out…" : "Sign out"}
             </button>

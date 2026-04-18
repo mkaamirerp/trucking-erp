@@ -99,7 +99,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
         onClick={onClose}
       />
       <aside
-        className="fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto border-l border-[#334155] bg-[#0a0e14] p-6 text-[#e8edf5] shadow-2xl"
+        className="fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto border-l border-[#334155] bg-[#0a0e14] p-6 text-[var(--trk-text)] shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-user-detail-title"
@@ -108,31 +108,31 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
           <h2 id="admin-user-detail-title" className="font-['Barlow_Condensed'] text-2xl font-bold">
             {user.username}
           </h2>
-          <button type="button" onClick={onClose} className="shrink-0 text-sm text-[#94a3b8] hover:text-white">
+          <button type="button" onClick={onClose} className="shrink-0 text-sm text-[var(--trk-text-muted)] hover:text-white">
             Close
           </button>
         </div>
         <p className="mt-1 text-sm text-[#64748b]">{user.email}</p>
-        {user.phone ? <p className="text-sm text-[#94a3b8]">{user.phone}</p> : null}
+        {user.phone ? <p className="text-sm text-[var(--trk-text-muted)]">{user.phone}</p> : null}
 
         <dl className="mt-6 space-y-3 text-sm">
           <div>
             <dt className="text-xs uppercase tracking-wider text-[#64748b]">Membership status</dt>
-            <dd className="mt-1 capitalize text-[#e8edf5]">{user.membership_status}</dd>
+            <dd className="mt-1 capitalize text-[var(--trk-text)]">{user.membership_status}</dd>
           </div>
           <div>
             <dt className="text-xs uppercase tracking-wider text-[#64748b]">Access level</dt>
-            <dd className="mt-1 text-[#e8edf5]">{user.access_level}</dd>
+            <dd className="mt-1 text-[var(--trk-text)]">{user.access_level}</dd>
           </div>
         </dl>
 
         <section className="mt-8 rounded-lg border border-[#334155] bg-[#0f172a]/50 p-4">
-          <h3 className="text-sm font-semibold text-[#e8edf5]">Sign-in Security</h3>
+          <h3 className="text-sm font-semibold text-[var(--trk-text)]">Sign-in Security</h3>
           <p className="mt-1 text-xs text-[#64748b]">
             Account status (such as Active) is separate from sign-in protection shown below.
           </p>
 
-          {loading ? <p className="mt-4 text-sm text-[#94a3b8]">Loading…</p> : null}
+          {loading ? <p className="mt-4 text-sm text-[var(--trk-text-muted)]">Loading…</p> : null}
           {err ? <p className="mt-4 text-sm whitespace-pre-wrap text-red-400">{err}</p> : null}
           {unlockOk ? <p className="mt-4 text-sm text-emerald-400">{unlockOk}</p> : null}
 
@@ -174,7 +174,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
                   in; after that they can trust their browser to skip the code on that device.
                 </p>
               ) : sec.all_clear ? (
-                <p className="text-[#94a3b8]">There is no user-specific sign-in lock on this account right now.</p>
+                <p className="text-[var(--trk-text-muted)]">There is no user-specific sign-in lock on this account right now.</p>
               ) : null}
 
               {rs && typeof rs === "object" ? (
@@ -182,24 +182,24 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
                   <span className="text-xs uppercase tracking-wider text-[#64748b]">Current sign-in checks</span>
                   <ul className="mt-2 space-y-2 text-[#cbd5e1]">
                     <li>
-                      <span className="text-[#94a3b8]">Wrong password attempts: </span>
-                      <span className="font-medium text-[#e8edf5]">{pwdLine}</span>
+                      <span className="text-[var(--trk-text-muted)]">Wrong password attempts: </span>
+                      <span className="font-medium text-[var(--trk-text)]">{pwdLine}</span>
                     </li>
                     <li>
-                      <span className="text-[#94a3b8]">Workspace sign-in limit: </span>
-                      <span className="font-medium text-[#e8edf5]">
+                      <span className="text-[var(--trk-text-muted)]">Workspace sign-in limit: </span>
+                      <span className="font-medium text-[var(--trk-text)]">
                         {lim(rs.workspace_email_login_at_limit)}
                       </span>
                     </li>
                     <li>
-                      <span className="text-[#94a3b8]">OTP request limit: </span>
-                      <span className="font-medium text-[#e8edf5]">
+                      <span className="text-[var(--trk-text-muted)]">OTP request limit: </span>
+                      <span className="font-medium text-[var(--trk-text)]">
                         {lim(rs.workspace_step_up_issue_at_limit)}
                       </span>
                     </li>
                     <li>
-                      <span className="text-[#94a3b8]">OTP verification limit: </span>
-                      <span className="font-medium text-[#e8edf5]">
+                      <span className="text-[var(--trk-text-muted)]">OTP verification limit: </span>
+                      <span className="font-medium text-[var(--trk-text)]">
                         {lim(rs.workspace_step_up_verify_at_limit)}
                       </span>
                     </li>
@@ -211,16 +211,16 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
                 <span className="text-xs uppercase tracking-wider text-[#64748b]">Recent activity</span>
                 <ul className="mt-2 space-y-2 text-[#cbd5e1]">
                   <li>
-                    <span className="text-[#94a3b8]">Lock started: </span>
-                    <span className="text-[#e8edf5]">{formatActivity(sec.timestamps.streak_window_started_at)}</span>
+                    <span className="text-[var(--trk-text-muted)]">Lock started: </span>
+                    <span className="text-[var(--trk-text)]">{formatActivity(sec.timestamps.streak_window_started_at)}</span>
                   </li>
                   <li>
-                    <span className="text-[#94a3b8]">Lock may clear after: </span>
-                    <span className="text-[#e8edf5]">{formatActivity(sec.timestamps.streak_window_expires_at)}</span>
+                    <span className="text-[var(--trk-text-muted)]">Lock may clear after: </span>
+                    <span className="text-[var(--trk-text)]">{formatActivity(sec.timestamps.streak_window_expires_at)}</span>
                   </li>
                   <li>
-                    <span className="text-[#94a3b8]">Last failed password activity: </span>
-                    <span className="text-[#e8edf5]">{formatActivity(sec.timestamps.last_streak_activity_at)}</span>
+                    <span className="text-[var(--trk-text-muted)]">Last failed password activity: </span>
+                    <span className="text-[var(--trk-text)]">{formatActivity(sec.timestamps.last_streak_activity_at)}</span>
                   </li>
                 </ul>
               </div>

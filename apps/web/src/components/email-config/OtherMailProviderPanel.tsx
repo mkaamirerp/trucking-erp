@@ -61,7 +61,7 @@ export default function OtherMailProviderPanel({
       )}
 
       {!manualConnected && (
-        <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4 text-sm text-[#94a3b8]">
+        <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4 text-sm text-[var(--trk-text-muted)]">
           <p className="font-medium text-[#cbd5e1]">Status: Not connected</p>
           <p className="mt-1 leading-relaxed">
             Enter your mailbox and server details below, save, then run the tests to confirm inbound and outbound mail.
@@ -73,54 +73,54 @@ export default function OtherMailProviderPanel({
         <div className="mb-6 rounded-lg border border-emerald-900/40 bg-emerald-950/10 p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#64748b]">Connection</h3>
           <div className="space-y-3 text-sm">
-            <p className="text-[#e8edf5]">
+            <p className="text-[var(--trk-text)]">
               <span className="text-[#64748b]">Mailbox </span>
               {config.email_address}
               {config.display_name ? ` · ${config.display_name}` : ""}
             </p>
             {config.reply_to && (
-              <p className="text-[#94a3b8]">
-                Reply-To: <span className="text-[#e8edf5]">{config.reply_to}</span>
+              <p className="text-[var(--trk-text-muted)]">
+                Reply-To: <span className="text-[var(--trk-text)]">{config.reply_to}</span>
               </p>
             )}
-            <p className="text-[#94a3b8]">
-              IMAP: <span className="text-[#e8edf5]">{config.imap_host}:{config.imap_port}</span> (
+            <p className="text-[var(--trk-text-muted)]">
+              IMAP: <span className="text-[var(--trk-text)]">{config.imap_host}:{config.imap_port}</span> (
               {config.imap_security || (config.use_ssl ? "ssl" : "starttls")}) · SMTP:{" "}
-              <span className="text-[#e8edf5]">
+              <span className="text-[var(--trk-text)]">
                 {config.smtp_host}:{config.smtp_port}
               </span>{" "}
               ({config.smtp_security || "starttls"})
             </p>
-            <p className="text-[#94a3b8]">
+            <p className="text-[var(--trk-text-muted)]">
               Connection:{" "}
-              <span className={STATUS_COLORS[config.connection_status || config.status] ?? "text-[#94a3b8]"}>
+              <span className={STATUS_COLORS[config.connection_status || config.status] ?? "text-[var(--trk-text-muted)]"}>
                 {STATUS_BADGE[config.connection_status || config.status] || config.connection_status || config.status}
               </span>
             </p>
-            <p className="text-[#94a3b8]">
+            <p className="text-[var(--trk-text-muted)]">
               Last inbound test: {formatLastTested(config.last_inbound_test_at)} · Last outbound test:{" "}
               {formatLastTested(config.last_outbound_test_at)}
             </p>
             <div className="rounded-lg border border-[#1e293b] bg-[#0d111a] p-3">
-              <p className="mb-2 font-medium text-[#94a3b8]">IMAP ingestion</p>
-              <ul className="space-y-1 text-[#94a3b8]">
+              <p className="mb-2 font-medium text-[var(--trk-text-muted)]">IMAP ingestion</p>
+              <ul className="space-y-1 text-[var(--trk-text-muted)]">
                 <li>
                   UIDVALIDITY / last UID:{" "}
-                  <span className="text-[#e8edf5]">
+                  <span className="text-[var(--trk-text)]">
                     {config.imap_uidvalidity != null ? String(config.imap_uidvalidity) : "—"} /{" "}
                     {config.imap_last_seen_uid != null ? String(config.imap_last_seen_uid) : "—"}
                   </span>
                 </li>
                 <li>
                   Last sync:{" "}
-                  <span className="text-[#e8edf5]">
+                  <span className="text-[var(--trk-text)]">
                     {config.last_inbound_sync_at ? formatLastTested(config.last_inbound_sync_at) : "—"}
                   </span>
                   {config.last_sync_status && (
                     <>
                       {" "}
                       <span className="text-[#64748b]">· status</span>{" "}
-                      <span className="text-[#e8edf5]">{config.last_sync_status}</span>
+                      <span className="text-[var(--trk-text)]">{config.last_sync_status}</span>
                     </>
                   )}
                 </li>
@@ -149,7 +149,7 @@ export default function OtherMailProviderPanel({
                 disabled={testingOutbound}
                 className={clsx(
                   emailBtnFocus,
-                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[#94a3b8] hover:border-[#475569] hover:text-[#e8edf5] disabled:opacity-50",
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#475569] hover:text-[var(--trk-text)] disabled:opacity-50",
                 )}
               >
                 {testingOutbound ? "Testing…" : "Test outbound (SMTP)"}
@@ -195,7 +195,7 @@ export default function OtherMailProviderPanel({
               placeholder="mailbox@example.com"
               className={clsx(
                 emailFieldFocus,
-                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
               )}
             />
           </div>
@@ -208,7 +208,7 @@ export default function OtherMailProviderPanel({
               placeholder="Optional"
               className={clsx(
                 emailFieldFocus,
-                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
               )}
             />
           </div>
@@ -221,7 +221,7 @@ export default function OtherMailProviderPanel({
               placeholder="Optional"
               className={clsx(
                 emailFieldFocus,
-                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                "w-full min-h-[44px] rounded-lg border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
               )}
             />
           </div>
@@ -234,13 +234,13 @@ export default function OtherMailProviderPanel({
             onChange={(e) => setForm((f) => ({ ...f, is_primary: e.target.checked }))}
             className={clsx(emailFieldFocus, "h-5 w-5 rounded border-[#1e293b]")}
           />
-          <label htmlFor="is_primary_mailbox_other" className="text-sm text-[#94a3b8]">
+          <label htmlFor="is_primary_mailbox_other" className="text-sm text-[var(--trk-text-muted)]">
             Primary mailbox for this workspace
           </label>
         </div>
         <div className="grid gap-6 md:grid-cols-2">
           <div className="rounded-lg border border-[#1e293b] p-4">
-            <h3 className="mb-3 text-sm font-semibold text-[#e8edf5]">Inbound (IMAP)</h3>
+            <h3 className="mb-3 text-sm font-semibold text-[var(--trk-text)]">Inbound (IMAP)</h3>
             <div className="space-y-3">
               <input
                 type="text"
@@ -249,7 +249,7 @@ export default function OtherMailProviderPanel({
                 placeholder="IMAP host"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <input
@@ -259,7 +259,7 @@ export default function OtherMailProviderPanel({
                 placeholder="Port"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <input
@@ -269,7 +269,7 @@ export default function OtherMailProviderPanel({
                 placeholder="Username"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <input
@@ -279,7 +279,7 @@ export default function OtherMailProviderPanel({
                 placeholder="App password (leave blank to keep existing)"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <div>
@@ -295,7 +295,7 @@ export default function OtherMailProviderPanel({
                   }
                   className={clsx(
                     emailFieldFocus,
-                    "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]",
+                    "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]",
                   )}
                 >
                   <option value="ssl">SSL/TLS (e.g. port 993)</option>
@@ -306,7 +306,7 @@ export default function OtherMailProviderPanel({
             </div>
           </div>
           <div className="rounded-lg border border-[#1e293b] p-4">
-            <h3 className="mb-3 text-sm font-semibold text-[#e8edf5]">Outbound (SMTP)</h3>
+            <h3 className="mb-3 text-sm font-semibold text-[var(--trk-text)]">Outbound (SMTP)</h3>
             <div className="space-y-3">
               <input
                 type="text"
@@ -315,7 +315,7 @@ export default function OtherMailProviderPanel({
                 placeholder="SMTP host"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <input
@@ -325,7 +325,7 @@ export default function OtherMailProviderPanel({
                 placeholder="Port"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <input
@@ -335,7 +335,7 @@ export default function OtherMailProviderPanel({
                 placeholder="Username"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <input
@@ -345,7 +345,7 @@ export default function OtherMailProviderPanel({
                 placeholder="App password (leave blank to keep existing)"
                 className={clsx(
                   emailFieldFocus,
-                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5] placeholder-[#475569]",
+                  "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder-[#475569]",
                 )}
               />
               <div>
@@ -361,7 +361,7 @@ export default function OtherMailProviderPanel({
                   }
                   className={clsx(
                     emailFieldFocus,
-                    "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[#e8edf5]",
+                    "w-full min-h-[44px] rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]",
                   )}
                 >
                   <option value="ssl">SSL (e.g. port 465)</option>
@@ -391,7 +391,7 @@ export default function OtherMailProviderPanel({
               disabled={testingInbound}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#94a3b8] transition hover:border-[#475569] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[#475569] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {testingInbound ? "Testing…" : "Test inbound"}
@@ -402,7 +402,7 @@ export default function OtherMailProviderPanel({
               disabled={testingOutbound}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#94a3b8] transition hover:border-[#475569] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[#475569] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {testingOutbound ? "Testing…" : "Test outbound"}
@@ -413,7 +413,7 @@ export default function OtherMailProviderPanel({
               disabled={testing}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#94a3b8] transition hover:border-[#475569] hover:text-[#e8edf5] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[#475569] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {testing ? "Testing…" : "Test IMAP (legacy)"}

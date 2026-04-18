@@ -92,9 +92,9 @@ function WorkspaceModeReadout({ mode }: { mode: LoadWorkspaceMode }) {
   ];
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Mode</span>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Mode</span>
       <div
-        className="inline-flex rounded-md border border-[#252a38] bg-[#1e2330] p-0.5"
+        className="inline-flex rounded-md border border-[var(--trk-border)] bg-[#1e2330] p-0.5"
         role="group"
         aria-label="Workspace mode (determined by route, not clickable)"
       >
@@ -102,7 +102,7 @@ function WorkspaceModeReadout({ mode }: { mode: LoadWorkspaceMode }) {
           <span
             key={x.id}
             className={`rounded px-2.5 py-1 text-[11px] font-semibold ${
-              mode === x.id ? "bg-amber-500 text-slate-900 shadow-sm" : "text-[#4a5068]"
+              mode === x.id ? "bg-amber-500 text-slate-900 shadow-sm" : "text-[var(--trk-text-muted)]"
             }`}
             aria-current={mode === x.id ? "true" : undefined}
           >
@@ -127,16 +127,16 @@ function IntakeEmailRail({
 }) {
   const head = messages[0];
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#141720]">
-      <div className="flex shrink-0 items-center justify-between border-b border-[#252a38] px-3.5 py-2.5">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--trk-surface)]">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--trk-border)] px-3.5 py-2.5">
         <span className={wsSectionTitle}>Source email</span>
-        <span className="text-[10px] text-[#4a5068]">Thread #{threadId}</span>
+        <span className="text-[10px] text-[var(--trk-text-muted)]">Thread #{threadId}</span>
       </div>
       {head ? (
-        <div className="shrink-0 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2.5">
-          <div className="text-xs font-semibold text-[#e8ecf4]">{head.from_email || "—"}</div>
-          {head.subject ? <div className="line-clamp-2 text-[11px] text-[#7a8299]">{head.subject}</div> : null}
-          <div className="text-[10px] text-[#4a5068]">
+        <div className="shrink-0 border-b border-[var(--trk-border)] bg-[#1e2330] px-3.5 py-2.5">
+          <div className="text-xs font-semibold text-[var(--trk-text)]">{head.from_email || "—"}</div>
+          {head.subject ? <div className="line-clamp-2 text-[11px] text-[var(--trk-text-muted)]">{head.subject}</div> : null}
+          <div className="text-[10px] text-[var(--trk-text-muted)]">
             {formatWhen(head.received_at || head.sent_at || head.created_at)}
           </div>
         </div>
@@ -199,16 +199,16 @@ function ReferenceTextRail({
   activeDocLine: number | null;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#141720]">
-      <div className="shrink-0 border-b border-[#252a38] px-3.5 py-2.5">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--trk-surface)]">
+      <div className="shrink-0 border-b border-[var(--trk-border)] px-3.5 py-2.5">
         <span className={wsSectionTitle}>{title}</span>
-        <p className="mt-1 text-[11px] leading-snug text-[#7a8299]">{hint}</p>
+        <p className="mt-1 text-[11px] leading-snug text-[var(--trk-text-muted)]">{hint}</p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {docLines.length ? (
           <div
             ref={docScrollRef}
-            className="rounded-md border border-[#252a38] bg-[#1a1e2a] p-2 font-mono text-[11px] leading-snug text-[#e8ecf4]"
+            className="rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
           >
             {docLines.map((line, i) => (
               <div
@@ -224,7 +224,7 @@ function ReferenceTextRail({
             ))}
           </div>
         ) : (
-          <p className="rounded-md border border-dashed border-[#252a38] bg-[#1a1e2a]/50 px-3 py-6 text-center text-xs text-[#7a8299]">
+          <p className="rounded-md border border-dashed border-[var(--trk-border)] bg-[#1a1e2a]/50 px-3 py-6 text-center text-xs text-[var(--trk-text-muted)]">
             Nothing to show yet — use internal notes in the form.
           </p>
         )}
@@ -277,8 +277,8 @@ function ContextRow({
 }) {
   return (
     <div>
-      <dt className="text-xs text-[#7a8299]">{label}</dt>
-      <dd className={`mt-0.5 text-[#e8ecf4] ${mono ? "font-mono text-xs break-all" : ""}`}>{value || "—"}</dd>
+      <dt className="text-xs text-[var(--trk-text-muted)]">{label}</dt>
+      <dd className={`mt-0.5 text-[var(--trk-text)] ${mono ? "font-mono text-xs break-all" : ""}`}>{value || "—"}</dd>
     </div>
   );
 }
@@ -1228,7 +1228,7 @@ export default function LoadWorkspacePage() {
         }`;
   const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
   const toolBtnSecondary =
-    "rounded-md border border-[#252a38] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[#7a8299] shadow-sm hover:border-[#3a4155] hover:bg-[#252a38]";
+    "rounded-md border border-[var(--trk-border)] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[#3a4155] hover:bg-[var(--trk-border)]";
 
   /** Compare the server snapshot against the current form state; return human-readable diffs. */
   function getConflictDiffs(snap: Load): Array<{ label: string; server: string; yours: string }> {
@@ -1277,21 +1277,21 @@ export default function LoadWorkspacePage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#0d0f14] text-[#e8ecf4]">
-      <header className="z-10 shrink-0 border-b border-[#252a38] bg-[#141720]">
+    <div className="flex min-h-screen flex-col bg-[var(--trk-bg)] text-[var(--trk-text)]">
+      <header className="z-10 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
             <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
               ← Loads
             </button>
             <div className="min-w-0 flex-1">
-              <div className="font-mono text-[11px] text-[#4a5068]">{lidLabel}</div>
-              <h1 className="truncate text-[15px] font-semibold tracking-tight text-[#e8ecf4]">{headerTitle}</h1>
+              <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</div>
+              <h1 className="truncate text-[15px] font-semibold tracking-tight text-[var(--trk-text)]">{headerTitle}</h1>
               {workspaceMode === "detail" && load ? (
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[#7a8299]">
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--trk-text-muted)]">
                   {load.trip_number?.trim() ? (
                     <span>
-                      Trip <span className="font-mono text-[#7a8299]">{load.trip_number.trim()}</span>
+                      Trip <span className="font-mono text-[var(--trk-text-muted)]">{load.trip_number.trim()}</span>
                     </span>
                   ) : (
                     <span className="italic">No trip number</span>
@@ -1307,7 +1307,7 @@ export default function LoadWorkspacePage() {
                   {(load.created_at || load.updated_at) && (
                     <>
                       <span>·</span>
-                      <span className="text-[10px] text-[#4a5068]">
+                      <span className="text-[10px] text-[var(--trk-text-muted)]">
                         {load.created_at ? `Created ${new Date(load.created_at).toLocaleString()}` : ""}
                         {load.created_at && load.updated_at ? " · " : ""}
                         {load.updated_at ? `Updated ${new Date(load.updated_at).toLocaleString()}` : ""}
@@ -1317,15 +1317,15 @@ export default function LoadWorkspacePage() {
                 </div>
               ) : null}
               {workspaceMode === "manual" ? (
-                <p className="mt-0.5 text-[11px] text-[#7a8299]">Create saves the load and opens it for edits.</p>
+                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Create saves the load and opens it for edits.</p>
               ) : workspaceMode === "intake" ? (
-                <p className="mt-0.5 text-[11px] text-[#7a8299]">Source rail + save updates this load.</p>
+                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Source rail + save updates this load.</p>
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               {workspaceMode !== "manual" && load ? <StatusBadge status={status} /> : null}
               {workspaceMode === "manual" ? (
-                <span className="rounded border border-[#252a38] bg-[#1e2330] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#7a8299]">
+                <span className="rounded border border-[var(--trk-border)] bg-[#1e2330] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]">
                   Manual
                 </span>
               ) : null}
@@ -1340,7 +1340,7 @@ export default function LoadWorkspacePage() {
                 </span>
               ) : null}
               {showDispatchAssignmentStrip ? (
-                <span className="rounded border border-[#f5a623]/40 bg-[#f5a623]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#f5d7a0]">
+                <span className="rounded border border-[var(--trk-heading)]/40 bg-[var(--trk-heading)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#f5d7a0]">
                   Dispatch · Assign
                 </span>
               ) : null}
@@ -1402,9 +1402,9 @@ export default function LoadWorkspacePage() {
         />
       ) : null}
 
-      <div className="shrink-0 border-b border-[#252a38] bg-[#141720]">
+      <div className="shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Workspace</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Workspace</span>
           <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
             Load directory
           </button>
@@ -1416,8 +1416,8 @@ export default function LoadWorkspacePage() {
               Intake queue
             </button>
           ) : null}
-          <span className="mx-1 hidden h-5 w-px bg-[#252a38] sm:inline-block" aria-hidden />
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-[#4a5068]">Actions</span>
+          <span className="mx-1 hidden h-5 w-px bg-[var(--trk-border)] sm:inline-block" aria-hidden />
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Actions</span>
           <input
             ref={pdfInputRef}
             type="file"
@@ -1465,7 +1465,7 @@ export default function LoadWorkspacePage() {
       </div>
 
       <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col overflow-hidden lg:flex-row">
-        <aside className="flex max-h-[38vh] min-h-0 shrink-0 flex-col border-b border-[#252a38] bg-[#141720] lg:max-h-none lg:w-[320px] lg:border-b-0 lg:border-r lg:border-[#252a38]">
+        <aside className="flex max-h-[38vh] min-h-0 shrink-0 flex-col border-b border-[var(--trk-border)] bg-[var(--trk-surface)] lg:max-h-none lg:w-[320px] lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]">
           {workspaceMode === "intake" && hasIntakeThread ? (
             <IntakeEmailRail
               threadId={intakeThreadId}
@@ -1479,12 +1479,12 @@ export default function LoadWorkspacePage() {
               hint={
                 workspaceMode === "manual" ? (
                   <>
-                    Mirrors <code className="rounded bg-[#252a38] px-1 text-[10px]">internal_notes</code> from the form.
+                    Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code> from the form.
                     Tab fields to highlight lines.
                   </>
                 ) : (
                   <>
-                    Text from <code className="rounded bg-[#252a38] px-1 text-[10px]">internal_notes</code>. Edit under
+                    Text from <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit under
                     Notes in the form.
                   </>
                 )
@@ -1497,7 +1497,7 @@ export default function LoadWorkspacePage() {
           )}
         </aside>
 
-        <main className="min-h-0 flex-1 overflow-y-auto bg-[#0d0f14] p-3 lg:p-4">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--trk-bg)] p-3 lg:p-4">
           {workspaceMode !== "manual" && load?.review_required ? (
             <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
               <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
@@ -1508,11 +1508,11 @@ export default function LoadWorkspacePage() {
           ) : null}
 
           {workspaceMode !== "manual" && load ? (
-            <details className="mb-3 rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm">
-              <summary className="cursor-pointer list-none px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#7a8299] marker:content-none [&::-webkit-details-marker]:hidden">
+            <details className="mb-3 rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm">
+              <summary className="cursor-pointer list-none px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
                 System context · trip, match, resolved labels
               </summary>
-              <div className="border-t border-[#252a38] px-3 py-3 text-xs">
+              <div className="border-t border-[var(--trk-border)] px-3 py-3 text-xs">
                 <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <ContextRow label="Trip number" value={load.trip_number?.trim() || "—"} mono />
                   <ContextRow label="Dispatch trip" value={hasActiveDispatchTrip ? "Linked" : "—"} />
@@ -1524,7 +1524,7 @@ export default function LoadWorkspacePage() {
                 ) : null}
                 {load.is_duplicate_of_load_id != null ? (
                   <p className="mt-3 text-xs">
-                    <span className="text-[#7a8299]">Possible duplicate — </span>
+                    <span className="text-[var(--trk-text-muted)]">Possible duplicate — </span>
                     <Link
                       to={OPS.LOAD_DETAIL(load.is_duplicate_of_load_id)}
                       className="font-medium text-indigo-600 hover:underline"
@@ -1533,8 +1533,8 @@ export default function LoadWorkspacePage() {
                     </Link>
                   </p>
                 ) : null}
-                <div className="mt-4 border-t border-[#252a38] pt-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">Resolved labels</p>
+                <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Resolved labels</p>
                   <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-sm">
                     <ContextRow label="Broker" value={load.broker?.name || "—"} />
                     <ContextRow label="Broker contact" value={load.broker_contact?.name || "—"} />
@@ -1555,11 +1555,11 @@ export default function LoadWorkspacePage() {
                   </dl>
                 </div>
                 {contextStops.length > 0 ? (
-                  <div className="mt-4 border-t border-[#252a38] pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">
+                  <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
                       Stop schedules (read-only)
                     </p>
-                    <ul className="space-y-1 text-xs text-[#7a8299]">
+                    <ul className="space-y-1 text-xs text-[var(--trk-text-muted)]">
                       {contextStops.map((s, i) => (
                         <li key={s.id || `ctx-${i}`}>
                           Stop {(s.sequence ?? i) + 1}
@@ -1575,8 +1575,8 @@ export default function LoadWorkspacePage() {
                   </div>
                 ) : null}
                 {(load.document_snapshot_confirmed_at || load.customs_snapshot) && (
-                  <div className="mt-4 border-t border-[#252a38] pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">Customs snapshot</p>
+                  <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Customs snapshot</p>
                     <dl className="space-y-1 text-xs">
                       <ContextRow
                         label="Confirmed at"
@@ -1589,7 +1589,7 @@ export default function LoadWorkspacePage() {
                       <ContextRow label="Snapshot version" value={String(load.document_snapshot_version ?? 0)} />
                     </dl>
                     {load.customs_snapshot && (
-                      <ul className="mt-2 space-y-0.5 text-xs text-[#7a8299]">
+                      <ul className="mt-2 space-y-0.5 text-xs text-[var(--trk-text-muted)]">
                         <li>{load.customs_snapshot.legal_name_snapshot || "—"}</li>
                         <li>{load.customs_snapshot.phone_primary_snapshot || ""}</li>
                         <li>{load.customs_snapshot.generic_email_snapshot || ""}</li>
@@ -1599,7 +1599,7 @@ export default function LoadWorkspacePage() {
                 )}
               </div>
               {contextSummary ? (
-                <p className="mt-2 border-t border-[#252a38] pt-2 text-[11px] text-amber-400/85">{contextSummary}</p>
+                <p className="mt-2 border-t border-[var(--trk-border)] pt-2 text-[11px] text-amber-400/85">{contextSummary}</p>
               ) : null}
             </details>
           ) : null}
@@ -1699,9 +1699,9 @@ export default function LoadWorkspacePage() {
 
           {/* AuditTimeline — visible in audit mode */}
           {sectionConfig.visible.includes("AuditTimeline") ? (
-            <section className="mt-2.5 rounded-lg border border-[#252a38] bg-[#1a1e2a] shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between gap-2 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2">
-                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#7a8299]">Audit timeline</span>
+            <section className="mt-2.5 rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[#1e2330] px-3.5 py-2">
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]">Audit timeline</span>
               </div>
               <LoadAuditTimeline loadId={load?.id ?? null} />
             </section>
@@ -1768,37 +1768,37 @@ function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
   }, [fetchRows]);
 
   if (!loadId) {
-    return <div className="px-3.5 py-6 text-center text-xs text-[#4a5068]">Select a load to view audit history.</div>;
+    return <div className="px-3.5 py-6 text-center text-xs text-[var(--trk-text-muted)]">Select a load to view audit history.</div>;
   }
   if (err) {
     return <div className="px-3.5 py-6 text-center text-xs text-[#b87a7a]">{err}</div>;
   }
   if (rows === null) {
-    return <div className="px-3.5 py-6 text-center text-xs text-[#4a5068]">Loading…</div>;
+    return <div className="px-3.5 py-6 text-center text-xs text-[var(--trk-text-muted)]">Loading…</div>;
   }
   if (rows.length === 0) {
-    return <div className="px-3.5 py-6 text-center text-xs text-[#4a5068]">No audit events.</div>;
+    return <div className="px-3.5 py-6 text-center text-xs text-[var(--trk-text-muted)]">No audit events.</div>;
   }
 
   return (
     <div className="px-3.5 py-2">
       <ul className="space-y-2">
         {rows.map((r) => (
-          <li key={r.id} className="rounded border border-[#252a38] bg-[#151826] px-3 py-2">
+          <li key={r.id} className="rounded border border-[var(--trk-border)] bg-[#151826] px-3 py-2">
             <div className="flex items-baseline justify-between gap-2">
               <div className="text-xs text-[#d7dbea]">
                 <span className="font-semibold">{loadAuditActionLabel(r.action)}</span>
-                <span className="ml-2 text-[11px] text-[#7a8299]">{r.source}</span>
+                <span className="ml-2 text-[11px] text-[var(--trk-text-muted)]">{r.source}</span>
                 {r.visibility && r.visibility !== "normal" ? (
                   <span className="ml-2 text-[11px] text-[#b9a46a]">{r.visibility}</span>
                 ) : null}
               </div>
-              <div className="text-[11px] text-[#7a8299]">{new Date(r.event_at).toLocaleString()}</div>
+              <div className="text-[11px] text-[var(--trk-text-muted)]">{new Date(r.event_at).toLocaleString()}</div>
             </div>
 
             {r.changed_fields && Object.keys(r.changed_fields).length > 0 ? (
               <details className="mt-1">
-                <summary className="cursor-pointer text-[11px] text-[#7a8299]">Show changes</summary>
+                <summary className="cursor-pointer text-[11px] text-[var(--trk-text-muted)]">Show changes</summary>
                 <div className="mt-2 space-y-1 text-[11px] text-[#aab0c5]">
                   {Object.entries(r.changed_fields).map(([k, v]) => (
                     <div key={k}>

@@ -7,7 +7,7 @@ import Button from "@/components/Button";
 import type { Driver, Trailer, Truck } from "@/api";
 
 const inputCls =
-  "w-full rounded-md border border-[#2b3347] bg-[#101522] px-2.5 py-1.5 text-xs text-[#e8ecf4] outline-none placeholder:text-[#4a5068] focus:border-[#f5a623]/50";
+  "w-full rounded-md border border-[#2b3347] bg-[#101522] px-2.5 py-1.5 text-xs text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)]/50";
 
 function SearchablePick({
   label,
@@ -55,7 +55,7 @@ function SearchablePick({
 
   return (
     <div ref={boxRef} className={clsx("relative flex min-w-0 flex-1 flex-col gap-1", primary && "sm:flex-[1.25]")}>
-      <label className="text-[10px] font-semibold uppercase tracking-wide text-[#7a8299]">{label}</label>
+      <label className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">{label}</label>
       <div className="relative">
         <input
           className={inputCls}
@@ -83,7 +83,7 @@ function SearchablePick({
             <li>
               <button
                 type="button"
-                className="w-full px-2.5 py-1.5 text-left text-[11px] text-[#94a3b8] hover:bg-[#1e2330]"
+                className="w-full px-2.5 py-1.5 text-left text-[11px] text-[var(--trk-text-muted)] hover:bg-[#1e2330]"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onSelect(null);
@@ -97,7 +97,7 @@ function SearchablePick({
               <li key={it.id}>
                 <button
                   type="button"
-                  className="w-full px-2.5 py-1.5 text-left text-xs text-[#e8ecf4] hover:bg-[#1e2330]"
+                  className="w-full px-2.5 py-1.5 text-left text-xs text-[var(--trk-text)] hover:bg-[#1e2330]"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onSelect(it.id);
@@ -161,12 +161,12 @@ export function DispatchAssignmentStrip(p: {
   const canAssign = p.driverId != null && !p.saving;
 
   return (
-    <div className="shrink-0 border-b border-[#f5a623]/25 bg-gradient-to-r from-[#1a1408] via-[#12151c] to-[#0d1018]">
+    <div className="shrink-0 border-b border-[var(--trk-heading)]/25 bg-gradient-to-r from-[#1a1408] via-[#12151c] to-[#0d1018]">
       <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#f5a623]/90">Dispatch assignment</p>
-            <p className="mt-0.5 text-[11px] text-[#94a3b8]">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--trk-heading)]/90">Dispatch assignment</p>
+            <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">
               Assign driver and equipment. This sets status to Assigned only — no trip number until the load is
               Dispatched.
             </p>
@@ -202,7 +202,7 @@ export function DispatchAssignmentStrip(p: {
             disabled={p.saving}
           />
         </div>
-        {p.message ? <p className="text-[11px] text-[#94a3b8]">{p.message}</p> : null}
+        {p.message ? <p className="text-[11px] text-[var(--trk-text-muted)]">{p.message}</p> : null}
       </div>
     </div>
   );

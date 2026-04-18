@@ -114,7 +114,7 @@ export default function DLUploadStep({
         <div
           style={{
             border: "2px dashed",
-            borderColor: stageBusy ? "#f5a623" : "#2a2d45",
+            borderColor: stageBusy ? "var(--trk-heading)" : "#2a2d45",
             borderRadius: 14,
             minHeight: 320,
             display: "flex",
@@ -132,16 +132,16 @@ export default function DLUploadStep({
         >
           {stageBusy ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "#cbd5e1" }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", border: "2px solid #334155", borderTopColor: "#f5a623", animation: "spin 0.7s linear infinite" }} />
+              <div style={{ width: 38, height: 38, borderRadius: "50%", border: "2px solid #334155", borderTopColor: "var(--trk-heading)", animation: "spin 0.7s linear infinite" }} />
               <div style={{ fontWeight: 700 }}>{message || "Saving your licence..."}</div>
             </div>
           ) : (
             <div>
-              <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "#f5a623", marginBottom: 10 }}>
+              <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--trk-heading)", marginBottom: 10 }}>
                 {side === "front" ? "Step 1" : "Step 2"}
               </div>
               <div style={{ color: "#f8fafc", fontSize: "1.5rem", fontWeight: 800, marginBottom: 10 }}>{title}</div>
-              <div style={{ color: "#94a3b8", maxWidth: 420, lineHeight: 1.6 }}>{subtitle}</div>
+              <div style={{ color: "var(--trk-text-muted)", maxWidth: 420, lineHeight: 1.6 }}>{subtitle}</div>
             </div>
           )}
           {!stageBusy && (
@@ -194,14 +194,14 @@ export default function DLUploadStep({
           <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "#22c55e", marginBottom: 8 }}>
             Front saved
           </div>
-          <div style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+          <div style={{ color: "var(--trk-text-muted)", lineHeight: 1.6 }}>
             The front image is kept in the current flow and will be shown again after the back side is done.
           </div>
           <button
             type="button"
             onClick={() => promptReplacementFile("front")}
             disabled={busy}
-            style={{ marginTop: 14, background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "#f5a623", padding: "9px 18px", fontSize: "0.8rem", fontWeight: 700, cursor: frontFile && !busy ? "pointer" : "default", opacity: frontFile ? 1 : 0.6 }}
+            style={{ marginTop: 14, background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "var(--trk-heading)", padding: "9px 18px", fontSize: "0.8rem", fontWeight: 700, cursor: frontFile && !busy ? "pointer" : "default", opacity: frontFile ? 1 : 0.6 }}
           >
             Re-upload front
           </button>
@@ -228,7 +228,7 @@ export default function DLUploadStep({
               type="button"
               onClick={() => promptReplacementFile("front")}
               disabled={busy}
-              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "#f5a623", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
             >
               Re-upload front
             </button>
@@ -245,7 +245,7 @@ export default function DLUploadStep({
               type="button"
               onClick={() => promptReplacementFile("back")}
               disabled={busy}
-              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "#f5a623", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
             >
               Re-upload back
             </button>

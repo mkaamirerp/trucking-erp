@@ -268,7 +268,7 @@ export default function DriverOnboardingAdminListPage() {
     "Name";
 
   return (
-    <div className="-m-6 min-h-screen overflow-x-hidden bg-[#080a0f] text-[#e8edf5]">
+    <div className="-m-6 min-h-screen overflow-x-hidden bg-[var(--trk-bg)] text-[var(--trk-text)]">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
       `}</style>
@@ -276,10 +276,10 @@ export default function DriverOnboardingAdminListPage() {
       <div className="relative px-10 py-9">
         <div className="mb-9 flex flex-wrap items-end justify-between gap-6">
           <div>
-            <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[#f5a623] before:inline-block before:h-px before:w-5 before:bg-[#f5a623] before:content-['']">
+            <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--trk-heading)] before:inline-block before:h-px before:w-5 before:bg-[var(--trk-heading)] before:content-['']">
               Onboarding
             </div>
-            <h2 className="font-['Barlow_Condensed'] text-5xl font-extrabold leading-none tracking-tight text-[#e8edf5]">
+            <h2 className="font-['Barlow_Condensed'] text-5xl font-extrabold leading-none tracking-tight text-[var(--trk-text)]">
               Applications
             </h2>
             <p className="mt-2 text-sm text-[#7c8ba1]">
@@ -289,7 +289,7 @@ export default function DriverOnboardingAdminListPage() {
           <button
             type="button"
             onClick={openInviteModal}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#f5a623] px-5 py-2.5 text-sm font-bold text-[#080a0f] shadow-[0_2px_16px_rgba(245,166,35,0.2)] transition hover:opacity-90"
+            className="inline-flex items-center gap-2 rounded-lg bg-[var(--trk-heading)] px-5 py-2.5 text-sm font-bold text-[var(--trk-bg)] shadow-[0_2px_16px_rgba(245,166,35,0.2)] transition hover:opacity-90"
           >
             <span className="text-base leading-none">+</span>
             Generate Link
@@ -299,9 +299,9 @@ export default function DriverOnboardingAdminListPage() {
         <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-5">
           {QUEUE_TAB_ORDER.map((key) => {
             const accent =
-              key === "ALL" ? "#94a3b8" :
+              key === "ALL" ? "var(--trk-text-muted)" :
               key === "SUBMITTED" ? "#3b82f6" :
-              key === "PROCESSING" ? "#94a3b8" :
+              key === "PROCESSING" ? "var(--trk-text-muted)" :
               key === "HR_PAYROLL" ? "#a78bfa" :
               "#f43f5e";
             const active = queueTab === key;
@@ -310,13 +310,13 @@ export default function DriverOnboardingAdminListPage() {
                 key={key}
                 type="button"
                 onClick={() => setQueueTab(key)}
-                className={`relative overflow-hidden rounded-xl border px-5 py-4 text-left transition ${active ? "bg-[#161b27]" : "bg-[#111520] hover:bg-[#161b27]"} ${active ? "border-white/20" : "border-[#1c2235]"}`}
+                className={`relative overflow-hidden rounded-xl border px-5 py-4 text-left transition ${active ? "bg-[#161b27]" : "bg-[var(--trk-surface)] hover:bg-[#161b27]"} ${active ? "border-white/20" : "border-[var(--trk-border)]"}`}
                 style={{ boxShadow: active ? `inset 0 0 0 1px ${accent}40` : undefined }}
               >
                 <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#7c8ba1]">
                   {QUEUE_TAB_LABEL[key]}
                 </div>
-                <div className="font-['Barlow_Condensed'] text-4xl font-extrabold leading-none" style={{ color: active ? accent : "#e8edf5" }}>
+                <div className="font-['Barlow_Condensed'] text-4xl font-extrabold leading-none" style={{ color: active ? accent : "var(--trk-text)" }}>
                   {counts[key]}
                 </div>
                 <span className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: accent, opacity: active ? 1 : 0.35 }} />
@@ -333,20 +333,20 @@ export default function DriverOnboardingAdminListPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search applicants..."
-              className="w-full rounded-lg border border-[#1c2235] bg-[#111520] py-2.5 pl-9 pr-3 text-sm text-[#e8edf5] outline-none transition placeholder:text-[#475569] focus:border-[#242840]"
+              className="w-full rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] py-2.5 pl-9 pr-3 text-sm text-[var(--trk-text)] outline-none transition placeholder:text-[#475569] focus:border-[#242840]"
             />
           </div>
           <button
             type="button"
             onClick={cycleSort}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#1c2235] bg-[#111520] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition hover:border-[#242840] hover:text-[#e8edf5]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-4 py-2.5 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[#242840] hover:text-[var(--trk-text)]"
           >
             ⇅ Sort: {sortLabel}
           </button>
           <button
             type="button"
             onClick={resetFilters}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#1c2235] bg-[#111520] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition hover:border-[#242840] hover:text-[#e8edf5]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-4 py-2.5 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[#242840] hover:text-[var(--trk-text)]"
           >
             ⊟ {hasFilters ? "Reset" : "Filter"}
           </button>
@@ -354,9 +354,9 @@ export default function DriverOnboardingAdminListPage() {
 
         {inviteModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-            <div className="w-full max-w-md rounded-2xl border border-[#242840] bg-[#111520] shadow-2xl">
-              <div className="border-b border-[#1c2235] px-5 py-4">
-                <h3 className="font-['Barlow_Condensed'] text-2xl font-bold tracking-wide text-[#e8edf5]">Generate invite link</h3>
+            <div className="w-full max-w-md rounded-2xl border border-[#242840] bg-[var(--trk-surface)] shadow-2xl">
+              <div className="border-b border-[var(--trk-border)] px-5 py-4">
+                <h3 className="font-['Barlow_Condensed'] text-2xl font-bold tracking-wide text-[var(--trk-text)]">Generate invite link</h3>
                 <p className="text-sm text-[#7c8ba1]">Enter email or phone to send the link to.</p>
               </div>
               <div className="space-y-4 px-5 py-5">
@@ -365,7 +365,7 @@ export default function DriverOnboardingAdminListPage() {
                 <select
                   value={inviteApplicationType}
                   onChange={(e) => setInviteApplicationType(e.target.value)}
-                  className="w-full rounded-lg border border-[#1c2235] bg-[#0d1017] px-3 py-2.5 text-sm text-[#e8edf5] outline-none"
+                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none"
                   disabled={!!inviteLink}
                 >
                   {APPLICATION_TYPES.map((t) => (
@@ -380,7 +380,7 @@ export default function DriverOnboardingAdminListPage() {
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="applicant@example.com"
-                  className="w-full rounded-lg border border-[#1c2235] bg-[#0d1017] px-3 py-2.5 text-sm text-[#e8edf5] outline-none placeholder:text-[#475569]"
+                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none placeholder:text-[#475569]"
                   disabled={!!inviteLink}
                 />
               </div>
@@ -391,7 +391,7 @@ export default function DriverOnboardingAdminListPage() {
                   value={invitePhone}
                   onChange={(e) => setInvitePhone(e.target.value)}
                   placeholder="+1 234 567 8900"
-                  className="w-full rounded-lg border border-[#1c2235] bg-[#0d1017] px-3 py-2.5 text-sm text-[#e8edf5] outline-none placeholder:text-[#475569]"
+                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none placeholder:text-[#475569]"
                   disabled={!!inviteLink}
                 />
               </div>
@@ -414,11 +414,11 @@ export default function DriverOnboardingAdminListPage() {
                   )}
                   <span className="font-medium text-[#cbd5e1]">Invite link</span>
                   <div className="flex flex-wrap items-center gap-2">
-                    <code className="flex-1 truncate rounded bg-[#161b27] px-2 py-1 text-[#e8edf5]">{inviteLink}</code>
+                    <code className="flex-1 truncate rounded bg-[#161b27] px-2 py-1 text-[var(--trk-text)]">{inviteLink}</code>
                     <button
                       type="button"
                       onClick={copyLink}
-                      className="rounded border border-[#242840] bg-[#161b27] px-3 py-1 text-[#cbd5e1] hover:bg-[#1c2235]"
+                      className="rounded border border-[#242840] bg-[#161b27] px-3 py-1 text-[#cbd5e1] hover:bg-[var(--trk-border)]"
                     >
                       Copy
                     </button>
@@ -426,12 +426,12 @@ export default function DriverOnboardingAdminListPage() {
                 </div>
               )}
               </div>
-              <div className="flex justify-end gap-2 border-t border-[#1c2235] px-5 py-4">
+              <div className="flex justify-end gap-2 border-t border-[var(--trk-border)] px-5 py-4">
                 {inviteLink ? (
                   <button
                     type="button"
                     onClick={closeInviteModal}
-                    className="rounded-lg bg-[#f5a623] px-4 py-2 text-sm font-bold text-[#080a0f] hover:opacity-90"
+                    className="rounded-lg bg-[var(--trk-heading)] px-4 py-2 text-sm font-bold text-[var(--trk-bg)] hover:opacity-90"
                   >
                     Done
                   </button>
@@ -440,7 +440,7 @@ export default function DriverOnboardingAdminListPage() {
                     <button
                       type="button"
                       onClick={closeInviteModal}
-                      className="rounded-lg border border-[#242840] bg-transparent px-4 py-2 text-sm font-medium text-[#94a3b8] hover:text-[#e8edf5]"
+                      className="rounded-lg border border-[#242840] bg-transparent px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:text-[var(--trk-text)]"
                     >
                       Cancel
                     </button>
@@ -448,7 +448,7 @@ export default function DriverOnboardingAdminListPage() {
                       type="button"
                       onClick={handleGenerateLink}
                       disabled={inviteLoading}
-                      className="rounded-lg bg-[#f5a623] px-4 py-2 text-sm font-bold text-[#080a0f] hover:opacity-90 disabled:opacity-50"
+                      className="rounded-lg bg-[var(--trk-heading)] px-4 py-2 text-sm font-bold text-[var(--trk-bg)] hover:opacity-90 disabled:opacity-50"
                     >
                       {inviteLoading ? "Generating…" : "Generate link"}
                     </button>
@@ -465,16 +465,16 @@ export default function DriverOnboardingAdminListPage() {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-2xl border border-[#1c2235] bg-[#111520]">
-          <div className="flex items-center gap-3 border-b border-[#1c2235] px-5 py-4">
+        <div className="overflow-hidden rounded-2xl border border-[var(--trk-border)] bg-[var(--trk-surface)]">
+          <div className="flex items-center gap-3 border-b border-[var(--trk-border)] px-5 py-4">
             <input
               type="checkbox"
               checked={allVisibleSelected}
               onChange={toggleSelectAll}
-              className="h-4 w-4 cursor-pointer rounded border border-[#242840] bg-[#0d1017] accent-[#f5a623]"
+              className="h-4 w-4 cursor-pointer rounded border border-[#242840] bg-[#0d1017] accent-[var(--trk-heading)]"
             />
             <span className="font-mono text-xs text-[#475569]">
-              <span className="font-medium text-[#f5a623]">{filteredItems.length}</span> applications
+              <span className="font-medium text-[var(--trk-heading)]">{filteredItems.length}</span> applications
             </span>
             {selectedIds.length > 0 && (
               <span className="ml-auto font-mono text-[11px] text-[#7c8ba1]">{selectedIds.length} selected</span>
@@ -484,9 +484,9 @@ export default function DriverOnboardingAdminListPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse">
               <thead>
-                <tr className="border-b border-[#1c2235]">
+                <tr className="border-b border-[var(--trk-border)]">
                   <th className="w-10 px-5 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]"></th>
-                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#f5a623]">Name</th>
+                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-heading)]">Name</th>
                   <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Type</th>
                   <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Status</th>
                   <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Created</th>
@@ -501,7 +501,7 @@ export default function DriverOnboardingAdminListPage() {
                   return (
                     <tr
                       key={item.id}
-                      className="border-b border-[#1c2235] transition hover:bg-[#161b27]"
+                      className="border-b border-[var(--trk-border)] transition hover:bg-[#161b27]"
                       style={{ animation: `rowIn 0.25s ease ${Math.min(index, 6) * 0.04}s both` }}
                     >
                       <td className="px-5 py-4">
@@ -509,17 +509,17 @@ export default function DriverOnboardingAdminListPage() {
                           type="checkbox"
                           checked={selectedIds.includes(item.id)}
                           onChange={() => toggleSelected(item.id)}
-                          className="h-4 w-4 cursor-pointer rounded border border-[#242840] bg-[#0d1017] accent-[#f5a623]"
+                          className="h-4 w-4 cursor-pointer rounded border border-[#242840] bg-[#0d1017] accent-[var(--trk-heading)]"
                         />
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
-                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${nameMissing ? "border-dashed border-[#242840] bg-[#0d1017] text-[#64748b]" : "border-[#242840] bg-[#161b27] text-[#94a3b8]"}`}>
+                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${nameMissing ? "border-dashed border-[#242840] bg-[#0d1017] text-[#64748b]" : "border-[#242840] bg-[#161b27] text-[var(--trk-text-muted)]"}`}>
                             {initials(item)}
                           </div>
                           <div>
                             <Link
-                              className="text-[15px] font-semibold text-[#e8edf5] transition hover:text-[#f5a623]"
+                              className="text-[15px] font-semibold text-[var(--trk-text)] transition hover:text-[var(--trk-heading)]"
                               to={`/operations/driver-onboarding-review/${item.id}`}
                             >
                               {displayName(item)}
@@ -529,7 +529,7 @@ export default function DriverOnboardingAdminListPage() {
                         </div>
                       </td>
                       <td className="px-4 py-4">
-                        <span className="font-mono text-xs text-[#94a3b8]">{item.application_type || "DRIVER"}</span>
+                        <span className="font-mono text-xs text-[var(--trk-text-muted)]">{item.application_type || "DRIVER"}</span>
                       </td>
                       <td className="px-4 py-4">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.08em] ${queueBadgeClass(bucket)}`}>
@@ -538,13 +538,13 @@ export default function DriverOnboardingAdminListPage() {
                         </span>
                       </td>
                       <td className="px-4 py-4 align-top">
-                        <div className="font-mono text-sm text-[#94a3b8]">{formatIsoDay(item.created_at)}</div>
+                        <div className="font-mono text-sm text-[var(--trk-text-muted)]">{formatIsoDay(item.created_at)}</div>
                         <div className="mt-1 text-xs text-[#7c8ba1]">{formatRelative(item.created_at)}</div>
                       </td>
                       <td className="px-4 py-4 align-top">
                         {item.submitted_at ? (
                           <>
-                            <div className="font-mono text-sm text-[#94a3b8]">{formatIsoDay(item.submitted_at)}</div>
+                            <div className="font-mono text-sm text-[var(--trk-text-muted)]">{formatIsoDay(item.submitted_at)}</div>
                             <div className="mt-1 text-xs text-[#7c8ba1]">{formatRelative(item.submitted_at)}</div>
                           </>
                         ) : (
@@ -574,14 +574,14 @@ export default function DriverOnboardingAdminListPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between border-t border-[#1c2235] px-5 py-4 text-sm text-[#7c8ba1]">
+          <div className="flex items-center justify-between border-t border-[var(--trk-border)] px-5 py-4 text-sm text-[#7c8ba1]">
             <span>
               Showing {filteredItems.length === 0 ? 0 : 1}-{filteredItems.length} of {filteredItems.length}
             </span>
             <div className="flex items-center gap-1">
-              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#1c2235] text-[#94a3b8]">‹</button>
-              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#f5a623]/40 bg-[#f5a623]/10 text-[#f5a623]">1</button>
-              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#1c2235] text-[#94a3b8]">›</button>
+              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--trk-border)] text-[var(--trk-text-muted)]">‹</button>
+              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--trk-heading)]/40 bg-[var(--trk-heading)]/10 text-[var(--trk-heading)]">1</button>
+              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--trk-border)] text-[var(--trk-text-muted)]">›</button>
             </div>
           </div>
         </div>

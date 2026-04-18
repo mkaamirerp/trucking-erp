@@ -11,10 +11,10 @@ export default function AdminPlaceholderPage({ title, description }: Props) {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[#e8edf5]">
+      <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">
         {displayTitle}
       </h1>
-      <p className="text-[#94a3b8]">
+      <p className="text-[var(--trk-text-muted)]">
         {description || "This page is a placeholder. Configuration options will be added here."}
       </p>
       <div className="rounded-xl border border-dashed border-[#334155] bg-[#0a0e14]/50 p-12 text-center text-[#64748b]">

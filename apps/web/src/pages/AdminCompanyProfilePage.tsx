@@ -6,7 +6,7 @@ function Field({ label, value }: { label: string; value: string | null | undefin
   return (
     <div>
       <dt className="text-xs font-medium uppercase tracking-wider text-[#64748b]">{label}</dt>
-      <dd className="mt-1 text-sm text-[#e8edf5]">{value}</dd>
+      <dd className="mt-1 text-sm text-[var(--trk-text)]">{value}</dd>
     </div>
   );
 }
@@ -52,7 +52,7 @@ export default function AdminCompanyProfilePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12 text-[#94a3b8]">
+      <div className="flex items-center justify-center py-12 text-[var(--trk-text-muted)]">
         Loading company profile...
       </div>
     );
@@ -128,9 +128,9 @@ export default function AdminCompanyProfilePage() {
 
       <section className="rounded-xl border border-amber-900/40 bg-[#0a0e14] p-6">
         <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-amber-500/90">Tenant admin</p>
-        <h2 className="mb-2 text-lg font-semibold text-[#e8edf5]">People · onboarding workspace mode</h2>
+        <h2 className="mb-2 text-lg font-semibold text-[var(--trk-text)]">People · onboarding workspace mode</h2>
         <p className="mb-4 text-sm text-[#64748b] leading-relaxed">
-          Tenant-wide, people-level setting (<code className="text-[#94a3b8]">person_setup_ui_mode</code>).
+          Tenant-wide, people-level setting (<code className="text-[var(--trk-text-muted)]">person_setup_ui_mode</code>).
           <strong className="font-medium text-[#cbd5e1]"> Combined (ON)</strong> — small teams: driver setup appears on the
           onboarding review page; <strong className="font-medium text-[#cbd5e1]">Approve</strong> stays blocked until that
           in-page setup is complete (saves are always allowed).
@@ -145,7 +145,7 @@ export default function AdminCompanyProfilePage() {
             className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
               personSetupLocalMode === "combined"
                 ? "border-amber-500/70 bg-amber-500/15 text-amber-100"
-                : "border-[#1e293b] bg-[#0f1420] text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5]"
+                : "border-[#1e293b] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[#334155] hover:text-[var(--trk-text)]"
             }`}
           >
             Combined — ON
@@ -157,7 +157,7 @@ export default function AdminCompanyProfilePage() {
             className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
               personSetupLocalMode === "segmented"
                 ? "border-sky-500/70 bg-sky-500/15 text-sky-100"
-                : "border-[#1e293b] bg-[#0f1420] text-[#94a3b8] hover:border-[#334155] hover:text-[#e8edf5]"
+                : "border-[#1e293b] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[#334155] hover:text-[var(--trk-text)]"
             }`}
           >
             Segmented — OFF
@@ -168,7 +168,7 @@ export default function AdminCompanyProfilePage() {
 
       <section className="rounded-xl border border-amber-900/40 bg-[#0a0e14] p-6">
         <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-amber-500/90">Tenant admin</p>
-        <h2 className="mb-2 text-lg font-semibold text-[#e8edf5]">Onboarding · Document request link expiry</h2>
+        <h2 className="mb-2 text-lg font-semibold text-[var(--trk-text)]">Onboarding · Document request link expiry</h2>
         <p className="mb-4 text-sm text-[#64748b] leading-relaxed">
           When you send a document request to an applicant, how many days the link stays active.
           The applicant can upload documents and come back multiple times until the link expires or all documents are submitted.
@@ -182,7 +182,7 @@ export default function AdminCompanyProfilePage() {
             value={expiryInput}
             onChange={(e) => setExpiryInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void saveExpiryDays(); }}
-            className="w-24 rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm text-[#e8edf5] focus:border-amber-500/50 focus:outline-none"
+            className="w-24 rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm text-[var(--trk-text)] focus:border-amber-500/50 focus:outline-none"
           />
           <span className="text-sm text-[#64748b]">days</span>
           <button
@@ -200,7 +200,7 @@ export default function AdminCompanyProfilePage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[#e8edf5]">
+          <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">
             Company Profile
           </h1>
           <p className="mt-1 text-sm text-[#64748b]">
@@ -218,7 +218,7 @@ export default function AdminCompanyProfilePage() {
 
       <div className="grid gap-6 md:grid-cols-2">
         <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
-          <h2 className="mb-4 font-semibold text-[#e8edf5]">Workspace</h2>
+          <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Workspace</h2>
           <dl className="space-y-4">
             <Field label="Subdomain / Slug" value={profile.slug} />
             <Field label="Name" value={profile.tenant_name} />
@@ -229,7 +229,7 @@ export default function AdminCompanyProfilePage() {
         </section>
 
         <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
-          <h2 className="mb-4 font-semibold text-[#e8edf5]">Company Identity</h2>
+          <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Company Identity</h2>
           <dl className="space-y-4">
             <Field label="Company Name" value={profile.tenant_name} />
             <Field label="Legal Name" value={profile.legal_name} />
@@ -239,7 +239,7 @@ export default function AdminCompanyProfilePage() {
         </section>
 
         <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6 md:col-span-2">
-          <h2 className="mb-4 font-semibold text-[#e8edf5]">Business Address</h2>
+          <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Business Address</h2>
           <p className="mb-4 text-sm text-[#64748b]">
             Mailing/business address for invoices, pay stubs, and documents.
           </p>
@@ -252,12 +252,12 @@ export default function AdminCompanyProfilePage() {
               <Field label="Country" value={profile.country} />
             </dl>
           ) : (
-            <p className="text-sm text-[#94a3b8]">No business address on file.</p>
+            <p className="text-sm text-[var(--trk-text-muted)]">No business address on file.</p>
           )}
         </section>
 
         <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6 md:col-span-2">
-          <h2 className="mb-4 font-semibold text-[#e8edf5]">Business Registration</h2>
+          <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Business Registration</h2>
           <p className="mb-4 text-sm text-[#64748b]">USDOT / MC / CVOR / operator license / HST as available.</p>
           <dl className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             <Field label="USDOT Number" value={profile.usdot_number} />

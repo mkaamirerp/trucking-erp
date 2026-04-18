@@ -16,7 +16,7 @@ const C = {
   border: "#2a2d36",
   accent: "#5b9fd4",
   red: "#e8380d",
-  green: "#2ecc71",
+  green: "var(--trk-success)",
   text: "#e8e9ec",
   muted: "#72747e",
   muted2: "#3a3d4a",
