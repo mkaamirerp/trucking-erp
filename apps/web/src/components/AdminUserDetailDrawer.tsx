@@ -162,14 +162,14 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
               {sec.reasons.length > 0 ? (
                 <div>
                   <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Why sign-in was blocked</span>
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-[#cbd5e1]">
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-[var(--trk-text)]">
                     {sec.reasons.map((r) => (
                       <li key={r}>{r}</li>
                     ))}
                   </ul>
                 </div>
               ) : sec.sign_in_status === "verification_on_next_sign_in" ? (
-                <p className="text-[#cbd5e1]">
+                <p className="text-[var(--trk-text)]">
                   Limits are cleared. The user will be asked for a verification email code the next time they sign
                   in; after that they can trust their browser to skip the code on that device.
                 </p>
@@ -180,7 +180,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
               {rs && typeof rs === "object" ? (
                 <div>
                   <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Current sign-in checks</span>
-                  <ul className="mt-2 space-y-2 text-[#cbd5e1]">
+                  <ul className="mt-2 space-y-2 text-[var(--trk-text)]">
                     <li>
                       <span className="text-[var(--trk-text-muted)]">Wrong password attempts: </span>
                       <span className="font-medium text-[var(--trk-text)]">{pwdLine}</span>
@@ -209,7 +209,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
 
               <div>
                 <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Recent activity</span>
-                <ul className="mt-2 space-y-2 text-[#cbd5e1]">
+                <ul className="mt-2 space-y-2 text-[var(--trk-text)]">
                   <li>
                     <span className="text-[var(--trk-text-muted)]">Lock started: </span>
                     <span className="text-[var(--trk-text)]">{formatActivity(sec.timestamps.streak_window_started_at)}</span>

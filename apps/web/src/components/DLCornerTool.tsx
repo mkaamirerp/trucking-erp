@@ -668,12 +668,12 @@ export default function DLCornerTool({
     <div
       ref={containerRef}
       style={{
-        background: "#0d0f18",
+        background: "var(--trk-bg)",
         borderRadius: 14,
-        border: "1px solid #1e2235",
+        border: "1px solid var(--trk-border)",
         padding: "20px 20px 24px",
         fontFamily: "'DM Sans', 'Segoe UI', sans-serif",
-        color: "#e2e8f0",
+        color: "var(--trk-text)",
         userSelect: "none",
       }}
     >
@@ -682,9 +682,9 @@ export default function DLCornerTool({
           <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--trk-heading)", marginBottom: 2 }}>
             Step - Adjust Card Corners
           </div>
-          <div style={{ fontSize: "1rem", fontWeight: 700, color: "#f1f5f9" }}>{label}</div>
+          <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--trk-text)" }}>{label}</div>
         </div>
-        <div style={{ background: "#1a1d2e", border: "1px solid #2a2d45", borderRadius: 8, padding: "6px 12px", fontSize: "0.72rem", color: "var(--trk-text-muted)", lineHeight: 1.5, textAlign: "right" }}>
+        <div style={{ background: "var(--trk-surface)", border: "1px solid var(--trk-border)", borderRadius: 8, padding: "6px 12px", fontSize: "0.72rem", color: "var(--trk-text-muted)", lineHeight: 1.5, textAlign: "right" }}>
           {CORNER_LABELS.map((cornerLabel, i) => (
             <span key={cornerLabel} style={{ color: CORNER_COLORS[i], marginRight: i < 3 ? 8 : 0, fontWeight: 700 }}>
               {cornerLabel}
@@ -722,14 +722,14 @@ export default function DLCornerTool({
         <button
           type="button"
           onClick={() => setRotation((prev) => normalizeRotation(prev - 90))}
-          style={{ background: "none", border: "1px solid #2a2d45", borderRadius: 8, color: "#cbd5e1", padding: "8px 14px", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer" }}
+          style={{ background: "none", border: "1px solid var(--trk-border)", borderRadius: 8, color: "var(--trk-text)", padding: "8px 14px", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer" }}
         >
           Left
         </button>
         <button
           type="button"
           onClick={() => setRotation((prev) => normalizeRotation(prev + 90))}
-          style={{ background: "none", border: "1px solid #2a2d45", borderRadius: 8, color: "#cbd5e1", padding: "8px 14px", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer" }}
+          style={{ background: "none", border: "1px solid var(--trk-border)", borderRadius: 8, color: "var(--trk-text)", padding: "8px 14px", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer" }}
         >
           Right
         </button>
@@ -740,7 +740,7 @@ export default function DLCornerTool({
           <button
             type="button"
             onClick={() => setRotation(0)}
-            style={{ background: "none", border: "1px solid #2a2d45", borderRadius: 8, color: "var(--trk-text-muted)", cursor: "pointer", fontSize: "0.75rem", padding: "8px 12px" }}
+            style={{ background: "none", border: "1px solid var(--trk-border)", borderRadius: 8, color: "var(--trk-text-muted)", cursor: "pointer", fontSize: "0.75rem", padding: "8px 12px" }}
           >
             Reset rotation
           </button>
@@ -755,7 +755,7 @@ export default function DLCornerTool({
         <button
           onClick={resetCorners}
           disabled={processing}
-          style={{ background: "none", border: "1px solid #2a2d45", borderRadius: 8, color: "var(--trk-text-muted)", padding: "10px 18px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" }}
+          style={{ background: "none", border: "1px solid var(--trk-border)", borderRadius: 8, color: "var(--trk-text-muted)", padding: "10px 18px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" }}
         >
           Reset
         </button>
@@ -763,7 +763,7 @@ export default function DLCornerTool({
           <button
             onClick={onCancel}
             disabled={processing}
-            style={{ background: "none", border: "1px solid #2a2d45", borderRadius: 8, color: "var(--trk-text-muted)", padding: "10px 18px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" }}
+            style={{ background: "none", border: "1px solid var(--trk-border)", borderRadius: 8, color: "var(--trk-text-muted)", padding: "10px 18px", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" }}
           >
             Cancel
           </button>
@@ -773,10 +773,10 @@ export default function DLCornerTool({
           disabled={processing || !ready}
           style={{
             marginLeft: "auto",
-            background: processing ? "#2a2d45" : "linear-gradient(135deg, var(--trk-heading), #e8951f)",
+            background: processing ? "var(--trk-surface-2)" : "var(--trk-heading)",
             border: "none",
             borderRadius: 8,
-            color: processing ? "var(--trk-text-muted)" : "#0d0f18",
+            color: processing ? "var(--trk-text-muted)" : "var(--trk-btn-text)",
             padding: "10px 28px",
             fontSize: "0.9rem",
             fontWeight: 800,

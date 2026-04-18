@@ -5,6 +5,27 @@
    ============================================================================= */
 
 /* ---------------------------------------------------------------------------
+   :root fallback — dark values, prevents flash of unstyled content before
+   React mounts and sets data-theme on <html>.
+   --------------------------------------------------------------------------- */
+:root {
+  --trk-bg:            #0D0F14;
+  --trk-surface:       #141720;
+  --trk-surface-2:     #1C1F2B;
+  --trk-heading:       #F59E0B;
+  --trk-text:          #E8ECF4;
+  --trk-text-muted:    #7A8299;
+  --trk-border:        #252A38;
+  --trk-border-strong: #3A3F52;
+  --trk-accent:        #60A5FA;
+  --trk-btn-primary:   #F59E0B;
+  --trk-btn-text:      #080A0F;
+  --trk-success:       #2ECC71;
+  --trk-warning:       #FBBF24;
+  --trk-danger:        #F87171;
+}
+
+/* ---------------------------------------------------------------------------
    dark  (charcoal — default)
    Anchored to the existing app palette so the Step-5 migration pass is
    a straight find-and-replace: #0d0f14 → var(--trk-bg), etc.

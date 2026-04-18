@@ -94,8 +94,8 @@ export default function DLUploadStep({
   };
 
   const card = useMemo(() => ({
-    background: "#1a1d2e",
-    border: "1px solid #1e2235",
+    background: "var(--trk-surface)",
+    border: "1px solid var(--trk-border)",
     borderRadius: 12,
     padding: 16,
     cursor: "pointer",
@@ -114,7 +114,7 @@ export default function DLUploadStep({
         <div
           style={{
             border: "2px dashed",
-            borderColor: stageBusy ? "var(--trk-heading)" : "#2a2d45",
+            borderColor: stageBusy ? "var(--trk-heading)" : "var(--trk-border)",
             borderRadius: 14,
             minHeight: 320,
             display: "flex",
@@ -125,13 +125,13 @@ export default function DLUploadStep({
             cursor: stageBusy ? "default" : "pointer",
             position: "relative",
             overflow: "hidden",
-            background: "#0f1322",
+            background: "var(--trk-bg)",
             textAlign: "center",
             padding: 28,
           }}
         >
           {stageBusy ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "#cbd5e1" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "var(--trk-text)" }}>
               <div style={{ width: 38, height: 38, borderRadius: "50%", border: "2px solid var(--trk-border-strong)", borderTopColor: "var(--trk-heading)", animation: "spin 0.7s linear infinite" }} />
               <div style={{ fontWeight: 700 }}>{message || "Saving your licence..."}</div>
             </div>
@@ -140,7 +140,7 @@ export default function DLUploadStep({
               <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--trk-heading)", marginBottom: 10 }}>
                 {side === "front" ? "Step 1" : "Step 2"}
               </div>
-              <div style={{ color: "#f8fafc", fontSize: "1.5rem", fontWeight: 800, marginBottom: 10 }}>{title}</div>
+              <div style={{ color: "var(--trk-text)", fontSize: "1.5rem", fontWeight: 800, marginBottom: 10 }}>{title}</div>
               <div style={{ color: "var(--trk-text-muted)", maxWidth: 420, lineHeight: 1.6 }}>{subtitle}</div>
             </div>
           )}
@@ -182,7 +182,7 @@ export default function DLUploadStep({
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {uploadStage("front", "Upload front of driver licence", "Take or choose a clear photo of the front side, then adjust the corners before continuing.", frontMessage, frontState)}
-        {frontState === "FAILED" && <p style={{ fontSize: "0.85rem", color: "#fda4af" }}>{frontMessage || "Upload failed. Please try again."}</p>}
+        {frontState === "FAILED" && <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{frontMessage || "Upload failed. Please try again."}</p>}
       </div>
     );
   }
@@ -191,7 +191,7 @@ export default function DLUploadStep({
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ ...card, textAlign: "center" }}>
-          <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "#22c55e", marginBottom: 8 }}>
+          <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--trk-success)", marginBottom: 8 }}>
             Front saved
           </div>
           <div style={{ color: "var(--trk-text-muted)", lineHeight: 1.6 }}>
@@ -201,13 +201,13 @@ export default function DLUploadStep({
             type="button"
             onClick={() => promptReplacementFile("front")}
             disabled={busy}
-            style={{ marginTop: 14, background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "var(--trk-heading)", padding: "9px 18px", fontSize: "0.8rem", fontWeight: 700, cursor: frontFile && !busy ? "pointer" : "default", opacity: frontFile ? 1 : 0.6 }}
+            style={{ marginTop: 14, background: "none", border: "1px solid var(--trk-border)", borderRadius: 6, color: "var(--trk-heading)", padding: "9px 18px", fontSize: "0.8rem", fontWeight: 700, cursor: frontFile && !busy ? "pointer" : "default", opacity: frontFile ? 1 : 0.6 }}
           >
             Re-upload front
           </button>
         </div>
         {uploadStage("back", "Upload back of driver licence", "After you confirm the back corners, TruckERP will try to read the PDF417 barcode. If nothing is found, you can continue manually.", backMessage, backState)}
-        {backState === "FAILED" && <p style={{ fontSize: "0.85rem", color: "#fda4af" }}>{backMessage || "Upload failed. Please try again."}</p>}
+        {backState === "FAILED" && <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{backMessage || "Upload failed. Please try again."}</p>}
       </div>
     );
   }
@@ -218,34 +218,34 @@ export default function DLUploadStep({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18 }}>
           <div style={{ ...card, border: "1px solid rgba(34,197,94,0.45)", boxShadow: "0 0 0 1px rgba(34,197,94,0.12) inset" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#86efac" }}>Front preview</div>
-              <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "#22c55e" }}>READY</div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--trk-success)" }}>Front preview</div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "var(--trk-success)" }}>READY</div>
             </div>
-            <div style={{ borderRadius: 12, overflow: "hidden", border: "2px solid rgba(34,197,94,0.45)", background: "#0f1322", aspectRatio: "8 / 5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ borderRadius: 12, overflow: "hidden", border: "2px solid rgba(34,197,94,0.45)", background: "var(--trk-bg)", aspectRatio: "8 / 5", display: "flex", alignItems: "center", justifyContent: "center" }}>
               {frontPreview && <img src={frontPreview} alt="Front corrected preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />}
             </div>
             <button
               type="button"
               onClick={() => promptReplacementFile("front")}
               disabled={busy}
-              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid var(--trk-border)", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
             >
               Re-upload front
             </button>
           </div>
           <div style={{ ...card, border: "1px solid rgba(34,197,94,0.45)", boxShadow: "0 0 0 1px rgba(34,197,94,0.12) inset" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#86efac" }}>Back preview</div>
-              <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "#22c55e" }}>READY</div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--trk-success)" }}>Back preview</div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "var(--trk-success)" }}>READY</div>
             </div>
-            <div style={{ borderRadius: 12, overflow: "hidden", border: "2px solid rgba(34,197,94,0.45)", background: "#0f1322", aspectRatio: "8 / 5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ borderRadius: 12, overflow: "hidden", border: "2px solid rgba(34,197,94,0.45)", background: "var(--trk-bg)", aspectRatio: "8 / 5", display: "flex", alignItems: "center", justifyContent: "center" }}>
               {backPreview && <img src={backPreview} alt="Back corrected preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />}
             </div>
             <button
               type="button"
               onClick={() => promptReplacementFile("back")}
               disabled={busy}
-              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid #2a2d45", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+              style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid var(--trk-border)", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
             >
               Re-upload back
             </button>

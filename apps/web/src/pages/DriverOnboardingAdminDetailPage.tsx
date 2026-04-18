@@ -144,16 +144,16 @@ function diffReviewPatch(
 }
 
 const C = {
-  bg: "#0d0e11",
-  surface: "#16181e",
-  surf2: "#1e2029",
-  border: "#2a2d36",
-  accent: "var(--trk-heading)",
-  red: "#e8380d",
-  green: "var(--trk-success)",
-  text: "#e8e9ec",
-  muted: "#72747e",
-  muted2: "#3a3d4a",
+  bg:      "var(--trk-bg)",
+  surface: "var(--trk-surface)",
+  surf2:   "var(--trk-surface-2)",
+  border:  "var(--trk-border)",
+  accent:  "var(--trk-heading)",
+  red:     "var(--trk-danger)",
+  green:   "var(--trk-success)",
+  text:    "var(--trk-text)",
+  muted:   "var(--trk-text-muted)",
+  muted2:  "var(--trk-border-strong)",
 };
 
 const STATUS_CFG: Record<string, { label: string; color: string; glow: string }> = {
