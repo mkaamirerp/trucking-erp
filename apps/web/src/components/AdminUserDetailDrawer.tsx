@@ -99,7 +99,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
         onClick={onClose}
       />
       <aside
-        className="fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto border-l border-[#334155] bg-[#0a0e14] p-6 text-[var(--trk-text)] shadow-2xl"
+        className="fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto border-l border-[var(--trk-border-strong)] bg-[var(--trk-bg)] p-6 text-[var(--trk-text)] shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-user-detail-title"
@@ -112,23 +112,23 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
             Close
           </button>
         </div>
-        <p className="mt-1 text-sm text-[#64748b]">{user.email}</p>
+        <p className="mt-1 text-sm text-[var(--trk-text-muted)]">{user.email}</p>
         {user.phone ? <p className="text-sm text-[var(--trk-text-muted)]">{user.phone}</p> : null}
 
         <dl className="mt-6 space-y-3 text-sm">
           <div>
-            <dt className="text-xs uppercase tracking-wider text-[#64748b]">Membership status</dt>
+            <dt className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Membership status</dt>
             <dd className="mt-1 capitalize text-[var(--trk-text)]">{user.membership_status}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wider text-[#64748b]">Access level</dt>
+            <dt className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Access level</dt>
             <dd className="mt-1 text-[var(--trk-text)]">{user.access_level}</dd>
           </div>
         </dl>
 
-        <section className="mt-8 rounded-lg border border-[#334155] bg-[#0f172a]/50 p-4">
+        <section className="mt-8 rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a]/50 p-4">
           <h3 className="text-sm font-semibold text-[var(--trk-text)]">Sign-in Security</h3>
-          <p className="mt-1 text-xs text-[#64748b]">
+          <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
             Account status (such as Active) is separate from sign-in protection shown below.
           </p>
 
@@ -139,7 +139,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
           {sec && !loading ? (
             <div className="mt-4 space-y-4 text-sm">
               <div>
-                <span className="text-xs uppercase tracking-wider text-[#64748b]">Sign-in status</span>
+                <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Sign-in status</span>
                 <p className="mt-1">
                   <span
                     className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
@@ -161,7 +161,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
 
               {sec.reasons.length > 0 ? (
                 <div>
-                  <span className="text-xs uppercase tracking-wider text-[#64748b]">Why sign-in was blocked</span>
+                  <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Why sign-in was blocked</span>
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-[#cbd5e1]">
                     {sec.reasons.map((r) => (
                       <li key={r}>{r}</li>
@@ -179,7 +179,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
 
               {rs && typeof rs === "object" ? (
                 <div>
-                  <span className="text-xs uppercase tracking-wider text-[#64748b]">Current sign-in checks</span>
+                  <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Current sign-in checks</span>
                   <ul className="mt-2 space-y-2 text-[#cbd5e1]">
                     <li>
                       <span className="text-[var(--trk-text-muted)]">Wrong password attempts: </span>
@@ -208,7 +208,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
               ) : null}
 
               <div>
-                <span className="text-xs uppercase tracking-wider text-[#64748b]">Recent activity</span>
+                <span className="text-xs uppercase tracking-wider text-[var(--trk-text-muted)]">Recent activity</span>
                 <ul className="mt-2 space-y-2 text-[#cbd5e1]">
                   <li>
                     <span className="text-[var(--trk-text-muted)]">Lock started: </span>
@@ -232,7 +232,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
               ) : null}
 
               {canShowUnlock ? (
-                <div className="space-y-2 border-t border-[#334155] pt-4">
+                <div className="space-y-2 border-t border-[var(--trk-border-strong)] pt-4">
                   <button
                     type="button"
                     disabled={unlockBusy}
@@ -241,7 +241,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
                   >
                     {unlockBusy ? "Unlocking…" : "Unlock sign-in"}
                   </button>
-                  <p className="text-center text-xs text-[#64748b]">
+                  <p className="text-center text-xs text-[var(--trk-text-muted)]">
                     Clears workspace limits for this account. The user will verify by email on their next sign-in,
                     then can choose to trust their device again.
                   </p>

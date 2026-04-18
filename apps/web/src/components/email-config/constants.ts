@@ -10,13 +10,13 @@ export const STATUS_BADGE: Record<string, string> = {
 };
 
 export const STATUS_COLORS: Record<string, string> = {
-  NOT_CONNECTED: "bg-[#1e293b] text-[var(--trk-text-muted)]",
+  NOT_CONNECTED: "bg-[var(--trk-border)] text-[var(--trk-text-muted)]",
   CONNECTING: "bg-amber-900/40 text-amber-200",
   CONNECTED: "bg-emerald-900/40 text-emerald-300",
   ERROR: "bg-red-900/40 text-red-400",
-  DISABLED: "bg-[#1e293b] text-[#64748b]",
-  NOT_CONFIGURED: "bg-[#1e293b] text-[var(--trk-text-muted)]",
-  CONFIGURED: "bg-[#1e293b] text-[var(--trk-text-muted)]",
+  DISABLED: "bg-[var(--trk-border)] text-[var(--trk-text-muted)]",
+  NOT_CONFIGURED: "bg-[var(--trk-border)] text-[var(--trk-text-muted)]",
+  CONFIGURED: "bg-[var(--trk-border)] text-[var(--trk-text-muted)]",
   TESTING: "bg-amber-900/40 text-amber-200",
 };
 

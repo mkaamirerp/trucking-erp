@@ -573,7 +573,7 @@ export default function AdminEmailConfigPage() {
         <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">
           Email Configuration
         </h1>
-        <p className="mt-1 text-sm text-[#64748b]">
+        <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
           Connect the mailbox your company uses for inbound and outbound load-related email. Pick a provider, then use the
           section below for that provider only.
         </p>
@@ -597,7 +597,7 @@ export default function AdminEmailConfigPage() {
       <EmailProviderSelector active={activeProvider} onSelect={selectProvider} config={config} />
 
       <div
-        className="min-h-[20rem] rounded-xl border border-[#1e293b]/70 bg-[#06080d]/40 p-1 sm:min-h-[28rem] sm:p-1.5 lg:min-h-[32rem]"
+        className="min-h-[20rem] rounded-xl border border-[var(--trk-border)]/70 bg-[#06080d]/40 p-1 sm:min-h-[28rem] sm:p-1.5 lg:min-h-[32rem]"
         aria-label="Email provider details"
       >
         <div key={activeProvider} className="animate-email-panel-in">
@@ -670,7 +670,7 @@ export default function AdminEmailConfigPage() {
         </div>
       </div>
 
-      <p className="text-xs leading-relaxed text-[#64748b]">
+      <p className="text-xs leading-relaxed text-[var(--trk-text-muted)]">
         Automatic Gmail ingestion uses Google push notifications when configured on the server. Microsoft 365 uses Graph
         subscriptions when the webhook URL is configured. Other mail uses IMAP polling / manual sync. Contact support if you
         are unsure which option matches your IT setup.
@@ -687,7 +687,7 @@ export default function AdminEmailConfigPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby={disconnectTitleId}
-            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-[#1e293b] bg-[#0d111a] p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id={disconnectTitleId} className="font-semibold text-[var(--trk-text)]">
@@ -699,7 +699,7 @@ export default function AdminEmailConfigPage() {
                 type="button"
                 data-disconnect-cancel="true"
                 onClick={() => setShowDisconnectConfirm(false)}
-                className={`min-h-[44px] rounded-lg border border-[#334155] px-4 py-2.5 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[#1e293b] ${emailModalBtnFocus}`}
+                className={`min-h-[44px] rounded-lg border border-[var(--trk-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[var(--trk-border)] ${emailModalBtnFocus}`}
               >
                 Cancel
               </button>

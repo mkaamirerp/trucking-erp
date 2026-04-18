@@ -629,7 +629,7 @@ function PersonDetailView() {
                       {savingDriver ? "Saving…" : "Save license"}
                     </button>
                   </div>
-                  <p className="mt-3 text-[11px] leading-relaxed" style={{ color: "#64748b" }}>
+                  <p className="mt-3 text-[11px] leading-relaxed" style={{ color: "var(--trk-text-muted)" }}>
                     Updates the canonical <span className="font-mono">driver_profiles</span> row and copies license fields onto active operational{" "}
                     <span className="font-mono">drivers</span> rows for this person.
                   </p>
@@ -682,7 +682,7 @@ function PersonDetailView() {
                   ))}
                 </ul>
               )}
-              <p className="mt-3 text-[11px]" style={{ color: "#64748b" }}>
+              <p className="mt-3 text-[11px]" style={{ color: "var(--trk-text-muted)" }}>
                 Name/phone/email on roster rows update when you save core fields here (canonical <span className="font-mono">people</span>).
               </p>
             </section>
@@ -705,7 +705,7 @@ function PersonDetailView() {
                 </div>
               ) : (
                 <>
-                  <div className="mb-3 text-[11px] leading-relaxed" style={{ color: "#64748b" }}>
+                  <div className="mb-3 text-[11px] leading-relaxed" style={{ color: "var(--trk-text-muted)" }}>
                     If <span className="font-mono">payee_id</span> is empty on the roster row, saving below requires a{" "}
                     <span className="font-mono">driver_person_extensions</span> row (driver classification) so worker type is known when
                     creating the payee.
@@ -765,7 +765,7 @@ function PersonDetailView() {
                             : "—"}
                       </div>
                       {a.changed_keys.length > 0 && (
-                        <div className="mt-2 text-[11px]" style={{ color: "#64748b" }}>
+                        <div className="mt-2 text-[11px]" style={{ color: "var(--trk-text-muted)" }}>
                           Fields: <span className="font-mono text-[var(--trk-text-muted)]">{a.changed_keys.join(", ")}</span>
                         </div>
                       )}

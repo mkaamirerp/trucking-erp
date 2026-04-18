@@ -7,6 +7,8 @@
 /* Reserve scrollbar track so toggling overflow does not change viewport content width */
 html {
   scrollbar-gutter: stable;
+  background-color: var(--trk-bg);
+  color: var(--trk-text);
 }
 
 body {

@@ -19,12 +19,12 @@ import Button from "@/components/Button";
 // ─── Shared style tokens ────────────────────────────────────────────────────
 
 const INPUT =
-  "w-full rounded border border-[#334155] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[#64748b] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
+  "w-full rounded border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
 const TEXTAREA = `${INPUT} min-h-[72px] resize-y`;
 const LABEL = "block text-xs text-[var(--trk-text-muted)] mb-1";
-const SECTION = "rounded-xl border border-[#1a2231] bg-[#0d111a] p-5";
+const SECTION = "rounded-xl border border-[#1a2231] bg-[var(--trk-surface)] p-5";
 const SECTION_HEADING = "text-sm font-semibold text-[var(--trk-text)] mb-4";
-const SUBSECTION_HEADING = "text-xs font-semibold uppercase tracking-wide text-[#64748b] mb-2";
+const SUBSECTION_HEADING = "text-xs font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] mb-2";
 const READ_ONLY_VALUE = "min-h-[38px] rounded border border-transparent bg-transparent px-0 py-1.5 text-sm text-[var(--trk-text)]";
 
 // ─── Root page ───────────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ export default function BrokerDetailPage() {
         </Link>
       </div>
 
-      {loading && <p className="text-[#64748b]">Loading…</p>}
+      {loading && <p className="text-[var(--trk-text-muted)]">Loading…</p>}
       {error && <p className="text-rose-400">{error}</p>}
 
       {broker && ws && (
@@ -272,10 +272,10 @@ function MetaChip({
 }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-[var(--trk-text-muted)]">
-      <span className="text-xs uppercase tracking-wide text-[#64748b]">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-[var(--trk-text-muted)]">{label}</span>
       {editing ? (
         <input
-          className="w-28 rounded border border-[#334155] bg-[var(--trk-bg)] px-2 py-1 text-sm text-[var(--trk-text)] focus:border-[var(--trk-heading)] focus:outline-none"
+          className="w-28 rounded border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] px-2 py-1 text-sm text-[var(--trk-text)] focus:border-[var(--trk-heading)] focus:outline-none"
           value={value}
           onChange={onChange}
           placeholder="—"
@@ -313,7 +313,7 @@ function FirmSections({
             <div className="sm:col-span-2">
               <label className={LABEL}>Broker name</label>
               <input className={INPUT} value={form.name} onChange={set("name")} placeholder="Name as shown in lists" />
-              <p className="mt-1 text-[11px] text-[#64748b]">Updates the display title and directory name. Legal/display names follow this value.</p>
+              <p className="mt-1 text-[11px] text-[var(--trk-text-muted)]">Updates the display title and directory name. Legal/display names follow this value.</p>
             </div>
           )}
           <Field label="Phone primary" editing={editing} readValue={form.phone}>
@@ -523,7 +523,7 @@ function ContactsSection({
       <div className="mb-5 overflow-x-auto rounded-lg border border-[#1a2231]">
         <table className="w-full text-sm">
           <thead className="border-b border-[#1a2231] bg-[#141924]">
-            <tr className="text-xs uppercase tracking-wide text-[#64748b]">
+            <tr className="text-xs uppercase tracking-wide text-[var(--trk-text-muted)]">
               {["Name", "Role", "Department", "Phone", "Ext", "Fax", "Email", "Primary"].map((h) => (
                 <th key={h} className="whitespace-nowrap px-3 py-2 text-left">
                   {h}
@@ -550,7 +550,7 @@ function ContactsSection({
             ))}
           </tbody>
         </table>
-        {active.length === 0 && <p className="p-4 text-center text-xs text-[#64748b]">No contacts yet.</p>}
+        {active.length === 0 && <p className="p-4 text-center text-xs text-[var(--trk-text-muted)]">No contacts yet.</p>}
       </div>
 
       <div className="border-t border-[#1a2231] pt-4">
@@ -591,7 +591,7 @@ function ContactsSection({
               type="checkbox"
               checked={form.is_primary}
               onChange={(e) => setForm((prev) => ({ ...prev, is_primary: e.target.checked }))}
-              className="rounded border-[#334155]"
+              className="rounded border-[var(--trk-border-strong)]"
             />
             Primary contact
           </label>
@@ -629,7 +629,7 @@ function EmailRulesSection({
   return (
     <section className={SECTION}>
       <h2 className={SECTION_HEADING}>Email matching rules</h2>
-      <p className="mb-5 text-xs text-[#64748b]">
+      <p className="mb-5 text-xs text-[var(--trk-text-muted)]">
         Precedence when an email arrives:{" "}
         <span className="text-[var(--trk-text-muted)]">known sender</span> (exact From address) → <span className="text-[var(--trk-text-muted)]">domain</span> →{" "}
         <span className="text-[var(--trk-text-muted)]">alias</span>
@@ -664,7 +664,7 @@ function EmailRulesSection({
                 {s.email_normalized}
               </li>
             ))}
-            {activeSenders.length === 0 && <li className="text-xs text-[#64748b]">None</li>}
+            {activeSenders.length === 0 && <li className="text-xs text-[var(--trk-text-muted)]">None</li>}
           </ul>
         </div>
 
@@ -692,7 +692,7 @@ function EmailRulesSection({
             </Button>
           </div>
           <label className="mb-3 flex cursor-pointer items-center gap-1.5 text-xs text-[var(--trk-text-muted)]">
-            <input type="checkbox" checked={domPrimary} onChange={(e) => setDomPrimary(e.target.checked)} className="rounded border-[#334155]" />
+            <input type="checkbox" checked={domPrimary} onChange={(e) => setDomPrimary(e.target.checked)} className="rounded border-[var(--trk-border-strong)]" />
             Mark as primary
           </label>
           <ul className="space-y-1.5">
@@ -702,7 +702,7 @@ function EmailRulesSection({
                 {d.is_primary && <span className="text-amber-300/80">primary</span>}
               </li>
             ))}
-            {activeDomains.length === 0 && <li className="text-xs text-[#64748b]">None</li>}
+            {activeDomains.length === 0 && <li className="text-xs text-[var(--trk-text-muted)]">None</li>}
           </ul>
         </div>
 
@@ -737,10 +737,10 @@ function EmailRulesSection({
           <ul className="space-y-1.5">
             {activeAliases.map((a) => (
               <li key={a.id} className="text-xs text-[#cbd5e1]">
-                {a.alias} <span className="text-[#64748b]">({a.alias_type})</span>
+                {a.alias} <span className="text-[var(--trk-text-muted)]">({a.alias_type})</span>
               </li>
             ))}
-            {activeAliases.length === 0 && <li className="text-xs text-[#64748b]">None</li>}
+            {activeAliases.length === 0 && <li className="text-xs text-[var(--trk-text-muted)]">None</li>}
           </ul>
         </div>
       </div>

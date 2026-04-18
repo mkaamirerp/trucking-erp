@@ -6,9 +6,9 @@ import { parseBrokerBulkInput } from "@/utils/brokerBulkImport";
 import Button from "@/components/Button";
 
 const INPUT =
-  "w-full rounded border border-[#334155] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[#64748b] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
+  "w-full rounded border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
 const LABEL = "block text-xs text-[var(--trk-text-muted)] mb-1";
-const SECTION_TITLE = "text-xs font-semibold uppercase tracking-wide text-[#64748b] mb-3 mt-5 first:mt-0";
+const SECTION_TITLE = "text-xs font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] mb-3 mt-5 first:mt-0";
 
 type AddForm = {
   name: string;
@@ -146,7 +146,7 @@ export default function BrokersPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-heading)]">Freight brokers</h1>
-          <p className="mt-1 text-sm text-[#64748b]">{total} broker{total !== 1 ? "s" : ""}</p>
+          <p className="mt-1 text-sm text-[var(--trk-text-muted)]">{total} broker{total !== 1 ? "s" : ""}</p>
         </div>
         <Button type="button" variant="primary" onClick={() => { setShowAdd((v) => !v); setAddMsg(null); }}>
           {showAdd ? "Cancel" : "+ Add broker"}
@@ -155,7 +155,7 @@ export default function BrokersPage() {
 
       {/* Add broker form */}
       {showAdd && (
-        <form onSubmit={onAdd} className="mb-6 rounded-xl border border-[#1a2231] bg-[#0d111a] p-5">
+        <form onSubmit={onAdd} className="mb-6 rounded-xl border border-[#1a2231] bg-[var(--trk-surface)] p-5">
           <h2 className="mb-4 text-sm font-semibold text-[var(--trk-text)]">New broker</h2>
 
           {/* Identity */}
@@ -283,20 +283,20 @@ export default function BrokersPage() {
           />
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--trk-text-muted)]">
-          <input type="checkbox" checked={includeArchived} onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }} className="rounded border-[#334155]" />
+          <input type="checkbox" checked={includeArchived} onChange={(e) => { setIncludeArchived(e.target.checked); setPage(1); }} className="rounded border-[var(--trk-border-strong)]" />
           Show archived
         </label>
       </div>
 
       {/* Directory table */}
       {error && <p className="mb-3 text-sm text-rose-400">{error}</p>}
-      <div className="rounded-xl border border-[#1a2231] bg-[#0d111a]">
+      <div className="rounded-xl border border-[#1a2231] bg-[var(--trk-surface)]">
         {loading ? (
-          <p className="p-6 text-sm text-[#64748b]">Loading…</p>
+          <p className="p-6 text-sm text-[var(--trk-text-muted)]">Loading…</p>
         ) : (
           <table className="w-full text-sm">
             <thead className="border-b border-[#1a2231]">
-              <tr className="text-xs uppercase tracking-wide text-[#64748b]">
+              <tr className="text-xs uppercase tracking-wide text-[var(--trk-text-muted)]">
                 <th className="px-4 py-2.5 text-left">Broker</th>
                 <th className="px-4 py-2.5 text-left">MC #</th>
                 <th className="px-4 py-2.5 text-left">Status</th>
@@ -324,7 +324,7 @@ export default function BrokersPage() {
           </table>
         )}
         {!loading && items.length === 0 && (
-          <p className="p-6 text-center text-sm text-[#64748b]">No brokers found.</p>
+          <p className="p-6 text-center text-sm text-[var(--trk-text-muted)]">No brokers found.</p>
         )}
       </div>
 
@@ -332,7 +332,7 @@ export default function BrokersPage() {
       {totalPages > 1 && (
         <div className="mt-4 flex items-center gap-3">
           <Button type="button" variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
-          <span className="text-xs text-[#64748b]">Page {page} / {totalPages}</span>
+          <span className="text-xs text-[var(--trk-text-muted)]">Page {page} / {totalPages}</span>
           <Button type="button" variant="secondary" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
         </div>
       )}
@@ -341,14 +341,14 @@ export default function BrokersPage() {
       <div className="mt-8 border-t border-[#1a2231] pt-4">
         <button
           type="button"
-          className="text-xs text-[#64748b] hover:text-[var(--trk-text-muted)]"
+          className="text-xs text-[var(--trk-text-muted)] hover:text-[var(--trk-text-muted)]"
           onClick={() => setShowBulk((v) => !v)}
         >
           {showBulk ? "▾" : "▸"} Bulk import
         </button>
         {showBulk && (
-          <div className="mt-3 rounded-xl border border-[#1a2231] bg-[#0d111a] p-4">
-            <p className="mb-2 text-xs text-[#64748b]">
+          <div className="mt-3 rounded-xl border border-[#1a2231] bg-[var(--trk-surface)] p-4">
+            <p className="mb-2 text-xs text-[var(--trk-text-muted)]">
               One broker per line — <code className="text-[#cbd5e1]">Name[TAB]MC</code> or <code className="text-[#cbd5e1]">Name, MC</code>. Lines starting with # are ignored.
             </p>
             <textarea

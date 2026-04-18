@@ -8,21 +8,21 @@ type TableProps = {
 export function Table({ headers, children }: TableProps) {
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+      <table className="min-w-full divide-y divide-[var(--trk-border)]">
+        <thead className="bg-[var(--trk-surface-2)]">
           <tr>
             {headers.map((h, idx) => (
               <th
                 key={idx}
                 scope="col"
-                className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)] uppercase tracking-wider"
               >
                 {h}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200 bg-white">{children}</tbody>
+        <tbody className="divide-y divide-[var(--trk-border)] bg-[var(--trk-surface)]">{children}</tbody>
       </table>
     </div>
   );

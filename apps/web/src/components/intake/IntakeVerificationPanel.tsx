@@ -50,7 +50,7 @@ function formatBytes(n: number | null | undefined): string {
 }
 
 function fieldClass() {
-  return "w-full rounded-lg border border-[#334155] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)] placeholder:text-[#64748b] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/40";
+  return "w-full rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/40";
 }
 
 type Props = {
@@ -280,7 +280,7 @@ export function IntakeVerificationPanel({
         <button
           type="button"
           onClick={onClose}
-          className="absolute left-1/2 top-0 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[#334155] bg-[#0d111a] text-lg leading-none text-[var(--trk-text-muted)] hover:bg-[#1e293b] hover:text-[var(--trk-text)]"
+          className="absolute left-1/2 top-0 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] text-lg leading-none text-[var(--trk-text-muted)] hover:bg-[var(--trk-border)] hover:text-[var(--trk-text)]"
           aria-label="Close intake"
         >
           ×
@@ -288,7 +288,7 @@ export function IntakeVerificationPanel({
       ) : null}
 
       <div className={`flex flex-col gap-4 ${onClose ? "pt-10" : ""}`}>
-        <div className="flex flex-col gap-4 border-b border-[#1e293b] pb-5">
+        <div className="flex flex-col gap-4 border-b border-[var(--trk-border)] pb-5">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-end">
             {userEmail ? <p className="text-xs text-[var(--trk-text-muted)] sm:order-first sm:mr-auto sm:pt-2 sm:text-left">{userEmail}</p> : null}
             <input ref={uploadRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={onUploadDocumentChange} />
@@ -296,7 +296,7 @@ export function IntakeVerificationPanel({
               <button
                 type="button"
                 onClick={onManualEntry}
-                className="rounded-lg border border-[#475569] bg-transparent px-3 py-2 text-sm font-medium text-[var(--trk-text)] hover:bg-[#1e293b]"
+                className="rounded-lg border border-[var(--trk-text-muted)] bg-transparent px-3 py-2 text-sm font-medium text-[var(--trk-text)] hover:bg-[var(--trk-border)]"
               >
                 + Manual entry
               </button>
@@ -321,12 +321,12 @@ export function IntakeVerificationPanel({
         </div>
 
         {linkedLoad ? (
-          <div className="flex flex-col gap-2 rounded-xl border border-[#334155] bg-[#0d111a] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 rounded-xl border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-[var(--trk-text)]">
               Linked load{" "}
               <span className="font-mono font-semibold text-[#93c5fd]">{linkedLoad.load_number}</span>
               {linkedLoad.trip_number?.trim() ? (
-                <span className="ml-2 text-xs text-[#64748b]">Trip {linkedLoad.trip_number.trim()}</span>
+                <span className="ml-2 text-xs text-[var(--trk-text-muted)]">Trip {linkedLoad.trip_number.trim()}</span>
               ) : null}
             </p>
             <button
@@ -357,13 +357,13 @@ export function IntakeVerificationPanel({
         ) : null}
 
         {reviewDetail?.review ? (
-          <div className="rounded-xl border border-slate-700 bg-[#0a0e14] px-4 py-3">
+          <div className="rounded-xl border border-slate-700 bg-[var(--trk-bg)] px-4 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Structured review</div>
-            <p className="mt-1 font-mono text-xs text-slate-200">
+            <p className="mt-1 font-mono text-xs text-[var(--trk-text)]">
               <span className="text-slate-500">primary_code</span> {reviewDetail.review.primary_code}
             </p>
             <p className="mt-1 text-xs text-slate-400">
-              Status: <span className="text-slate-200">{reviewDetail.review.status}</span>
+              Status: <span className="text-[var(--trk-text)]">{reviewDetail.review.status}</span>
               {reviewDetail.review.claimed_by_tenant_user_id != null ? (
                 <span className="ml-2">· claimed by tenant_user_id {reviewDetail.review.claimed_by_tenant_user_id}</span>
               ) : null}
@@ -412,7 +412,7 @@ export function IntakeVerificationPanel({
                   </p>
                 ) : null}
                 {duplicateReviewUi.status === "dismissed" ? (
-                  <p className="mt-2 rounded-lg border border-slate-600/60 bg-slate-900/40 px-3 py-2 text-xs text-slate-300/95">
+                  <p className="mt-2 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)]/40 px-3 py-2 text-xs text-slate-300/95">
                     <span className="font-semibold text-slate-200/95">Review dismissed.</span> The duplicate signal was
                     treated as a false positive; link or create a load separately if this email still needs one.
                   </p>
@@ -453,7 +453,7 @@ export function IntakeVerificationPanel({
                           duplicateIntakeReviewDismissFalsePositive(emailThreadId!, dupDismissNote.trim() || null),
                         )
                       }
-                      className="rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Dismiss (false positive)
                     </button>
@@ -470,7 +470,7 @@ export function IntakeVerificationPanel({
               const showReopen = st === "resolved" || st === "dismissed";
               if (!showGenericResolveDismiss && !showReopen) return null;
               return (
-                <div className="mt-3 space-y-3 rounded-lg border border-slate-600/50 bg-slate-950/35 px-3 py-3">
+                <div className="mt-3 space-y-3 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-bg)] px-3 py-3">
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Review actions</div>
                   <p className="text-[10px] text-slate-500">
                     Reason is chosen from the list below (not typed). Optional note is free text only. Raw codes stay in
@@ -553,7 +553,7 @@ export function IntakeVerificationPanel({
                               }),
                             )
                           }
-                          className="rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800/70 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800/70 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           {reviewWorkflowBusy ? "…" : "Dismiss"}
                         </button>
@@ -614,10 +614,10 @@ export function IntakeVerificationPanel({
                     const tip = [ev.event_type, ev.reason_code].filter(Boolean).join(" · ");
                     return (
                       <li key={ev.id} className="border-t border-slate-800/80 py-1.5 first:border-t-0" title={tip || undefined}>
-                        <span className="text-slate-200">{intakeReviewEventTypeLabel(ev.event_type)}</span>
-                        <span className="text-slate-600"> · {ev.actor_kind}</span>
+                        <span className="text-[var(--trk-text)]">{intakeReviewEventTypeLabel(ev.event_type)}</span>
+                        <span className="text-[var(--trk-text-muted)]"> · {ev.actor_kind}</span>
                         {reasonHint ? <span className="text-slate-500"> · {reasonHint}</span> : null}
-                        <span className="block text-[10px] text-slate-600">{new Date(ev.created_at).toLocaleString()}</span>
+                        <span className="block text-[10px] text-[var(--trk-text-muted)]">{new Date(ev.created_at).toLocaleString()}</span>
                       </li>
                     );
                   })}
@@ -631,21 +631,21 @@ export function IntakeVerificationPanel({
           {kpiCards.map((k) => (
             <div
               key={k.label}
-              className="flex gap-3 rounded-xl border border-[#1e293b] bg-[#0d111a] px-3 py-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
+              className="flex gap-3 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-3 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
             >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#0a0e14]">{k.icon}</div>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--trk-bg)]">{k.icon}</div>
               <div className="min-w-0">
                 <div className={`text-2xl font-semibold tabular-nums leading-tight ${k.accent}`}>{k.value}</div>
-                <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-[#64748b]">{k.label}</div>
+                <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-[var(--trk-text-muted)]">{k.label}</div>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="rounded-xl border border-[#1e293b] bg-[#0d111a] px-4 py-4">
+        <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] px-4 py-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex min-w-0 flex-1 gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#1e293b] text-[#93c5fd]">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--trk-border)] text-[#93c5fd]">
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                 </svg>
@@ -655,12 +655,12 @@ export function IntakeVerificationPanel({
                   <>
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                       <span className="truncate text-sm font-semibold text-[var(--trk-text)]">{pdf.att.filename || "attachment.pdf"}</span>
-                      <span className="text-xs text-[#64748b]">{formatBytes(pdf.att.size_bytes)}</span>
+                      <span className="text-xs text-[var(--trk-text-muted)]">{formatBytes(pdf.att.size_bytes)}</span>
                     </div>
                     <p className="mt-1 text-xs font-medium text-emerald-400/90">Parsed successfully</p>
                   </>
                 ) : (
-                  <p className="text-sm text-[#64748b]">No PDF attachment on this thread yet.</p>
+                  <p className="text-sm text-[var(--trk-text-muted)]">No PDF attachment on this thread yet.</p>
                 )}
                 {intakeTags.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -673,10 +673,10 @@ export function IntakeVerificationPanel({
                 ) : null}
               </div>
             </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[#1e293b] pt-3 lg:border-t-0 lg:border-l lg:pl-4 lg:pt-0">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--trk-border)] pt-3 lg:border-t-0 lg:border-l lg:pl-4 lg:pt-0">
               <span
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm ${
-                  ocrComplete ? "border-emerald-800/50 bg-emerald-950/40 text-emerald-300" : "border-[#334155] bg-[#0a0e14] text-[#64748b]"
+                  ocrComplete ? "border-emerald-800/50 bg-emerald-950/40 text-emerald-300" : "border-[var(--trk-border-strong)] bg-[var(--trk-bg)] text-[var(--trk-text-muted)]"
                 }`}
                 title="Based on PDF attachment presence on this thread; server-side OCR status is not exposed yet"
               >
@@ -686,7 +686,7 @@ export function IntakeVerificationPanel({
                 type="button"
                 onClick={onReparse}
                 disabled={!canReparse || recomputingIntake}
-                className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg border border-[var(--trk-text-muted)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-40"
                 title={!canReparse ? "Re-parse uses Gmail intake rules on this thread" : "Re-run PDF / intake classification"}
               >
                 {recomputingIntake ? "Re-parsing…" : "Re-parse"}

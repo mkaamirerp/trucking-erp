@@ -121,7 +121,7 @@ export default function DLUploadStep({
             alignItems: "center",
             justifyContent: "center",
             fontSize: "0.9rem",
-            color: "#475569",
+            color: "var(--trk-text-muted)",
             cursor: stageBusy ? "default" : "pointer",
             position: "relative",
             overflow: "hidden",
@@ -132,7 +132,7 @@ export default function DLUploadStep({
         >
           {stageBusy ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "#cbd5e1" }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", border: "2px solid #334155", borderTopColor: "var(--trk-heading)", animation: "spin 0.7s linear infinite" }} />
+              <div style={{ width: 38, height: 38, borderRadius: "50%", border: "2px solid var(--trk-border-strong)", borderTopColor: "var(--trk-heading)", animation: "spin 0.7s linear infinite" }} />
               <div style={{ fontWeight: 700 }}>{message || "Saving your licence..."}</div>
             </div>
           ) : (

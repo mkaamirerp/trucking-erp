@@ -141,7 +141,7 @@ export default function AdminUsersPage() {
   return (
     <div className="space-y-8">
       <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">Users</h1>
-      <p className="text-sm text-[#64748b] -mt-4">
+      <p className="text-sm text-[var(--trk-text-muted)] -mt-4">
         Click a user&apos;s name or row to open details and sign-in security.
       </p>
 
@@ -157,11 +157,11 @@ export default function AdminUsersPage() {
         onAfterUnlock={() => loadUsers()}
       />
 
-      <div className={`rounded-xl border border-[#334155] bg-[#0a0e14]/50 p-6 ${!canInvite ? "opacity-60" : ""}`}>
+      <div className={`rounded-xl border border-[var(--trk-border-strong)] bg-[var(--trk-bg)]/50 p-6 ${!canInvite ? "opacity-60" : ""}`}>
         <h2 className="mb-4 text-lg font-semibold text-[var(--trk-text)]">
           Invite user
           {!canInvite && (
-            <span className="ml-2 text-sm font-normal text-[#64748b]">(Read-only: invite disabled)</span>
+            <span className="ml-2 text-sm font-normal text-[var(--trk-text-muted)]">(Read-only: invite disabled)</span>
           )}
         </h2>
         <form onSubmit={handleInvite} className="space-y-4">
@@ -175,7 +175,7 @@ export default function AdminUsersPage() {
           )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Username
               </label>
               <input
@@ -184,42 +184,42 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={inviteUsername}
                 onChange={(e) => setInviteUsername(e.target.value)}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Display name"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">Email</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">Email</label>
               <input
                 type="email"
                 required
                 disabled={!canInvite}
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="user@company.com"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">Phone</label>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">Phone</label>
               <input
                 type="tel"
                 disabled={!canInvite}
                 value={invitePhone}
                 onChange={(e) => setInvitePhone(e.target.value)}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[#64748b] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="+1 (optional)"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Access level
               </label>
               <select
                 value={inviteAccessLevel}
                 onChange={(e) => setInviteAccessLevel(e.target.value)}
                 disabled={!canInvite}
-                className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] focus:border-[#475569] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="READ_ONLY">Read only</option>
                 <option value="FULL_ACCESS">Full access</option>
@@ -238,34 +238,34 @@ export default function AdminUsersPage() {
         </form>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[#334155] bg-[#0a0e14]/50">
+      <div className="overflow-hidden rounded-xl border border-[var(--trk-border-strong)] bg-[var(--trk-bg)]/50">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-[#334155] bg-[#0f172a]/80">
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#64748b]">
+            <tr className="border-b border-[var(--trk-border-strong)] bg-[#0f172a]/80">
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Username
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Email
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Phone
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Access
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Status
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[#64748b]">
+              <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#334155]">
+          <tbody className="divide-y divide-[var(--trk-border-strong)]">
             {users.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-[#64748b]">
+                <td colSpan={6} className="py-8 text-center text-[var(--trk-text-muted)]">
                   No users yet. Invite someone to get started.
                 </td>
               </tr>
@@ -290,7 +290,7 @@ export default function AdminUsersPage() {
                             ? "bg-emerald-900/40 text-emerald-400"
                             : st === "suspended"
                               ? "bg-amber-900/40 text-amber-400"
-                              : "bg-[#334155] text-[var(--trk-text-muted)]"
+                              : "bg-[var(--trk-border-strong)] text-[var(--trk-text-muted)]"
                         }`}
                       >
                         {u.membership_status}

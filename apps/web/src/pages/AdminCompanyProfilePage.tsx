@@ -5,7 +5,7 @@ function Field({ label, value }: { label: string; value: string | null | undefin
   if (value == null || value === "") return null;
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wider text-[#64748b]">{label}</dt>
+      <dt className="text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">{label}</dt>
       <dd className="mt-1 text-sm text-[var(--trk-text)]">{value}</dd>
     </div>
   );
@@ -126,10 +126,10 @@ export default function AdminCompanyProfilePage() {
         </div>
       )}
 
-      <section className="rounded-xl border border-amber-900/40 bg-[#0a0e14] p-6">
+      <section className="rounded-xl border border-amber-900/40 bg-[var(--trk-bg)] p-6">
         <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-amber-500/90">Tenant admin</p>
         <h2 className="mb-2 text-lg font-semibold text-[var(--trk-text)]">People · onboarding workspace mode</h2>
-        <p className="mb-4 text-sm text-[#64748b] leading-relaxed">
+        <p className="mb-4 text-sm text-[var(--trk-text-muted)] leading-relaxed">
           Tenant-wide, people-level setting (<code className="text-[var(--trk-text-muted)]">person_setup_ui_mode</code>).
           <strong className="font-medium text-[#cbd5e1]"> Combined (ON)</strong> — small teams: driver setup appears on the
           onboarding review page; <strong className="font-medium text-[#cbd5e1]">Approve</strong> stays blocked until that
@@ -145,7 +145,7 @@ export default function AdminCompanyProfilePage() {
             className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
               personSetupLocalMode === "combined"
                 ? "border-amber-500/70 bg-amber-500/15 text-amber-100"
-                : "border-[#1e293b] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[#334155] hover:text-[var(--trk-text)]"
+                : "border-[var(--trk-border)] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)]"
             }`}
           >
             Combined — ON
@@ -157,19 +157,19 @@ export default function AdminCompanyProfilePage() {
             className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
               personSetupLocalMode === "segmented"
                 ? "border-sky-500/70 bg-sky-500/15 text-sky-100"
-                : "border-[#1e293b] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[#334155] hover:text-[var(--trk-text)]"
+                : "border-[var(--trk-border)] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)]"
             }`}
           >
             Segmented — OFF
           </button>
-          {personSetupModeSaving && <span className="text-xs text-[#64748b]">Saving…</span>}
+          {personSetupModeSaving && <span className="text-xs text-[var(--trk-text-muted)]">Saving…</span>}
         </div>
       </section>
 
-      <section className="rounded-xl border border-amber-900/40 bg-[#0a0e14] p-6">
+      <section className="rounded-xl border border-amber-900/40 bg-[var(--trk-bg)] p-6">
         <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-amber-500/90">Tenant admin</p>
         <h2 className="mb-2 text-lg font-semibold text-[var(--trk-text)]">Onboarding · Document request link expiry</h2>
-        <p className="mb-4 text-sm text-[#64748b] leading-relaxed">
+        <p className="mb-4 text-sm text-[var(--trk-text-muted)] leading-relaxed">
           When you send a document request to an applicant, how many days the link stays active.
           The applicant can upload documents and come back multiple times until the link expires or all documents are submitted.
           Range: 1–90 days.
@@ -182,9 +182,9 @@ export default function AdminCompanyProfilePage() {
             value={expiryInput}
             onChange={(e) => setExpiryInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void saveExpiryDays(); }}
-            className="w-24 rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm text-[var(--trk-text)] focus:border-amber-500/50 focus:outline-none"
+            className="w-24 rounded-lg border border-[var(--trk-border)] bg-[#0f1420] px-3 py-2 text-sm text-[var(--trk-text)] focus:border-amber-500/50 focus:outline-none"
           />
-          <span className="text-sm text-[#64748b]">days</span>
+          <span className="text-sm text-[var(--trk-text-muted)]">days</span>
           <button
             type="button"
             disabled={expirySaving || parseInt(expiryInput, 10) === expiryDays}
@@ -194,7 +194,7 @@ export default function AdminCompanyProfilePage() {
             {expirySaving ? "Saving…" : "Save"}
           </button>
           {expiryError && <span className="text-xs text-red-400">{expiryError}</span>}
-          {!expiryError && <span className="text-xs text-[#64748b]">Currently: {expiryDays} days</span>}
+          {!expiryError && <span className="text-xs text-[var(--trk-text-muted)]">Currently: {expiryDays} days</span>}
         </div>
       </section>
 
@@ -203,21 +203,21 @@ export default function AdminCompanyProfilePage() {
           <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-text)]">
             Company Profile
           </h1>
-          <p className="mt-1 text-sm text-[#64748b]">
+          <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
             Business information for invoices and pay stubs. Edit support coming soon.
           </p>
         </div>
         <button
           type="button"
           disabled
-          className="rounded-lg border border-[#1e293b] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[#64748b] cursor-not-allowed"
+          className="rounded-lg border border-[var(--trk-border)] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] cursor-not-allowed"
         >
           Edit (coming soon)
         </button>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+        <section className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
           <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Workspace</h2>
           <dl className="space-y-4">
             <Field label="Subdomain / Slug" value={profile.slug} />
@@ -228,7 +228,7 @@ export default function AdminCompanyProfilePage() {
           </dl>
         </section>
 
-        <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+        <section className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
           <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Company Identity</h2>
           <dl className="space-y-4">
             <Field label="Company Name" value={profile.tenant_name} />
@@ -238,9 +238,9 @@ export default function AdminCompanyProfilePage() {
           </dl>
         </section>
 
-        <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6 md:col-span-2">
+        <section className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6 md:col-span-2">
           <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Business Address</h2>
-          <p className="mb-4 text-sm text-[#64748b]">
+          <p className="mb-4 text-sm text-[var(--trk-text-muted)]">
             Mailing/business address for invoices, pay stubs, and documents.
           </p>
           {hasAddress ? (
@@ -256,9 +256,9 @@ export default function AdminCompanyProfilePage() {
           )}
         </section>
 
-        <section className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6 md:col-span-2">
+        <section className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6 md:col-span-2">
           <h2 className="mb-4 font-semibold text-[var(--trk-text)]">Business Registration</h2>
-          <p className="mb-4 text-sm text-[#64748b]">USDOT / MC / CVOR / operator license / HST as available.</p>
+          <p className="mb-4 text-sm text-[var(--trk-text-muted)]">USDOT / MC / CVOR / operator license / HST as available.</p>
           <dl className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             <Field label="USDOT Number" value={profile.usdot_number} />
             <Field label="MC Number" value={profile.mc_number} />
@@ -268,7 +268,7 @@ export default function AdminCompanyProfilePage() {
             <Field label="W9 on File" value={profile.has_w9_file ? "Yes" : null} />
           </dl>
           {profile.setup_completed_at && (
-            <p className="mt-4 text-xs text-[#64748b]">
+            <p className="mt-4 text-xs text-[var(--trk-text-muted)]">
               Setup completed: {new Date(profile.setup_completed_at).toLocaleString()}
             </p>
           )}

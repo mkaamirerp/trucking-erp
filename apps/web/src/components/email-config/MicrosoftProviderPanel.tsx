@@ -21,7 +21,7 @@ export type MicrosoftProviderPanelProps = {
 };
 
 function SectionTitle({ children }: { children: string }) {
-  return <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#64748b]">{children}</h3>;
+  return <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">{children}</h3>;
 }
 
 function msAutomaticMailSummary(config: EmailConfig): {
@@ -103,9 +103,9 @@ export default function MicrosoftProviderPanel({
 
   if (!connected || !config) {
     return (
-      <div className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+      <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
         <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Microsoft 365</h2>
-        <p className="mb-5 text-sm text-[#64748b]">
+        <p className="mb-5 text-sm text-[var(--trk-text-muted)]">
           First-class option for Outlook and Microsoft 365 — same idea as Gmail: sign in once, then sync and optional
           automatic intake.
         </p>
@@ -113,7 +113,7 @@ export default function MicrosoftProviderPanel({
           <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
         )}
         {microsoftOAuthConfigured === null && (
-          <p className="mb-4 text-xs text-[#64748b]" role="status" aria-live="polite">
+          <p className="mb-4 text-xs text-[var(--trk-text-muted)]" role="status" aria-live="polite">
             Checking whether Microsoft sign-in is enabled on this server…
           </p>
         )}
@@ -134,7 +134,7 @@ export default function MicrosoftProviderPanel({
           </div>
         )}
         {!oauthDisabled && (
-          <div className="mb-5 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4 text-sm text-[var(--trk-text-muted)]">
+          <div className="mb-5 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4 text-sm text-[var(--trk-text-muted)]">
             <p className="font-medium text-[#cbd5e1]">Before you connect</p>
             <p className="mt-2 leading-relaxed">
               Your administrator must register redirect URIs in Microsoft Entra for this TruckERP host. If anything is
@@ -171,7 +171,7 @@ export default function MicrosoftProviderPanel({
       ? "border-emerald-900/45 bg-emerald-950/15"
       : auto.tone === "amber"
         ? "border-amber-900/45 bg-amber-950/10"
-        : "border-[#1e293b] bg-[#0d111a]";
+        : "border-[var(--trk-border)] bg-[var(--trk-surface)]";
 
   const textAutoHead =
     auto.tone === "live"
@@ -181,22 +181,22 @@ export default function MicrosoftProviderPanel({
         : "text-[var(--trk-text)]";
 
   return (
-    <div className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+    <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
       <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Microsoft 365</h2>
-      <p className="mb-5 text-sm text-[#64748b]">Outlook and Microsoft 365 mail through Microsoft Graph.</p>
+      <p className="mb-5 text-sm text-[var(--trk-text-muted)]">Outlook and Microsoft 365 mail through Microsoft Graph.</p>
 
       {panelFlash && onDismissPanelFlash && (
         <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
       )}
 
-      <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4">
+      <div className="mb-6 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4">
         <SectionTitle>Connection</SectionTitle>
         <p className="text-sm text-[var(--trk-text-muted)]">
           Signed in as:{" "}
           <span className="font-medium text-[var(--trk-text)]">{config.oauth_account_email || config.email_address}</span>
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-[#64748b]">Status</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-[var(--trk-text-muted)]">Status</span>
           <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${connPillClass}`}>{connLabel}</span>
         </div>
         {config.last_error_message && <p className="mt-3 text-sm text-red-400">{config.last_error_message}</p>}
@@ -208,13 +208,13 @@ export default function MicrosoftProviderPanel({
         <p className="mt-1 text-sm text-[var(--trk-text-muted)]">{auto.body}</p>
         <dl className="mt-4 space-y-2 text-sm text-[var(--trk-text-muted)]">
           <div className="flex flex-wrap gap-x-2 gap-y-1">
-            <dt className="text-[#64748b]">Last Microsoft signal</dt>
+            <dt className="text-[var(--trk-text-muted)]">Last Microsoft signal</dt>
             <dd className="text-[var(--trk-text)]">
               {config.ms_graph_last_notification_at ? formatLastTested(config.ms_graph_last_notification_at) : "None yet"}
             </dd>
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-1">
-            <dt className="text-[#64748b]">Last sync into TruckERP</dt>
+            <dt className="text-[var(--trk-text-muted)]">Last sync into TruckERP</dt>
             <dd className="text-[var(--trk-text)]">
               {config.ms_graph_last_delta_sync_at
                 ? formatLastTested(config.ms_graph_last_delta_sync_at)
@@ -224,7 +224,7 @@ export default function MicrosoftProviderPanel({
             </dd>
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-1">
-            <dt className="text-[#64748b]">Subscription renew by</dt>
+            <dt className="text-[var(--trk-text-muted)]">Subscription renew by</dt>
             <dd className="text-[var(--trk-text)]">
               {config.ms_graph_subscription_expiration_at
                 ? formatLastTested(config.ms_graph_subscription_expiration_at)
@@ -234,30 +234,30 @@ export default function MicrosoftProviderPanel({
         </dl>
       </div>
 
-      <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4">
+      <div className="mb-6 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4">
         <SectionTitle>Mailbox & subscription details</SectionTitle>
-        <p className="mb-3 text-xs text-[#64748b]">
+        <p className="mb-3 text-xs text-[var(--trk-text-muted)]">
           Technical detail for admins. If a line shows “—”, nothing has been recorded yet — that is normal right after
           setup.
         </p>
         <ul className="space-y-2 text-sm text-[var(--trk-text-muted)]">
           <li>
-            <span className="text-[#64748b]">Inbox subscription </span>
+            <span className="text-[var(--trk-text-muted)]">Inbox subscription </span>
             <span className="text-[var(--trk-text)]">
               {config.ms_graph_subscription_id ? "Registered" : "Not registered yet"}
             </span>
           </li>
           <li>
-            <span className="text-[#64748b]">Subscription state </span>
+            <span className="text-[var(--trk-text-muted)]">Subscription state </span>
             <span className="text-[var(--trk-text)]">{subStatusDisplay}</span>
           </li>
           <li>
-            <span className="text-[#64748b]">Change tracking (delta) </span>
+            <span className="text-[var(--trk-text-muted)]">Change tracking (delta) </span>
             <span className="text-[var(--trk-text)]">{config.ms_graph_delta_cursor_present ? "Ready" : "Not set yet"}</span>
           </li>
           {(config.ms_graph_last_sync_status || config.ms_graph_last_sync_error) && (
             <li>
-              <span className="text-[#64748b]">Last sync note </span>
+              <span className="text-[var(--trk-text-muted)]">Last sync note </span>
               <span className="text-[var(--trk-text)]">
                 {config.ms_graph_last_sync_status ?? "—"}
                 {config.ms_graph_last_sync_error ? ` — ${config.ms_graph_last_sync_error}` : ""}
@@ -286,7 +286,7 @@ export default function MicrosoftProviderPanel({
             disabled={renewingMs}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#475569] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
             )}
           >
             {renewingMs ? "…" : "Renew subscription (if due)"}
@@ -308,13 +308,13 @@ export default function MicrosoftProviderPanel({
             disabled={oauthDisabled}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#475569] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-40",
             )}
           >
             Sign in with Microsoft again
           </button>
         </div>
-        <div className="border-t border-[#1e293b] pt-3">
+        <div className="border-t border-[var(--trk-border)] pt-3">
           <button
             type="button"
             onClick={onDisconnectClick}

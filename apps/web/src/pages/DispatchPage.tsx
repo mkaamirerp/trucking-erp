@@ -58,7 +58,7 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
 };
 
 const CARD_BADGE_CLASS: Record<string, string> = {
-  unassigned: "bg-[#1c2233] text-[#9ca3af] border border-[#2b3347]",
+  unassigned: "bg-[var(--trk-surface)] text-[#9ca3af] border border-[var(--trk-border-strong)]",
   assigned:   "bg-[var(--trk-heading)] text-[#0a0c12] border border-[var(--trk-heading)]",
   dispatched: "bg-[#0d1f1a] text-[#34d399] border border-[#10b981]/40",
 };
@@ -173,7 +173,7 @@ function LoadCard({
       {/* HEADER — broker/company is primary identifier (snapshot + FK broker fallbacks) */}
       <div className="mb-1 flex items-start justify-between gap-1.5">
         <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-white leading-snug truncate" title={displayBrokerHeadline(load)}>
+          <div className="text-[15px] font-semibold text-[var(--trk-text)] leading-snug truncate" title={displayBrokerHeadline(load)}>
             {displayBrokerHeadline(load)}
           </div>
           <div className="mt-0.5 truncate font-mono text-[10px] text-[#6b7280]">
@@ -189,12 +189,12 @@ function LoadCard({
       {/* ROUTE */}
       <div className="mb-1 flex items-center justify-between rounded-lg border border-[#242b3c] bg-[#0f141f] px-2 py-1.5">
         <div>
-          <div className="text-[12px] font-medium text-white">{origin}</div>
+          <div className="text-[12px] font-medium text-[var(--trk-text)]">{origin}</div>
           <div className="text-[10px] text-[#6b7280]">{originState}</div>
         </div>
         <div className="text-[#6b7280] text-[10px]">→</div>
         <div className="text-right">
-          <div className="text-[12px] font-medium text-white">{dest}</div>
+          <div className="text-[12px] font-medium text-[var(--trk-text)]">{dest}</div>
           <div className="text-[10px] text-[#6b7280]">{destState}</div>
         </div>
       </div>
@@ -361,7 +361,7 @@ function StatusColumn({
           />
         ))}
         {loads.length === 0 && (
-          <div className="text-center py-6 text-[#64748b] text-xs">
+          <div className="text-center py-6 text-[var(--trk-text-muted)] text-xs">
             {statusKey === "unassigned" && onEmptyAction ? (
               <button onClick={onEmptyAction} className="text-[var(--trk-heading)] hover:underline">New Load</button>
             ) : (
@@ -443,7 +443,7 @@ function DriverCard({ item }: { item: DriverWithLoad }) {
     >
       {/* Name + status pill */}
       <div className="flex items-start justify-between gap-1.5">
-        <span className="text-[14px] font-semibold text-white leading-tight">
+        <span className="text-[14px] font-semibold text-[var(--trk-text)] leading-tight">
           {driver.first_name} {driver.last_name}
         </span>
         <span className={clsx("shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold", DRIVER_STATUS_PILL[status])}>
@@ -516,7 +516,7 @@ function DriverColumn({
       </div>
       <div className="box-border max-h-[calc(100vh-292px)] min-h-[60px] flex-1 overflow-x-hidden overflow-y-auto p-2 [scrollbar-gutter:stable]">
         {items.length === 0 ? (
-          <div className="text-center py-6 text-[#64748b] text-xs">—</div>
+          <div className="text-center py-6 text-[var(--trk-text-muted)] text-xs">—</div>
         ) : (
           items.map((item) => <DriverCard key={item.driver.id} item={item} />)
         )}
@@ -642,7 +642,7 @@ export default function DispatchPage() {
               "focus-visible:ring-2 focus-visible:ring-[var(--trk-heading)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0d12]",
               ribbonTab === tab.key
                 ? "border-[var(--trk-heading)] bg-[var(--trk-heading)] text-[#0a0c12]"
-                : "border-transparent text-[var(--trk-text-muted)] hover:border-[#1e293b] hover:bg-[#11151c] hover:text-white"
+                : "border-transparent text-[var(--trk-text-muted)] hover:border-[var(--trk-border)] hover:bg-[#11151c] hover:text-white"
             )}
           >
             {tab.label}
@@ -653,17 +653,17 @@ export default function DispatchPage() {
       <main className="flex-1 flex overflow-hidden min-h-0 bg-[var(--trk-bg)]">
         {layoutMode === "table" ? (
           <div className="flex-1 overflow-auto p-4">
-            <div className="rounded-lg border border-[#1e293b] bg-[#0d1117] overflow-hidden">
+            <div className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-bg)] overflow-hidden">
               {loading ? (
-                <div className="py-12 text-center text-[#64748b] text-sm">Loading...</div>
+                <div className="py-12 text-center text-[var(--trk-text-muted)] text-sm">Loading...</div>
               ) : (
                 <table className="min-w-full">
                   <thead>
-                    <tr className="border-b border-[#1e293b]">
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">Load #</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">Trip #</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">Route</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">Status</th>
+                    <tr className="border-b border-[var(--trk-border)]">
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">Load #</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">Trip #</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">Route</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -672,7 +672,7 @@ export default function DispatchPage() {
                         <tr
                           key={load.id}
                           onClick={() => openLoadWorkspace(load)}
-                          className="cursor-pointer border-b border-[#1e293b]/50 transition-colors hover:bg-[#1e293b]/30"
+                          className="cursor-pointer border-b border-[var(--trk-border)]/50 transition-colors hover:bg-[var(--trk-border)]/30"
                         >
                           <td className="px-4 py-2.5 text-sm font-medium text-[var(--trk-text)]">#{load.load_number}</td>
                           <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{formatTripNumber(load)}</td>
@@ -687,7 +687,7 @@ export default function DispatchPage() {
                     )}
                     {!loading && loadsForView.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="px-4 py-12 text-center text-[#64748b] text-sm">
+                        <td colSpan={4} className="px-4 py-12 text-center text-[var(--trk-text-muted)] text-sm">
                           {ribbonTab === "active" ? (
                             <span>
                               No loads ·{" "}
@@ -709,7 +709,7 @@ export default function DispatchPage() {
         ) : (
           <div className="box-border flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden px-2 py-3 [scrollbar-gutter:stable]">
             {loading ? (
-              <div className="flex w-full items-center justify-center text-[#64748b] text-sm">Loading...</div>
+              <div className="flex w-full items-center justify-center text-[var(--trk-text-muted)] text-sm">Loading...</div>
             ) : (
               <>
                 <DriverColumn drivers={drivers} board={board} />
@@ -742,13 +742,13 @@ export default function DispatchPage() {
             onClick={() => setSelectedLoad(null)}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-            <div className="relative w-[96vw] max-w-6xl max-h-[92vh] bg-[#0d1117] rounded-2xl border border-[#1e293b] flex flex-col overflow-hidden shadow-2xl pointer-events-auto">
+            <div className="relative w-[96vw] max-w-6xl max-h-[92vh] bg-[var(--trk-bg)] rounded-2xl border border-[var(--trk-border)] flex flex-col overflow-hidden shadow-2xl pointer-events-auto">
 
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] bg-[#0a0d14] shrink-0">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--trk-border)] bg-[var(--trk-bg)] shrink-0">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-lg font-bold text-white">
+                    <span className="text-lg font-bold text-[var(--trk-text)]">
                       #{selectedLoad.load_number || "—"}
                     </span>
                     <span className={clsx("text-[11px] font-semibold px-2 py-0.5 rounded border", STATUS_BADGE_CLASS[selectedLoad.status])}>
@@ -760,7 +760,7 @@ export default function DispatchPage() {
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 text-xs text-[#64748b]">
+                  <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
                     {displayBrokerHeadline(selectedLoad)} · {formatRouteFromStops(selectedLoad.stops)}
                   </p>
                 </div>
@@ -772,7 +772,7 @@ export default function DispatchPage() {
                       setSelectedLoad(null);
                       navigate(`${slug}${OPS.LOAD_DETAIL(id)}`);
                     }}
-                    className="box-border rounded-md border border-[#2b3347] px-3 py-1.5 text-xs text-[var(--trk-text-muted)] transition-colors hover:border-[#475569] hover:text-white"
+                    className="box-border rounded-md border border-[var(--trk-border-strong)] px-3 py-1.5 text-xs text-[var(--trk-text-muted)] transition-colors hover:border-[var(--trk-text-muted)] hover:text-white"
                   >
                     Edit load
                   </button>
@@ -780,7 +780,7 @@ export default function DispatchPage() {
                     type="button"
                     aria-label="Close"
                     onClick={() => setSelectedLoad(null)}
-                    className="text-[#64748b] hover:text-white text-2xl leading-none px-1"
+                    className="text-[var(--trk-text-muted)] hover:text-white text-2xl leading-none px-1"
                   >
                     ×
                   </button>
@@ -788,13 +788,13 @@ export default function DispatchPage() {
               </div>
 
               {/* Body — 2 columns */}
-              <div className="flex-1 overflow-hidden grid grid-cols-1 md:grid-cols-2 divide-x divide-[#1e293b]">
+              <div className="flex-1 overflow-hidden grid grid-cols-1 md:grid-cols-2 divide-x divide-[var(--trk-border)]">
 
                 {/* LEFT — who is involved, identity, financials */}
                 <div className="overflow-y-auto p-5 space-y-6">
 
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">Who is involved</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)] border-b border-[var(--trk-border)] pb-2 mb-3">Who is involved</p>
                     <div className="space-y-2">
                       <ModalRow label="Broker" value={selectedLoad.broker_name_snapshot || selectedLoad.broker?.name || "—"} />
                       <ModalRow label="Contact" value={selectedLoad.broker_contact_name_snapshot || selectedLoad.broker_contact?.name || "—"} />
@@ -815,15 +815,15 @@ export default function DispatchPage() {
                         className="h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
                         style={selectedLoad.driver
                           ? { background: "#1e3a5f", color: "var(--trk-accent)" }
-                          : { background: "#1c2233", color: "#4b5563" }}
+                          : { background: "var(--trk-surface)", color: "#4b5563" }}
                       >
                         {selectedLoad.driver
                           ? `${selectedLoad.driver.first_name[0] ?? ""}${selectedLoad.driver.last_name[0] ?? ""}`.toUpperCase()
                           : "?"}
                       </div>
                       <div>
-                        <p className="text-[10px] text-[#64748b]">Driver</p>
-                        <p className="text-xs text-white">
+                        <p className="text-[10px] text-[var(--trk-text-muted)]">Driver</p>
+                        <p className="text-xs text-[var(--trk-text)]">
                           {selectedLoad.driver
                             ? `${selectedLoad.driver.first_name} ${selectedLoad.driver.last_name}`
                             : "Unassigned"}
@@ -848,7 +848,7 @@ export default function DispatchPage() {
                   </div>
 
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">Load identity</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)] border-b border-[var(--trk-border)] pb-2 mb-3">Load identity</p>
                     <div className="space-y-2">
                       <ModalRow label="Trip #" value={selectedLoad.trip_number?.trim() || "—"} mono />
                       <ModalRow label="Mode" value={selectedLoad.mode || "—"} />
@@ -865,7 +865,7 @@ export default function DispatchPage() {
                   </div>
 
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">Financials</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)] border-b border-[var(--trk-border)] pb-2 mb-3">Financials</p>
                     <div className="space-y-2">
                       <ModalRow
                         label="Linehaul rate"
@@ -888,7 +888,7 @@ export default function DispatchPage() {
                 <div className="overflow-y-auto p-5 space-y-6">
 
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">Freight & equipment</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)] border-b border-[var(--trk-border)] pb-2 mb-3">Freight & equipment</p>
                     <div className="space-y-2">
                       <ModalRow label="Equipment" value={selectedLoad.equipment_type || "—"} />
                       <ModalRow label="Trailer type" value={selectedLoad.trailer_type || "—"} />
@@ -908,17 +908,17 @@ export default function DispatchPage() {
                   </div>
 
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)] border-b border-[var(--trk-border)] pb-2 mb-3">
                       Stops ({selectedLoad.stops?.length ?? 0})
                     </p>
                     <div className="space-y-3">
                       {(selectedLoad.stops?.length ? sortedStops(selectedLoad.stops) : []).map((s, i) => (
-                        <div key={s.id || i} className="rounded-xl border border-[#1e293b] bg-[#0c101a] p-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64748b] mb-2">
+                        <div key={s.id || i} className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] mb-2">
                             {s.stop_type} · Stop {(s.sequence ?? i) + 1}
                           </p>
                           {s.facility_name && (
-                            <p className="text-xs font-medium text-white">{s.facility_name}</p>
+                            <p className="text-xs font-medium text-[var(--trk-text)]">{s.facility_name}</p>
                           )}
                           {(s.street || s.city) && (
                             <p className="text-xs text-[var(--trk-text-muted)]">
@@ -928,7 +928,7 @@ export default function DispatchPage() {
                             </p>
                           )}
                           {(s.appointment_date || s.appointment_time_text) && (
-                            <p className="mt-1 text-xs text-[#64748b]">
+                            <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
                               Appt:{" "}
                               {[s.appointment_date, s.appointment_time_text, s.appointment_type]
                                 .filter(Boolean)
@@ -936,23 +936,23 @@ export default function DispatchPage() {
                             </p>
                           )}
                           {s.reference_number && (
-                            <p className="text-[10px] text-[#64748b]">Ref: {s.reference_number}</p>
+                            <p className="text-[10px] text-[var(--trk-text-muted)]">Ref: {s.reference_number}</p>
                           )}
                           {s.notes && (
-                            <p className="mt-1 text-[10px] italic text-[#64748b]">{s.notes}</p>
+                            <p className="mt-1 text-[10px] italic text-[var(--trk-text-muted)]">{s.notes}</p>
                           )}
                         </div>
                       ))}
                       {!selectedLoad.stops?.length && (
-                        <p className="text-xs text-[#64748b] italic">No stops on this load.</p>
+                        <p className="text-xs text-[var(--trk-text-muted)] italic">No stops on this load.</p>
                       )}
                     </div>
                   </div>
 
                   {selectedLoad.internal_notes?.trim() && (
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-[#475569] border-b border-[#1e293b] pb-2 mb-3">Internal notes</p>
-                      <pre className="whitespace-pre-wrap text-xs text-[var(--trk-text-muted)] font-mono max-h-48 overflow-y-auto rounded-lg border border-[#1e293b] bg-[#0c101a] p-3 leading-relaxed">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-[var(--trk-text-muted)] border-b border-[var(--trk-border)] pb-2 mb-3">Internal notes</p>
+                      <pre className="whitespace-pre-wrap text-xs text-[var(--trk-text-muted)] font-mono max-h-48 overflow-y-auto rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-3 leading-relaxed">
                         {selectedLoad.internal_notes.trim()}
                       </pre>
                     </div>
@@ -970,7 +970,7 @@ export default function DispatchPage() {
 function ModalRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <span className="text-[11px] text-[#64748b] shrink-0">{label}</span>
+      <span className="text-[11px] text-[var(--trk-text-muted)] shrink-0">{label}</span>
       <span className={clsx("text-right break-all", mono ? "font-mono text-[11px] text-[var(--trk-text-muted)]" : "text-xs text-[#e2e8f0]")}>
         {value}
       </span>

@@ -30,7 +30,7 @@ export type GmailProviderPanelProps = {
 function CheckRow({ ok, label }: { ok: boolean; label: string }) {
   return (
     <li className="flex items-start gap-2 text-sm text-[var(--trk-text-muted)]">
-      <span className={`mt-0.5 shrink-0 font-medium ${ok ? "text-emerald-400" : "text-[#64748b]"}`} aria-hidden="true">
+      <span className={`mt-0.5 shrink-0 font-medium ${ok ? "text-emerald-400" : "text-[var(--trk-text-muted)]"}`} aria-hidden="true">
         {ok ? "✓" : "—"}
       </span>
       <span>{label}</span>
@@ -39,7 +39,7 @@ function CheckRow({ ok, label }: { ok: boolean; label: string }) {
 }
 
 function SectionTitle({ children }: { children: ReactNode }) {
-  return <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#64748b]">{children}</h3>;
+  return <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">{children}</h3>;
 }
 
 export default function GmailProviderPanel({
@@ -87,9 +87,9 @@ export default function GmailProviderPanel({
 
   if (!connected || !config) {
     return (
-      <div className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+      <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
         <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Gmail</h2>
-        <p className="mb-5 text-sm text-[#64748b]">Connect Google to send and receive load mail from Gmail or Google Workspace.</p>
+        <p className="mb-5 text-sm text-[var(--trk-text-muted)]">Connect Google to send and receive load mail from Gmail or Google Workspace.</p>
         {panelFlash && onDismissPanelFlash && (
           <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
         )}
@@ -126,24 +126,24 @@ export default function GmailProviderPanel({
   const subActive = !!config.gmail_watch_active && config.gmail_watch_expires_at != null;
 
   return (
-    <div className="rounded-xl border border-[#1e293b] bg-[#0a0e14] p-6">
+    <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
       <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Gmail</h2>
-      <p className="mb-5 text-sm text-[#64748b]">Google sign-in, automatic mail, and optional advanced tools.</p>
+      <p className="mb-5 text-sm text-[var(--trk-text-muted)]">Google sign-in, automatic mail, and optional advanced tools.</p>
 
       {panelFlash && onDismissPanelFlash && (
         <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
       )}
 
-      <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4">
+      <div className="mb-6 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4">
         <SectionTitle>Connection</SectionTitle>
         <p className="text-sm text-[var(--trk-text-muted)]">
           Signed in as: <span className="font-medium text-[var(--trk-text)]">{config.oauth_account_email || config.email_address}</span>
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium uppercase tracking-wide text-[#64748b]">Status</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-[var(--trk-text-muted)]">Status</span>
           <span className={`rounded-md px-2.5 py-1 text-xs font-semibold ${connPillClass}`}>{connLabel}</span>
           {config.last_tested_at && (
-            <span className="text-xs text-[#64748b]">Last checked {formatLastTested(config.last_tested_at)}</span>
+            <span className="text-xs text-[var(--trk-text-muted)]">Last checked {formatLastTested(config.last_tested_at)}</span>
           )}
         </div>
         {config.last_error_message && (
@@ -179,19 +179,19 @@ export default function GmailProviderPanel({
         </p>
         <dl className="mt-4 space-y-2 text-sm text-[var(--trk-text-muted)]">
           <div className="flex flex-wrap gap-x-2 gap-y-1">
-            <dt className="text-[#64748b]">Last Google signal</dt>
+            <dt className="text-[var(--trk-text-muted)]">Last Google signal</dt>
             <dd className="text-[var(--trk-text)]">
               {config.last_gmail_webhook_at ? formatLastTested(config.last_gmail_webhook_at) : "None yet"}
             </dd>
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-1">
-            <dt className="text-[#64748b]">Last sync into TruckERP</dt>
+            <dt className="text-[var(--trk-text-muted)]">Last sync into TruckERP</dt>
             <dd className="text-[var(--trk-text)]">
               {config.last_inbound_sync_at ? formatLastTested(config.last_inbound_sync_at) : "—"}
             </dd>
           </div>
           <div className="flex flex-wrap gap-x-2 gap-y-1">
-            <dt className="text-[#64748b]">Renewal due</dt>
+            <dt className="text-[var(--trk-text-muted)]">Renewal due</dt>
             <dd className="text-[var(--trk-text)]">{renewalDue ?? "—"}</dd>
           </div>
         </dl>
@@ -211,9 +211,9 @@ export default function GmailProviderPanel({
         )}
       </div>
 
-      <div className="mb-6 rounded-lg border border-[#1e293b] bg-[#0d111a] p-4">
+      <div className="mb-6 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4">
         <SectionTitle>System checks</SectionTitle>
-        <p className="mb-3 text-xs text-[#64748b]">Background requirements for automatic mail — you usually do not need to act on these.</p>
+        <p className="mb-3 text-xs text-[var(--trk-text-muted)]">Background requirements for automatic mail — you usually do not need to act on these.</p>
         <ul className="space-y-2">
           <CheckRow ok={pushReady} label="Push endpoint ready (server can receive alerts from Google)" />
           <CheckRow ok={trackingReady} label="Change tracking ready (Gmail bookmark in place)" />
@@ -252,13 +252,13 @@ export default function GmailProviderPanel({
             onClick={onConnectGmail}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#334155] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#475569] hover:text-[var(--trk-text)]",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)]",
             )}
           >
             Reconnect / Sign in again
           </button>
         </div>
-        <div className="border-t border-[#1e293b] pt-3">
+        <div className="border-t border-[var(--trk-border)] pt-3">
           <button
             type="button"
             onClick={onDisconnectClick}
@@ -274,7 +274,7 @@ export default function GmailProviderPanel({
       </div>
 
       <details
-        className="rounded-lg border border-[#1e293b] bg-[#0d111a]"
+        className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)]"
         onToggle={(e) => setGmailOpsAdvancedOpen((e.target as HTMLDetailsElement).open)}
       >
         <summary
@@ -285,8 +285,8 @@ export default function GmailProviderPanel({
         >
           Advanced — manual sync & subscription tools
         </summary>
-        <div className="space-y-4 border-t border-[#1e293b] px-4 py-4 text-sm text-[var(--trk-text-muted)]">
-          <p className="text-xs leading-relaxed text-[#64748b]">
+        <div className="space-y-4 border-t border-[var(--trk-border)] px-4 py-4 text-sm text-[var(--trk-text-muted)]">
+          <p className="text-xs leading-relaxed text-[var(--trk-text-muted)]">
             For troubleshooting. Routine renewal is handled automatically in production where possible.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -318,7 +318,7 @@ export default function GmailProviderPanel({
               disabled={registeringWatch || renewingWatch}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[#334155] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {renewingWatch ? "…" : "Extend subscription (if due soon)"}
@@ -335,12 +335,12 @@ export default function GmailProviderPanel({
               Force extend subscription
             </button>
           </div>
-          <div className="rounded border border-[#1e293b] bg-[#0a0e14] p-3 text-xs leading-relaxed text-[var(--trk-text-muted)]">
+          <div className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 text-xs leading-relaxed text-[var(--trk-text-muted)]">
             <p className="mb-2 font-medium text-[#cbd5e1]">Support checklist</p>
             {loadingGmailHealth && <p>Loading…</p>}
             {!loadingGmailHealth && gmailHealth && (
               <>
-                <p className="mb-2 text-[#64748b]">
+                <p className="mb-2 text-[var(--trk-text-muted)]">
                   Automatic pipeline:{" "}
                   <span className="text-[var(--trk-text)]">{gmailHealth.automatic_ingestion_ready ? "ready" : "not ready"}</span>
                 </p>

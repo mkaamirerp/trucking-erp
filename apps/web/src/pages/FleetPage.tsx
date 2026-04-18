@@ -43,7 +43,7 @@ const TRAILER_STATUS_OPTIONS = [
 ] as const;
 
 const FORM_INPUT_CLS =
-  "w-full rounded border border-[#334155] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
+  "w-full rounded border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
 const FORM_LABEL_CLS = "block text-xs font-medium text-[var(--trk-text-muted)] mb-1";
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -104,7 +104,7 @@ function formatDateTime(d: string | null | undefined): string {
 function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: number) => void }) {
   return (
     <tr
-      className="border-t border-[#1e293b] hover:bg-[#0f1419]/50 cursor-pointer"
+      className="border-t border-[var(--trk-border)] hover:bg-[#0f1419]/50 cursor-pointer"
       onClick={() => onNavigate(load.id)}
     >
       <td className="px-4 py-2 text-xs font-medium text-[var(--trk-heading)]">
@@ -118,7 +118,7 @@ function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: num
         {formatDate(firstPickupAppointmentDate(load.stops))}
       </td>
       <td className="px-4 py-2 text-xs">
-        <span className="px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 text-[10px]">
+        <span className="px-2 py-0.5 rounded bg-[var(--trk-surface-2)] text-[var(--trk-text-muted)] text-[10px]">
           {STATUS_LABELS[load.status ?? ""] ?? load.status ?? "—"}
         </span>
       </td>
@@ -128,7 +128,7 @@ function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: num
       <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
         {load.trailer ? `Trailer ${load.trailer.unit_number}` : "—"}
       </td>
-      <td className="px-4 py-2 text-xs text-[#64748b]">
+      <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
         {formatDateTime(load.updated_at)}
       </td>
     </tr>
@@ -160,7 +160,7 @@ function AssetRow({
     <>
       <tr
         className={clsx(
-          "border-t border-[#1e293b] transition-colors",
+          "border-t border-[var(--trk-border)] transition-colors",
           expanded && "bg-[#0f1419]/30"
         )}
       >
@@ -168,7 +168,7 @@ function AssetRow({
           <button
             type="button"
             onClick={onToggle}
-            className="text-[#64748b] hover:text-[var(--trk-text)] text-sm font-mono"
+            className="text-[var(--trk-text-muted)] hover:text-[var(--trk-text)] text-sm font-mono"
             aria-expanded={expanded}
           >
             {expanded ? "▼" : "▶"}
@@ -196,7 +196,7 @@ function AssetRow({
               asset.status === "active"
                 ? "bg-emerald-500/20 text-emerald-300"
                 : asset.status === "inactive"
-                  ? "bg-slate-500/20 text-slate-400"
+                  ? "bg-[var(--trk-surface-2)] text-[var(--trk-text-muted)]"
                   : "bg-amber-500/20 text-amber-300"
             )}
           >
@@ -214,32 +214,32 @@ function AssetRow({
         </td>
       </tr>
       {expanded && (
-        <tr className="border-t border-[#1e293b] bg-[var(--trk-bg)]">
+        <tr className="border-t border-[var(--trk-border)] bg-[var(--trk-bg)]">
           <td colSpan={8} className="px-4 py-3">
-            <div className="rounded border border-[#1e293b] bg-[#0d1117] overflow-hidden">
-              <div className="px-4 py-2 border-b border-[#1e293b] text-xs font-semibold text-[var(--trk-text-muted)]">
+            <div className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] overflow-hidden">
+              <div className="px-4 py-2 border-b border-[var(--trk-border)] text-xs font-semibold text-[var(--trk-text-muted)]">
                 Assignment history — loads this {isTruck ? "truck" : "trailer"} was assigned to
               </div>
               {loadHistoryLoading ? (
-                <div className="px-4 py-6 text-center text-[#64748b] text-sm">
+                <div className="px-4 py-6 text-center text-[var(--trk-text-muted)] text-sm">
                   Loading…
                 </div>
               ) : loadHistory.length === 0 ? (
-                <div className="px-4 py-6 text-center text-[#64748b] text-sm">
+                <div className="px-4 py-6 text-center text-[var(--trk-text-muted)] text-sm">
                   No loads assigned yet. Assign from Dispatch.
                 </div>
               ) : (
                 <table className="min-w-full text-xs">
                   <thead>
-                    <tr className="border-b border-[#1e293b]">
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Load #</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Trip #</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Route (stops)</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">1st pickup date</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Status</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Truck</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Trailer</th>
-                      <th className="px-4 py-2 text-left text-[#64748b] font-medium">Updated</th>
+                    <tr className="border-b border-[var(--trk-border)]">
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Load #</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Trip #</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Route (stops)</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">1st pickup date</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Status</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Truck</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Trailer</th>
+                      <th className="px-4 py-2 text-left text-[var(--trk-text-muted)] font-medium">Updated</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -321,13 +321,13 @@ export default function FleetPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-[var(--trk-text)]">Fleet</h1>
-          <p className="text-sm text-[#64748b]">
+          <p className="text-sm text-[var(--trk-text-muted)]">
             Trucks and trailers — add assets, view assignment history.
           </p>
         </div>
       </div>
 
-      <div className="flex gap-2 border-b border-[#1e293b]">
+      <div className="flex gap-2 border-b border-[var(--trk-border)]">
         <button
           type="button"
           onClick={() => setTab("trucks")}
@@ -335,7 +335,7 @@ export default function FleetPage() {
             "px-4 py-2 text-sm font-medium rounded-t border-b-2 -mb-px transition-colors",
             tab === "trucks"
               ? "border-[var(--trk-heading)] text-[var(--trk-heading)]"
-              : "border-transparent text-[#64748b] hover:text-[var(--trk-text-muted)]"
+              : "border-transparent text-[var(--trk-text-muted)] hover:text-[var(--trk-text-muted)]"
           )}
         >
           Trucks ({trucks.length})
@@ -347,7 +347,7 @@ export default function FleetPage() {
             "px-4 py-2 text-sm font-medium rounded-t border-b-2 -mb-px transition-colors",
             tab === "trailers"
               ? "border-[var(--trk-heading)] text-[var(--trk-heading)]"
-              : "border-transparent text-[#64748b] hover:text-[var(--trk-text-muted)]"
+              : "border-transparent text-[var(--trk-text-muted)] hover:text-[var(--trk-text-muted)]"
           )}
         >
           Trailers ({trailers.length})
@@ -361,8 +361,8 @@ export default function FleetPage() {
       )}
 
       {tab === "trucks" && (
-        <div className="rounded-lg border border-[#1e293b] bg-[#0d1117] overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e293b]">
+        <div className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-bg)] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--trk-border)]">
             <span className="text-sm font-semibold text-[var(--trk-text)]">Trucks</span>
             <button
               type="button"
@@ -381,30 +381,30 @@ export default function FleetPage() {
 
           <div className="overflow-x-auto">
             {loading ? (
-              <div className="px-4 py-12 text-center text-[#64748b] text-sm">
+              <div className="px-4 py-12 text-center text-[var(--trk-text-muted)] text-sm">
                 Loading trucks…
               </div>
             ) : trucks.length === 0 && !showAddTruck ? (
-              <div className="px-4 py-12 text-center text-[#64748b] text-sm">
+              <div className="px-4 py-12 text-center text-[var(--trk-text-muted)] text-sm">
                 No trucks yet. Click &quot;+ Add Truck&quot; to add one.
               </div>
             ) : trucks.length === 0 ? (
               /* Form open, no trucks — show minimal placeholder so table area isn't empty during overlay */
-              <div className="px-4 py-8 text-center text-[#64748b] text-sm" aria-hidden="true">
+              <div className="px-4 py-8 text-center text-[var(--trk-text-muted)] text-sm" aria-hidden="true">
                 &nbsp;
               </div>
             ) : (
               <table className="min-w-full">
                 <thead>
-                  <tr className="border-b border-[#1e293b]">
+                  <tr className="border-b border-[var(--trk-border)]">
                     <th className="w-8 px-4 py-2" />
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Unit #</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">VIN</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Make / Model</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Type</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Plate</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Status</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Actions</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Unit #</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">VIN</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Make / Model</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Type</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Plate</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Status</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -433,8 +433,8 @@ export default function FleetPage() {
       )}
 
       {tab === "trailers" && (
-        <div className="rounded-lg border border-[#1e293b] bg-[#0d1117] overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e293b]">
+        <div className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-bg)] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--trk-border)]">
             <span className="text-sm font-semibold text-[var(--trk-text)]">Trailers</span>
             <button
               type="button"
@@ -453,29 +453,29 @@ export default function FleetPage() {
 
           <div className="overflow-x-auto">
             {loading ? (
-              <div className="px-4 py-12 text-center text-[#64748b] text-sm">
+              <div className="px-4 py-12 text-center text-[var(--trk-text-muted)] text-sm">
                 Loading trailers…
               </div>
             ) : trailers.length === 0 && !showAddTrailer ? (
-              <div className="px-4 py-12 text-center text-[#64748b] text-sm">
+              <div className="px-4 py-12 text-center text-[var(--trk-text-muted)] text-sm">
                 No trailers yet. Click &quot;+ Add Trailer&quot; to add one.
               </div>
             ) : trailers.length === 0 ? (
-              <div className="px-4 py-8 text-center text-[#64748b] text-sm" aria-hidden="true">
+              <div className="px-4 py-8 text-center text-[var(--trk-text-muted)] text-sm" aria-hidden="true">
                 &nbsp;
               </div>
             ) : (
               <table className="min-w-full">
                 <thead>
-                  <tr className="border-b border-[#1e293b]">
+                  <tr className="border-b border-[var(--trk-border)]">
                     <th className="w-8 px-4 py-2" />
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Unit #</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">VIN</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Make / Model</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Type</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Plate</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Status</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-[#64748b]">Actions</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Unit #</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">VIN</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Make / Model</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Type</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Plate</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Status</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-[var(--trk-text-muted)]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -704,15 +704,15 @@ function AddTruckForm({
         aria-label="Close"
       />
       <div
-        className="relative z-10 ml-auto w-full max-w-xl bg-[#0d1117] border-l border-[#1e293b] shadow-xl flex flex-col h-full overflow-hidden"
+        className="relative z-10 ml-auto w-full max-w-xl bg-[var(--trk-bg)] border-l border-[var(--trk-border)] shadow-xl flex flex-col h-full overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--trk-border)] shrink-0">
           <h2 className="text-lg font-semibold text-[var(--trk-text)]">Add Truck Asset</h2>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]"
+            className="p-2 text-[var(--trk-text-muted)] hover:text-[var(--trk-text)] rounded hover:bg-[var(--trk-border)]"
             aria-label="Close"
           >
             ✕
@@ -927,7 +927,7 @@ function AddTruckForm({
           </div>
 
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
-          <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
+          <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
             <button
               type="submit"
               disabled={saving}
@@ -938,7 +938,7 @@ function AddTruckForm({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]"
+              className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]"
             >
               Cancel
             </button>
@@ -1052,15 +1052,15 @@ function AddTrailerForm({
         aria-label="Close"
       />
       <div
-        className="relative z-10 ml-auto w-full max-w-xl bg-[#0d1117] border-l border-[#1e293b] shadow-xl flex flex-col h-full overflow-hidden"
+        className="relative z-10 ml-auto w-full max-w-xl bg-[var(--trk-bg)] border-l border-[var(--trk-border)] shadow-xl flex flex-col h-full overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--trk-border)] shrink-0">
           <h2 className="text-lg font-semibold text-[var(--trk-text)]">Add Trailer Asset</h2>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]"
+            className="p-2 text-[var(--trk-text-muted)] hover:text-[var(--trk-text)] rounded hover:bg-[var(--trk-border)]"
             aria-label="Close"
           >
             ✕
@@ -1177,11 +1177,11 @@ function AddTrailerForm({
           </div>
 
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
-          <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
+          <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
             <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
               {saving ? "Adding…" : "Add Trailer"}
             </button>
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]">
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]">
               Cancel
             </button>
           </div>
@@ -1322,15 +1322,15 @@ function EditTruckForm({
         aria-label="Close"
       />
       <div
-        className="relative z-10 ml-auto w-full max-w-xl bg-[#0d1117] border-l border-[#1e293b] shadow-xl flex flex-col h-full overflow-hidden"
+        className="relative z-10 ml-auto w-full max-w-xl bg-[var(--trk-bg)] border-l border-[var(--trk-border)] shadow-xl flex flex-col h-full overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--trk-border)] shrink-0">
           <h2 className="text-lg font-semibold text-[var(--trk-text)]">Edit Truck — {truck.unit_number}</h2>
           <button
             type="button"
             onClick={onCancel}
-            className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]"
+            className="p-2 text-[var(--trk-text-muted)] hover:text-[var(--trk-text)] rounded hover:bg-[var(--trk-border)]"
             aria-label="Close"
           >
             ✕
@@ -1440,11 +1440,11 @@ function EditTruckForm({
             </FormSection>
           </div>
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
-          <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
+          <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
             <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
               {saving ? "Saving…" : "Save"}
             </button>
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]">
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]">
               Cancel
             </button>
           </div>
@@ -1557,12 +1557,12 @@ function EditTrailerForm({
     <div className="fixed inset-0 z-50 flex">
       <div className="absolute inset-0 z-0 bg-black/50" role="button" tabIndex={0} onClick={onCancel} onKeyDown={(e) => e.key === "Escape" && onCancel()} aria-label="Close" />
       <div
-        className="relative z-10 ml-auto w-full max-w-xl bg-[#0d1117] border-l border-[#1e293b] shadow-xl flex flex-col h-full overflow-hidden"
+        className="relative z-10 ml-auto w-full max-w-xl bg-[var(--trk-bg)] border-l border-[var(--trk-border)] shadow-xl flex flex-col h-full overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--trk-border)] shrink-0">
           <h2 className="text-lg font-semibold text-[var(--trk-text)]">Edit Trailer — {trailer.unit_number}</h2>
-          <button type="button" onClick={onCancel} className="p-2 text-[#64748b] hover:text-[var(--trk-text)] rounded hover:bg-[#1e293b]" aria-label="Close">✕</button>
+          <button type="button" onClick={onCancel} className="p-2 text-[var(--trk-text-muted)] hover:text-[var(--trk-text)] rounded hover:bg-[var(--trk-border)]" aria-label="Close">✕</button>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col min-h-0 overflow-y-auto">
           <div className="flex-1 px-6 py-5 space-y-6">
@@ -1625,9 +1625,9 @@ function EditTrailerForm({
             </FormSection>
           </div>
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
-          <div className="flex gap-3 px-6 py-4 border-t border-[#1e293b] shrink-0 bg-[#0d1117]">
+          <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
             <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
-            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[#334155] text-[var(--trk-text-muted)] text-sm hover:bg-[#1e293b]">Cancel</button>
+            <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]">Cancel</button>
           </div>
         </form>
       </div>

@@ -7,7 +7,7 @@ import Button from "@/components/Button";
 import type { Driver, Trailer, Truck } from "@/api";
 
 const inputCls =
-  "w-full rounded-md border border-[#2b3347] bg-[#101522] px-2.5 py-1.5 text-xs text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)]/50";
+  "w-full rounded-md border border-[var(--trk-border-strong)] bg-[#101522] px-2.5 py-1.5 text-xs text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)]/50";
 
 function SearchablePick({
   label,
@@ -77,7 +77,7 @@ function SearchablePick({
         />
         {open && !disabled ? (
           <ul
-            className="absolute z-[60] mt-1 max-h-52 w-full overflow-auto rounded-md border border-[#2b3347] bg-[#0d1117] py-1 shadow-xl"
+            className="absolute z-[60] mt-1 max-h-52 w-full overflow-auto rounded-md border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] py-1 shadow-xl"
             role="listbox"
           >
             <li>
@@ -109,7 +109,7 @@ function SearchablePick({
               </li>
             ))}
             {filtered.length === 0 ? (
-              <li className="px-2.5 py-2 text-[11px] text-[#64748b]">No matches</li>
+              <li className="px-2.5 py-2 text-[11px] text-[var(--trk-text-muted)]">No matches</li>
             ) : null}
           </ul>
         ) : null}

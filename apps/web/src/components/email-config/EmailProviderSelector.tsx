@@ -50,7 +50,7 @@ function MicrosoftIcon() {
 
 function MailIcon() {
   return (
-    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#334155]" aria-hidden="true">
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--trk-border-strong)]" aria-hidden="true">
       <svg viewBox="0 0 24 24" className="h-6 w-6 text-[var(--trk-text-muted)]" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" focusable="false">
         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
         <path d="M22 6l-10 7L2 6" />
@@ -103,7 +103,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
 
   return (
     <section aria-label="Email provider">
-      <h2 id={headingId} className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#64748b]">
+      <h2 id={headingId} className="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">
         Choose provider
       </h2>
       <div
@@ -151,7 +151,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                 "relative flex h-full min-h-[158px] w-full flex-col rounded-xl border p-4 text-left transition-all duration-200 ease-out",
                 isActive
                   ? "border-[#3b82f6] bg-[#0f1828] shadow-[0_0_0_2px_rgba(59,130,246,0.28),0_12px_40px_rgba(0,0,0,0.45)] ring-2 ring-[var(--trk-accent)]/35"
-                  : "border-[#1e293b] bg-[#0a0e14] hover:border-[#334155] hover:bg-[#0c1018]",
+                  : "border-[var(--trk-border)] bg-[var(--trk-bg)] hover:border-[var(--trk-border-strong)] hover:bg-[#0c1018]",
               ].join(" ")}
             >
               {tag && id === "gmail" && (
@@ -184,7 +184,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                     )}
                   </div>
                 </div>
-                <p className="text-xs leading-snug text-[#64748b]" aria-hidden="true">
+                <p className="text-xs leading-snug text-[var(--trk-text-muted)]" aria-hidden="true">
                   {hint}
                 </p>
               </div>

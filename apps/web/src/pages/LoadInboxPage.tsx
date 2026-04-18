@@ -69,7 +69,7 @@ function confidenceClass(level: string | null | undefined): string {
   const l = (level || "").toLowerCase();
   if (l === "high") return "border-emerald-900/60 bg-emerald-900/20 text-emerald-300";
   if (l === "medium") return "border-amber-900/60 bg-amber-900/20 text-amber-300";
-  return "border-slate-700 bg-slate-800/60 text-slate-300";
+  return "border-[var(--trk-border)] bg-[var(--trk-surface)] text-[var(--trk-text-muted)]";
 }
 
 function ThreadMessageList({
@@ -90,7 +90,7 @@ function ThreadMessageList({
       ) : null}
       {!loadingMessages && messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : null}
       {!loadingMessages && !messagesError && selectedThreadId && messages.length === 0 ? (
-        <div className="text-sm text-[#64748b]">No messages in this thread.</div>
+        <div className="text-sm text-[var(--trk-text-muted)]">No messages in this thread.</div>
       ) : null}
       {!loadingMessages && !messagesError
         ? messages.map((m) => {
@@ -99,7 +99,7 @@ function ThreadMessageList({
               <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
                 <article
                   className={`w-full max-w-[820px] rounded-xl border p-4 ${
-                    outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[#1e293b] bg-[#0d111a]"
+                    outbound ? "border-[#1d4ed8] bg-[#0f172a]" : "border-[var(--trk-border)] bg-[var(--trk-surface)]"
                   }`}
                 >
                   <div className="mb-2 grid gap-1 text-xs text-[var(--trk-text-muted)] md:grid-cols-2">
@@ -116,8 +116,8 @@ function ThreadMessageList({
                       {m.attachments.map((a) => (
                         <li key={a.id}>
                           <span className="text-[#cbd5e1]">{a.filename || a.external_attachment_id}</span>
-                          {a.mime_type ? <span className="text-[#64748b]"> · {a.mime_type}</span> : null}
-                          {a.size_bytes != null ? <span className="text-[#64748b]"> · {a.size_bytes} bytes</span> : null}
+                          {a.mime_type ? <span className="text-[var(--trk-text-muted)]"> · {a.mime_type}</span> : null}
+                          {a.size_bytes != null ? <span className="text-[var(--trk-text-muted)]"> · {a.size_bytes} bytes</span> : null}
                         </li>
                       ))}
                     </ul>
@@ -584,17 +584,17 @@ export default function LoadInboxPage() {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <span className="text-sm font-semibold text-[var(--trk-text)]">Load {loadLabel}</span>
-                <p className="mt-0.5 text-[11px] text-[#64748b]">Trip {tripLabel}</p>
+                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Trip {tripLabel}</p>
               </div>
               <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${confidenceClass(t.confidence_level)}`}>
                 {confidenceLabel(t.confidence_level)}
               </span>
             </div>
             <div className="text-xs text-[var(--trk-text-muted)]">{broker}</div>
-            <div className="line-clamp-2 text-xs text-[#64748b]">
+            <div className="line-clamp-2 text-xs text-[var(--trk-text-muted)]">
               {t.pickup_delivery_summary || t.snippet || "No route summary yet."}
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#64748b]">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--trk-text-muted)]">
               <span>{formatWhen(t.last_message_at || t.created_at)}</span>
               <span className="text-emerald-400/90">Thread #{t.id}</span>
             </div>
@@ -630,12 +630,12 @@ export default function LoadInboxPage() {
             </div>
             <p className="text-xs text-[var(--trk-text-muted)]">{broker}</p>
             <p
-              className="line-clamp-2 text-[11px] text-[#64748b]"
+              className="line-clamp-2 text-[11px] text-[var(--trk-text-muted)]"
               title={formatRoutingReason(t.routing_reason)}
             >
               {formatRoutingReason(t.routing_reason)}
             </p>
-            <div className="flex items-center justify-between gap-2 pt-1 text-[11px] text-[#64748b]">
+            <div className="flex items-center justify-between gap-2 pt-1 text-[11px] text-[var(--trk-text-muted)]">
               <span>{formatWhen(t.last_message_at || t.created_at)}</span>
               <button
                 type="button"
@@ -656,9 +656,9 @@ export default function LoadInboxPage() {
       <div className="flex flex-wrap items-end gap-3">
         <div className="max-w-2xl">
           <h1 className="text-xl font-semibold text-[var(--trk-text)]">{pageTitle}</h1>
-          <p className="text-sm text-[#64748b]">{pageSubtitle}</p>
+          <p className="text-sm text-[var(--trk-text-muted)]">{pageSubtitle}</p>
           {isEmailLoadRoute ? (
-            <details className="mt-2 text-xs text-[#64748b] marker:text-[#475569]">
+            <details className="mt-2 text-xs text-[var(--trk-text-muted)] marker:text-[var(--trk-text-muted)]">
               <summary className="cursor-pointer text-[var(--trk-text-muted)] hover:text-[#cbd5e1]">Ingestion &amp; troubleshooting</summary>
               <p className="mt-2 leading-relaxed">
                 New Gmail is classified and routed via backend sync (push → delta → route). Use Refresh to reload this list
@@ -666,7 +666,7 @@ export default function LoadInboxPage() {
               </p>
             </details>
           ) : (
-            <p className="mt-2 text-xs text-[#64748b]">
+            <p className="mt-2 text-xs text-[var(--trk-text-muted)]">
               Open <strong className="text-[var(--trk-text-muted)]">Email load</strong> for sync, queues, and ingestion tools. This screen
               focuses on verification and draft load creation.
             </p>
@@ -676,7 +676,7 @@ export default function LoadInboxPage() {
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
+            className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)]"
           >
             <option value="">All providers</option>
             <option value="gmail">Gmail</option>
@@ -688,7 +688,7 @@ export default function LoadInboxPage() {
               setStatus(v);
               if (v !== "active") setQueueFocus("intake");
             }}
-            className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
+            className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)]"
           >
             <option value="active">Active threads</option>
             <option value="">All statuses</option>
@@ -699,7 +699,7 @@ export default function LoadInboxPage() {
             <select
               value={queueFocus}
               onChange={(e) => setQueueFocus(e.target.value as "intake" | "linked")}
-              className="rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
+              className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)]"
             >
               <option value="intake">Queues: New loads + Needs review</option>
               <option value="linked">Linked threads</option>
@@ -708,7 +708,7 @@ export default function LoadInboxPage() {
           <button
             type="button"
             onClick={() => loadThreads({ keepSelection: true })}
-            className="rounded border border-[#334155] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[#0f1420]"
+            className="rounded border border-[var(--trk-border-strong)] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[#0f1420]"
           >
             Refresh list
           </button>
@@ -737,8 +737,8 @@ export default function LoadInboxPage() {
 
       {actionError && <div className="rounded border border-red-900/50 bg-red-950/20 p-3 text-sm text-red-400">{actionError}</div>}
       <div className="grid min-h-[620px] grid-cols-1 gap-4 lg:grid-cols-[380px_1fr]">
-        <section className="flex flex-col rounded-xl border border-[#1e293b] bg-[#0a0e14]">
-          <div className="border-b border-[#1e293b] px-4 py-3 text-sm font-semibold text-[#cbd5e1]">Queues</div>
+        <section className="flex flex-col rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)]">
+          <div className="border-b border-[var(--trk-border)] px-4 py-3 text-sm font-semibold text-[#cbd5e1]">Queues</div>
           <div className="max-h-[560px] flex-1 overflow-auto">
             {loadingThreads && <div className="px-4 py-6 text-sm text-[var(--trk-text-muted)]">Loading…</div>}
             {!loadingThreads && threadsError && <div className="px-4 py-6 text-sm text-red-400">{threadsError}</div>}
@@ -748,45 +748,45 @@ export default function LoadInboxPage() {
               bandNewLoads.length === 0 &&
               bandNeedsReview.length === 0 &&
               bandBackground.length === 0 && (
-                <div className="px-4 py-10 text-sm text-[#64748b]">No active intake items.</div>
+                <div className="px-4 py-10 text-sm text-[var(--trk-text-muted)]">No active intake items.</div>
               )}
             {!loadingThreads && !threadsError && isLinkedOnlyView && flatThreads.length === 0 && (
-              <div className="px-4 py-10 text-sm text-[#64748b]">No linked threads.</div>
+              <div className="px-4 py-10 text-sm text-[var(--trk-text-muted)]">No linked threads.</div>
             )}
             {!loadingThreads && !threadsError && !isBandView && !isLinkedOnlyView && flatThreads.length === 0 && (
-              <div className="px-4 py-10 text-sm text-[#64748b]">No threads.</div>
+              <div className="px-4 py-10 text-sm text-[var(--trk-text-muted)]">No threads.</div>
             )}
 
             {!loadingThreads && !threadsError && isBandView && (
               <>
-                <div className="border-b border-[#1e293b] bg-[#0d111a] px-3 py-2">
+                <div className="border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">New loads</p>
-                  <p className="text-[11px] text-[#64748b]">Auto-created loads with trip numbers; verify in Loads.</p>
+                  <p className="text-[11px] text-[var(--trk-text-muted)]">Auto-created loads with trip numbers; verify in Loads.</p>
                 </div>
                 {bandNewLoads.length === 0 ? (
-                  <div className="px-3 py-4 text-xs text-[#64748b]">None right now.</div>
+                  <div className="px-3 py-4 text-xs text-[var(--trk-text-muted)]">None right now.</div>
                 ) : (
                   bandNewLoads.map((t) => renderThreadRow(t, "new_load"))
                 )}
 
-                <div className="border-b border-t border-[#1e293b] bg-[#0d111a] px-3 py-2">
+                <div className="border-b border-t border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">Needs review</p>
-                  <p className="text-[11px] text-[#64748b]">Rate cons and broker mail — verify, link, or ignore.</p>
+                  <p className="text-[11px] text-[var(--trk-text-muted)]">Rate cons and broker mail — verify, link, or ignore.</p>
                 </div>
                 {bandNeedsReview.length === 0 ? (
-                  <div className="px-3 py-4 text-xs text-[#64748b]">None right now.</div>
+                  <div className="px-3 py-4 text-xs text-[var(--trk-text-muted)]">None right now.</div>
                 ) : (
                   bandNeedsReview.map((t) => renderThreadRow(t, "needs_review"))
                 )}
 
-                <div className="border-b border-t border-[#1e293b] bg-[#0d111a] px-3 py-2">
+                <div className="border-b border-t border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Other synced mail</p>
-                  <p className="text-[11px] text-[#64748b]">
+                  <p className="text-[11px] text-[var(--trk-text-muted)]">
                     Non–broker-intake threads (still in Gmail). Open from here or disregard.
                   </p>
                 </div>
                 {bandBackground.length === 0 ? (
-                  <div className="px-3 py-4 text-xs text-[#64748b]">None.</div>
+                  <div className="px-3 py-4 text-xs text-[var(--trk-text-muted)]">None.</div>
                 ) : (
                   bandBackground.map((t) => renderThreadRow(t, "needs_review"))
                 )}
@@ -811,8 +811,8 @@ export default function LoadInboxPage() {
                     <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
                       {t.linked_load_number ? `Load ${t.linked_load_number}` : `Load id ${t.linked_load_id ?? "—"}`}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-[#64748b]">Trip {t.linked_trip_number?.trim() || "—"}</p>
-                    <p className="mt-1 text-[11px] text-[#64748b]">{formatWhen(t.last_message_at || t.created_at)}</p>
+                    <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Trip {t.linked_trip_number?.trim() || "—"}</p>
+                    <p className="mt-1 text-[11px] text-[var(--trk-text-muted)]">{formatWhen(t.last_message_at || t.created_at)}</p>
                   </button>
                 );
               })}
@@ -836,8 +836,8 @@ export default function LoadInboxPage() {
                       )}
                     </div>
                     <p className="mt-1 truncate text-xs text-[var(--trk-text-muted)]">{participantPreview(t.participants_json)}</p>
-                    <p className="mt-1 truncate text-xs text-[#64748b]">{t.snippet || "No snippet"}</p>
-                    <div className="mt-2 flex items-center justify-between text-[11px] text-[#64748b]">
+                    <p className="mt-1 truncate text-xs text-[var(--trk-text-muted)]">{t.snippet || "No snippet"}</p>
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--trk-text-muted)]">
                       <span>{formatWhen(t.last_message_at || t.created_at)}</span>
                       <span>{t.intake_bucket}</span>
                     </div>
@@ -847,10 +847,10 @@ export default function LoadInboxPage() {
           </div>
         </section>
 
-        <section className="flex min-h-[620px] flex-col rounded-xl border border-[#1e293b] bg-[#0a0e14]">
-          <div className="shrink-0 border-b border-[#1e293b] px-4 py-2.5">
+        <section className="flex min-h-[620px] flex-col rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)]">
+          <div className="shrink-0 border-b border-[var(--trk-border)] px-4 py-2.5">
             {!selectedThread ? (
-              <p className="text-sm text-[#64748b]">
+              <p className="text-sm text-[var(--trk-text-muted)]">
                 {isEmailLoadRoute
                   ? "Select a queue item to read the thread."
                   : "Select a queue item to verify intake."}
@@ -863,9 +863,9 @@ export default function LoadInboxPage() {
                       ? threadIntakePrimaryLabel(selectedThread)
                       : selectedThread.subject || "(No subject)"}
                   </h2>
-                  <p className="truncate text-xs text-[#64748b]">
+                  <p className="truncate text-xs text-[var(--trk-text-muted)]">
                     {participantPreview(selectedThread.participants_json)}
-                    <span className="text-[#475569]"> · </span>
+                    <span className="text-[var(--trk-text-muted)]"> · </span>
                     {selectedThread.provider} · {selectedThread.intake_bucket}
                     {selectedThread.confidence_level ? ` · ${confidenceLabel(selectedThread.confidence_level)}` : ""}
                   </p>
@@ -873,7 +873,7 @@ export default function LoadInboxPage() {
                     <p className="mt-0.5 truncate text-[11px] text-[var(--trk-text-muted)]/90">{selectedThread.pickup_delivery_summary}</p>
                   ) : null}
                   {selectedThread.linked_load_id ? (
-                    <p className="mt-0.5 truncate text-[11px] text-[#64748b]">
+                    <p className="mt-0.5 truncate text-[11px] text-[var(--trk-text-muted)]">
                       Trip {selectedThread.linked_trip_number?.trim() || "—"}
                     </p>
                   ) : null}
@@ -950,11 +950,11 @@ export default function LoadInboxPage() {
                     className="hidden"
                     onChange={handleUploadDocumentChange}
                   />
-                  <p className="mb-3 text-xs text-[#64748b]">
+                  <p className="mb-3 text-xs text-[var(--trk-text-muted)]">
                     Read and triage mail here. Open <span className="text-[var(--trk-text-muted)]">Load Intake</span> for verify, form,
                     and create-load.
                   </p>
-                  <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[#1e293b] pb-4">
+                  <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-[var(--trk-border)] pb-4">
                     <button
                       type="button"
                       onClick={() => navigate(`${OPS.INTAKE}?thread=${selectedThread.id}`)}
@@ -976,7 +976,7 @@ export default function LoadInboxPage() {
                       disabled={
                         !(selectedThread.provider === "gmail" && selectedThread.status === "active") || recomputingIntake
                       }
-                      className="rounded-lg border border-[#475569] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-lg border border-[var(--trk-text-muted)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {recomputingIntake ? "Re-parsing…" : "Re-parse"}
                     </button>
@@ -991,7 +991,7 @@ export default function LoadInboxPage() {
               ) : (
                 <>
                   {loadingLinkedLoad && linkedLoadId ? (
-                    <p className="mb-2 text-xs text-[#64748b]">Loading linked load for verification…</p>
+                    <p className="mb-2 text-xs text-[var(--trk-text-muted)]">Loading linked load for verification…</p>
                   ) : null}
                   <IntakeVerificationPanel
                     emailThreadId={selectedThreadId}
@@ -1027,11 +1027,11 @@ export default function LoadInboxPage() {
                     }}
                   />
 
-                  <details className="mt-6 rounded-xl border border-[#1e293b] bg-[#0d111a]">
-                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#cbd5e1] marker:text-[#64748b]">
+                  <details className="mt-6 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)]">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#cbd5e1] marker:text-[var(--trk-text-muted)]">
                       Email thread (reference)
                     </summary>
-                    <div className="border-t border-[#1e293b] p-4">
+                    <div className="border-t border-[var(--trk-border)] p-4">
                       <ThreadMessageList
                         loadingMessages={loadingMessages}
                         messagesError={messagesError}
@@ -1054,29 +1054,29 @@ export default function LoadInboxPage() {
           aria-modal="true"
           aria-label="Link existing load"
         >
-          <div className="w-full max-w-md rounded-xl border border-[#1e293b] bg-[#0a0e14] p-4 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-4 shadow-xl">
             <h3 className="text-sm font-semibold text-[var(--trk-text)]">Link Existing Load</h3>
-            <p className="mt-1 text-xs text-[#64748b]">Search by load number, broker reference, or broker name.</p>
+            <p className="mt-1 text-xs text-[var(--trk-text-muted)]">Search by load number, broker reference, or broker name.</p>
             <div className="mt-3 flex gap-2">
               <input
                 value={linkSearch}
                 onChange={(e) => setLinkSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && runLinkSearch()}
                 placeholder="Search…"
-                className="flex-1 rounded border border-[#1e293b] bg-[#0d111a] px-3 py-2 text-sm text-[var(--trk-text)]"
+                className="flex-1 rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)]"
               />
               <button
                 type="button"
                 onClick={runLinkSearch}
                 disabled={linkLoading}
-                className="rounded border border-[#334155] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[#0f1420] disabled:opacity-50"
+                className="rounded border border-[var(--trk-border-strong)] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[#0f1420] disabled:opacity-50"
               >
                 {linkLoading ? "…" : "Search"}
               </button>
             </div>
-            <div className="mt-3 max-h-52 overflow-auto rounded border border-[#1e293b]">
+            <div className="mt-3 max-h-52 overflow-auto rounded border border-[var(--trk-border)]">
               {linkResults.length === 0 && !linkLoading && (
-                <p className="p-3 text-xs text-[#64748b]">No results yet. Enter a term and search.</p>
+                <p className="p-3 text-xs text-[var(--trk-text-muted)]">No results yet. Enter a term and search.</p>
               )}
               {linkResults.map((ld) => (
                 <div
@@ -1085,7 +1085,7 @@ export default function LoadInboxPage() {
                 >
                   <div>
                     <div className="font-medium text-[var(--trk-text)]">{ld.load_number}</div>
-                    <div className="text-[11px] text-[#64748b]">
+                    <div className="text-[11px] text-[var(--trk-text-muted)]">
                       Trip {ld.trip_number?.trim() || "—"}
                     </div>
                     <div className="text-[var(--trk-text-muted)]">
@@ -1110,7 +1110,7 @@ export default function LoadInboxPage() {
                   setLinkModalOpen(false);
                   setLinkResults([]);
                 }}
-                className="rounded border border-[#334155] px-3 py-1.5 text-xs text-[var(--trk-text)] hover:bg-[#0f1420]"
+                className="rounded border border-[var(--trk-border-strong)] px-3 py-1.5 text-xs text-[var(--trk-text)] hover:bg-[#0f1420]"
               >
                 Cancel
               </button>

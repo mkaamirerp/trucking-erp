@@ -327,13 +327,13 @@ export default function DriverOnboardingAdminListPage() {
 
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <div className="relative min-w-[240px] flex-1 max-w-[360px]">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#475569]">🔍</span>
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--trk-text-muted)]">🔍</span>
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search applicants..."
-              className="w-full rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] py-2.5 pl-9 pr-3 text-sm text-[var(--trk-text)] outline-none transition placeholder:text-[#475569] focus:border-[#242840]"
+              className="w-full rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] py-2.5 pl-9 pr-3 text-sm text-[var(--trk-text)] outline-none transition placeholder:text-[var(--trk-text-muted)] focus:border-[#242840]"
             />
           </div>
           <button
@@ -380,7 +380,7 @@ export default function DriverOnboardingAdminListPage() {
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="applicant@example.com"
-                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none placeholder:text-[#475569]"
+                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)]"
                   disabled={!!inviteLink}
                 />
               </div>
@@ -391,7 +391,7 @@ export default function DriverOnboardingAdminListPage() {
                   value={invitePhone}
                   onChange={(e) => setInvitePhone(e.target.value)}
                   placeholder="+1 234 567 8900"
-                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none placeholder:text-[#475569]"
+                  className="w-full rounded-lg border border-[var(--trk-border)] bg-[#0d1017] px-3 py-2.5 text-sm text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)]"
                   disabled={!!inviteLink}
                 />
               </div>
@@ -473,7 +473,7 @@ export default function DriverOnboardingAdminListPage() {
               onChange={toggleSelectAll}
               className="h-4 w-4 cursor-pointer rounded border border-[#242840] bg-[#0d1017] accent-[var(--trk-heading)]"
             />
-            <span className="font-mono text-xs text-[#475569]">
+            <span className="font-mono text-xs text-[var(--trk-text-muted)]">
               <span className="font-medium text-[var(--trk-heading)]">{filteredItems.length}</span> applications
             </span>
             {selectedIds.length > 0 && (
@@ -485,12 +485,12 @@ export default function DriverOnboardingAdminListPage() {
             <table className="min-w-full border-collapse">
               <thead>
                 <tr className="border-b border-[var(--trk-border)]">
-                  <th className="w-10 px-5 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]"></th>
+                  <th className="w-10 px-5 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-text-muted)]"></th>
                   <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-heading)]">Name</th>
-                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Type</th>
-                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Status</th>
-                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Created</th>
-                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#475569]">Submitted</th>
+                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-text-muted)]">Type</th>
+                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-text-muted)]">Status</th>
+                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-text-muted)]">Created</th>
+                  <th className="px-4 py-3 text-left font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--trk-text-muted)]">Submitted</th>
                 </tr>
               </thead>
               <tbody>
@@ -514,7 +514,7 @@ export default function DriverOnboardingAdminListPage() {
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
-                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${nameMissing ? "border-dashed border-[#242840] bg-[#0d1017] text-[#64748b]" : "border-[#242840] bg-[#161b27] text-[var(--trk-text-muted)]"}`}>
+                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${nameMissing ? "border-dashed border-[#242840] bg-[#0d1017] text-[var(--trk-text-muted)]" : "border-[#242840] bg-[#161b27] text-[var(--trk-text-muted)]"}`}>
                             {initials(item)}
                           </div>
                           <div>
@@ -548,7 +548,7 @@ export default function DriverOnboardingAdminListPage() {
                             <div className="mt-1 text-xs text-[#7c8ba1]">{formatRelative(item.submitted_at)}</div>
                           </>
                         ) : (
-                          <span className="text-sm text-[#475569]">—</span>
+                          <span className="text-sm text-[var(--trk-text-muted)]">—</span>
                         )}
                       </td>
                     </tr>
