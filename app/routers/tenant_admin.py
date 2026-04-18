@@ -95,6 +95,8 @@ class CompanyProfileOut(BaseModel):
     address_is_fallback: bool = False
     #: People-level onboarding UI: combined vs segmented (see docs/HR_PAYROLL_ONBOARDING_LOGIC_ANCHOR.md).
     person_setup_ui_mode: str = "combined"
+    #: Days a document-request applicant link stays valid (default 21, range 1–90).
+    doc_request_link_expiry_days: int = 21
 
 
 class PersonSetupUiModeOut(BaseModel):
@@ -256,6 +258,7 @@ async def get_company_profile(
         company_email_is_fallback=email_is_fallback,
         address_is_fallback=address_is_fallback,
         person_setup_ui_mode=normalize_person_setup_ui_mode(getattr(tenant, "person_setup_ui_mode", None)),
+        doc_request_link_expiry_days=int(getattr(tenant, "doc_request_link_expiry_days", None) or 21),
     )
 
 
@@ -280,6 +283,32 @@ async def patch_person_setup_ui_mode(
         await reconcile_person_application_lanes_for_tenant_ui_mode(tenant_db, db, int(tenant_id))
         await tenant_db.commit()
     return PersonSetupUiModeOut(person_setup_ui_mode=mode)
+
+
+class DocRequestLinkExpiryOut(BaseModel):
+    doc_request_link_expiry_days: int
+
+
+class DocRequestLinkExpiryPatch(BaseModel):
+    doc_request_link_expiry_days: int = Field(..., ge=1, le=90)
+
+
+@router.patch("/doc-request-link-expiry", response_model=DocRequestLinkExpiryOut)
+async def patch_doc_request_link_expiry(
+    body: DocRequestLinkExpiryPatch,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update how many days a document-request applicant link stays valid (1–90). Tenant admin only."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    tenant = await db.get(PlatformTenant, int(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    tenant.doc_request_link_expiry_days = body.doc_request_link_expiry_days
+    await db.commit()
+    return DocRequestLinkExpiryOut(doc_request_link_expiry_days=body.doc_request_link_expiry_days)
 
 
 # ---- Tenant users (list, invite, suspend, reactivate) ----

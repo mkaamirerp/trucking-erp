@@ -152,6 +152,7 @@ async def patch_person_driver_profile(
         changed=changed,
         ip=ip,
         user_agent=ua,
+        request_id=getattr(request.state, "request_id", None),
         action="people_driver_profile_patch",
     )
 
@@ -232,6 +233,7 @@ async def patch_person_compensation_setup(
             changed=changed,
             ip=ip,
             user_agent=ua,
+                request_id=getattr(request.state, "request_id", None),
             action="people_compensation_patch",
         )
 
@@ -331,6 +333,7 @@ async def patch_person_driver_role_configuration(
             changed=changed,
             ip=ip,
             user_agent=ua,
+            request_id=getattr(request.state, "request_id", None),
             action="people_driver_role_configuration_patch",
         )
 
@@ -465,6 +468,7 @@ async def patch_person_core(
         changed=changed,
         ip=ip,
         user_agent=ua,
+        request_id=getattr(request.state, "request_id", None),
     )
 
     await db.commit()

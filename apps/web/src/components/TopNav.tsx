@@ -1,9 +1,9 @@
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef } from "react";
 import { clsx } from "clsx";
 import { useAuth } from "../contexts/AuthContext";
 import { useMe, isTenantAdmin } from "../hooks/useMe";
-import { OPS, ADMIN } from "../routes";
+import { OPS, ADMIN, USER } from "../routes";
 
 // ─── Navigation data ──────────────────────────────────────────────────────────
 
@@ -85,6 +85,7 @@ function usePageLabel(): string {
   if (pathname.startsWith("/admin/integrations/fuel")) return "Fuel";
   if (pathname.startsWith("/admin/onboarding")) return "Onboarding Settings";
   if (pathname.startsWith("/admin/documents")) return "Document Rules";
+  if (pathname.startsWith("/profile")) return "My Profile";
   return "";
 }
 
@@ -302,7 +303,9 @@ export default function TopNav() {
           {/* Right: Settings (admin only), tenant pill, sign out */}
           <div className="flex items-center gap-1">
             {isAdmin && <SettingsDropdown />}
-            <TenantPill me={me} />
+            <Link to={USER.PROFILE} title="My profile" className="flex items-center">
+              <TenantPill me={me} />
+            </Link>
             <button
               type="button"
               onClick={handleLogout}

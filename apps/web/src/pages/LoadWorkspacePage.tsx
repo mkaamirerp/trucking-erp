@@ -22,6 +22,7 @@ import {
   listDrivers,
   listTrailers,
   listTrucks,
+  listAuditEventsByEntity,
   parseLoadVersionConflict,
   parseLoadWorkspaceDocument,
   resolveBrokerIdentity,
@@ -35,6 +36,7 @@ import {
   type Load,
   type LoadDocumentParseStop,
   type LoadNote,
+  type AuditEventRow,
   type Trailer,
   type Truck,
 } from "@/api";
@@ -1701,13 +1703,121 @@ export default function LoadWorkspacePage() {
               <div className="flex items-center justify-between gap-2 border-b border-[#252a38] bg-[#1e2330] px-3.5 py-2">
                 <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#7a8299]">Audit timeline</span>
               </div>
-              <div className="px-3.5 py-8 text-center text-xs text-[#4a5068]">
-                Audit timeline coming soon.
-              </div>
+              <LoadAuditTimeline loadId={load?.id ?? null} />
             </section>
           ) : null}
         </main>
       </div>
+    </div>
+  );
+}
+
+function formatAuditValue(v: unknown): string {
+  if (v === null) return "null";
+  if (v === undefined) return "—";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function loadAuditActionLabel(action: string): string {
+  switch (action) {
+    case "load_created":
+      return "Load created";
+    case "load_updated":
+      return "Load updated";
+    case "load_status_changed":
+      return "Status changed";
+    case "load_assigned":
+      return "Driver assignment changed";
+    case "load_dispatched":
+      return "Load dispatched";
+    case "document_snapshot_confirmed":
+      return "Document snapshot confirmed";
+    case "customs_broker_changed":
+      return "Customs broker changed";
+    case "note_added":
+      return "Note added";
+    default:
+      return action;
+  }
+}
+
+function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
+  const [rows, setRows] = useState<AuditEventRow[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const fetchRows = useCallback(async () => {
+    if (!loadId) return;
+    try {
+      setErr(null);
+      const r = await listAuditEventsByEntity("load", String(loadId), { limit: 100 });
+      setRows(r);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to load audit");
+      setRows([]);
+    }
+  }, [loadId]);
+
+  useEffect(() => {
+    void fetchRows();
+  }, [fetchRows]);
+
+  if (!loadId) {
+    return <div className="px-3.5 py-6 text-center text-xs text-[#4a5068]">Select a load to view audit history.</div>;
+  }
+  if (err) {
+    return <div className="px-3.5 py-6 text-center text-xs text-[#b87a7a]">{err}</div>;
+  }
+  if (rows === null) {
+    return <div className="px-3.5 py-6 text-center text-xs text-[#4a5068]">Loading…</div>;
+  }
+  if (rows.length === 0) {
+    return <div className="px-3.5 py-6 text-center text-xs text-[#4a5068]">No audit events.</div>;
+  }
+
+  return (
+    <div className="px-3.5 py-2">
+      <ul className="space-y-2">
+        {rows.map((r) => (
+          <li key={r.id} className="rounded border border-[#252a38] bg-[#151826] px-3 py-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="text-xs text-[#d7dbea]">
+                <span className="font-semibold">{loadAuditActionLabel(r.action)}</span>
+                <span className="ml-2 text-[11px] text-[#7a8299]">{r.source}</span>
+                {r.visibility && r.visibility !== "normal" ? (
+                  <span className="ml-2 text-[11px] text-[#b9a46a]">{r.visibility}</span>
+                ) : null}
+              </div>
+              <div className="text-[11px] text-[#7a8299]">{new Date(r.event_at).toLocaleString()}</div>
+            </div>
+
+            {r.changed_fields && Object.keys(r.changed_fields).length > 0 ? (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[11px] text-[#7a8299]">Show changes</summary>
+                <div className="mt-2 space-y-1 text-[11px] text-[#aab0c5]">
+                  {Object.entries(r.changed_fields).map(([k, v]) => (
+                    <div key={k}>
+                      <span className="text-[#d7dbea]">{k}</span>:{" "}
+                      {(v as any)?.redacted ? (
+                        <span className="text-[#b87a7a]">redacted</span>
+                      ) : (
+                        <>
+                          {formatAuditValue((v as any)?.before)} → {formatAuditValue((v as any)?.after)}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

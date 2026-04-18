@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { MeProvider } from "./hooks/useMe";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 import "./styles/company-setup.css";
@@ -15,7 +16,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <BrowserRouter>
         <AuthProvider>
           <MeProvider>
-            <App />
+            <ThemeProvider>
+              <App />
+            </ThemeProvider>
           </MeProvider>
         </AuthProvider>
       </BrowserRouter>

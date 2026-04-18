@@ -27,6 +27,52 @@ from app.services import dispatch_trips as dispatch_trips_service
 from app.utils.pagination import paginate
 
 
+async def _write_load_audit(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    load: Load,
+    action: str,
+    actor_user_id: int | None,
+    request_id: str | None,
+    correlation_id: str | None,
+    source: str,
+    changed_fields: dict | None = None,
+    context_json: dict | None = None,
+) -> None:
+    """Best-effort audit_events writer for Loads (Slice 5).
+
+    Never raises (load mutations must not fail due to audit).
+    """
+    try:
+        from app.services.audit_events import write_audit_event
+
+        ctx = context_json
+        if ctx is None and changed_fields is None:
+            # Writer requires at least one payload surface; use minimal context for checkpoint events.
+            ctx = {"checkpoint": True}
+
+        await write_audit_event(
+            db,
+            tenant_id=int(tenant_id),
+            module="loads",
+            entity_type="load",
+            entity_id=str(int(load.id)),
+            entity_label=(str(load.load_number) if getattr(load, "load_number", None) else None),
+            action=action,
+            source=source,
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=correlation_id,
+            changed_fields=changed_fields,
+            context_json=ctx,
+            best_effort=True,
+        )
+    except Exception:
+        # Avoid failing core load mutations; audit is additive during rollout.
+        pass
+
+
 async def _get_driver(db: AsyncSession, tenant_id: int, driver_id: int) -> Driver | None:
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
     return result.scalar_one_or_none()
@@ -142,6 +188,20 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
     out = await get_load(db, tenant_id, created_id)
     if out is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
+
+    await _write_load_audit(
+        db,
+        tenant_id=tenant_id,
+        load=out,
+        action="load_created",
+        actor_user_id=None,
+        request_id=None,
+        correlation_id=None,
+        source="ui",
+        changed_fields=None,
+    )
+    # Persist audit row (load already committed above).
+    await db.commit()
     return out
 
 
@@ -228,14 +288,27 @@ async def list_loads(
     return await paginate(db, stmt, page=page, size=size)
 
 
-async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: LoadUpdate) -> Load:
+async def update_load(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    payload: LoadUpdate,
+    *,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    source: str = "ui",
+) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
     expected = payload.expected_concurrency_version
     old_status = (load.status or "").strip().lower()
+    old_driver_id = load.driver_id
+    old_customs_broker_id = load.customs_broker_id
     data = _load_data_from_payload(payload)
+    before_snapshot: dict[str, object] = {str(k): getattr(load, k, None) for k in data.keys()}
 
     if "driver_id" in data:
         driver_id = data["driver_id"]
@@ -354,6 +427,89 @@ async def update_load(db: AsyncSession, tenant_id: int, load_id: int, payload: L
     out = await get_load(db, tenant_id, load_id)
     if out is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+
+    # Slice 5 audit writes (best-effort). Correlation defaults to request_id.
+    corr = correlation_id or request_id
+    changed: dict = {}
+    for k, v in data.items():
+        # note: for stops we don't include full stop diff here; this is lightweight.
+        before = before_snapshot.get(str(k))
+        after = getattr(out, k, None)
+        if before != after:
+            changed[str(k)] = {"before": before, "after": after}
+
+    # Duplicate-event policy:
+    # - Emit semantic events for status/assignment/customs broker changes.
+    # - Emit `load_updated` only for residual diffs not fully explained by semantic events.
+    semantic_keys = {"status", "driver_id", "customs_broker_id"}
+    residual_changed = {k: v for k, v in changed.items() if k not in semantic_keys}
+
+    if residual_changed:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_updated",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields=residual_changed,
+        )
+
+    if old_status != (out.status or "").strip().lower():
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_status_changed",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields={"status": {"before": old_status or None, "after": (out.status or "").strip().lower() or None}},
+        )
+        if (out.status or "").strip().lower() == "dispatched":
+            await _write_load_audit(
+                db,
+                tenant_id=tenant_id,
+                load=out,
+                action="load_dispatched",
+                actor_user_id=actor_user_id,
+                request_id=request_id,
+                correlation_id=corr,
+                source=source,
+                changed_fields=None,
+            )
+
+    if old_driver_id != out.driver_id:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_assigned",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields={"driver_id": {"before": old_driver_id, "after": out.driver_id}},
+        )
+
+    if old_customs_broker_id != out.customs_broker_id:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="customs_broker_changed",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields={"customs_broker_id": {"before": old_customs_broker_id, "after": out.customs_broker_id}},
+        )
+
+    # Persist audit rows (best-effort writes are additive).
+    await db.commit()
     return out
 
 
@@ -501,7 +657,15 @@ async def mark_load_ready(
 
 
 async def add_load_note(
-    db: AsyncSession, tenant_id: int, load_id: int, body: str, author_user_id: str | None = None
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    body: str,
+    author_user_id: str | None = None,
+    *,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    source: str = "ui",
 ) -> LoadNote:
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -510,6 +674,20 @@ async def add_load_note(
     db.add(note)
     await db.commit()
     await db.refresh(note)
+
+    await _write_load_audit(
+        db,
+        tenant_id=tenant_id,
+        load=load,
+        action="note_added",
+        actor_user_id=int(author_user_id) if author_user_id is not None and str(author_user_id).isdigit() else None,
+        request_id=request_id,
+        correlation_id=correlation_id or request_id,
+        source=source,
+        changed_fields={"note_id": {"before": None, "after": int(note.id)}},
+        context_json={"note_preview": (note.body[:120] if note.body else "")},
+    )
+    await db.commit()
     return note
 
 
@@ -602,6 +780,21 @@ async def confirm_load_customs_document_snapshot(
             client_version=expected_concurrency_version,
             server_version=current_load.concurrency_version if current_load else None,
             server_snapshot=server_snapshot,
+        )
+
+    # audit
+    out = await get_load(db, tenant_id, load_id)
+    if out is not None:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="document_snapshot_confirmed",
+            actor_user_id=int(confirming_user_id) if confirming_user_id and str(confirming_user_id).isdigit() else None,
+            request_id=None,
+            correlation_id=None,
+            source="ui",
+            changed_fields={"document_snapshot_confirmed_at": {"before": None, "after": now.isoformat()}},
         )
     await db.commit()
     db.expire_all()

@@ -16,6 +16,7 @@ export type MeResponse = {
   account_setup_missing?: string[];
   country_code?: string | null;
   tenant_slug?: string | null;
+  theme?: string | null;
 };
 
 type MeContextValue = {
@@ -45,6 +46,7 @@ function sessionToMe(session: SessionData | null): MeResponse | null {
     account_setup_missing: session.account_setup_missing ?? undefined,
     country_code: session.country_code ?? undefined,
     tenant_slug: session.tenant_slug ?? undefined,
+    theme: session.theme ?? undefined,
   };
 }
 

@@ -38,10 +38,11 @@ import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
 import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
 import AdminRouteGuard from "./components/AdminRouteGuard";
+import UserProfilePage from "./pages/UserProfilePage";
 import { useAuth } from "./contexts/AuthContext";
 import { useMe } from "./hooks/useMe";
 import { getTenantSlugFromHost } from "./tenant";
-import { OPS } from "./routes";
+import { OPS, USER } from "./routes";
 import PlatformApexGate from "./components/PlatformApexGate";
 import PlatformShellLayout from "./components/PlatformShellLayout";
 import PlatformHomePage from "./pages/PlatformHomePage";
@@ -72,7 +73,8 @@ function App() {
     /^\/loads/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
     /^\/operations/.test(location.pathname) ||
-    /^\/admin/.test(location.pathname);
+    /^\/admin/.test(location.pathname) ||
+    /^\/profile/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
     location.pathname.startsWith(accountSetupPath) || location.pathname.startsWith("/company-setup");
@@ -137,6 +139,14 @@ function App() {
       <Route path="/onboarding" element={<OnboardingApplicantPage />} />
       <Route path="/company-setup" element={<CompanySetupPage />} />
       <Route path="/account-setup" element={<CompanySetupPage />} />
+      <Route
+        path={USER.PROFILE}
+        element={
+          <Layout>
+            <UserProfilePage />
+          </Layout>
+        }
+      />
       <Route
         path="/dashboard"
         element={

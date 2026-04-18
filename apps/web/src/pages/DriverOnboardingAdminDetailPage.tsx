@@ -797,8 +797,7 @@ export default function DriverOnboardingAdminDetailPage() {
   const [requestSubject, setRequestSubject] = useState("");
   const [requestBody, setRequestBody] = useState("");
   const [requestSending, setRequestSending] = useState(false);
-  /** Header tabs: switch Driver extension vs Compensation when both panels exist. */
-  const [driverSetupTab, setDriverSetupTab] = useState<"driver" | "compensation">("driver");
+  const [pageTab, setPageTab] = useState<"application" | "configure">("application");
   const [approveReadiness, setApproveReadiness] = useState<CombinedDriverApproveReadiness | null>(null);
   const [onboardingCompleteLoading, setOnboardingCompleteLoading] = useState(false);
   const [readinessNonce, setReadinessNonce] = useState(0);
@@ -866,7 +865,7 @@ export default function DriverOnboardingAdminDetailPage() {
   }, [application]);
 
   useEffect(() => {
-    setDriverSetupTab("driver");
+    setPageTab("application");
   }, [application?.id]);
 
   useEffect(() => {
@@ -1363,20 +1362,15 @@ export default function DriverOnboardingAdminDetailPage() {
             FLEET<span style={{ color: C.text }}>PRO</span>
           </div>
           <div style={{ width: 1, height: 26, background: C.border }} />
-          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 19, letterSpacing: 2, color: C.text, whiteSpace: "nowrap" }}>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <DriverSetupTabBtn active={pageTab === "application"} onClick={() => setPageTab("application")}>
               {[application.first_name, p.middle_name, application.last_name].filter(Boolean).join(" ") || "Unnamed applicant"}
-            </span>
+            </DriverSetupTabBtn>
             <StatusBadge status={application.status} />
-            {showDriverSetupTabs && (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <DriverSetupTabBtn active={driverSetupTab === "driver"} onClick={() => setDriverSetupTab("driver")}>
-                  Driver setup
-                </DriverSetupTabBtn>
-                <DriverSetupTabBtn active={driverSetupTab === "compensation"} onClick={() => setDriverSetupTab("compensation")}>
-                  Compensation
-                </DriverSetupTabBtn>
-              </div>
+            {showCombinedSetupChrome && (
+              <DriverSetupTabBtn active={pageTab === "configure"} onClick={() => setPageTab("configure")}>
+                Configure
+              </DriverSetupTabBtn>
             )}
             <span style={{ fontSize: 11, color: C.muted2 }}>{application.application_type || "DRIVER"}</span>
             <span style={{ fontSize: 11, color: C.muted2 }}>#{application.id}</span>
@@ -1402,6 +1396,40 @@ export default function DriverOnboardingAdminDetailPage() {
       </div>
 
       <div style={{ maxWidth: 1060, margin: "0 auto", padding: "24px 20px 80px" }}>
+
+        {pageTab === "configure" && showCombinedSetupChrome && (
+          <>
+            {!application.person_id ? (
+              <div style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: "40px 0" }}>
+                Linking application to person record… Driver setup will appear here shortly.
+              </div>
+            ) : (
+              <>
+                <Panel title="Driver Setup" icon="🚛" defaultOpen>
+                  <DriverPersonExtensionAdminPanel
+                    key={`dpe-${application.person_id}-${application.status}`}
+                    mode="onboarding"
+                    personId={application.person_id}
+                    editable={driverConfigurationEditable}
+                    onAfterPersist={bumpApproveReadiness}
+                  />
+                </Panel>
+                <Panel title="Compensation Setup" icon="💰" defaultOpen>
+                  <DriverCompensationSetupAdminPanel
+                    key={`dcs-${application.id}-${application.person_id}`}
+                    mode="application"
+                    applicationId={application.id}
+                    editable={driverConfigurationEditable}
+                    onAfterPersist={bumpApproveReadiness}
+                  />
+                </Panel>
+              </>
+            )}
+          </>
+        )}
+
+        {pageTab === "application" && (
+        <>
         {application.status === "REJECTED" && application.rejection_reason && (
           <div style={{ background: "rgba(232,56,13,0.08)", border: `1px solid ${C.red}44`, borderRadius: 10, padding: "14px 18px", marginBottom: 16 }}>
             <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 12, letterSpacing: 2, color: C.red, marginBottom: 4 }}>Rejection Reason</div>
@@ -1787,29 +1815,6 @@ export default function DriverOnboardingAdminDetailPage() {
               </div>
             )}
 
-            {showDriverSetupTabs && (
-              <>
-                {driverSetupTab === "driver" && (
-                  <DriverPersonExtensionAdminPanel
-                    key={`dpe-${application.person_id}-${application.status}`}
-                    mode="onboarding"
-                    personId={application.person_id!}
-                    editable={driverConfigurationEditable}
-                    onAfterPersist={bumpApproveReadiness}
-                  />
-                )}
-                {driverSetupTab === "compensation" && (
-                  <DriverCompensationSetupAdminPanel
-                    key={`dcs-${application.id}-${application.person_id}`}
-                    mode="application"
-                    applicationId={application.id}
-                    editable={driverConfigurationEditable}
-                    onAfterPersist={bumpApproveReadiness}
-                  />
-                )}
-              </>
-            )}
-
             {(application.reviewed_at || application.reviewed_by_user_id || application.approved_at || application.approved_by_user_id) && (
               <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 10 }}>
                 <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 12, letterSpacing: 2, color: C.muted, marginBottom: 10 }}>Review Details</div>
@@ -1909,6 +1914,8 @@ export default function DriverOnboardingAdminDetailPage() {
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

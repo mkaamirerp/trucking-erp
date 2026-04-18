@@ -93,6 +93,10 @@ class PlatformTenant(Base):
     person_setup_ui_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="combined", default="combined"
     )
+    #: How many days a document-request applicant link stays valid. Default 21.
+    doc_request_link_expiry_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="21", default=21
+    )
 
     members = relationship("PlatformTenantMember", back_populates="tenant", cascade="all, delete-orphan")
     subscriptions = relationship("PlatformSubscription", back_populates="tenant", cascade="all, delete-orphan")
@@ -150,6 +154,7 @@ class PlatformUser(Base):
     password_reset_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     session_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    theme: Mapped[str] = mapped_column(String(20), nullable=False, default="dark", server_default="dark")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 

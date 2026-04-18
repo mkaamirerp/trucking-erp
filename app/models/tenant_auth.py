@@ -43,6 +43,7 @@ class TenantUser(Base):
     password_reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     session_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
+    theme: Mapped[str] = mapped_column(String(20), nullable=False, server_default="dark")
     person_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

@@ -1,0 +1,94 @@
+/* =============================================================================
+   TruckERP — global theme tokens
+   Applied via data-theme attribute on <html> (set by ThemeProvider in Step 4).
+   All components must use var(--trk-*) — never hardcode hex.
+   ============================================================================= */
+
+/* ---------------------------------------------------------------------------
+   dark  (charcoal — default)
+   Anchored to the existing app palette so the Step-5 migration pass is
+   a straight find-and-replace: #0d0f14 → var(--trk-bg), etc.
+   --------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  /* Backgrounds */
+  --trk-bg:              #0D0F14;   /* page / AdminLayout shell         */
+  --trk-surface:         #141720;   /* cards, panels, nav bar           */
+  --trk-surface-2:       #1C1F2B;   /* hover state, nested panels       */
+
+  /* Typography */
+  --trk-heading:         #F59E0B;   /* section headings, logo area      */
+  --trk-text:            #E8ECF4;   /* primary body text                */
+  --trk-text-muted:      #7A8299;   /* secondary / placeholder text     */
+
+  /* Borders */
+  --trk-border:          #252A38;   /* default separator                */
+  --trk-border-strong:   #3A3F52;   /* focus rings, active outlines     */
+
+  /* Interactive */
+  --trk-accent:          #60A5FA;   /* links, chips, info states        */
+  --trk-btn-primary:     #F59E0B;   /* primary CTA background           */
+  --trk-btn-text:        #080A0F;   /* text on --trk-btn-primary        */
+
+  /* Semantic */
+  --trk-success:         #2ECC71;
+  --trk-warning:         #FBBF24;
+  --trk-danger:          #F87171;
+}
+
+/* ---------------------------------------------------------------------------
+   dark-navy  (deep ocean)
+   --------------------------------------------------------------------------- */
+[data-theme="dark-navy"] {
+  /* Backgrounds */
+  --trk-bg:              #0F1829;
+  --trk-surface:         #0A1020;
+  --trk-surface-2:       #162036;
+
+  /* Typography */
+  --trk-heading:         #F97316;   /* more vivid orange on deep navy   */
+  --trk-text:            #DCE8FF;   /* cool blue-white                  */
+  --trk-text-muted:      #5E7499;
+
+  /* Borders */
+  --trk-border:          #1A2B45;
+  --trk-border-strong:   #2A3F62;
+
+  /* Interactive */
+  --trk-accent:          #93C5FD;   /* lighter blue pops on navy bg     */
+  --trk-btn-primary:     #F97316;
+  --trk-btn-text:        #060C18;
+
+  /* Semantic */
+  --trk-success:         #34D399;
+  --trk-warning:         #FBBF24;
+  --trk-danger:          #F87171;
+}
+
+/* ---------------------------------------------------------------------------
+   light
+   --------------------------------------------------------------------------- */
+[data-theme="light-slate"] {
+  /* Backgrounds */
+  --trk-bg:              #F2F1ED;
+  --trk-surface:         #FFFFFF;
+  --trk-surface-2:       #F8F7F4;
+
+  /* Typography */
+  --trk-heading:         #D97706;   /* warm amber on parchment          */
+  --trk-text:            #1A1612;
+  --trk-text-muted:      #9A9188;
+
+  /* Borders */
+  --trk-border:          #D4D0C8;
+  --trk-border-strong:   #B0A99F;
+
+  /* Interactive */
+  --trk-accent:          #2B4EAE;
+  --trk-btn-primary:     #D97706;
+  --trk-btn-text:        #FFFFFF;
+
+  /* Semantic */
+  --trk-success:         #059669;
+  --trk-warning:         #D97706;
+  --trk-danger:          #DC2626;
+}

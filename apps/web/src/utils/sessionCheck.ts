@@ -27,6 +27,7 @@ export type SessionData = {
   requires_account_setup?: boolean;
   account_setup_missing?: string[];
   country_code?: string | null;
+  theme?: string | null;
 };
 
 /**

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getCompanyProfile, patchPersonSetupUiMode, type CompanyProfile, type PersonSetupUiMode } from "../api";
+import { getCompanyProfile, patchDocRequestLinkExpiryDays, patchPersonSetupUiMode, type CompanyProfile, type PersonSetupUiMode } from "../api";
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   if (value == null || value === "") return null;
@@ -17,6 +17,10 @@ export default function AdminCompanyProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [personSetupModeSaving, setPersonSetupModeSaving] = useState(false);
   const [personSetupLocalMode, setPersonSetupLocalMode] = useState<PersonSetupUiMode>("combined");
+  const [expiryDays, setExpiryDays] = useState<number>(21);
+  const [expiryInput, setExpiryInput] = useState<string>("21");
+  const [expirySaving, setExpirySaving] = useState(false);
+  const [expiryError, setExpiryError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +42,13 @@ export default function AdminCompanyProfilePage() {
     const raw = profile.person_setup_ui_mode;
     setPersonSetupLocalMode(raw === "segmented" ? "segmented" : "combined");
   }, [profile?.person_setup_ui_mode]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const days = profile.doc_request_link_expiry_days ?? 21;
+    setExpiryDays(days);
+    setExpiryInput(String(days));
+  }, [profile?.doc_request_link_expiry_days]);
 
   if (loading) {
     return (
@@ -69,6 +80,25 @@ export default function AdminCompanyProfilePage() {
       setError(err instanceof Error ? err.message : "Could not save people onboarding mode.");
     } finally {
       setPersonSetupModeSaving(false);
+    }
+  };
+
+  const saveExpiryDays = async () => {
+    const val = parseInt(expiryInput, 10);
+    if (isNaN(val) || val < 1 || val > 90) {
+      setExpiryError("Must be a number between 1 and 90.");
+      return;
+    }
+    setExpirySaving(true);
+    setExpiryError(null);
+    try {
+      const res = await patchDocRequestLinkExpiryDays(val);
+      setExpiryDays(res.doc_request_link_expiry_days);
+      setExpiryInput(String(res.doc_request_link_expiry_days));
+    } catch (err: unknown) {
+      setExpiryError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setExpirySaving(false);
     }
   };
 
@@ -133,6 +163,38 @@ export default function AdminCompanyProfilePage() {
             Segmented — OFF
           </button>
           {personSetupModeSaving && <span className="text-xs text-[#64748b]">Saving…</span>}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-amber-900/40 bg-[#0a0e14] p-6">
+        <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-amber-500/90">Tenant admin</p>
+        <h2 className="mb-2 text-lg font-semibold text-[#e8edf5]">Onboarding · Document request link expiry</h2>
+        <p className="mb-4 text-sm text-[#64748b] leading-relaxed">
+          When you send a document request to an applicant, how many days the link stays active.
+          The applicant can upload documents and come back multiple times until the link expires or all documents are submitted.
+          Range: 1–90 days.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="number"
+            min={1}
+            max={90}
+            value={expiryInput}
+            onChange={(e) => setExpiryInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void saveExpiryDays(); }}
+            className="w-24 rounded-lg border border-[#1e293b] bg-[#0f1420] px-3 py-2 text-sm text-[#e8edf5] focus:border-amber-500/50 focus:outline-none"
+          />
+          <span className="text-sm text-[#64748b]">days</span>
+          <button
+            type="button"
+            disabled={expirySaving || parseInt(expiryInput, 10) === expiryDays}
+            onClick={() => void saveExpiryDays()}
+            className="rounded-lg border border-amber-500/70 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-100 transition-colors hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {expirySaving ? "Saving…" : "Save"}
+          </button>
+          {expiryError && <span className="text-xs text-red-400">{expiryError}</span>}
+          {!expiryError && <span className="text-xs text-[#64748b]">Currently: {expiryDays} days</span>}
         </div>
       </section>
 

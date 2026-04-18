@@ -49,6 +49,11 @@ export const PLATFORM = {
   TESTING_UNLOCK_LOGIN: "/platform/testing/unlock-login",
 } as const;
 
+/** Current user — profile and preferences. */
+export const USER = {
+  PROFILE: "/profile",
+} as const;
+
 /** Tenant Admin workspace — company profile, users, settings, etc. */
 export const ADMIN = {
   ROOT: "/admin",

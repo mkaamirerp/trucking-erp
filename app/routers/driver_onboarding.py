@@ -38,6 +38,7 @@ from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.models.application_access_token import ApplicationAccessToken
 from app.models.driver import Driver
+from app.models.platform import PlatformTenant
 from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
 from app.models.person_application import APPLICATION_TYPES, PersonApplication
@@ -1246,6 +1247,7 @@ async def request_person_application_documents(
     tenant_id: int = Depends(require_tenant),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
+    platform_db: AsyncSession = Depends(get_db),
 ):
     """Admin: email applicant a combined document request; rotate resume token (hash-only)."""
     if not is_tenant_admin(current_user.role):
@@ -1285,6 +1287,9 @@ async def request_person_application_documents(
     app.intake_payload = _sanitize_intake_for_workflow(app, intake)
     ensure_processing_lane_if_submitted_admin_engaged(app)
 
+    tenant_cfg = await platform_db.get(PlatformTenant, int(tenant_id))
+    expiry_days = int(getattr(tenant_cfg, "doc_request_link_expiry_days", None) or 21)
+
     await _revoke_active_access_tokens_for_application(db, tenant_id, application_id)
     raw = secrets.token_urlsafe(32)
     th = _token_sha256_hex(raw)
@@ -1294,7 +1299,7 @@ async def request_person_application_documents(
             application_id=application_id,
             token=None,
             token_hash=th,
-            expires_at=now + timedelta(days=21),
+            expires_at=now + timedelta(days=expiry_days),
             revoked_at=None,
             purpose=TOKEN_PURPOSE_DOCUMENT_RESUME,
         )

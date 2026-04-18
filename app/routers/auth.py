@@ -244,6 +244,9 @@ async def auth_me(current: CurrentUser = Depends(get_current_user), db=Depends(g
                 "country": p.address_country,
             },
         }
+    theme = (
+        current.tenant_user.theme if current.tenant_user is not None else current.user.theme
+    ) or "dark"
     out = {
         "user_id": current.user.id,
         "email": current.user.email,
@@ -260,6 +263,7 @@ async def auth_me(current: CurrentUser = Depends(get_current_user), db=Depends(g
         "country_code": country,
         "company_profile": company_profile,
         "tenant_auth_mode": getattr(tenant, "tenant_auth_mode", None) or "platform",
+        "theme": theme,
     }
     if current.tenant_user is not None:
         out["tenant_local_user_id"] = int(current.tenant_user.id)

@@ -1707,6 +1707,38 @@ export type PeopleAuditLogEntry = {
   snapshot: Record<string, unknown>;
 };
 
+export type AuditEventRow = {
+  id: number;
+  event_at: string;
+  actor_user_id?: number | null;
+  actor_label?: string | null;
+  module: string;
+  entity_type: string;
+  entity_id: string;
+  entity_label?: string | null;
+  action: string;
+  request_id?: string | null;
+  correlation_id?: string | null;
+  source: string;
+  visibility: string;
+  changed_fields: Record<string, { before?: unknown; after?: unknown; redacted?: boolean }>;
+};
+
+export async function listAuditEventsByEntity(
+  entityType: string,
+  entityId: string,
+  opts?: { limit?: number; offset?: number },
+): Promise<AuditEventRow[]> {
+  const q = new URLSearchParams({
+    entity_type: entityType,
+    entity_id: entityId,
+    limit: String(opts?.limit ?? 50),
+    offset: String(opts?.offset ?? 0),
+  });
+  const res = await fetchWithTenant(`${API_BASE}/audit-events/by-entity?${q.toString()}`);
+  return handle<AuditEventRow[]>(res);
+}
+
 export async function listPersonWorkspaceAuditLog(
   personId: number,
   params: { limit?: number; offset?: number } = {},
@@ -1984,6 +2016,15 @@ export async function patchPersonSetupUiMode(person_setup_ui_mode: PersonSetupUi
   return handle<{ person_setup_ui_mode: string }>(res);
 }
 
+export async function patchDocRequestLinkExpiryDays(days: number): Promise<{ doc_request_link_expiry_days: number }> {
+  const res = await fetchWithTenant(`${API_BASE}/admin/doc-request-link-expiry`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doc_request_link_expiry_days: days }),
+  });
+  return handle<{ doc_request_link_expiry_days: number }>(res);
+}
+
 /** Phase 3A driver extension (tenant admin + admin_sensitive). */
 export type DriverPersonExtensionWrite = {
   employment_relationship_type: string;
@@ -2259,6 +2300,8 @@ export type CompanyProfile = {
   address_is_fallback: boolean;
   /** Present when API returns tenant person setup mode (combined vs segmented). */
   person_setup_ui_mode?: PersonSetupUiMode | string;
+  /** Days a document-request applicant link stays valid (1–90, default 21). */
+  doc_request_link_expiry_days?: number;
 };
 
 export async function getCompanyProfile(): Promise<CompanyProfile> {

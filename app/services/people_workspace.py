@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -70,6 +71,24 @@ PEOPLE_MAINTENANCE_AUDIT_ACTIONS: frozenset[str] = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class PeopleMaintenanceAuditRow:
+    """Compatibility row for People correction-history timeline (Slice 3).
+
+    The router historically read `TenantAuditLog` rows and decoded `details_json`.
+    During cutover we map `audit_events` into the same effective shape and merge
+    with legacy rows (fallback) without changing the People API response.
+    """
+
+    id: int
+    action: str
+    created_at: datetime
+    actor_user_id: int | None
+    ip: str | None
+    user_agent: str | None
+    details_json: dict[str, Any]
+
+
 async def list_people_maintenance_audit_entries(
     db: AsyncSession,
     *,
@@ -78,12 +97,60 @@ async def list_people_maintenance_audit_entries(
     limit: int = 50,
     offset: int = 0,
 ) -> list[Any]:
-    """Return tenant audit rows for People-maintained corrections only (newest first)."""
-    from app.models.tenant import TenantAuditLog
+    """Return People correction-history rows (newest first).
+
+    Slice 3 contract:
+    - Read `audit_events` first (canonical order: event_at desc, id desc).
+    - Include legacy `tenant_audit_logs` rows as fallback during transition.
+    - Preserve API output shape (router still decodes details_json).
+    - Canonical combined ordering: created_at desc, id desc, with audit_events winning ties.
+    """
+    from app.models.tenant import AuditEvent, TenantAuditLog
 
     cap = max(1, min(int(limit), 200))
     off = max(0, int(offset))
-    stmt = (
+    want = off + cap
+
+    rows: list[tuple[tuple[float, int, int], PeopleMaintenanceAuditRow]] = []
+
+    # 1) audit_events (preferred)
+    new_stmt = (
+        select(AuditEvent)
+        .where(
+            AuditEvent.tenant_id == tenant_id,
+            AuditEvent.module == "people",
+            AuditEvent.entity_type == "person",
+            AuditEvent.entity_id == str(int(person_id)),
+            AuditEvent.action.in_(PEOPLE_MAINTENANCE_AUDIT_ACTIONS),
+        )
+        .order_by(AuditEvent.event_at.desc(), AuditEvent.id.desc())
+        .limit(want)
+    )
+    for r in list((await db.scalars(new_stmt)).all()):
+        changed = r.changed_fields if isinstance(r.changed_fields, dict) else {}
+        details: dict[str, Any] = {
+            "changed_keys": list(changed.keys()),
+            "snapshot": changed,
+        }
+        ip = None
+        ua = None
+        if isinstance(r.context_json, dict) and isinstance(r.context_json.get("legacy"), dict):
+            legacy = r.context_json["legacy"]
+            ip = legacy.get("ip")
+            ua = legacy.get("user_agent")
+        compat = PeopleMaintenanceAuditRow(
+            id=int(r.id),
+            action=str(r.action),
+            created_at=r.event_at,
+            actor_user_id=int(r.actor_user_id) if r.actor_user_id is not None else None,
+            ip=ip,
+            user_agent=ua,
+            details_json=details,
+        )
+        rows.append(((-compat.created_at.timestamp(), 0, -compat.id), compat))
+
+    # 2) legacy tenant_audit_logs fallback
+    legacy_stmt = (
         select(TenantAuditLog)
         .where(
             TenantAuditLog.tenant_id == tenant_id,
@@ -92,11 +159,23 @@ async def list_people_maintenance_audit_entries(
             TenantAuditLog.action.in_(PEOPLE_MAINTENANCE_AUDIT_ACTIONS),
         )
         .order_by(TenantAuditLog.created_at.desc(), TenantAuditLog.id.desc())
-        .offset(off)
-        .limit(cap)
+        .limit(want)
     )
-    result = await db.scalars(stmt)
-    return list(result.all())
+    for r in list((await db.scalars(legacy_stmt)).all()):
+        compat = PeopleMaintenanceAuditRow(
+            id=int(r.id),
+            action=str(r.action),
+            created_at=r.created_at,
+            actor_user_id=int(r.actor_user_id) if r.actor_user_id is not None else None,
+            ip=r.ip,
+            user_agent=r.user_agent,
+            details_json=(r.details_json if isinstance(r.details_json, dict) else {}),
+        )
+        rows.append(((-compat.created_at.timestamp(), 1, -compat.id), compat))
+
+    rows.sort(key=lambda x: x[0])
+    merged = [r for _k, r in rows]
+    return merged[off : off + cap]
 
 
 def _dec_str(v: Decimal | None) -> str | None:
@@ -338,6 +417,9 @@ async def write_people_patch_audit(
     changed: dict[str, Any],
     ip: str | None,
     user_agent: str | None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    source: str = "ui",
     action: str = "people_core_patch",
 ) -> None:
     """Best-effort tenant audit row; never raises."""
@@ -358,3 +440,41 @@ async def write_people_patch_audit(
         await db.flush()
     except Exception:
         logger.exception("%s audit insert failed; continuing", action)
+
+    # Slice 2: dual-write to audit_events (foundation) without breaking legacy behavior.
+    try:
+        from app.services.audit_events import write_audit_event
+
+        # Normalize changed snapshot/diff into audit_events changed_fields contract.
+        changed_fields = {}
+        for k, v in (changed or {}).items():
+            if isinstance(v, dict) and ("before" in v or "after" in v):
+                before = v.get("before")
+                after = v.get("after")
+            else:
+                before = None
+                after = v
+            changed_fields[str(k)] = {"before": before, "after": after}
+
+        await write_audit_event(
+            db,
+            tenant_id=int(tenant_id),
+            module="people",
+            entity_type="person",
+            entity_id=str(int(person_id)),
+            action=action,
+            source=source,
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=correlation_id,
+            changed_fields=changed_fields,
+            context_json={
+                "legacy": {
+                    "ip": ip or None,
+                    "user_agent": user_agent or None,
+                }
+            },
+            best_effort=True,
+        )
+    except Exception:
+        logger.exception("%s audit_events dual-write failed; continuing", action)

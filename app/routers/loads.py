@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import get_current_user
@@ -26,10 +26,14 @@ router = APIRouter(prefix="/loads", tags=["loads"])
 @router.post("", response_model=LoadResponse, status_code=status.HTTP_201_CREATED)
 async def create_load(
     payload: LoadCreate,
+    request: Request,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    # Slice 5: request/user captured for future audit correlation; create_load audit currently best-effort.
+    _ = getattr(request.state, "request_id", None) if request else None
+    _ = getattr(user, "user_id", None)
     load = await loads_service.create_load(db, tenant_id, payload)
     return LoadResponse.model_validate(load)
 
@@ -112,11 +116,20 @@ async def get_load_detail(
 async def update_load(
     load_id: int,
     payload: LoadUpdate,
+    request: Request,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    load = await loads_service.update_load(db, tenant_id, load_id, payload)
+    load = await loads_service.update_load(
+        db,
+        tenant_id,
+        load_id,
+        payload,
+        actor_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+    )
     return LoadResponse.model_validate(load)
 
 
@@ -124,6 +137,7 @@ async def update_load(
 async def confirm_document_snapshot(
     load_id: int,
     body: LoadMutationConcurrencyBody,
+    request: Request,
     tenant_id: int = Depends(require_tenant),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
@@ -142,6 +156,7 @@ async def confirm_document_snapshot(
 async def mark_load_ready(
     load_id: int,
     body: LoadMutationConcurrencyBody,
+    request: Request,
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
@@ -167,12 +182,19 @@ async def list_load_notes(
 async def add_load_note(
     load_id: int,
     payload: LoadNoteCreate,
+    request: Request,
     tenant_id: int = Depends(require_tenant),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     note = await loads_service.add_load_note(
-        db, tenant_id, load_id, payload.body, author_user_id=getattr(user, "user_id", None)
+        db,
+        tenant_id,
+        load_id,
+        payload.body,
+        author_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
     )
     return LoadNoteOut.model_validate(note)
 
