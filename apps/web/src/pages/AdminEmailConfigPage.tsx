@@ -597,7 +597,7 @@ export default function AdminEmailConfigPage() {
       <EmailProviderSelector active={activeProvider} onSelect={selectProvider} config={config} />
 
       <div
-        className="min-h-[20rem] rounded-xl border border-[var(--trk-border)]/70 bg-[#06080d]/40 p-1 sm:min-h-[28rem] sm:p-1.5 lg:min-h-[32rem]"
+        className="min-h-[20rem] rounded-xl border border-[var(--trk-border)]/70 bg-[var(--trk-bg)]/40 p-1 sm:min-h-[28rem] sm:p-1.5 lg:min-h-[32rem]"
         aria-label="Email provider details"
       >
         <div key={activeProvider} className="animate-email-panel-in">

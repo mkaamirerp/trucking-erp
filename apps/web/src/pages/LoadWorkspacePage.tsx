@@ -94,7 +94,7 @@ function WorkspaceModeReadout({ mode }: { mode: LoadWorkspaceMode }) {
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Mode</span>
       <div
-        className="inline-flex rounded-md border border-[var(--trk-border)] bg-[#1e2330] p-0.5"
+        className="inline-flex rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] p-0.5"
         role="group"
         aria-label="Workspace mode (determined by route, not clickable)"
       >
@@ -133,7 +133,7 @@ function IntakeEmailRail({
         <span className="text-[10px] text-[var(--trk-text-muted)]">Thread #{threadId}</span>
       </div>
       {head ? (
-        <div className="shrink-0 border-b border-[var(--trk-border)] bg-[#1e2330] px-3.5 py-2.5">
+        <div className="shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3.5 py-2.5">
           <div className="text-xs font-semibold text-[var(--trk-text)]">{head.from_email || "—"}</div>
           {head.subject ? <div className="line-clamp-2 text-[11px] text-[var(--trk-text-muted)]">{head.subject}</div> : null}
           <div className="text-[10px] text-[var(--trk-text-muted)]">
@@ -208,7 +208,7 @@ function ReferenceTextRail({
         {docLines.length ? (
           <div
             ref={docScrollRef}
-            className="rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
+            className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
           >
             {docLines.map((line, i) => (
               <div
@@ -224,7 +224,7 @@ function ReferenceTextRail({
             ))}
           </div>
         ) : (
-          <p className="rounded-md border border-dashed border-[var(--trk-border)] bg-[#1a1e2a]/50 px-3 py-6 text-center text-xs text-[var(--trk-text-muted)]">
+          <p className="rounded-md border border-dashed border-[var(--trk-border)] bg-[var(--trk-surface)]/50 px-3 py-6 text-center text-xs text-[var(--trk-text-muted)]">
             Nothing to show yet — use internal notes in the form.
           </p>
         )}
@@ -1325,7 +1325,7 @@ export default function LoadWorkspacePage() {
             <div className="flex flex-wrap items-center gap-1.5">
               {workspaceMode !== "manual" && load ? <StatusBadge status={status} /> : null}
               {workspaceMode === "manual" ? (
-                <span className="rounded border border-[var(--trk-border)] bg-[#1e2330] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]">
+                <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]">
                   Manual
                 </span>
               ) : null}
@@ -1340,7 +1340,7 @@ export default function LoadWorkspacePage() {
                 </span>
               ) : null}
               {showDispatchAssignmentStrip ? (
-                <span className="rounded border border-[var(--trk-heading)]/40 bg-[var(--trk-heading)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#f5d7a0]">
+                <span className="rounded border border-[var(--trk-heading)]/40 bg-[var(--trk-heading)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-heading)]">
                   Dispatch · Assign
                 </span>
               ) : null}
@@ -1700,7 +1700,7 @@ export default function LoadWorkspacePage() {
           {/* AuditTimeline — visible in audit mode */}
           {sectionConfig.visible.includes("AuditTimeline") ? (
             <section className="mt-2.5 rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[#1e2330] px-3.5 py-2">
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3.5 py-2">
                 <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]">Audit timeline</span>
               </div>
               <LoadAuditTimeline loadId={load?.id ?? null} />
@@ -1771,7 +1771,7 @@ function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
     return <div className="px-3.5 py-6 text-center text-xs text-[var(--trk-text-muted)]">Select a load to view audit history.</div>;
   }
   if (err) {
-    return <div className="px-3.5 py-6 text-center text-xs text-[#b87a7a]">{err}</div>;
+    return <div className="px-3.5 py-6 text-center text-xs text-[var(--trk-danger)]">{err}</div>;
   }
   if (rows === null) {
     return <div className="px-3.5 py-6 text-center text-xs text-[var(--trk-text-muted)]">Loading…</div>;
@@ -1784,13 +1784,13 @@ function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
     <div className="px-3.5 py-2">
       <ul className="space-y-2">
         {rows.map((r) => (
-          <li key={r.id} className="rounded border border-[var(--trk-border)] bg-[#151826] px-3 py-2">
+          <li key={r.id} className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-xs text-[#d7dbea]">
+              <div className="text-xs text-[var(--trk-text)]">
                 <span className="font-semibold">{loadAuditActionLabel(r.action)}</span>
                 <span className="ml-2 text-[11px] text-[var(--trk-text-muted)]">{r.source}</span>
                 {r.visibility && r.visibility !== "normal" ? (
-                  <span className="ml-2 text-[11px] text-[#b9a46a]">{r.visibility}</span>
+                  <span className="ml-2 text-[11px] text-[var(--trk-text-muted)]">{r.visibility}</span>
                 ) : null}
               </div>
               <div className="text-[11px] text-[var(--trk-text-muted)]">{new Date(r.event_at).toLocaleString()}</div>
@@ -1799,12 +1799,12 @@ function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
             {r.changed_fields && Object.keys(r.changed_fields).length > 0 ? (
               <details className="mt-1">
                 <summary className="cursor-pointer text-[11px] text-[var(--trk-text-muted)]">Show changes</summary>
-                <div className="mt-2 space-y-1 text-[11px] text-[#aab0c5]">
+                <div className="mt-2 space-y-1 text-[11px] text-[var(--trk-text-muted)]">
                   {Object.entries(r.changed_fields).map(([k, v]) => (
                     <div key={k}>
-                      <span className="text-[#d7dbea]">{k}</span>:{" "}
+                      <span className="text-[var(--trk-text)]">{k}</span>:{" "}
                       {(v as any)?.redacted ? (
-                        <span className="text-[#b87a7a]">redacted</span>
+                        <span className="text-[var(--trk-danger)]">redacted</span>
                       ) : (
                         <>
                           {formatAuditValue((v as any)?.before)} → {formatAuditValue((v as any)?.after)}

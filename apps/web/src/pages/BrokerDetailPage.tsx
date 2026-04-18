@@ -22,7 +22,7 @@ const INPUT =
   "w-full rounded border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] px-2.5 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:ring-0 focus:outline-none";
 const TEXTAREA = `${INPUT} min-h-[72px] resize-y`;
 const LABEL = "block text-xs text-[var(--trk-text-muted)] mb-1";
-const SECTION = "rounded-xl border border-[#1a2231] bg-[var(--trk-surface)] p-5";
+const SECTION = "rounded-xl border border-[var(--trk-surface-2)] bg-[var(--trk-surface)] p-5";
 const SECTION_HEADING = "text-sm font-semibold text-[var(--trk-text)] mb-4";
 const SUBSECTION_HEADING = "text-xs font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] mb-2";
 const READ_ONLY_VALUE = "min-h-[38px] rounded border border-transparent bg-transparent px-0 py-1.5 text-sm text-[var(--trk-text)]";
@@ -210,14 +210,14 @@ function Header({
       onFormChange((prev) => ({ ...prev, [key]: e.target.value }));
 
   return (
-    <div className="border-b border-[#1a2231] pb-5">
+    <div className="border-b border-[var(--trk-surface-2)] pb-5">
       <h1 className="font-['Barlow_Condensed'] text-3xl font-bold tracking-tight text-[var(--trk-heading)]">{label}</h1>
 
       <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <span
             className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-              isActive ? "bg-[#052e16] text-[#86efac]" : "bg-[#422006] text-[#fdba74]"
+              isActive ? "bg-[#052e16] text-[var(--trk-success)]" : "bg-[#422006] text-[var(--trk-warning)]"
             }`}
           >
             {isActive ? "Active" : `Archived${broker.archived_at ? " · " + broker.archived_at.slice(0, 10) : ""}`}
@@ -520,9 +520,9 @@ function ContactsSection({
     <section className={SECTION}>
       <h2 className={SECTION_HEADING}>Contacts</h2>
 
-      <div className="mb-5 overflow-x-auto rounded-lg border border-[#1a2231]">
+      <div className="mb-5 overflow-x-auto rounded-lg border border-[var(--trk-surface-2)]">
         <table className="w-full text-sm">
-          <thead className="border-b border-[#1a2231] bg-[#141924]">
+          <thead className="border-b border-[var(--trk-surface-2)] bg-[var(--trk-surface)]">
             <tr className="text-xs uppercase tracking-wide text-[var(--trk-text-muted)]">
               {["Name", "Role", "Department", "Phone", "Ext", "Fax", "Email", "Primary"].map((h) => (
                 <th key={h} className="whitespace-nowrap px-3 py-2 text-left">
@@ -531,9 +531,9 @@ function ContactsSection({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#1a2231]">
+          <tbody className="divide-y divide-[var(--trk-surface-2)]">
             {active.map((c) => (
-              <tr key={c.id} className="hover:bg-[#141924]/60">
+              <tr key={c.id} className="hover:bg-[var(--trk-surface)]/60">
                 <td className="whitespace-nowrap px-3 py-2 font-medium text-[var(--trk-text)]">{c.name}</td>
                 <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.role ?? "—"}</td>
                 <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.department ?? "—"}</td>
@@ -543,7 +543,7 @@ function ContactsSection({
                 <td className="px-3 py-2 text-[var(--trk-text-muted)]">{c.email ?? "—"}</td>
                 <td className="px-3 py-2 text-center">
                   {c.is_primary && (
-                    <span className="rounded bg-[#1e3a5f] px-1.5 py-0.5 text-[10px] text-[#93c5fd]">primary</span>
+                    <span className="rounded bg-[#1e3a5f] px-1.5 py-0.5 text-[10px] text-[var(--trk-accent)]">primary</span>
                   )}
                 </td>
               </tr>
@@ -553,7 +553,7 @@ function ContactsSection({
         {active.length === 0 && <p className="p-4 text-center text-xs text-[var(--trk-text-muted)]">No contacts yet.</p>}
       </div>
 
-      <div className="border-t border-[#1a2231] pt-4">
+      <div className="border-t border-[var(--trk-surface-2)] pt-4">
         <p className={SUBSECTION_HEADING}>Add contact</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
@@ -660,7 +660,7 @@ function EmailRulesSection({
           </div>
           <ul className="space-y-1.5">
             {activeSenders.map((s) => (
-              <li key={s.id} className="truncate font-mono text-xs text-[#cbd5e1]">
+              <li key={s.id} className="truncate font-mono text-xs text-[var(--trk-text)]">
                 {s.email_normalized}
               </li>
             ))}
@@ -697,7 +697,7 @@ function EmailRulesSection({
           </label>
           <ul className="space-y-1.5">
             {activeDomains.map((d) => (
-              <li key={d.id} className="flex items-center gap-1.5 text-xs text-[#cbd5e1]">
+              <li key={d.id} className="flex items-center gap-1.5 text-xs text-[var(--trk-text)]">
                 <span className="font-mono">{d.domain}</span>
                 {d.is_primary && <span className="text-amber-300/80">primary</span>}
               </li>
@@ -736,7 +736,7 @@ function EmailRulesSection({
           </select>
           <ul className="space-y-1.5">
             {activeAliases.map((a) => (
-              <li key={a.id} className="text-xs text-[#cbd5e1]">
+              <li key={a.id} className="text-xs text-[var(--trk-text)]">
                 {a.alias} <span className="text-[var(--trk-text-muted)]">({a.alias_type})</span>
               </li>
             ))}

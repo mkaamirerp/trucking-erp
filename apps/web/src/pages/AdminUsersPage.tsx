@@ -184,7 +184,7 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={inviteUsername}
                 onChange={(e) => setInviteUsername(e.target.value)}
-                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="Display name"
               />
             </div>
@@ -196,7 +196,7 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="user@company.com"
               />
             </div>
@@ -207,7 +207,7 @@ export default function AdminUsersPage() {
                 disabled={!canInvite}
                 value={invitePhone}
                 onChange={(e) => setInvitePhone(e.target.value)}
-                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-[var(--trk-text)] placeholder-[var(--trk-text-muted)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 placeholder="+1 (optional)"
               />
             </div>
@@ -219,7 +219,7 @@ export default function AdminUsersPage() {
                 value={inviteAccessLevel}
                 onChange={(e) => setInviteAccessLevel(e.target.value)}
                 disabled={!canInvite}
-                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a] px-3 py-2 text-[var(--trk-text)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-[var(--trk-text)] focus:border-[var(--trk-text-muted)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="READ_ONLY">Read only</option>
                 <option value="FULL_ACCESS">Full access</option>
@@ -241,7 +241,7 @@ export default function AdminUsersPage() {
       <div className="overflow-hidden rounded-xl border border-[var(--trk-border-strong)] bg-[var(--trk-bg)]/50">
         <table className="w-full">
           <thead>
-            <tr className="border-b border-[var(--trk-border-strong)] bg-[#0f172a]/80">
+            <tr className="border-b border-[var(--trk-border-strong)] bg-[var(--trk-surface)]/80">
               <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--trk-text-muted)]">
                 Username
               </th>
@@ -275,7 +275,7 @@ export default function AdminUsersPage() {
                 return (
                   <tr
                     key={u.user_id}
-                    className="cursor-pointer hover:bg-[#0f172a]/30"
+                    className="cursor-pointer hover:bg-[var(--trk-surface)]/30"
                     onClick={() => setDetailUser(u)}
                     title="View user details"
                   >

@@ -324,7 +324,7 @@ export function IntakeVerificationPanel({
           <div className="flex flex-col gap-2 rounded-xl border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-[var(--trk-text)]">
               Linked load{" "}
-              <span className="font-mono font-semibold text-[#93c5fd]">{linkedLoad.load_number}</span>
+              <span className="font-mono font-semibold text-[var(--trk-accent)]">{linkedLoad.load_number}</span>
               {linkedLoad.trip_number?.trim() ? (
                 <span className="ml-2 text-xs text-[var(--trk-text-muted)]">Trip {linkedLoad.trip_number.trim()}</span>
               ) : null}
@@ -645,7 +645,7 @@ export function IntakeVerificationPanel({
         <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] px-4 py-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex min-w-0 flex-1 gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--trk-border)] text-[#93c5fd]">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--trk-border)] text-[var(--trk-accent)]">
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                 </svg>
@@ -665,7 +665,7 @@ export function IntakeVerificationPanel({
                 {intakeTags.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {intakeTags.map((t) => (
-                      <span key={t} className="rounded-full bg-[#1d4ed8]/22 px-2.5 py-0.5 text-[11px] font-medium text-[#93c5fd]">
+                      <span key={t} className="rounded-full bg-[#1d4ed8]/22 px-2.5 py-0.5 text-[11px] font-medium text-[var(--trk-accent)]">
                         {t}
                       </span>
                     ))}
@@ -686,7 +686,7 @@ export function IntakeVerificationPanel({
                 type="button"
                 onClick={onReparse}
                 disabled={!canReparse || recomputingIntake}
-                className="rounded-lg border border-[var(--trk-text-muted)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-lg border border-[var(--trk-text-muted)] bg-[var(--trk-surface)] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-40"
                 title={!canReparse ? "Re-parse uses Gmail intake rules on this thread" : "Re-run PDF / intake classification"}
               >
                 {recomputingIntake ? "Re-parsing…" : "Re-parse"}

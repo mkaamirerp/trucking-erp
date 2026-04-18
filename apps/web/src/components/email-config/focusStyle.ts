@@ -8,7 +8,7 @@ export const emailModalBtnFocus =
 
 /** Provider cards sit on page background */
 export const emailSelectorFocus =
-  "touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/90 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0f16]";
+  "touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/90 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--trk-bg)]";
 
 /** Form fields in dark panels */
 export const emailFieldFocus =

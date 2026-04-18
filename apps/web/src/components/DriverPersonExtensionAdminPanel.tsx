@@ -442,7 +442,7 @@ export default function DriverPersonExtensionAdminPanel(props: DriverPersonExten
                 borderRadius: 8,
                 padding: "10px 12px",
                 fontSize: 13,
-                color: "#fca5a5",
+                color: "var(--trk-danger)",
               }}
             >
               {clientError || serverError}

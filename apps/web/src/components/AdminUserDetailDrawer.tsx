@@ -126,7 +126,7 @@ export default function AdminUserDetailDrawer({ user, open, onClose, canUnlock, 
           </div>
         </dl>
 
-        <section className="mt-8 rounded-lg border border-[var(--trk-border-strong)] bg-[#0f172a]/50 p-4">
+        <section className="mt-8 rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)]/50 p-4">
           <h3 className="text-sm font-semibold text-[var(--trk-text)]">Sign-in Security</h3>
           <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
             Account status (such as Active) is separate from sign-in protection shown below.

@@ -88,7 +88,7 @@ export default function GmailProviderPanel({
   if (!connected || !config) {
     return (
       <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
-        <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Gmail</h2>
+        <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--trk-text)]">Gmail</h2>
         <p className="mb-5 text-sm text-[var(--trk-text-muted)]">Connect Google to send and receive load mail from Gmail or Google Workspace.</p>
         {panelFlash && onDismissPanelFlash && (
           <ProviderPanelFlash variant={panelFlash.variant} message={panelFlash.message} onDismiss={onDismissPanelFlash} />
@@ -127,7 +127,7 @@ export default function GmailProviderPanel({
 
   return (
     <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
-      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Gmail</h2>
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--trk-text)]">Gmail</h2>
       <p className="mb-5 text-sm text-[var(--trk-text-muted)]">Google sign-in, automatic mail, and optional advanced tools.</p>
 
       {panelFlash && onDismissPanelFlash && (
@@ -153,7 +153,7 @@ export default function GmailProviderPanel({
               config.last_error_message.includes("token refresh failed") ||
               config.last_error_message.includes("oauth2.googleapis.com/token")) && (
               <p className="text-xs leading-relaxed text-[var(--trk-text-muted)]">
-                Try <span className="font-medium text-[#cbd5e1]">Reconnect / Sign in again</span> below, or contact support
+                Try <span className="font-medium text-[var(--trk-text)]">Reconnect / Sign in again</span> below, or contact support
                 if this keeps happening.
               </p>
             )}
@@ -196,14 +196,14 @@ export default function GmailProviderPanel({
           </div>
         </dl>
         {(config.gmail_automatic_ingestion_blockers?.length ?? 0) > 0 && (
-          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-[#fca5a5]">
+          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-[var(--trk-danger)]">
             {config.gmail_automatic_ingestion_blockers!.map((b, i) => (
               <li key={i}>{b}</li>
             ))}
           </ul>
         )}
         {(config.gmail_automatic_ingestion_warnings?.length ?? 0) > 0 && (
-          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-[#fde68a]">
+          <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-[var(--trk-warning)]">
             {config.gmail_automatic_ingestion_warnings!.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
@@ -229,7 +229,7 @@ export default function GmailProviderPanel({
             disabled={testing}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#3b82f6]/60 bg-[#3b82f6]/15 px-3 py-2 text-sm font-semibold text-[#93c5fd] hover:bg-[#3b82f6]/25 disabled:cursor-not-allowed disabled:opacity-50",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#3b82f6]/60 bg-[#3b82f6]/15 px-3 py-2 text-sm font-semibold text-[var(--trk-accent)] hover:bg-[#3b82f6]/25 disabled:cursor-not-allowed disabled:opacity-50",
             )}
           >
             {testing ? "Testing…" : "Test connection"}
@@ -252,7 +252,7 @@ export default function GmailProviderPanel({
             onClick={onConnectGmail}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)]",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)]",
             )}
           >
             Reconnect / Sign in again
@@ -318,7 +318,7 @@ export default function GmailProviderPanel({
               disabled={registeringWatch || renewingWatch}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {renewingWatch ? "…" : "Extend subscription (if due soon)"}
@@ -336,7 +336,7 @@ export default function GmailProviderPanel({
             </button>
           </div>
           <div className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 text-xs leading-relaxed text-[var(--trk-text-muted)]">
-            <p className="mb-2 font-medium text-[#cbd5e1]">Support checklist</p>
+            <p className="mb-2 font-medium text-[var(--trk-text)]">Support checklist</p>
             {loadingGmailHealth && <p>Loading…</p>}
             {!loadingGmailHealth && gmailHealth && (
               <>

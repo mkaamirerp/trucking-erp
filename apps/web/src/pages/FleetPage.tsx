@@ -104,7 +104,7 @@ function formatDateTime(d: string | null | undefined): string {
 function LoadHistoryRow({ load, onNavigate }: { load: Load; onNavigate: (id: number) => void }) {
   return (
     <tr
-      className="border-t border-[var(--trk-border)] hover:bg-[#0f1419]/50 cursor-pointer"
+      className="border-t border-[var(--trk-border)] hover:bg-[var(--trk-bg)]/50 cursor-pointer"
       onClick={() => onNavigate(load.id)}
     >
       <td className="px-4 py-2 text-xs font-medium text-[var(--trk-heading)]">
@@ -161,7 +161,7 @@ function AssetRow({
       <tr
         className={clsx(
           "border-t border-[var(--trk-border)] transition-colors",
-          expanded && "bg-[#0f1419]/30"
+          expanded && "bg-[var(--trk-bg)]/30"
         )}
       >
         <td className="px-4 py-2">
@@ -373,7 +373,7 @@ export default function FleetPage() {
                 setEditTrailer(null);
                 setAddError(null);
               }}
-              className="px-3 py-1.5 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520]"
+              className="px-3 py-1.5 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[var(--trk-heading)]"
             >
               + Add Truck
             </button>
@@ -445,7 +445,7 @@ export default function FleetPage() {
                 setEditTrailer(null);
                 setAddError(null);
               }}
-              className="px-3 py-1.5 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520]"
+              className="px-3 py-1.5 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[var(--trk-heading)]"
             >
               + Add Trailer
             </button>
@@ -931,7 +931,7 @@ function AddTruckForm({
             <button
               type="submit"
               disabled={saving}
-              className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50"
+              className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[var(--trk-heading)] disabled:opacity-50"
             >
               {saving ? "Adding…" : "Add Truck"}
             </button>
@@ -1178,7 +1178,7 @@ function AddTrailerForm({
 
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
           <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[var(--trk-heading)] disabled:opacity-50">
               {saving ? "Adding…" : "Add Trailer"}
             </button>
             <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]">
@@ -1441,7 +1441,7 @@ function EditTruckForm({
           </div>
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
           <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[var(--trk-heading)] disabled:opacity-50">
               {saving ? "Saving…" : "Save"}
             </button>
             <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]">
@@ -1626,7 +1626,7 @@ function EditTrailerForm({
           </div>
           {error && <div className="px-6 py-2 text-sm text-red-400">{error}</div>}
           <div className="flex gap-3 px-6 py-4 border-t border-[var(--trk-border)] shrink-0 bg-[var(--trk-bg)]">
-            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[#e59520] disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 rounded bg-[var(--trk-heading)] text-[var(--trk-bg)] text-sm font-medium hover:bg-[var(--trk-heading)] disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
             <button type="button" onClick={onCancel} className="px-4 py-2 rounded border border-[var(--trk-border-strong)] text-[var(--trk-text-muted)] text-sm hover:bg-[var(--trk-border)]">Cancel</button>
           </div>
         </form>

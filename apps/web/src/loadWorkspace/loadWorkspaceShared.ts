@@ -186,7 +186,7 @@ export const grid2 = "grid grid-cols-1 gap-4 sm:grid-cols-2";
 /** Load workspace form — compact card rhythm (light theme, mockup-inspired hierarchy). */
 export const wsSectionCard = "rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden";
 export const wsSectionHeader =
-  "flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[#1e2330] px-3.5 py-2";
+  "flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3.5 py-2";
 export const wsSectionTitle = "text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]";
 export const wsSectionBody = "px-3.5 py-3";
 export const wsSectionMeta = "text-[10px] font-medium text-[var(--trk-text-muted)]";

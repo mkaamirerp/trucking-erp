@@ -151,7 +151,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                 "relative flex h-full min-h-[158px] w-full flex-col rounded-xl border p-4 text-left transition-all duration-200 ease-out",
                 isActive
                   ? "border-[#3b82f6] bg-[#0f1828] shadow-[0_0_0_2px_rgba(59,130,246,0.28),0_12px_40px_rgba(0,0,0,0.45)] ring-2 ring-[var(--trk-accent)]/35"
-                  : "border-[var(--trk-border)] bg-[var(--trk-bg)] hover:border-[var(--trk-border-strong)] hover:bg-[#0c1018]",
+                  : "border-[var(--trk-border)] bg-[var(--trk-bg)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-bg)]",
               ].join(" ")}
             >
               {tag && id === "gmail" && (
@@ -165,7 +165,7 @@ export default function EmailProviderSelector({ active, onSelect, config }: Prop
                   <div className="min-w-0 flex-1">
                     <span
                       className={
-                        isActive ? "text-base font-semibold text-[#f8fafc]" : "text-base font-semibold text-[var(--trk-text-muted)]"
+                        isActive ? "text-base font-semibold text-[var(--trk-text)]" : "text-base font-semibold text-[var(--trk-text-muted)]"
                       }
                       aria-hidden="true"
                     >

@@ -131,10 +131,10 @@ export default function AdminCompanyProfilePage() {
         <h2 className="mb-2 text-lg font-semibold text-[var(--trk-text)]">People · onboarding workspace mode</h2>
         <p className="mb-4 text-sm text-[var(--trk-text-muted)] leading-relaxed">
           Tenant-wide, people-level setting (<code className="text-[var(--trk-text-muted)]">person_setup_ui_mode</code>).
-          <strong className="font-medium text-[#cbd5e1]"> Combined (ON)</strong> — small teams: driver setup appears on the
-          onboarding review page; <strong className="font-medium text-[#cbd5e1]">Approve</strong> stays blocked until that
+          <strong className="font-medium text-[var(--trk-text)]"> Combined (ON)</strong> — small teams: driver setup appears on the
+          onboarding review page; <strong className="font-medium text-[var(--trk-text)]">Approve</strong> stays blocked until that
           in-page setup is complete (saves are always allowed).
-          <strong className="font-medium text-[#cbd5e1]"> Segmented (OFF)</strong> — larger orgs: that setup is hidden here;
+          <strong className="font-medium text-[var(--trk-text)]"> Segmented (OFF)</strong> — larger orgs: that setup is hidden here;
           managers can save and approve; downstream setup stays pending for HR/Payroll later.
         </p>
         <div className="flex flex-wrap items-center gap-3">
@@ -145,7 +145,7 @@ export default function AdminCompanyProfilePage() {
             className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
               personSetupLocalMode === "combined"
                 ? "border-amber-500/70 bg-amber-500/15 text-amber-100"
-                : "border-[var(--trk-border)] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)]"
+                : "border-[var(--trk-border)] bg-[var(--trk-surface)] text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)]"
             }`}
           >
             Combined — ON
@@ -157,7 +157,7 @@ export default function AdminCompanyProfilePage() {
             className={`rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
               personSetupLocalMode === "segmented"
                 ? "border-sky-500/70 bg-sky-500/15 text-sky-100"
-                : "border-[var(--trk-border)] bg-[#0f1420] text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)]"
+                : "border-[var(--trk-border)] bg-[var(--trk-surface)] text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:text-[var(--trk-text)]"
             }`}
           >
             Segmented — OFF
@@ -182,7 +182,7 @@ export default function AdminCompanyProfilePage() {
             value={expiryInput}
             onChange={(e) => setExpiryInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void saveExpiryDays(); }}
-            className="w-24 rounded-lg border border-[var(--trk-border)] bg-[#0f1420] px-3 py-2 text-sm text-[var(--trk-text)] focus:border-amber-500/50 focus:outline-none"
+            className="w-24 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)] focus:border-amber-500/50 focus:outline-none"
           />
           <span className="text-sm text-[var(--trk-text-muted)]">days</span>
           <button
@@ -210,7 +210,7 @@ export default function AdminCompanyProfilePage() {
         <button
           type="button"
           disabled
-          className="rounded-lg border border-[var(--trk-border)] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] cursor-not-allowed"
+          className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] cursor-not-allowed"
         >
           Edit (coming soon)
         </button>

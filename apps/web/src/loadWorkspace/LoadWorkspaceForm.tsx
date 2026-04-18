@@ -831,7 +831,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         {p.showOperationalNotesTimeline ? (
           <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
             <p className={L}>Operational notes (timeline)</p>
-            <ul className="mt-2 max-h-44 space-y-2 overflow-y-auto rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] p-2.5 text-sm">
+            <ul className="mt-2 max-h-44 space-y-2 overflow-y-auto rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] p-2.5 text-sm">
               {p.loadNotes.length === 0 ? (
                 <li className="text-xs text-[var(--trk-text-muted)]">No notes yet.</li>
               ) : (

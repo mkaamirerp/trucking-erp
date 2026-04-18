@@ -50,7 +50,7 @@ export default function OtherMailProviderPanel({
 
   return (
     <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
-      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Other Mail</h2>
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--trk-text)]">Other Mail</h2>
       <p className="mb-5 text-sm text-[var(--trk-text-muted)]">
         For Yahoo, Zoho, cPanel mail, or any host that gives you IMAP and SMTP — same first-class setup flow as the OAuth
         providers.
@@ -62,7 +62,7 @@ export default function OtherMailProviderPanel({
 
       {!manualConnected && (
         <div className="mb-6 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4 text-sm text-[var(--trk-text-muted)]">
-          <p className="font-medium text-[#cbd5e1]">Status: Not connected</p>
+          <p className="font-medium text-[var(--trk-text)]">Status: Not connected</p>
           <p className="mt-1 leading-relaxed">
             Enter your mailbox and server details below, save, then run the tests to confirm inbound and outbound mail.
           </p>
@@ -138,7 +138,7 @@ export default function OtherMailProviderPanel({
                 disabled={testingInbound}
                 className={clsx(
                   emailBtnFocus,
-                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#3b82f6]/40 bg-[#3b82f6]/10 px-3 py-2 text-sm font-semibold text-[#93c5fd] hover:bg-[#3b82f6]/20 disabled:opacity-50",
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[#3b82f6]/40 bg-[#3b82f6]/10 px-3 py-2 text-sm font-semibold text-[var(--trk-accent)] hover:bg-[#3b82f6]/20 disabled:opacity-50",
                 )}
               >
                 {testingInbound ? "Testing…" : "Test inbound (IMAP)"}
@@ -149,7 +149,7 @@ export default function OtherMailProviderPanel({
                 disabled={testingOutbound}
                 className={clsx(
                   emailBtnFocus,
-                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:opacity-50",
+                  "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:opacity-50",
                 )}
               >
                 {testingOutbound ? "Testing…" : "Test outbound (SMTP)"}
@@ -391,7 +391,7 @@ export default function OtherMailProviderPanel({
               disabled={testingInbound}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {testingInbound ? "Testing…" : "Test inbound"}
@@ -402,7 +402,7 @@ export default function OtherMailProviderPanel({
               disabled={testingOutbound}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {testingOutbound ? "Testing…" : "Test outbound"}
@@ -413,7 +413,7 @@ export default function OtherMailProviderPanel({
               disabled={testing}
               className={clsx(
                 emailBtnFocus,
-                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+                "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-4 py-2 text-sm font-medium text-[var(--trk-text-muted)] transition hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
               )}
             >
               {testing ? "Testing…" : "Test IMAP (legacy)"}

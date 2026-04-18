@@ -1585,9 +1585,12 @@ export async function markAdminReviewEngaged(applicationId: number): Promise<App
 // ---- People workspace (maintained `people` master; tenant admin + admin_sensitive) ----
 
 export type PersonRoleSummary = {
+  id: number;
   role_code: string;
   is_primary: boolean;
   is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 export type DriverProfileSummary = {

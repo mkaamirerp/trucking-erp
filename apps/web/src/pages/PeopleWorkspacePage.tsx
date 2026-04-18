@@ -138,7 +138,7 @@ function PeopleListView() {
               )}
               {!loading &&
                 items.map((p) => (
-                  <tr key={p.id} className="border-b transition hover:bg-[#161b27]" style={{ borderColor: C.border }}>
+                  <tr key={p.id} className="border-b transition hover:bg-[var(--trk-surface)]" style={{ borderColor: C.border }}>
                     <td className="px-4 py-3">
                       <Link className="font-medium hover:underline" style={{ color: C.accent }} to={OPS.PEOPLE_DETAIL(p.id)}>
                         {[p.first_name, p.last_name].filter(Boolean).join(" ") || `Person #${p.id}`}
@@ -216,6 +216,132 @@ function hasActiveDriverRole(d: PeopleDetail): boolean {
 
 function hasActiveOperationalDriver(d: PeopleDetail): boolean {
   return d.operational_drivers.some((od) => od.is_active);
+}
+
+function formatRoleAttachedAt(iso: string | null | undefined): string {
+  if (iso == null || iso === "") return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function compensationHasPayeeLink(c: PeopleDetail["compensation"]): boolean {
+  return c.payee_id != null && c.payee_id !== undefined;
+}
+
+function PeopleRolesReadOnlySection({ detail }: { detail: PeopleDetail }) {
+  const activeRoles = detail.roles.filter((r) => r.is_active);
+  const inactiveRoles = detail.roles.filter((r) => !r.is_active);
+
+  const badgeCls =
+    "inline-block rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-[var(--trk-text-muted)]";
+  const badgeWrap = "mt-2 flex flex-wrap gap-1";
+
+  const renderRoleRow = (r: (typeof detail.roles)[number]) => {
+    const isDriver = r.role_code.trim().toUpperCase() === "DRIVER";
+    return (
+      <li
+        key={r.id}
+        className="rounded-lg border px-3 py-2.5"
+        style={{ borderColor: C.border, background: "var(--trk-bg)" }}
+      >
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="font-mono text-sm" style={{ color: C.text }}>
+            {r.role_code}
+          </span>
+          {r.is_primary ? (
+            <span
+              className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+              style={{ background: `${C.accent}22`, color: C.accent }}
+            >
+              Primary
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-1 text-[11px]" style={{ color: C.muted }}>
+          Attached {formatRoleAttachedAt(r.created_at)}
+        </div>
+        {isDriver ? (
+          <div className={badgeWrap}>
+            {detail.driver_profile ? (
+              <span className={badgeCls} style={{ border: `1px solid ${C.border}` }}>
+                Driver profile
+              </span>
+            ) : null}
+            {detail.driver_person_extension ? (
+              <span className={badgeCls} style={{ border: `1px solid ${C.border}` }}>
+                Role config (driver)
+              </span>
+            ) : null}
+            {detail.operational_drivers.length > 0 ? (
+              <span className={badgeCls} style={{ border: `1px solid ${C.border}` }}>
+                Operational roster ({detail.operational_drivers.length})
+              </span>
+            ) : null}
+            {compensationHasPayeeLink(detail.compensation) ? (
+              <span className={badgeCls} style={{ border: `1px solid ${C.border}` }}>
+                Compensation payee
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] leading-snug" style={{ color: C.muted }}>
+            No dedicated People maintenance surface exists for this role yet.
+          </p>
+        )}
+      </li>
+    );
+  };
+
+  if (detail.roles.length === 0) {
+    return (
+      <section className="rounded-2xl border p-5" style={{ borderColor: C.border, background: C.card }}>
+        <h3 className="mb-3 text-sm font-semibold" style={{ color: C.text }}>
+          Roles
+        </h3>
+        <p className="text-xs" style={{ color: C.muted }}>
+          No roles attached.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border p-5" style={{ borderColor: C.border, background: C.card }}>
+      <h3 className="mb-3 text-sm font-semibold" style={{ color: C.text }}>
+        Roles
+      </h3>
+      <p className="mb-4 text-[11px] leading-relaxed" style={{ color: C.muted }}>
+        Read-only view of roles on this person. Role changes continue through onboarding and provisioning flows.
+      </p>
+      <div className="space-y-5">
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: C.muted }}>
+            Active roles
+          </h4>
+          {activeRoles.length === 0 ? (
+            <p className="text-xs" style={{ color: C.muted }}>
+              None.
+            </p>
+          ) : (
+            <ul className="space-y-2 text-xs">{activeRoles.map(renderRoleRow)}</ul>
+          )}
+        </div>
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide" style={{ color: C.muted }}>
+            Inactive roles
+          </h4>
+          {inactiveRoles.length === 0 ? (
+            <p className="text-xs" style={{ color: C.muted }}>
+              None.
+            </p>
+          ) : (
+            <ul className="space-y-2 text-xs">{inactiveRoles.map(renderRoleRow)}</ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function peopleMaintenanceAuditActionLabel(action: string): string {
@@ -432,7 +558,7 @@ function PersonDetailView() {
                     value={form.first_name}
                     onChange={(e) => setForm((f) => (f ? { ...f, first_name: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="Last name">
@@ -440,7 +566,7 @@ function PersonDetailView() {
                     value={form.last_name}
                     onChange={(e) => setForm((f) => (f ? { ...f, last_name: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="Phone">
@@ -448,7 +574,7 @@ function PersonDetailView() {
                     value={form.phone}
                     onChange={(e) => setForm((f) => (f ? { ...f, phone: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="Email">
@@ -457,7 +583,7 @@ function PersonDetailView() {
                     value={form.email}
                     onChange={(e) => setForm((f) => (f ? { ...f, email: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="Street">
@@ -465,7 +591,7 @@ function PersonDetailView() {
                     value={form.street_address}
                     onChange={(e) => setForm((f) => (f ? { ...f, street_address: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none sm:col-span-2"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="City">
@@ -473,7 +599,7 @@ function PersonDetailView() {
                     value={form.city}
                     onChange={(e) => setForm((f) => (f ? { ...f, city: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="State / province">
@@ -481,7 +607,7 @@ function PersonDetailView() {
                     value={form.region}
                     onChange={(e) => setForm((f) => (f ? { ...f, region: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="Postal code">
@@ -489,7 +615,7 @@ function PersonDetailView() {
                     value={form.postal_code}
                     onChange={(e) => setForm((f) => (f ? { ...f, postal_code: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="ZIP">
@@ -497,7 +623,7 @@ function PersonDetailView() {
                     value={form.zip_code}
                     onChange={(e) => setForm((f) => (f ? { ...f, zip_code: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
                 <FormField label="Country">
@@ -505,7 +631,7 @@ function PersonDetailView() {
                     value={form.country}
                     onChange={(e) => setForm((f) => (f ? { ...f, country: e.target.value } : f))}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
               </div>
@@ -516,7 +642,7 @@ function PersonDetailView() {
                     onChange={(e) => setForm((f) => (f ? { ...f, notes: e.target.value } : f))}
                     rows={3}
                     className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                    style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                    style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                   />
                 </FormField>
               </div>
@@ -545,26 +671,7 @@ function PersonDetailView() {
           </div>
 
           <div className="space-y-4">
-            <section className="rounded-2xl border p-5" style={{ borderColor: C.border, background: C.card }}>
-              <h3 className="mb-3 text-sm font-semibold" style={{ color: C.text }}>
-                Roles
-              </h3>
-              {detail.roles.length === 0 ? (
-                <p className="text-xs" style={{ color: C.muted }}>
-                  No roles attached.
-                </p>
-              ) : (
-                <ul className="space-y-2 text-xs" style={{ color: C.muted }}>
-                  {detail.roles.map((r) => (
-                    <li key={`${r.role_code}-${r.is_primary}`}>
-                      <span className="font-mono text-[var(--trk-text)]">{r.role_code}</span>
-                      {r.is_primary ? " · primary" : ""}
-                      {r.is_active ? "" : " · inactive"}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            <PeopleRolesReadOnlySection detail={detail} />
 
             <section className="rounded-2xl border p-5" style={{ borderColor: C.border, background: C.card }}>
               <h3 className="mb-3 text-sm font-semibold" style={{ color: C.text }}>
@@ -587,7 +694,7 @@ function PersonDetailView() {
                         value={driverForm.license_number}
                         onChange={(e) => setDriverForm((f) => (f ? { ...f, license_number: e.target.value } : f))}
                         className="w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none"
-                        style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                        style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                       />
                     </FormField>
                     <FormField label="Issuing region (state/province)">
@@ -595,7 +702,7 @@ function PersonDetailView() {
                         value={driverForm.license_region}
                         onChange={(e) => setDriverForm((f) => (f ? { ...f, license_region: e.target.value } : f))}
                         className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                        style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                        style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                       />
                     </FormField>
                     <FormField label="Expiry">
@@ -604,7 +711,7 @@ function PersonDetailView() {
                         value={driverForm.license_expiry}
                         onChange={(e) => setDriverForm((f) => (f ? { ...f, license_expiry: e.target.value } : f))}
                         className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                        style={{ borderColor: C.border, background: "#0d1017", color: C.text }}
+                        style={{ borderColor: C.border, background: "var(--trk-bg)", color: C.text }}
                       />
                     </FormField>
                     <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: C.muted }}>
@@ -748,7 +855,7 @@ function PersonDetailView() {
                     <div
                       key={a.id}
                       className="rounded-lg border p-3 text-xs"
-                      style={{ borderColor: C.border, background: "#0d1017" }}
+                      style={{ borderColor: C.border, background: "var(--trk-bg)" }}
                     >
                       <div className="font-semibold" style={{ color: C.text }}>
                         {peopleMaintenanceAuditActionLabel(a.action)}

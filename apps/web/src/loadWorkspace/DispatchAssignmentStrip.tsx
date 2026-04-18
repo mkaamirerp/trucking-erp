@@ -7,7 +7,7 @@ import Button from "@/components/Button";
 import type { Driver, Trailer, Truck } from "@/api";
 
 const inputCls =
-  "w-full rounded-md border border-[var(--trk-border-strong)] bg-[#101522] px-2.5 py-1.5 text-xs text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)]/50";
+  "w-full rounded-md border border-[var(--trk-border-strong)] bg-[var(--trk-bg)] px-2.5 py-1.5 text-xs text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)]/50";
 
 function SearchablePick({
   label,
@@ -83,7 +83,7 @@ function SearchablePick({
             <li>
               <button
                 type="button"
-                className="w-full px-2.5 py-1.5 text-left text-[11px] text-[var(--trk-text-muted)] hover:bg-[#1e2330]"
+                className="w-full px-2.5 py-1.5 text-left text-[11px] text-[var(--trk-text-muted)] hover:bg-[var(--trk-surface)]"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onSelect(null);
@@ -97,7 +97,7 @@ function SearchablePick({
               <li key={it.id}>
                 <button
                   type="button"
-                  className="w-full px-2.5 py-1.5 text-left text-xs text-[var(--trk-text)] hover:bg-[#1e2330]"
+                  className="w-full px-2.5 py-1.5 text-left text-xs text-[var(--trk-text)] hover:bg-[var(--trk-surface)]"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onSelect(it.id);
@@ -161,7 +161,7 @@ export function DispatchAssignmentStrip(p: {
   const canAssign = p.driverId != null && !p.saving;
 
   return (
-    <div className="shrink-0 border-b border-[var(--trk-heading)]/25 bg-gradient-to-r from-[#1a1408] via-[#12151c] to-[#0d1018]">
+    <div className="shrink-0 border-b border-[var(--trk-heading)]/25 bg-[var(--trk-bg)]">
       <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>

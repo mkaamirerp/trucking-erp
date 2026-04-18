@@ -104,7 +104,7 @@ export default function MicrosoftProviderPanel({
   if (!connected || !config) {
     return (
       <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
-        <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Microsoft 365</h2>
+        <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--trk-text)]">Microsoft 365</h2>
         <p className="mb-5 text-sm text-[var(--trk-text-muted)]">
           First-class option for Outlook and Microsoft 365 — same idea as Gmail: sign in once, then sync and optional
           automatic intake.
@@ -135,7 +135,7 @@ export default function MicrosoftProviderPanel({
         )}
         {!oauthDisabled && (
           <div className="mb-5 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4 text-sm text-[var(--trk-text-muted)]">
-            <p className="font-medium text-[#cbd5e1]">Before you connect</p>
+            <p className="font-medium text-[var(--trk-text)]">Before you connect</p>
             <p className="mt-2 leading-relaxed">
               Your administrator must register redirect URIs in Microsoft Entra for this TruckERP host. If anything is
               missing, sign-in will fail after you leave this page.
@@ -182,7 +182,7 @@ export default function MicrosoftProviderPanel({
 
   return (
     <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)] p-6">
-      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[#f1f5f9]">Microsoft 365</h2>
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-[var(--trk-text)]">Microsoft 365</h2>
       <p className="mb-5 text-sm text-[var(--trk-text-muted)]">Outlook and Microsoft 365 mail through Microsoft Graph.</p>
 
       {panelFlash && onDismissPanelFlash && (
@@ -286,7 +286,7 @@ export default function MicrosoftProviderPanel({
             disabled={renewingMs}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-50",
             )}
           >
             {renewingMs ? "…" : "Renew subscription (if due)"}
@@ -308,7 +308,7 @@ export default function MicrosoftProviderPanel({
             disabled={oauthDisabled}
             className={clsx(
               emailBtnFocus,
-              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[#0f1420] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-sm font-medium text-[var(--trk-text-muted)] hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)] disabled:cursor-not-allowed disabled:opacity-40",
             )}
           >
             Sign in with Microsoft again

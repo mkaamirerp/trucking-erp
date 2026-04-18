@@ -393,7 +393,7 @@ export default function DriverCompensationSetupAdminPanel(props: DriverCompensat
               borderRadius: 8,
               border: "none",
               background: C.accent,
-              color: "#0d0e11",
+              color: "var(--trk-btn-text)",
               fontWeight: 700,
               fontSize: 12,
               letterSpacing: 0.5,

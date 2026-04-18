@@ -934,7 +934,7 @@ export default function DriverOnboardingAdminDetailPage() {
     background: C.bg,
     color: C.text,
     fontFamily: "'DM Sans', system-ui, sans-serif",
-    backgroundImage: "repeating-linear-gradient(0deg,transparent,transparent 59px,#1a1c22 59px,#1a1c22 60px),repeating-linear-gradient(90deg,transparent,transparent 59px,#1a1c22 59px,#1a1c22 60px)",
+    backgroundImage: "repeating-linear-gradient(0deg,transparent,transparent 59px,var(--trk-surface-2) 59px,var(--trk-surface-2) 60px),repeating-linear-gradient(90deg,transparent,transparent 59px,var(--trk-surface-2) 59px,var(--trk-surface-2) 60px)",
   };
 
   if (loading) {
@@ -1433,7 +1433,7 @@ export default function DriverOnboardingAdminDetailPage() {
         {application.status === "REJECTED" && application.rejection_reason && (
           <div style={{ background: "rgba(232,56,13,0.08)", border: `1px solid ${C.red}44`, borderRadius: 10, padding: "14px 18px", marginBottom: 16 }}>
             <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 12, letterSpacing: 2, color: C.red, marginBottom: 4 }}>Rejection Reason</div>
-            <div style={{ fontSize: 13, color: "#fca5a5", lineHeight: 1.6 }}>{application.rejection_reason}</div>
+            <div style={{ fontSize: 13, color: "var(--trk-danger)", lineHeight: 1.6 }}>{application.rejection_reason}</div>
           </div>
         )}
 
@@ -1550,7 +1550,7 @@ export default function DriverOnboardingAdminDetailPage() {
                       borderRadius: 8,
                       border: "none",
                       background: C.accent,
-                      color: "#0d0e11",
+                      color: "var(--trk-surface)",
                       fontWeight: 700,
                       fontSize: 12,
                       cursor: reviewSaving ? "wait" : "pointer",
@@ -1836,7 +1836,7 @@ export default function DriverOnboardingAdminDetailPage() {
                 <div
                   style={{
                     fontSize: 12,
-                    color: "#fca5a5",
+                    color: "var(--trk-danger)",
                     background: "rgba(232,56,13,0.12)",
                     border: `1px solid ${C.red}44`,
                     borderRadius: 8,

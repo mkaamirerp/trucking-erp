@@ -155,7 +155,7 @@ export default function BrokersPage() {
 
       {/* Add broker form */}
       {showAdd && (
-        <form onSubmit={onAdd} className="mb-6 rounded-xl border border-[#1a2231] bg-[var(--trk-surface)] p-5">
+        <form onSubmit={onAdd} className="mb-6 rounded-xl border border-[var(--trk-surface-2)] bg-[var(--trk-surface)] p-5">
           <h2 className="mb-4 text-sm font-semibold text-[var(--trk-text)]">New broker</h2>
 
           {/* Identity */}
@@ -290,12 +290,12 @@ export default function BrokersPage() {
 
       {/* Directory table */}
       {error && <p className="mb-3 text-sm text-rose-400">{error}</p>}
-      <div className="rounded-xl border border-[#1a2231] bg-[var(--trk-surface)]">
+      <div className="rounded-xl border border-[var(--trk-surface-2)] bg-[var(--trk-surface)]">
         {loading ? (
           <p className="p-6 text-sm text-[var(--trk-text-muted)]">Loading…</p>
         ) : (
           <table className="w-full text-sm">
-            <thead className="border-b border-[#1a2231]">
+            <thead className="border-b border-[var(--trk-surface-2)]">
               <tr className="text-xs uppercase tracking-wide text-[var(--trk-text-muted)]">
                 <th className="px-4 py-2.5 text-left">Broker</th>
                 <th className="px-4 py-2.5 text-left">MC #</th>
@@ -303,17 +303,17 @@ export default function BrokersPage() {
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#1a2231]">
+            <tbody className="divide-y divide-[var(--trk-surface-2)]">
               {items.map((b) => (
-                <tr key={b.id} className="hover:bg-[#141924]/60">
+                <tr key={b.id} className="hover:bg-[var(--trk-surface)]/60">
                   <td className="px-4 py-2.5 font-medium text-[var(--trk-text)]">
                     {(b.display_name || b.legal_name || b.name).trim()}
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-[var(--trk-text-muted)]">{b.mc_number ?? "—"}</td>
                   <td className="px-4 py-2.5">
                     {b.is_active === false
-                      ? <span className="rounded bg-[#422006] px-2 py-0.5 text-xs text-[#fdba74]">Archived</span>
-                      : <span className="rounded bg-[#052e16] px-2 py-0.5 text-xs text-[#86efac]">Active</span>}
+                      ? <span className="rounded bg-[#422006] px-2 py-0.5 text-xs text-[var(--trk-warning)]">Archived</span>
+                      : <span className="rounded bg-[#052e16] px-2 py-0.5 text-xs text-[var(--trk-success)]">Active</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <Link to={OPS.BROKER_DETAIL(b.id)} className="text-sm font-medium text-[var(--trk-heading)] hover:underline">Open →</Link>
@@ -338,7 +338,7 @@ export default function BrokersPage() {
       )}
 
       {/* Bulk import — collapsed by default */}
-      <div className="mt-8 border-t border-[#1a2231] pt-4">
+      <div className="mt-8 border-t border-[var(--trk-surface-2)] pt-4">
         <button
           type="button"
           className="text-xs text-[var(--trk-text-muted)] hover:text-[var(--trk-text-muted)]"
@@ -347,9 +347,9 @@ export default function BrokersPage() {
           {showBulk ? "▾" : "▸"} Bulk import
         </button>
         {showBulk && (
-          <div className="mt-3 rounded-xl border border-[#1a2231] bg-[var(--trk-surface)] p-4">
+          <div className="mt-3 rounded-xl border border-[var(--trk-surface-2)] bg-[var(--trk-surface)] p-4">
             <p className="mb-2 text-xs text-[var(--trk-text-muted)]">
-              One broker per line — <code className="text-[#cbd5e1]">Name[TAB]MC</code> or <code className="text-[#cbd5e1]">Name, MC</code>. Lines starting with # are ignored.
+              One broker per line — <code className="text-[var(--trk-text)]">Name[TAB]MC</code> or <code className="text-[var(--trk-text)]">Name, MC</code>. Lines starting with # are ignored.
             </p>
             <textarea
               className={`${INPUT} min-h-[160px] font-mono text-xs`}

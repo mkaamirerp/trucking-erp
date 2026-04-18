@@ -71,7 +71,7 @@ export default function LoadsListPage() {
   };
 
   const btnClass =
-    "rounded-md border border-[var(--trk-border)] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] hover:border-[#3a4155] hover:bg-[var(--trk-border)] disabled:opacity-50";
+    "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:opacity-50";
 
   return (
     <div className="space-y-4">
@@ -88,7 +88,7 @@ export default function LoadsListPage() {
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && applySearch()}
             placeholder="Search load #, trip #, broker ref…"
-            className="min-w-[200px] rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] px-3 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none"
+            className="min-w-[200px] rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none"
           />
           <button type="button" className={btnClass} onClick={applySearch} disabled={loading}>
             Search
@@ -133,7 +133,7 @@ export default function LoadsListPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
-                <tr className="border-b border-[var(--trk-border)] bg-[#1e2330]">
+                <tr className="border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
                   {["Load #", "Trip #", "Route", "First pickup", "Status", "Driver", "Rate"].map((h) => (
                     <th
                       key={h}
@@ -148,7 +148,7 @@ export default function LoadsListPage() {
                 {loads.map((load) => (
                   <tr
                     key={load.id}
-                    className="border-b border-[var(--trk-border)] last:border-0 cursor-pointer hover:bg-[#1e2330] transition-colors"
+                    className="border-b border-[var(--trk-border)] last:border-0 cursor-pointer hover:bg-[var(--trk-surface)] transition-colors"
                     onClick={() => navigate(OPS.LOAD_DETAIL(load.id))}
                   >
                     <td className="px-4 py-2.5 text-sm font-medium text-[var(--trk-text)]">
