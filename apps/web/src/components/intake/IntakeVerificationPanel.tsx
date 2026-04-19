@@ -304,7 +304,7 @@ export function IntakeVerificationPanel({
                 type="button"
                 onClick={() => uploadRef.current?.click()}
                 disabled={uploadBusy}
-                className="rounded-lg border border-[#2563eb] bg-[#1d4ed8] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg border border-[var(--trk-accent)] bg-[var(--trk-accent)] px-4 py-2 text-sm font-semibold text-[var(--trk-btn-text)] shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {uploadBusy ? "Uploading…" : "Upload document"}
               </button>

@@ -13,9 +13,7 @@ interface ThemeOption {
 }
 
 const THEME_OPTIONS: ThemeOption[] = [
-  { value: "dark",        label: "Dark",      bg: "#0D0F14", accent: "#F59E0B" },
-  { value: "dark-navy",   label: "Dark navy", bg: "#0F1829", accent: "#F97316" },
-  { value: "light-slate", label: "Light",     bg: "#F2F1ED", accent: "#D97706" },
+  { value: "dark", label: "Dark", bg: "#0D0F14", accent: "#F59E0B" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -180,7 +178,7 @@ export default function UserProfilePage() {
             ))}
           </div>
           <p style={{ color: "var(--trk-text-muted)", fontSize: 12, margin: 0 }}>
-            Changes apply instantly
+            More themes coming soon.
           </p>
         </div>
       </section>

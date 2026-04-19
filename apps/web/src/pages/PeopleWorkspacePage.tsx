@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
   getPersonWorkspaceDetail,
@@ -28,6 +28,71 @@ function fmt(v: string | null | undefined) {
   return v;
 }
 
+function peopleListOnboardingStatusStyle(status: string): { border: string; color: string } | undefined {
+  const u = status.trim().toUpperCase();
+  if (u === "REJECTED") return { border: "rgba(244, 63, 94, 0.35)", color: "#fda4af" };
+  if (u === "APPROVED") return { border: "rgba(34, 197, 94, 0.35)", color: "#86efac" };
+  if (u === "SUBMITTED") return { border: "rgba(245, 158, 11, 0.35)", color: "#fcd34d" };
+  if (u === "DRAFT") return { border: `${C.border}`, color: C.muted };
+  return undefined;
+}
+
+function PeopleListOnboardingStatusCell({ p }: { p: PeopleListItem }) {
+  const la = p.latest_application;
+  if (!la) {
+    return <span className="text-[11px] text-[var(--trk-text-muted)]">No application</span>;
+  }
+  const st = la.status || "—";
+  const accent = peopleListOnboardingStatusStyle(st);
+  return (
+    <div className="max-w-[200px] space-y-1">
+      <span
+        className="inline-block rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide"
+        style={{
+          border: `1px solid ${accent?.border ?? C.border}`,
+          color: accent?.color ?? C.text,
+          background: accent ? `${accent.color}12` : "transparent",
+        }}
+      >
+        {st}
+      </span>
+      <div className="font-mono text-[10px] leading-tight text-[var(--trk-text-muted)]">
+        {la.current_workflow_lane ? <span className="block">Lane: {la.current_workflow_lane}</span> : null}
+        {la.setup_status ? <span className="block">Setup: {la.setup_status}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function PeopleListActiveRolesCell({ p }: { p: PeopleListItem }) {
+  const codes = p.active_role_codes ?? [];
+  const primary = p.primary_role_code ?? null;
+  if (codes.length === 0) {
+    return <span className="text-[11px] text-[var(--trk-text-muted)]">No active role</span>;
+  }
+  return (
+    <div className="flex max-w-[220px] flex-wrap gap-1">
+      {codes.map((code) => {
+        const isPrimary = primary != null && primary !== "" && code === primary;
+        return (
+          <span
+            key={code}
+            className="rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide"
+            style={{
+              border: `1px solid ${isPrimary ? C.accent : C.border}`,
+              color: isPrimary ? C.accent : C.muted,
+              background: isPrimary ? `${C.accent}14` : "transparent",
+            }}
+            title={isPrimary ? "Primary role (active)" : undefined}
+          >
+            {code}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function FormField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -39,9 +104,19 @@ function FormField({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
+/** Client-only list filter sentinel (not a real role code). */
+const PEOPLE_LIST_ROLE_FILTER_NONE = "__none_active__";
+const PEOPLE_LIST_ROLE_FILTER_ALL = "";
+
+/** Client-only: no linked latest application on list payload. */
+const PEOPLE_LIST_ONBOARDING_FILTER_NONE = "__no_application__";
+const PEOPLE_LIST_ONBOARDING_FILTER_ALL = "";
+
 function PeopleListView() {
   const [items, setItems] = useState<PeopleListItem[]>([]);
   const [q, setQ] = useState("");
+  const [roleFilter, setRoleFilter] = useState<string>(PEOPLE_LIST_ROLE_FILTER_ALL);
+  const [onboardingFilter, setOnboardingFilter] = useState<string>(PEOPLE_LIST_ONBOARDING_FILTER_ALL);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +136,86 @@ function PeopleListView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const discoveredRoleCodes = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of items) {
+      for (const c of p.active_role_codes ?? []) {
+        const t = (c || "").trim();
+        if (t) s.add(t);
+      }
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  const hasAnyoneWithoutActiveRole = useMemo(
+    () => items.some((p) => !(p.active_role_codes && p.active_role_codes.length > 0)),
+    [items]
+  );
+
+  const discoveredApplicationStatuses = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of items) {
+      const st = p.latest_application?.status;
+      const t = (st || "").trim();
+      if (t) s.add(t);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  const hasAnyoneWithoutApplication = useMemo(() => items.some((p) => !p.latest_application), [items]);
+
+  useEffect(() => {
+    if (roleFilter === PEOPLE_LIST_ROLE_FILTER_ALL || roleFilter === PEOPLE_LIST_ROLE_FILTER_NONE) return;
+    if (!discoveredRoleCodes.includes(roleFilter)) {
+      setRoleFilter(PEOPLE_LIST_ROLE_FILTER_ALL);
+    }
+  }, [discoveredRoleCodes, roleFilter]);
+
+  useEffect(() => {
+    if (roleFilter === PEOPLE_LIST_ROLE_FILTER_NONE && !hasAnyoneWithoutActiveRole) {
+      setRoleFilter(PEOPLE_LIST_ROLE_FILTER_ALL);
+    }
+  }, [hasAnyoneWithoutActiveRole, roleFilter]);
+
+  useEffect(() => {
+    if (
+      onboardingFilter !== PEOPLE_LIST_ONBOARDING_FILTER_ALL &&
+      onboardingFilter !== PEOPLE_LIST_ONBOARDING_FILTER_NONE &&
+      !discoveredApplicationStatuses.includes(onboardingFilter)
+    ) {
+      setOnboardingFilter(PEOPLE_LIST_ONBOARDING_FILTER_ALL);
+    }
+  }, [discoveredApplicationStatuses, onboardingFilter]);
+
+  useEffect(() => {
+    if (onboardingFilter === PEOPLE_LIST_ONBOARDING_FILTER_NONE && !hasAnyoneWithoutApplication) {
+      setOnboardingFilter(PEOPLE_LIST_ONBOARDING_FILTER_ALL);
+    }
+  }, [hasAnyoneWithoutApplication, onboardingFilter]);
+
+  const roleFilteredItems = useMemo(() => {
+    if (roleFilter === PEOPLE_LIST_ROLE_FILTER_ALL) return items;
+    if (roleFilter === PEOPLE_LIST_ROLE_FILTER_NONE) {
+      return items.filter((p) => !(p.active_role_codes && p.active_role_codes.length > 0));
+    }
+    return items.filter((p) => (p.active_role_codes ?? []).includes(roleFilter));
+  }, [items, roleFilter]);
+
+  const filteredItems = useMemo(() => {
+    if (onboardingFilter === PEOPLE_LIST_ONBOARDING_FILTER_ALL) return roleFilteredItems;
+    if (onboardingFilter === PEOPLE_LIST_ONBOARDING_FILTER_NONE) {
+      return roleFilteredItems.filter((p) => !p.latest_application);
+    }
+    return roleFilteredItems.filter((p) => p.latest_application?.status === onboardingFilter);
+  }, [roleFilteredItems, onboardingFilter]);
+
+  const emptyMessage = useMemo(() => {
+    if (loading) return "";
+    if (items.length === 0) return "No people match your search.";
+    if (filteredItems.length === 0) return "No people match the selected filters.";
+    return "";
+  }, [loading, items.length, filteredItems.length]);
 
   return (
     <div className="min-h-screen overflow-x-hidden text-[var(--trk-text)]" style={{ background: C.bg, margin: -24 }}>
@@ -83,7 +238,7 @@ function PeopleListView() {
           </div>
         </div>
 
-        <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="mb-6 flex flex-wrap items-end gap-3">
           <input
             type="search"
             value={q}
@@ -101,6 +256,52 @@ function PeopleListView() {
           >
             Search
           </button>
+          <label className="flex shrink-0 flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-wide" style={{ color: C.muted }}>
+              Role
+            </span>
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              disabled={loading}
+              className="min-w-[10rem] max-w-[14rem] cursor-pointer rounded-lg border px-3 py-2 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ borderColor: C.border, background: C.card, color: C.text }}
+              aria-label="Filter people by active role"
+            >
+              <option value={PEOPLE_LIST_ROLE_FILTER_ALL}>All roles</option>
+              {hasAnyoneWithoutActiveRole ? (
+                <option value={PEOPLE_LIST_ROLE_FILTER_NONE}>No active role</option>
+              ) : null}
+              {discoveredRoleCodes.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex shrink-0 flex-col gap-1">
+            <span className="font-mono text-[10px] uppercase tracking-wide" style={{ color: C.muted }}>
+              Onboarding
+            </span>
+            <select
+              value={onboardingFilter}
+              onChange={(e) => setOnboardingFilter(e.target.value)}
+              disabled={loading}
+              className="min-w-[9rem] max-w-[12rem] cursor-pointer rounded-lg border px-3 py-2 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ borderColor: C.border, background: C.card, color: C.text }}
+              aria-label="Filter people by latest application status"
+            >
+              <option value={PEOPLE_LIST_ONBOARDING_FILTER_ALL}>All statuses</option>
+              {hasAnyoneWithoutApplication ? (
+                <option value={PEOPLE_LIST_ONBOARDING_FILTER_NONE}>No application</option>
+              ) : null}
+              {discoveredApplicationStatuses.map((st) => (
+                <option key={st} value={st}>
+                  {st}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {error && (
@@ -124,6 +325,12 @@ function PeopleListView() {
                   Location
                 </th>
                 <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider" style={{ color: C.muted }}>
+                  Roles
+                </th>
+                <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider" style={{ color: C.muted }}>
+                  Onboarding
+                </th>
+                <th className="px-4 py-3 font-mono text-[11px] uppercase tracking-wider" style={{ color: C.muted }}>
                   Active
                 </th>
               </tr>
@@ -131,13 +338,13 @@ function PeopleListView() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center" style={{ color: C.muted }}>
+                  <td colSpan={7} className="px-4 py-8 text-center" style={{ color: C.muted }}>
                     Loading…
                   </td>
                 </tr>
               )}
               {!loading &&
-                items.map((p) => (
+                filteredItems.map((p) => (
                   <tr key={p.id} className="border-b transition hover:bg-[var(--trk-surface)]" style={{ borderColor: C.border }}>
                     <td className="px-4 py-3">
                       <Link className="font-medium hover:underline" style={{ color: C.accent }} to={OPS.PEOPLE_DETAIL(p.id)}>
@@ -153,13 +360,19 @@ function PeopleListView() {
                     <td className="px-4 py-3 text-xs" style={{ color: C.muted }}>
                       {[p.city, p.region].filter(Boolean).join(", ") || "—"}
                     </td>
+                    <td className="px-4 py-3 align-top">
+                      <PeopleListActiveRolesCell p={p} />
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <PeopleListOnboardingStatusCell p={p} />
+                    </td>
                     <td className="px-4 py-3 text-xs">{p.is_active ? "Yes" : "No"}</td>
                   </tr>
                 ))}
-              {!loading && items.length === 0 && (
+              {!loading && emptyMessage && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center" style={{ color: C.muted }}>
-                    No people match your search.
+                  <td colSpan={7} className="px-4 py-8 text-center" style={{ color: C.muted }}>
+                    {emptyMessage}
                   </td>
                 </tr>
               )}

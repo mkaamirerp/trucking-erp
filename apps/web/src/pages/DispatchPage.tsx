@@ -47,20 +47,20 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
-  unassigned: "bg-slate-500/15 text-slate-300 border border-slate-500/30",
-  assigned: "bg-slate-500/15 text-slate-300 border border-slate-500/30",
+  unassigned: "bg-[var(--trk-surface)] text-[var(--trk-text-muted)] border border-[var(--trk-border)]",
+  assigned: "bg-[var(--trk-surface)] text-[var(--trk-text-muted)] border border-[var(--trk-border)]",
   dispatched: "bg-blue-500/15 text-blue-300 border border-blue-500/30",
   arrived_pickup: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
   in_transit: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
   arrived_delivery: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
-  delivered: "bg-slate-400/15 text-slate-400 border border-slate-400/30",
+  delivered: "bg-[var(--trk-surface)] text-[var(--trk-text-muted)] border border-[var(--trk-border)]",
   issue_hold: "bg-red-500/15 text-red-300 border border-red-500/30",
 };
 
 const CARD_BADGE_CLASS: Record<string, string> = {
   unassigned: "bg-[var(--trk-surface)] text-[var(--trk-text-muted)] border border-[var(--trk-border-strong)]",
   assigned:   "bg-[var(--trk-heading)] text-[var(--trk-bg)] border border-[var(--trk-heading)]",
-  dispatched: "bg-[#0d1f1a] text-[var(--trk-success)] border border-[var(--trk-success)]/40",
+  dispatched: "bg-[var(--trk-success)]/10 text-[var(--trk-success)] border border-[var(--trk-success)]/40",
 };
 
 const CARD_ACCENT_COLOR: Record<string, string> = {
@@ -83,8 +83,8 @@ const COLUMN_BG: Record<string, string> = {
 
 const COLUMN_COUNT_CLASS: Record<string, string> = {
   unassigned: "bg-[var(--trk-border)] text-[var(--trk-text-muted)] border border-[var(--trk-border)]",
-  assigned:   "bg-[#2a1f0a] text-[var(--trk-heading)] border border-[#3d2d0e]",
-  dispatched: "bg-[#0d2420] text-[var(--trk-success)] border border-[#0f302a]",
+  assigned:   "bg-[var(--trk-heading)]/10 text-[var(--trk-heading)] border border-[var(--trk-heading)]/20",
+  dispatched: "bg-[var(--trk-success)]/10 text-[var(--trk-success)] border border-[var(--trk-success)]/20",
 };
 
 /** Load-status lanes: fixed width (stable metrics; no hover width change). */
@@ -207,7 +207,7 @@ function LoadCard({
             {load.miles ? `${load.miles} mi` : "— mi"}
           </span>
         </div>
-        <div className="flex flex-1 items-center justify-between rounded-md border border-[#3b232a] bg-[#2a1b1f] px-1 py-1">
+        <div className="flex flex-1 items-center justify-between rounded-md border border-[var(--trk-danger)]/30 bg-[var(--trk-danger)]/10 px-1 py-1">
           <span className="text-[9px] text-[var(--trk-danger)] uppercase tracking-wide">Dead</span>
           <span className="text-[11px] font-bold text-[var(--trk-danger)]">
             {uiDeadMiles(load) != null ? `${uiDeadMiles(load)} mi` : "— mi"}
@@ -414,8 +414,8 @@ function deriveDriverStatuses(
 }
 
 const DRIVER_STATUS_PILL: Record<DriverAvailStatus, string> = {
-  available: "bg-[#0d2e1f] text-[var(--trk-success)] border border-[var(--trk-success)]/30",
-  on_load:   "bg-[#2a1f0a] text-[var(--trk-heading)] border border-[var(--trk-heading)]/30",
+  available: "bg-[var(--trk-success)]/10 text-[var(--trk-success)] border border-[var(--trk-success)]/30",
+  on_load:   "bg-[var(--trk-heading)]/10 text-[var(--trk-heading)] border border-[var(--trk-heading)]/30",
 };
 
 const DRIVER_STATUS_LABEL: Record<DriverAvailStatus, string> = {
@@ -501,7 +501,7 @@ function DriverColumn({
           />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--trk-text-muted)]">DRIVERS</span>
         </div>
-        <span className="rounded-full border border-[var(--trk-success)]/30 bg-[#0d2e1f] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[var(--trk-success)]">
+        <span className="rounded-full border border-[var(--trk-success)]/30 bg-[var(--trk-success)]/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[var(--trk-success)]">
           {availableCount}
         </span>
       </div>
@@ -642,7 +642,7 @@ export default function DispatchPage() {
               "focus-visible:ring-2 focus-visible:ring-[var(--trk-heading)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--trk-bg)]",
               ribbonTab === tab.key
                 ? "border-[var(--trk-heading)] bg-[var(--trk-heading)] text-[var(--trk-bg)]"
-                : "border-transparent text-[var(--trk-text-muted)] hover:border-[var(--trk-border)] hover:bg-[var(--trk-bg)] hover:text-white"
+                : "border-transparent text-[var(--trk-text-muted)] hover:border-[var(--trk-border)] hover:bg-[var(--trk-bg)] hover:text-[var(--trk-text)]"
             )}
           >
             {tab.label}
@@ -738,7 +738,7 @@ export default function DispatchPage() {
           <button
             type="button"
             aria-label="Close"
-            className="fixed inset-0 z-40 bg-black/70"
+            className="fixed inset-0 z-40 bg-[var(--trk-bg)]/75"
             onClick={() => setSelectedLoad(null)}
           />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
@@ -772,7 +772,7 @@ export default function DispatchPage() {
                       setSelectedLoad(null);
                       navigate(`${slug}${OPS.LOAD_DETAIL(id)}`);
                     }}
-                    className="box-border rounded-md border border-[var(--trk-border-strong)] px-3 py-1.5 text-xs text-[var(--trk-text-muted)] transition-colors hover:border-[var(--trk-text-muted)] hover:text-white"
+                    className="box-border rounded-md border border-[var(--trk-border-strong)] px-3 py-1.5 text-xs text-[var(--trk-text-muted)] transition-colors hover:border-[var(--trk-text-muted)] hover:text-[var(--trk-text)]"
                   >
                     Edit load
                   </button>
@@ -780,7 +780,7 @@ export default function DispatchPage() {
                     type="button"
                     aria-label="Close"
                     onClick={() => setSelectedLoad(null)}
-                    className="text-[var(--trk-text-muted)] hover:text-white text-2xl leading-none px-1"
+                    className="text-[var(--trk-text-muted)] hover:text-[var(--trk-text)] text-2xl leading-none px-1"
                   >
                     ×
                   </button>

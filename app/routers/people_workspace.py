@@ -34,6 +34,7 @@ from app.services.driver_compensation_setup import (
 )
 from app.services.people_workspace import (
     build_people_detail_out,
+    build_people_list_items_out,
     driver_role_attached_config_audit_snapshot,
     driver_role_attached_configuration_audit_diff,
     list_people_maintenance_audit_entries,
@@ -72,7 +73,7 @@ async def list_people(
     stmt = stmt.order_by(Person.id.desc()).offset(offset).limit(limit)
     result = await db.execute(stmt)
     rows = result.scalars().all()
-    return [PeopleListItemOut.model_validate(p) for p in rows]
+    return await build_people_list_items_out(db, tenant_id=tenant_id, people=list(rows))
 
 
 @router.patch("/{person_id}/driver-profile", response_model=PeoplePatchResultOut)

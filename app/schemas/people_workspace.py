@@ -11,9 +11,12 @@ from app.core.validators import normalize_phone_number as normalize_phone
 
 
 class PersonRoleSummary(BaseModel):
+    id: int
     role_code: str
     is_primary: bool
     is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class DriverProfileSummary(BaseModel):
@@ -64,6 +67,8 @@ class LinkedPersonApplicationSummary(BaseModel):
     id: int
     status: str
     setup_status: Optional[str] = None
+    #: Raw ``person_applications.current_workflow_lane`` (queue / ownership hint).
+    current_workflow_lane: Optional[str] = None
 
 
 class PeopleListItemOut(BaseModel):
@@ -78,6 +83,11 @@ class PeopleListItemOut(BaseModel):
     is_active: bool = True
     created_at: datetime
     updated_at: datetime
+    #: Active `person_roles` only; read-only list hint (detail uses full `roles`).
+    active_role_codes: list[str] = Field(default_factory=list)
+    primary_role_code: Optional[str] = None
+    #: Latest `person_applications` row for this person (same ordering as detail: updated_at, id).
+    latest_application: Optional[LinkedPersonApplicationSummary] = None
 
     model_config = {"from_attributes": True}
 
@@ -95,7 +105,6 @@ class PeopleDetailOut(PeopleListItemOut):
     driver_person_extension: Optional[DriverPersonExtensionSummary] = None
     operational_drivers: list[OperationalDriverSummary] = Field(default_factory=list)
     compensation: CompensationSummary
-    latest_application: Optional[LinkedPersonApplicationSummary] = None
 
 
 class PeopleCorePatch(BaseModel):

@@ -67,8 +67,8 @@ function confidenceLabel(level: string | null | undefined): string {
 
 function confidenceClass(level: string | null | undefined): string {
   const l = (level || "").toLowerCase();
-  if (l === "high") return "border-emerald-900/60 bg-emerald-900/20 text-emerald-300";
-  if (l === "medium") return "border-amber-900/60 bg-amber-900/20 text-amber-300";
+  if (l === "high") return "border-[var(--trk-success)] bg-[var(--trk-surface)] text-[var(--trk-success)]";
+  if (l === "medium") return "border-[var(--trk-warning)] bg-[var(--trk-surface)] text-[var(--trk-warning)]";
   return "border-[var(--trk-border)] bg-[var(--trk-surface)] text-[var(--trk-text-muted)]";
 }
 
@@ -99,7 +99,7 @@ function ThreadMessageList({
               <div key={m.id} className={`mb-4 flex ${outbound ? "justify-end" : "justify-start"}`}>
                 <article
                   className={`w-full max-w-[820px] rounded-xl border p-4 ${
-                    outbound ? "border-[#1d4ed8] bg-[var(--trk-surface)]" : "border-[var(--trk-border)] bg-[var(--trk-surface)]"
+                    outbound ? "border-[var(--trk-accent)] bg-[var(--trk-surface)]" : "border-[var(--trk-border)] bg-[var(--trk-surface)]"
                   }`}
                 >
                   <div className="mb-2 grid gap-1 text-xs text-[var(--trk-text-muted)] md:grid-cols-2">
@@ -596,14 +596,14 @@ export default function LoadInboxPage() {
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--trk-text-muted)]">
               <span>{formatWhen(t.last_message_at || t.created_at)}</span>
-              <span className="text-emerald-400/90">Thread #{t.id}</span>
+              <span className="text-[var(--trk-success)]">Thread #{t.id}</span>
             </div>
             <div className="flex flex-wrap gap-1.5 pt-1">
               {t.linked_load_id ? (
                 <span
                   role="link"
                   tabIndex={0}
-                  className="cursor-pointer rounded border border-sky-900/50 bg-sky-950/30 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-sky-950/50"
+                  className="cursor-pointer rounded border border-[var(--trk-accent)] bg-[var(--trk-surface)] px-2 py-0.5 text-[11px] text-[var(--trk-accent)] hover:bg-[var(--trk-surface-2)]"
                   onClick={(e) => {
                     e.stopPropagation();
                     navigate(OPS.LOAD_WORKSPACE_INTAKE(t.linked_load_id!, t.id));
@@ -639,7 +639,7 @@ export default function LoadInboxPage() {
               <span>{formatWhen(t.last_message_at || t.created_at)}</span>
               <button
                 type="button"
-                className="rounded border border-amber-900/50 px-2 py-0.5 text-amber-300 hover:bg-amber-950/30"
+                className="rounded border border-[var(--trk-warning)] px-2 py-0.5 text-[var(--trk-warning)] hover:bg-[var(--trk-surface-2)]"
                 onClick={(e) => handleIgnoreRow(t.id, e)}
               >
                 Ignore
@@ -728,14 +728,14 @@ export default function LoadInboxPage() {
                 setPullingGmailDelta(false);
               }
             }}
-            className="rounded border border-sky-900/50 bg-sky-950/25 px-3 py-2 text-sm text-sky-200 hover:bg-sky-950/45 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)] hover:bg-[var(--trk-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pullingGmailDelta ? "Pulling…" : "Pull new mail (optional)"}
           </button>
         </div>
       </div>
 
-      {actionError && <div className="rounded border border-red-900/50 bg-red-950/20 p-3 text-sm text-red-400">{actionError}</div>}
+      {actionError && <div className="rounded border border-[var(--trk-danger)] bg-[var(--trk-surface)] p-3 text-sm text-[var(--trk-danger)]">{actionError}</div>}
       <div className="grid min-h-[620px] grid-cols-1 gap-4 lg:grid-cols-[380px_1fr]">
         <section className="flex flex-col rounded-xl border border-[var(--trk-border)] bg-[var(--trk-bg)]">
           <div className="border-b border-[var(--trk-border)] px-4 py-3 text-sm font-semibold text-[var(--trk-text)]">Queues</div>
@@ -879,7 +879,7 @@ export default function LoadInboxPage() {
                   ) : null}
                   {!selectedThread.linked_load_id && selectedThread.routing_reason ? (
                     <p
-                      className="mt-0.5 line-clamp-3 text-[11px] text-amber-200/75"
+                      className="mt-0.5 line-clamp-3 text-[11px] text-[var(--trk-warning)]"
                       title={formatRoutingReason(selectedThread.routing_reason)}
                     >
                       {formatRoutingReason(selectedThread.routing_reason)}
@@ -891,7 +891,7 @@ export default function LoadInboxPage() {
                     <button
                       type="button"
                       onClick={() => navigate(`${OPS.INTAKE}?thread=${selectedThread.id}`)}
-                      className="rounded border border-violet-900/50 bg-violet-950/40 px-3 py-1.5 text-xs font-medium text-violet-200 hover:bg-violet-950/60"
+                      className="rounded border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-1.5 text-xs font-medium text-[var(--trk-text)] hover:bg-[var(--trk-surface-2)]"
                     >
                       Load Intake
                     </button>
@@ -902,7 +902,7 @@ export default function LoadInboxPage() {
                       onClick={() =>
                         navigate(OPS.LOAD_WORKSPACE_INTAKE(selectedThread.linked_load_id!, selectedThreadId))
                       }
-                      className="rounded border border-sky-900/50 bg-sky-950/30 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-950/50"
+                      className="rounded border border-[var(--trk-accent)] bg-[var(--trk-surface)] px-3 py-1.5 text-xs font-medium text-[var(--trk-accent)] hover:bg-[var(--trk-surface-2)]"
                     >
                       Open in Loads
                     </button>
@@ -917,7 +917,7 @@ export default function LoadInboxPage() {
                           setLinkResults([]);
                           setLinkSearch("");
                         }}
-                        className="rounded border border-indigo-900/50 bg-indigo-950/40 px-3 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-950/60"
+                        className="rounded border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] px-3 py-1.5 text-xs font-medium text-[var(--trk-text)] hover:bg-[var(--trk-surface-2)]"
                       >
                         Link existing load
                       </button>
@@ -926,7 +926,7 @@ export default function LoadInboxPage() {
                     type="button"
                     onClick={handleDisregard}
                     disabled={disregarding || selectedThread.status === "disregarded"}
-                    className="rounded border border-amber-900/60 bg-amber-900/20 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded border border-[var(--trk-warning)] bg-[var(--trk-surface)] px-3 py-1.5 text-xs font-medium text-[var(--trk-warning)] hover:bg-[var(--trk-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {selectedThread.status === "disregarded"
                       ? "Disregarded"
@@ -958,7 +958,7 @@ export default function LoadInboxPage() {
                     <button
                       type="button"
                       onClick={() => navigate(`${OPS.INTAKE}?thread=${selectedThread.id}`)}
-                      className="rounded-lg border border-violet-700/70 bg-violet-950/50 px-3 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-950/70"
+                      className="rounded-lg border border-[var(--trk-heading)] bg-[var(--trk-heading)] px-3 py-2 text-sm font-semibold text-[var(--trk-btn-text)] hover:opacity-90"
                     >
                       Open Load Intake
                     </button>
@@ -966,7 +966,7 @@ export default function LoadInboxPage() {
                       type="button"
                       onClick={() => emailUploadRef.current?.click()}
                       disabled={uploadingPdf || selectedThread.status !== "active"}
-                      className="rounded-lg border border-[#2563eb] bg-[#1d4ed8] px-3 py-2 text-sm font-semibold text-white hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-[var(--trk-accent)] bg-[var(--trk-accent)] px-3 py-2 text-sm font-semibold text-[var(--trk-btn-text)] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {uploadingPdf ? "Uploading…" : "Upload PDF"}
                     </button>
@@ -1096,7 +1096,7 @@ export default function LoadInboxPage() {
                     type="button"
                     disabled={linkSubmitting}
                     onClick={() => handleConfirmLinkLoad(ld.id)}
-                    className="shrink-0 rounded border border-emerald-900/50 bg-emerald-950/40 px-2 py-1 text-emerald-300 hover:bg-emerald-950/60 disabled:opacity-50"
+                    className="shrink-0 rounded border border-[var(--trk-success)] bg-[var(--trk-surface)] px-2 py-1 text-[var(--trk-success)] hover:bg-[var(--trk-surface-2)] disabled:opacity-50"
                   >
                     Link
                   </button>

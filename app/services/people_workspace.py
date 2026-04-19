@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -21,6 +22,7 @@ from app.schemas.people_workspace import (
     LinkedPersonApplicationSummary,
     OperationalDriverSummary,
     PeopleDetailOut,
+    PeopleListItemOut,
     PersonRoleSummary,
 )
 from app.services.driver_compensation_setup import get_driver_compensation_setup
@@ -261,6 +263,113 @@ async def sync_operational_drivers_license_from_driver_profile(
     return out
 
 
+def summarize_active_person_roles(active_rows: list[PersonRole]) -> tuple[list[str], str | None]:
+    """List-oriented active roles: primary first, then newest attach, then role_code, id (stable).
+
+    Caller passes **active** `PersonRole` rows only (``is_active`` is True).
+    """
+    if not active_rows:
+        return [], None
+
+    def _key(r: PersonRole) -> tuple[bool, float, str, int]:
+        ca = r.created_at
+        if ca is None:
+            ts = 0.0
+        elif ca.tzinfo is None:
+            ts = ca.replace(tzinfo=timezone.utc).timestamp()
+        else:
+            ts = ca.timestamp()
+        return (bool(r.is_primary), ts, r.role_code, int(r.id))
+
+    ordered = sorted(active_rows, key=_key, reverse=True)
+    codes = [r.role_code for r in ordered]
+    primary = next((r.role_code for r in ordered if r.is_primary), None)
+    return codes, primary
+
+
+def linked_application_summary_from_row(app: PersonApplication) -> LinkedPersonApplicationSummary:
+    """Pass-through from `person_applications` columns (no workflow interpretation)."""
+    lane = getattr(app, "current_workflow_lane", None)
+    return LinkedPersonApplicationSummary(
+        id=int(app.id),
+        status=str(app.status),
+        setup_status=getattr(app, "setup_status", None),
+        current_workflow_lane=str(lane) if lane is not None else None,
+    )
+
+
+async def batch_latest_person_applications_for_people(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    person_ids: list[int],
+) -> dict[int, PersonApplication]:
+    """One query: latest application per person (same ordering as detail: updated_at desc, id desc)."""
+    if not person_ids:
+        return {}
+    app_result = await db.scalars(
+        select(PersonApplication)
+        .where(
+            PersonApplication.tenant_id == tenant_id,
+            PersonApplication.person_id.in_(person_ids),
+            PersonApplication.person_id.isnot(None),
+        )
+        .order_by(
+            PersonApplication.person_id.asc(),
+            PersonApplication.updated_at.desc(),
+            PersonApplication.id.desc(),
+        )
+    )
+    by_pid: dict[int, PersonApplication] = {}
+    for app in app_result.all():
+        pid = int(app.person_id)  # type: ignore[arg-type]
+        if pid not in by_pid:
+            by_pid[pid] = app
+    return by_pid
+
+
+async def build_people_list_items_out(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    people: list[Person],
+) -> list[PeopleListItemOut]:
+    """Batch-load active roles for list rows (no N+1)."""
+    if not people:
+        return []
+    ids = [int(p.id) for p in people]
+    role_result = await db.scalars(
+        select(PersonRole).where(
+            PersonRole.tenant_id == tenant_id,
+            PersonRole.person_id.in_(ids),
+            PersonRole.is_active.is_(True),
+        )
+    )
+    by_pid: dict[int, list[PersonRole]] = {}
+    for pr in role_result.all():
+        by_pid.setdefault(int(pr.person_id), []).append(pr)
+
+    apps_by_pid = await batch_latest_person_applications_for_people(db, tenant_id=tenant_id, person_ids=ids)
+
+    out: list[PeopleListItemOut] = []
+    for p in people:
+        pid = int(p.id)
+        codes, primary = summarize_active_person_roles(by_pid.get(pid, []))
+        app_row = apps_by_pid.get(pid)
+        latest_app_summary = linked_application_summary_from_row(app_row) if app_row is not None else None
+        base = PeopleListItemOut.model_validate(p)
+        out.append(
+            base.model_copy(
+                update={
+                    "active_role_codes": codes,
+                    "primary_role_code": primary,
+                    "latest_application": latest_app_summary,
+                }
+            )
+        )
+    return out
+
+
 async def build_people_detail_out(
     db: AsyncSession,
     *,
@@ -273,14 +382,34 @@ async def build_people_detail_out(
             PersonRole.person_id == person.id,
         )
     )
+    role_rows = list(roles_result.all())
+    # Stable ordering: active first, primary first, newest attached first, then id desc.
+
+    def _role_sort_key(r: PersonRole) -> tuple[bool, bool, float, int]:
+        ca = r.created_at
+        if ca is None:
+            ts = 0.0
+        else:
+            if ca.tzinfo is None:
+                ca = ca.replace(tzinfo=timezone.utc)
+            ts = ca.timestamp()
+        return (bool(r.is_active), bool(r.is_primary), ts, int(r.id))
+
+    role_rows.sort(key=_role_sort_key, reverse=True)
     roles = [
         PersonRoleSummary(
+            id=int(r.id),
             role_code=r.role_code,
             is_primary=bool(r.is_primary),
             is_active=bool(r.is_active),
+            created_at=r.created_at,
+            updated_at=r.updated_at,
         )
-        for r in roles_result.all()
+        for r in role_rows
     ]
+
+    active_rows = [r for r in role_rows if r.is_active]
+    active_role_codes, primary_role_code = summarize_active_person_roles(active_rows)
 
     dp = await db.scalar(
         select(DriverProfile).where(
@@ -362,11 +491,7 @@ async def build_people_detail_out(
     )
     latest_application: LinkedPersonApplicationSummary | None = None
     if latest_app:
-        latest_application = LinkedPersonApplicationSummary(
-            id=int(latest_app.id),
-            status=str(latest_app.status),
-            setup_status=getattr(latest_app, "setup_status", None),
-        )
+        latest_application = linked_application_summary_from_row(latest_app)
 
     return PeopleDetailOut(
         id=int(person.id),
@@ -380,6 +505,8 @@ async def build_people_detail_out(
         is_active=bool(person.is_active),
         created_at=person.created_at,
         updated_at=person.updated_at,
+        active_role_codes=active_role_codes,
+        primary_role_code=primary_role_code,
         street_address=person.street_address,
         postal_code=person.postal_code,
         zip_code=person.zip_code,

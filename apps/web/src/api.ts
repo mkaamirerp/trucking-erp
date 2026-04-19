@@ -1639,6 +1639,8 @@ export type LinkedPersonApplicationSummary = {
   id: number;
   status: string;
   setup_status?: string | null;
+  /** Raw `person_applications.current_workflow_lane`. */
+  current_workflow_lane?: string | null;
 };
 
 export type PeopleListItem = {
@@ -1653,6 +1655,11 @@ export type PeopleListItem = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** Active `person_roles` only; read-only list hint. */
+  active_role_codes: string[];
+  primary_role_code?: string | null;
+  /** Latest linked onboarding application (same ordering as detail). */
+  latest_application?: LinkedPersonApplicationSummary | null;
 };
 
 export type PeopleDetail = PeopleListItem & {
@@ -1667,7 +1674,6 @@ export type PeopleDetail = PeopleListItem & {
   driver_person_extension?: DriverPersonExtensionSummary | null;
   operational_drivers: OperationalDriverSummary[];
   compensation: CompensationSummary;
-  latest_application?: LinkedPersonApplicationSummary | null;
 };
 
 export type PeopleCorePatchPayload = {

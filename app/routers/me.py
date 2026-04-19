@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1", tags=["Auth"])
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_THEMES: frozenset[str] = frozenset({"dark", "dark-navy", "light-slate"})
+VALID_THEMES: frozenset[str] = frozenset({"dark"})
 
 
 # ---------------------------------------------------------------------------
