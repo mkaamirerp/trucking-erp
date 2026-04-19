@@ -1,4 +1,5 @@
 import type { LoadDocumentParseExtracted } from "../api";
+import { filterMeaningfulParsedStops } from "./loadParseStops";
 
 function trimmedNonEmpty(v: string | null | undefined): boolean {
   return typeof v === "string" && v.trim().length > 0;
@@ -26,7 +27,7 @@ export function countMeaningfulExtractedFields(ex: LoadDocumentParseExtracted): 
   if (ex.miles != null) n += 1;
   if (trimmedNonEmpty(ex.customs_broker_name)) n += 1;
   if (ex.references?.length) n += 1;
-  if (ex.stops?.length) n += 1;
+  if (filterMeaningfulParsedStops(ex.stops ?? []).length > 0) n += 1;
   return n;
 }
 

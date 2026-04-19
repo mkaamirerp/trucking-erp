@@ -1,4 +1,5 @@
 import type { LoadDocumentParseExtracted } from "../api";
+import { filterMeaningfulParsedStops } from "./loadParseStops";
 
 export type WorkspacePdfParseResolutionSummary = {
   /** True iff `mcSnap || dotSnap` branch ran in `onParseWorkspacePdf`. */
@@ -16,6 +17,7 @@ function trimNonEmpty(v: string | null | undefined): boolean {
 /**
  * Human-readable labels for what the load workspace PDF parse handler actually applied.
  * Mirrors `onParseWorkspacePdf` in `LoadWorkspacePage.tsx` — keep in sync when that handler changes.
+ * Stops: uses `filterMeaningfulParsedStops` like the handler before `setDraftStops`.
  */
 export function buildWorkspacePdfParseAppliedLabels(
   ex: LoadDocumentParseExtracted,
@@ -83,7 +85,7 @@ export function buildWorkspacePdfParseAppliedLabels(
     labels.push("Miles");
   }
 
-  if (ex.stops?.length) {
+  if (filterMeaningfulParsedStops(ex.stops ?? []).length > 0) {
     labels.push("Stops");
   }
 

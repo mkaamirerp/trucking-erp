@@ -15,7 +15,16 @@ describe("countMeaningfulExtractedFields", () => {
       rate: 100,
       stops: [{ stop_type: "pickup", sequence: 0 }],
     };
-    expect(countMeaningfulExtractedFields(ex)).toBe(3);
+    expect(countMeaningfulExtractedFields(ex)).toBe(2);
+  });
+
+  it("counts stops only when at least one parsed stop is meaningful", () => {
+    const ex: LoadDocumentParseExtracted = {
+      ...emptyExtracted(),
+      miles: 1,
+      stops: [{ stop_type: "pickup", sequence: 0, city: "Dallas" }],
+    };
+    expect(countMeaningfulExtractedFields(ex)).toBe(2);
   });
 
   it("returns 0 for empty extracted", () => {

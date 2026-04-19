@@ -62,6 +62,7 @@ import {
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
+import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
 import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
 import { SectionSettlement } from "@/components/load/SectionSettlement";
 
@@ -126,7 +127,7 @@ function WorkspaceModeReadout({ mode }: { mode: LoadWorkspaceMode }) {
           <span
             key={x.id}
             className={`rounded px-2.5 py-1 text-[11px] font-semibold ${
-              mode === x.id ? "bg-amber-500 text-slate-900 shadow-sm" : "text-[var(--trk-text-muted)]"
+              mode === x.id ? "bg-amber-500 text-[var(--trk-btn-text)] shadow-sm" : "text-[var(--trk-text-muted)]"
             }`}
             aria-current={mode === x.id ? "true" : undefined}
           >
@@ -165,11 +166,11 @@ function IntakeEmailRail({
           </div>
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-950 p-3">
-        {loading ? <div className="text-xs text-slate-400">Loading messages…</div> : null}
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--trk-bg)] p-3">
+        {loading ? <div className="text-xs text-[var(--trk-text-muted)]">Loading messages…</div> : null}
         {!loading && error ? <div className="text-xs text-red-400">{error}</div> : null}
         {!loading && !error && messages.length === 0 ? (
-          <div className="text-xs text-slate-500">No messages in this thread.</div>
+          <div className="text-xs text-[var(--trk-text-muted)]">No messages in this thread.</div>
         ) : null}
         {!loading && !error
           ? messages.map((m) => {
@@ -178,17 +179,17 @@ function IntakeEmailRail({
                 <div key={m.id} className={`mb-3 flex ${outbound ? "justify-end" : "justify-start"}`}>
                   <article
                     className={`max-w-[min(100%,280px)] rounded-lg border px-2.5 py-2 text-[11px] leading-relaxed ${
-                      outbound ? "border-blue-900/60 bg-slate-900" : "border-slate-700 bg-slate-900/90"
+                      outbound ? "border-[var(--trk-accent)]/30 bg-[var(--trk-surface-2)]" : "border-[var(--trk-border)] bg-[var(--trk-surface)]"
                     }`}
                   >
-                    <div className="mb-1.5 space-y-0.5 text-[10px] text-slate-400">
+                    <div className="mb-1.5 space-y-0.5 text-[10px] text-[var(--trk-text-muted)]">
                       <div>From: {m.from_email || "—"}</div>
                       <div>{formatWhen(m.received_at || m.sent_at || m.created_at)}</div>
-                      {m.subject ? <div className="text-slate-300">{m.subject}</div> : null}
+                      {m.subject ? <div className="text-[var(--trk-text)]">{m.subject}</div> : null}
                     </div>
-                    <p className="whitespace-pre-wrap text-slate-100">{m.body_text || m.snippet || "—"}</p>
+                    <p className="whitespace-pre-wrap text-[var(--trk-text)]">{m.body_text || m.snippet || "—"}</p>
                     {m.attachments && m.attachments.length > 0 ? (
-                      <ul className="mt-1.5 space-y-0.5 text-[10px] text-slate-400">
+                      <ul className="mt-1.5 space-y-0.5 text-[10px] text-[var(--trk-text-muted)]">
                         {m.attachments.map((a) => (
                           <li key={a.id}>
                             {a.filename || a.external_attachment_id}
@@ -718,7 +719,10 @@ export default function LoadWorkspacePage() {
           notesBody = notesBody ? `${notesBody}\n\n---\n${cline}` : cline;
         }
         setInternalNotes(notesBody);
-        if (ex.stops?.length) setDraftStops(extractedStopsToDraft(ex.stops));
+        const meaningfulStops = filterMeaningfulParsedStops(ex.stops ?? []);
+        if (meaningfulStops.length > 0) {
+          setDraftStops(extractedStopsToDraft(meaningfulStops));
+        }
         setParseWarnings(res.warnings ?? []);
         const outcome = describeWorkspacePdfParseOutcome(res.extracted, res.raw_text, res.warnings ?? []);
         const tone: WorkspaceToolbarTone =
@@ -1224,9 +1228,9 @@ export default function LoadWorkspacePage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 p-4 text-gray-600">
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-2 p-4 text-[var(--trk-text-muted)]">
         <div
-          className="h-9 w-9 animate-spin rounded-full border-2 border-gray-200 border-t-indigo-600"
+          className="h-9 w-9 animate-spin rounded-full border-2 border-[var(--trk-border)] border-t-[var(--trk-accent)]"
           aria-hidden
         />
         <p className="text-sm">Loading…</p>
@@ -1259,7 +1263,7 @@ export default function LoadWorkspacePage() {
   if (workspaceMode !== "manual" && !load) {
     return (
       <div className="p-4">
-        <p className="text-sm text-gray-600">Load not found</p>
+        <p className="text-sm text-[var(--trk-text-muted)]">Load not found</p>
         <Button variant="secondary" onClick={() => navigate(OPS.LOADS)} className="mt-2">
           Back to Loads
         </Button>
@@ -1280,7 +1284,7 @@ export default function LoadWorkspacePage() {
         }`;
   const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
   const toolBtnSecondary =
-    "rounded-md border border-[var(--trk-border)] bg-[#1e2330] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[#3a4155] hover:bg-[var(--trk-border)]";
+    "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
 
   /** Compare the server snapshot against the current form state; return human-readable diffs. */
   function getConflictDiffs(snap: Load): Array<{ label: string; server: string; yours: string }> {
@@ -1587,7 +1591,7 @@ export default function LoadWorkspacePage() {
           ) : null}
 
           {workspaceMode !== "manual" && load ? (
-            <details className="mb-3 rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm">
+            <details className="mb-3 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] shadow-sm">
               <summary className="cursor-pointer list-none px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
                 System context · trip, match, resolved labels
               </summary>
@@ -1599,7 +1603,7 @@ export default function LoadWorkspacePage() {
                   <ContextRow label="Confidence tier" value={load.broker_match_confidence_tier || "—"} />
                 </dl>
                 {load.broker_match_explanation?.trim() ? (
-                  <p className="mt-3 whitespace-pre-wrap text-xs text-gray-700">{load.broker_match_explanation.trim()}</p>
+                  <p className="mt-3 whitespace-pre-wrap text-xs text-[var(--trk-text-muted)]">{load.broker_match_explanation.trim()}</p>
                 ) : null}
                 {load.is_duplicate_of_load_id != null ? (
                   <p className="mt-3 text-xs">
@@ -1778,7 +1782,7 @@ export default function LoadWorkspacePage() {
 
           {/* AuditTimeline — visible in audit mode */}
           {sectionConfig.visible.includes("AuditTimeline") ? (
-            <section className="mt-2.5 rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
+            <section className="mt-2.5 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] shadow-sm overflow-hidden">
               <div className="flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3.5 py-2">
                 <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]">Audit timeline</span>
               </div>

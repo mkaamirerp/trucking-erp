@@ -78,6 +78,24 @@ describe("buildWorkspacePdfParseAppliedLabels", () => {
     expect(labels).toContain("Broker contact name");
   });
 
+  it("does not claim Stops when only shell parsed stops exist", () => {
+    const ex: LoadDocumentParseExtracted = {
+      ...emptyEx(),
+      miles: 50,
+      stops: [
+        { stop_type: "pickup", sequence: 0 },
+        { stop_type: "delivery", sequence: 1 },
+      ],
+    };
+    const labels = buildWorkspacePdfParseAppliedLabels(ex, "", {
+      mcOrDotAttempted: false,
+      resolvedBrokerId: null,
+      brokerContactMatched: false,
+    });
+    expect(labels).toContain("Miles");
+    expect(labels).not.toContain("Stops");
+  });
+
   it("ignores references array (not mapped by handler)", () => {
     const ex: LoadDocumentParseExtracted = {
       ...emptyEx(),
