@@ -28,18 +28,18 @@ export default function DashboardPage() {
   }).format(revenue);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6">
+    <div className="min-h-screen bg-[var(--trk-bg)] text-[var(--trk-text)] p-6">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold">Dashboard</h1>
-            <p className="mt-2 text-slate-400">
+            <p className="mt-2 text-[var(--trk-text-muted)]">
               {loading ? "Loading..." : "Dispatch overview"}
             </p>
           </div>
           <div className="flex items-center gap-4 flex-wrap">
             <div className="text-right">
-              <div className="text-xs text-slate-500">Signed in as</div>
+              <div className="text-xs text-[var(--trk-text-muted)]">Signed in as</div>
               <div className="text-sm font-semibold">{me?.email ?? "—"}</div>
             </div>
             <button
@@ -91,7 +91,7 @@ export default function DashboardPage() {
           />
         </section>
 
-        <section className="mt-6 rounded-xl border border-slate-800 bg-slate-900/40 p-6">
+        <section className="mt-6 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-6">
           <div className="font-semibold mb-3">
             Drivers ({(drivers ?? []).length || (s?.drivers_active ?? 0)} on duty)
           </div>
@@ -100,17 +100,17 @@ export default function DashboardPage() {
               {(drivers ?? []).map((d) => (
                 <li
                   key={d.id}
-                  className="flex items-center gap-3 rounded-lg border border-slate-700/50 bg-slate-800/40 px-4 py-3"
+                  className="flex items-center gap-3 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-4 py-3"
                 >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-600 text-sm font-semibold">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--trk-surface-2)] text-sm font-semibold">
                     {(d.first_name?.[0] ?? "") + (d.last_name?.[0] ?? "")}
                   </span>
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-100">
+                    <div className="font-medium text-[var(--trk-text)]">
                       {d.first_name} {d.last_name}
                     </div>
                     {d.email ? (
-                      <div className="truncate text-xs text-slate-400">{d.email}</div>
+                      <div className="truncate text-xs text-[var(--trk-text-muted)]">{d.email}</div>
                     ) : null}
                   </div>
                 </li>
@@ -118,7 +118,7 @@ export default function DashboardPage() {
             </ul>
           ) : (s?.drivers_active ?? 0) > 0 ? (
             <div className="space-y-2">
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-[var(--trk-text-muted)]">
                 {s.drivers_active} drivers on duty. List could not be loaded.
                 {driversError ? ` (${driversError})` : ""}
               </p>
@@ -126,7 +126,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => refetch()}
-                  className="px-3 py-1.5 rounded-md text-sm font-medium bg-slate-700 text-slate-200 hover:bg-slate-600"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium bg-[var(--trk-surface-2)] text-[var(--trk-text)] hover:bg-[var(--trk-border)]"
                 >
                   Retry loading drivers
                 </button>
@@ -136,15 +136,15 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-[var(--trk-text-muted)]">
               No drivers yet. Add drivers in Fleet or your admin workflow.
             </p>
           )}
         </section>
 
-        <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-6">
+        <div className="mt-8 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-6">
           <div className="font-semibold mb-2">Quick links</div>
-          <ul className="text-sm text-slate-400 space-y-1">
+          <ul className="text-sm text-[var(--trk-text-muted)] space-y-1">
             <li>• <a href="/loads" className="text-sky-400 hover:underline">Loads</a> — view and manage loads (drivers on assignments)</li>
             <li>• <a href="/payroll/pay-runs" className="text-sky-400 hover:underline">Pay runs</a> — payroll</li>
             <li>• <a href="/operations/driver-onboarding-review" className="text-sky-400 hover:underline">Driver onboarding</a> — admin</li>
@@ -180,14 +180,14 @@ function KpiCard({
             : "";
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 flex flex-col gap-2">
+    <div className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4 flex flex-col gap-2">
       {icon ? (
         <span className={`inline-flex w-9 h-9 items-center justify-center rounded-lg text-lg ${iconBgClass}`}>
           {icon}
         </span>
       ) : null}
       <div className={`text-2xl font-semibold ${revenue ? "text-emerald-400" : ""}`}>{value}</div>
-      <div className="text-sm text-slate-400">{label}</div>
+      <div className="text-sm text-[var(--trk-text-muted)]">{label}</div>
     </div>
   );
 }

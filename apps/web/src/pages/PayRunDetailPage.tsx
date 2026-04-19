@@ -143,12 +143,12 @@ export default function PayRunDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <p className="text-sm text-gray-500 cursor-pointer" onClick={() => navigate("/payroll/pay-runs")}>
+          <p className="text-sm text-[var(--trk-text-muted)] cursor-pointer" onClick={() => navigate("/payroll/pay-runs")}>
             ← Back to Pay Runs
           </p>
           <h1 className="text-xl font-semibold">Pay Run #{id}</h1>
           {run && (
-            <div className="flex items-center space-x-2 text-sm text-gray-700">
+            <div className="flex items-center space-x-2 text-sm text-[var(--trk-text-muted)]">
               <StatusBadge status={run.status} />
               <StatusBadge status={run.payout_status} />
               <span>{run.pay_document_type}</span>
@@ -168,7 +168,7 @@ export default function PayRunDetailPage() {
       </div>
 
       <Card title="Payees">
-        {loading && <p className="text-sm text-gray-500">Loading...</p>}
+        {loading && <p className="text-sm text-[var(--trk-text-muted)]">Loading...</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
         {!loading && !run && <EmptyState title="Pay run not found" />}
         {!loading && run && payees.length === 0 && (
@@ -182,15 +182,15 @@ export default function PayRunDetailPage() {
                   <button
                     key={p.payee_id}
                     className={`w-full text-left px-4 py-3 flex items-center justify-between ${
-                      selectedPayeeId === p.payee_id ? "bg-blue-50" : ""
+                      selectedPayeeId === p.payee_id ? "bg-[var(--trk-accent)]/15" : ""
                     }`}
                     onClick={() => setSelectedPayeeId(p.payee_id)}
                   >
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">{p.display_name}</p>
-                      <p className="text-xs text-gray-600">Payee #{p.payee_id}</p>
+                      <p className="text-sm font-semibold text-[var(--trk-text)]">{p.display_name}</p>
+                      <p className="text-xs text-[var(--trk-text-muted)]">Payee #{p.payee_id}</p>
                     </div>
-                    <div className="text-sm font-medium text-gray-900">
+                    <div className="text-sm font-medium text-[var(--trk-text)]">
                       {Number(p.net_amount).toFixed(2)} {run.base_currency_snapshot}
                     </div>
                   </button>
@@ -204,7 +204,7 @@ export default function PayRunDetailPage() {
                   actions={
                     <div className="flex flex-wrap items-center gap-3">
                       {selectedPayeeNet !== null ? (
-                        <div className="text-sm font-medium text-gray-900">
+                        <div className="text-sm font-medium text-[var(--trk-text)]">
                           Net: {Number(selectedPayeeNet).toFixed(2)} {run.base_currency_snapshot}
                         </div>
                       ) : null}
@@ -232,18 +232,18 @@ export default function PayRunDetailPage() {
                       const { ref, trip } = payrollTraceLabels(item.metadata_json);
                       return (
                         <tr key={item.id}>
-                          <td className="px-4 py-2 text-sm text-gray-700">{item.source_type}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700">{item.description}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700 font-mono text-xs">{trip}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700 font-mono text-xs">{ref}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700">
-                            {item.quantity ?? <span className="text-gray-400">—</span>}
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)]">{item.source_type}</td>
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)]">{item.description}</td>
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)] font-mono text-xs">{trip}</td>
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)] font-mono text-xs">{ref}</td>
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
+                            {item.quantity ?? <span className="text-[var(--trk-text-muted)]">—</span>}
                           </td>
-                          <td className="px-4 py-2 text-sm text-gray-700">
-                            {item.unit_rate ?? <span className="text-gray-400">—</span>}
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
+                            {item.unit_rate ?? <span className="text-[var(--trk-text-muted)]">—</span>}
                           </td>
-                          <td className="px-4 py-2 text-sm text-gray-900 font-medium">{item.amount_signed}</td>
-                          <td className="px-4 py-2 text-sm text-gray-700">{item.currency}</td>
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)] font-medium">{item.amount_signed}</td>
+                          <td className="px-4 py-2 text-sm text-[var(--trk-text)]">{item.currency}</td>
                         </tr>
                       );
                     })}

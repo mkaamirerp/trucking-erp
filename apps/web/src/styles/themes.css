@@ -86,6 +86,30 @@
 }
 
 /* ---------------------------------------------------------------------------
+   dark-blue  (steel blue — navy-tinted dark)
+   --------------------------------------------------------------------------- */
+[data-theme="dark-blue"] {
+  --trk-bg:           #0F1525;
+  --trk-surface:      #141E35;
+  --trk-surface-2:    #1A2540;
+  --trk-heading:      #F59E0B;
+  --trk-text:         #CDD8F0;
+  --trk-text-muted:   #4A5A7A;
+  --trk-border:       #1E2740;
+  --trk-border-strong:#243050;
+  --trk-accent:       #60A5FA;
+  --trk-btn-primary:  #F59E0B;
+  --trk-btn-text:     #0A0F1A;
+  --trk-success:      #34D399;
+  --trk-warning:      #F59E0B;
+  --trk-danger:       #F87171;
+  --trk-success-tint: #0a2a1c;
+  --trk-warning-tint: #261c08;
+  --trk-danger-tint:  #26151a;
+  --trk-info-tint:    #162d4f;
+}
+
+/* ---------------------------------------------------------------------------
    light
    --------------------------------------------------------------------------- */
 [data-theme="light-slate"] {

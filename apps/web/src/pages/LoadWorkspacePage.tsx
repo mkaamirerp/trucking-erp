@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import clsx from "clsx";
 import Button from "@/components/Button";
 import StatusBadge from "@/components/StatusBadge";
 import {
@@ -60,7 +61,30 @@ import {
   type IntakeProposedFields,
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
+import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
+import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
 import { SectionSettlement } from "@/components/load/SectionSettlement";
+
+type WorkspaceToolbarTone = "success" | "warning" | "error" | "neutral";
+
+type WorkspaceToolbarMessage = {
+  text: string;
+  tone: WorkspaceToolbarTone;
+};
+
+function workspaceToolbarToneClassName(tone: WorkspaceToolbarTone): string {
+  switch (tone) {
+    case "success":
+      return "text-emerald-700";
+    case "warning":
+      return "text-amber-600 dark:text-amber-200/95";
+    case "error":
+      return "text-red-700";
+    case "neutral":
+    default:
+      return "text-[var(--trk-text-muted)]";
+  }
+}
 
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -334,7 +358,7 @@ export default function LoadWorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [toolbarMessage, setToolbarMessage] = useState<WorkspaceToolbarMessage | null>(null);
   const [customsMessage, setCustomsMessage] = useState<string | null>(null);
   const [serverConflict, setServerConflict] = useState<{
     serverVersion: number | null;
@@ -380,6 +404,8 @@ export default function LoadWorkspacePage() {
   const [internalNotes, setInternalNotes] = useState("");
   const [parseBusy, setParseBusy] = useState(false);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
+  const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
   const docLineRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
@@ -594,7 +620,7 @@ export default function LoadWorkspacePage() {
         hydrateFromLoad(remote);
         setLoadNotes(Array.isArray(notes) ? notes : []);
         setServerConflict(null);
-        setSaveMessage(null);
+        setToolbarMessage(null);
       }
     } catch {
       /* background refresh — ignore */
@@ -609,13 +635,16 @@ export default function LoadWorkspacePage() {
       if (!canWorkspaceParsePdf) return;
       setParseBusy(true);
       setParseWarnings([]);
-      setSaveMessage(null);
+      setToolbarMessage(null);
+      setLastParseAppliedLabels(null);
       try {
         const res = await parseLoadWorkspaceDocument(file, {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
         });
         const ex = res.extracted;
+        let resolvedBrokerIdForSummary: number | null = null;
+        let brokerContactMatchedForSummary = false;
         const brokerNameSnap = ex.broker_name_snapshot?.trim() ?? "";
         if (brokerNameSnap) {
           setBrokerNameSnapshot(brokerNameSnap);
@@ -633,6 +662,7 @@ export default function LoadWorkspacePage() {
           } catch {
             resolvedBrokerId = null;
           }
+          resolvedBrokerIdForSummary = resolvedBrokerId;
           setBrokerId(resolvedBrokerId);
           setBrokerContactId(null);
           if (resolvedBrokerId != null) {
@@ -649,7 +679,10 @@ export default function LoadWorkspacePage() {
                 email: ex.broker_contact_email_snapshot,
                 phone: ex.broker_contact_phone_snapshot,
               });
-              if (matchedContact) setBrokerContactId(matchedContact.id);
+              if (matchedContact) {
+                brokerContactMatchedForSummary = true;
+                setBrokerContactId(matchedContact.id);
+              }
             } catch {
               setBrokerContacts([]);
             }
@@ -687,10 +720,20 @@ export default function LoadWorkspacePage() {
         setInternalNotes(notesBody);
         if (ex.stops?.length) setDraftStops(extractedStopsToDraft(ex.stops));
         setParseWarnings(res.warnings ?? []);
-        setSaveMessage("Parsed PDF — review fields before saving.");
+        const outcome = describeWorkspacePdfParseOutcome(res.extracted, res.raw_text, res.warnings ?? []);
+        const tone: WorkspaceToolbarTone =
+          outcome.tone === "success" ? "success" : outcome.tone === "warning" ? "warning" : "neutral";
+        setToolbarMessage({ text: outcome.headline, tone });
+        const appliedLabels = buildWorkspacePdfParseAppliedLabels(res.extracted, res.raw_text, {
+          mcOrDotAttempted: Boolean(mcSnap || dotSnap),
+          resolvedBrokerId: resolvedBrokerIdForSummary,
+          brokerContactMatched: brokerContactMatchedForSummary,
+        });
+        setLastParseAppliedLabels(appliedLabels.length > 0 ? appliedLabels : null);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "PDF parse failed";
-        setSaveMessage(msg);
+        setToolbarMessage({ text: msg, tone: "error" });
+        setLastParseAppliedLabels(null);
       } finally {
         setParseBusy(false);
       }
@@ -847,7 +890,7 @@ export default function LoadWorkspacePage() {
 
   async function onCreate() {
     setSaving(true);
-    setSaveMessage(null);
+    setToolbarMessage(null);
     try {
       const payload = buildLoadPersistPayload({
         status,
@@ -882,7 +925,7 @@ export default function LoadWorkspacePage() {
       const created = await createLoad(payload);
       navigate(OPS.LOAD_DETAIL(created.id), { replace: true });
     } catch (e: unknown) {
-      setSaveMessage((e as Error)?.message || "Could not create load");
+      setToolbarMessage({ text: (e as Error)?.message || "Could not create load", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -891,7 +934,7 @@ export default function LoadWorkspacePage() {
   async function onReloadServerVersion() {
     if (!load) return;
     setSaving(true);
-    setSaveMessage(null);
+    setToolbarMessage(null);
     setServerConflict(null);
     try {
       const [remote, notes] = await Promise.all([
@@ -901,9 +944,9 @@ export default function LoadWorkspacePage() {
       setLoad(remote);
       hydrateFromLoad(remote);
       setLoadNotes(Array.isArray(notes) ? notes : []);
-      setSaveMessage("Loaded latest from server.");
+      setToolbarMessage({ text: "Loaded latest from server.", tone: "neutral" });
     } catch (e: unknown) {
-      setSaveMessage((e as Error)?.message || "Could not reload");
+      setToolbarMessage({ text: (e as Error)?.message || "Could not reload", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -913,7 +956,7 @@ export default function LoadWorkspacePage() {
     if (!load) return;
     const expectedVersion = load.concurrency_version ?? 1;
     setSaving(true);
-    setSaveMessage(null);
+    setToolbarMessage(null);
     setError(null);
     try {
       const updated = await updateLoad(load.id, {
@@ -951,7 +994,7 @@ export default function LoadWorkspacePage() {
       });
       setLoad(updated);
       hydrateFromLoad(updated);
-      setSaveMessage("Saved.");
+      setToolbarMessage({ text: "Saved.", tone: "success" });
       setServerConflict(null);
     } catch (e: unknown) {
       const c = parseLoadVersionConflict(e);
@@ -960,9 +1003,12 @@ export default function LoadWorkspacePage() {
           serverVersion: c.server_version,
           serverSnapshot: c.server_snapshot,
         });
-        setSaveMessage("Load was modified elsewhere — see conflict details above.");
+        setToolbarMessage({
+          text: "Load was modified elsewhere — see conflict details above.",
+          tone: "warning",
+        });
       } else {
-        setSaveMessage((e as Error)?.message || "Save failed");
+        setToolbarMessage({ text: (e as Error)?.message || "Save failed", tone: "error" });
       }
     } finally {
       setSaving(false);
@@ -1014,7 +1060,7 @@ export default function LoadWorkspacePage() {
     if (!load || driverId == null) return;
     const expectedVersion = load.concurrency_version ?? 1;
     setSaving(true);
-    setSaveMessage(null);
+    setToolbarMessage(null);
     setError(null);
     try {
       const updated = await updateLoad(load.id, {
@@ -1026,7 +1072,10 @@ export default function LoadWorkspacePage() {
       });
       setLoad(updated);
       hydrateFromLoad(updated);
-      setSaveMessage("Load assigned (trip number starts at Dispatched).");
+      setToolbarMessage({
+        text: "Load assigned (trip number starts at Dispatched).",
+        tone: "success",
+      });
       setServerConflict(null);
       const sp = new URLSearchParams(searchParams);
       sp.delete(OPS.LOAD_DISPATCH_ASSIGN_QUERY);
@@ -1039,9 +1088,12 @@ export default function LoadWorkspacePage() {
           serverVersion: c.server_version,
           serverSnapshot: c.server_snapshot,
         });
-        setSaveMessage("Load was modified elsewhere — see conflict details above.");
+        setToolbarMessage({
+          text: "Load was modified elsewhere — see conflict details above.",
+          tone: "warning",
+        });
       } else {
-        setSaveMessage((e as Error)?.message || "Assignment failed");
+        setToolbarMessage({ text: (e as Error)?.message || "Assignment failed", tone: "error" });
       }
     } finally {
       setSaving(false);
@@ -1119,7 +1171,7 @@ export default function LoadWorkspacePage() {
       const notes = await getLoadNotes(load.id);
       setLoadNotes(notes);
     } catch (e: unknown) {
-      setSaveMessage((e as Error)?.message || "Could not add note");
+      setToolbarMessage({ text: (e as Error)?.message || "Could not add note", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -1449,19 +1501,46 @@ export default function LoadWorkspacePage() {
               {saving ? "Saving…" : "Save load"}
             </Button>
           )}
-          {parseWarnings.length > 0 ? (
-            <span className="max-w-[200px] truncate text-[10px] text-amber-500/95" title={parseWarnings.join(" · ")}>
-              {parseWarnings.join(" · ")}
-            </span>
-          ) : null}
-          {saveMessage ? (
+          {toolbarMessage ? (
             <span
-              className={`ml-auto max-w-full text-[11px] sm:max-w-md ${saveMessage.toLowerCase().includes("saved") || saveMessage.toLowerCase().includes("created") ? "text-emerald-700" : "text-red-700"}`}
+              className={clsx(
+                "ml-auto max-w-full text-[11px] sm:max-w-md",
+                workspaceToolbarToneClassName(toolbarMessage.tone),
+              )}
             >
-              {saveMessage}
+              {toolbarMessage.text}
             </span>
           ) : null}
         </div>
+        {parseWarnings.length > 0 ? (
+          <div className="mx-auto max-w-[1600px] border-t border-[var(--trk-border)] px-4 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-200/90">
+              Parse notes
+            </div>
+            <ul className="mt-1 max-h-32 list-disc space-y-0.5 overflow-y-auto pl-4 text-[11px] leading-snug text-[var(--trk-text)]">
+              {parseWarnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {lastParseAppliedLabels && lastParseAppliedLabels.length > 0 ? (
+          <div className="mx-auto max-w-[1600px] border-t border-[var(--trk-border)] px-4 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
+              Parsed fields applied
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {lastParseAppliedLabels.map((label, i) => (
+                <span
+                  key={`${i}-${label}`}
+                  className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-0.5 font-mono text-[10px] text-[var(--trk-text-muted)]"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col overflow-hidden lg:flex-row">

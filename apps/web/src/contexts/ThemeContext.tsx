@@ -4,7 +4,7 @@ import { useMe } from "../hooks/useMe";
 const API_BASE = import.meta.env.VITE_API_BASE || "/api/v1";
 
 // Keep in sync with VALID_THEMES in app/routers/me.py
-export type Theme = "dark" | "dark-navy" | "light-slate";
+export type Theme = "dark" | "dark-blue" | "dark-navy" | "light-slate";
 
 type ThemeContextValue = {
   theme: Theme;
@@ -19,7 +19,7 @@ const ThemeContext = createContext<ThemeContextValue>({
 function getInitialTheme(): Theme {
   try {
     const stored = localStorage.getItem("trk-theme");
-    if (stored === "dark" || stored === "dark-navy" || stored === "light-slate") {
+    if (stored === "dark" || stored === "dark-blue" || stored === "dark-navy" || stored === "light-slate") {
       return stored;
     }
   } catch {

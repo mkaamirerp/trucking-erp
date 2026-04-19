@@ -13,7 +13,8 @@ interface ThemeOption {
 }
 
 const THEME_OPTIONS: ThemeOption[] = [
-  { value: "dark", label: "Dark", bg: "#0D0F14", accent: "#F59E0B" },
+  { value: "dark",      label: "Dark",      bg: "#0D0F14", accent: "#F59E0B" },
+  { value: "dark-blue", label: "Dark blue", bg: "#0F1525", accent: "#F59E0B" },
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
