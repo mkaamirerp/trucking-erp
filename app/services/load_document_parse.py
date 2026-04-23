@@ -21,22 +21,29 @@ except ImportError:  # pragma: no cover
 
 def _extract_text_from_pdf_bytes(data: bytes) -> tuple[str, list[str]]:
     """Return (full_text, warnings)."""
+    full, _pages, warnings = _extract_text_and_pages_from_pdf_bytes(data)
+    return full, warnings
+
+
+def _extract_text_and_pages_from_pdf_bytes(data: bytes) -> tuple[str, list[str], list[str]]:
+    """Return (full_text, page_texts, warnings)."""
     warnings: list[str] = []
     if PdfReader is None:
         warnings.append("pypdf not installed — cannot extract text")
-        return "", warnings
+        return "", [], warnings
     try:
         reader = PdfReader(io.BytesIO(data))
     except Exception as exc:
         warnings.append(f"PDF open error: {type(exc).__name__}")
-        return "", warnings
-    parts: list[str] = []
+        return "", [], warnings
+    page_texts: list[str] = []
     for i, page in enumerate(reader.pages):
         try:
-            parts.append(page.extract_text() or "")
+            page_texts.append(page.extract_text() or "")
         except Exception as exc:
             warnings.append(f"Page {i} extract error: {type(exc).__name__}")
-    return "\n".join(parts), warnings
+            page_texts.append("")
+    return "\n".join(page_texts), page_texts, warnings
 
 
 def _first(pattern: str, text: str, flags: int = re.IGNORECASE) -> str | None:
