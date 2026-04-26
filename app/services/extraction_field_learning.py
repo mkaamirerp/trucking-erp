@@ -45,13 +45,24 @@ def _extract_paths(extracted: dict[str, Any]) -> list[tuple[str, Any]]:
         ("extracted.estimated_weight", extracted.get("estimated_weight")),
         ("extracted.commodity", extracted.get("commodity")),
         ("extracted.temperature_requirement", extracted.get("temperature_requirement")),
+        ("extracted.equipment_type", extracted.get("equipment_type")),
+        ("extracted.trailer_type", extracted.get("trailer_type")),
     ]
     stops = extracted.get("stops")
     if isinstance(stops, list):
         for i, s in enumerate(stops[:4]):
             if not isinstance(s, dict):
                 continue
-            for k in ("city", "state_or_province", "postal_code", "facility_name", "stop_type"):
+            for k in (
+                "city",
+                "state_or_province",
+                "postal_code",
+                "facility_name",
+                "stop_type",
+                "street",
+                "appointment_date",
+                "appointment_time_text",
+            ):
                 out.append((f"extracted.stops.{i}.{k}", s.get(k)))
     return out
 
@@ -162,6 +173,18 @@ async def record_extraction_field_learning_operator_event(
     return ev
 
 
+def _dedupe_latest_per_field_path(rows: list[ExtractionFieldLearningEvent]) -> list[ExtractionFieldLearningEvent]:
+    """Rows must be ordered by id desc; keep the first (newest) row per field_path."""
+    seen: set[str] = set()
+    out: list[ExtractionFieldLearningEvent] = []
+    for ev in rows:
+        if ev.field_path in seen:
+            continue
+        seen.add(ev.field_path)
+        out.append(ev)
+    return out
+
+
 async def list_extraction_field_learning_by_origin(
     db: AsyncSession,
     *,
@@ -169,19 +192,26 @@ async def list_extraction_field_learning_by_origin(
     origin_type: str,
     origin_id: int,
     limit: int = 200,
+    response_contract: str | None = None,
+    dedupe_latest_per_field_path: bool = False,
 ) -> list[ExtractionFieldLearningEvent]:
-    stmt = (
-        select(ExtractionFieldLearningEvent)
-        .where(
-            ExtractionFieldLearningEvent.tenant_id == tenant_id,
-            ExtractionFieldLearningEvent.origin_type == origin_type,
-            ExtractionFieldLearningEvent.origin_id == origin_id,
-        )
-        .order_by(ExtractionFieldLearningEvent.id.desc())
-        .limit(max(1, min(limit, 500)))
+    stmt = select(ExtractionFieldLearningEvent).where(
+        ExtractionFieldLearningEvent.tenant_id == tenant_id,
+        ExtractionFieldLearningEvent.origin_type == origin_type,
+        ExtractionFieldLearningEvent.origin_id == origin_id,
     )
+    if response_contract is not None and str(response_contract).strip():
+        rc = str(response_contract).strip()
+        stmt = stmt.where(ExtractionFieldLearningEvent.response_contract == rc)
+    stmt = stmt.order_by(ExtractionFieldLearningEvent.id.desc())
+    cap = 500 if dedupe_latest_per_field_path else max(1, min(limit, 500))
+    stmt = stmt.limit(cap)
     r = await db.execute(stmt)
-    return list(r.scalars().all())
+    rows = list(r.scalars().all())
+    if dedupe_latest_per_field_path:
+        rows = _dedupe_latest_per_field_path(rows)
+        rows = rows[: max(1, min(limit, 500))]
+    return rows
 
 
 # --- platform upsert safety (no tenant values in free-text) ---

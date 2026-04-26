@@ -165,8 +165,21 @@ async def list_field_learning_events(
     _user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
     limit: int = Query(200, ge=1, le=500),
+    response_contract: str | None = Query(
+        None,
+        description="Filter to one snapshot contract (e.g. truckerjson, critical_v1_1). Omit to return all runs (truckerjson and critical may both be present after re-semantic).",
+    ),
+    dedupe: bool = Query(
+        False,
+        description="Keep only the latest row per field_path (highest id) after the optional response_contract filter; requires response_contract.",
+    ),
 ):
     """Field learning for this Load Lab run (`origin_type=load_lab_run`, `origin_id=run_id`)."""
+    if dedupe and not (response_contract and str(response_contract).strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="dedupe=true requires response_contract=... (e.g. truckerjson or critical_v1_1) so results are not mixed.",
+        )
     run = await load_lab_service.get_run(db, tenant_id, run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
@@ -176,6 +189,8 @@ async def list_field_learning_events(
         origin_type=ORIGIN_LOAD_LAB_RUN,
         origin_id=run_id,
         limit=limit,
+        response_contract=response_contract.strip() if response_contract and str(response_contract).strip() else None,
+        dedupe_latest_per_field_path=dedupe,
     )
     return [ExtractionFieldLearningEventOut.model_validate(e) for e in evs]
 
