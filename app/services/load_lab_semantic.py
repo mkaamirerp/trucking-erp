@@ -28,6 +28,7 @@ from app.services.critical_extraction_v11_guardrails import (
 )
 from app.services.critical_extraction_v11_map import map_critical_v11_to_extracted_fields
 from app.services.critical_extraction_v11_prompt import build_critical_v11_system_prompt
+from app.services.load_lab_truckerjson_prompt import build_truckerjson_field_instructions_block
 from app.services.extraction_field_learning import record_extraction_field_learning_load_lab_ai_snapshot
 from app.services import load_lab as load_lab_v1
 from app.services import load_lab_review as load_lab_review_v3
@@ -82,7 +83,7 @@ def _broker_identity_selection_reason(diag: dict[str, Any] | None) -> str:
     return "No grounded broker identity match found in tenant/global broker reference; broker identity remains ungrounded."
 
 # Contract pins (bump when prompt or JSON shape changes).
-SEMANTIC_PROMPT_VERSION = "load_lab_semantic_v2_1"
+SEMANTIC_PROMPT_VERSION = "load_lab_semantic_v2_2"
 SEMANTIC_SCHEMA_VERSION = "load_lab_candidate_truckerjson_v1"
 CRITICAL_EXTRACTION_V11_SCHEMA_VERSION = "critical_extraction_v1_1"
 
@@ -918,6 +919,7 @@ def _system_prompt() -> str:
         "Populate extracted.references with {kind,value} objects for each distinct labeled identifier you see "
         "(load_number, order_number, bol_number, po_number, pro_number, shipment_number, broker_load_number, etc.); "
         "use parse_diagnostics.reference_candidates as hints, not ground truth."
+        + build_truckerjson_field_instructions_block()
     )
 
 
