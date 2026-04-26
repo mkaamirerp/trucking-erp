@@ -217,6 +217,22 @@ Pair-eval re-run: runs **38–43** against **running** `truckerp-api` after `scr
 | 43 | TQLRC.pdf | stops[1].appointment_time_text | 21:00 | Appt 21:00 | needs_review | needs_review | | n/a |  |
 | 43 | TQLRC.pdf | stops[] order/count | 2 stops | 2 stops | — | — | | | OK |
 
+## Module close — acceptance checklist (2026-04-26, post `64ec3e5d`)
+
+Final `tools/run_load_lab_contract_pair_eval.py` re-run on runs **38–43** (same as field table source): all **12** calls **HTTP 200**, **`semantic_extract_status: success`**. A later re-run can show **minor row drift** (e.g. date string shape, a commodity/temperature line) from model randomness; closure below is on **criteria**, not a frozen cell-by-cell table.
+
+| # | Criterion | Result |
+| --- | --- | --- |
+| 1 | `critical_v1_1` **broker_load_reference** useful / correct / only null if uncertain | **Pass** on this slice: 39, 42, 43 non-null; 42 may differ from truckerjson id (Order Number vs long numeric) by design. |
+| 2 | No nonsense tokens (Yes, RELATES, will, must, Information, …) in **broker_load_reference** | **Pass** — rejected by `critical_extraction_v11_guardrails` `_FORBIDDEN_BROKER_REF_TOKENS` + digit requirement. |
+| 3 | **2** physical **stops** (pickup + delivery), not bill-to/remit/corporate | **Pass** on 38–43 table: `2 stops` / `OK` each run; bad-section stops flagged in guardrails when applicable. |
+| 4 | **Rates** present | **Pass** — `extracted.rate` + critical `carrier_rate_total` in context on compared rows. |
+| 5 | **Learning** continues with **`response_contract=critical_v1_1`** | **Pass** (tenant DB): `extraction_field_learning_events` with `event_kind=ai_proposed` and `response_contract=critical_v1_1` for origins 38–43 (non-zero count; snapshot written each critical semantic pass). |
+| 6 | No **auto-created** `platform_extraction_sanitized_patterns` | **Pass** — patterns are **PUT**-only from platform admin; **0** rows in platform DB at close (no auto-promotion path). |
+| 7 | **Default** | **`truckerjson`** unchanged. |
+
+**Recommendation:** `critical_v1_1` is **fit for optional side-by-side / tenant testing** in Load Lab; **not** ready as **default** until product signs off on remaining diffs (dates, equipment split, commodity/temperature encodings, etc.).
+
 ## Interpretation (evidence-based, not a default switch)
 
 
