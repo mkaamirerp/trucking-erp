@@ -1,0 +1,42 @@
+{
+  "runs": [
+    {
+      "run_id": 18,
+      "categories": [],
+      "diffs": [],
+      "stop_diffs": []
+    },
+    {
+      "run_id": 17,
+      "categories": [],
+      "diffs": [],
+      "stop_diffs": []
+    },
+    {
+      "run_id": 15,
+      "categories": [],
+      "diffs": [],
+      "stop_diffs": []
+    },
+    {
+      "run_id": 12,
+      "categories": [],
+      "diffs": [],
+      "stop_diffs": []
+    },
+    {
+      "run_id": 11,
+      "categories": [],
+      "diffs": [],
+      "stop_diffs": []
+    },
+    {
+      "run_id": 10,
+      "categories": [],
+      "diffs": [],
+      "stop_diffs": []
+    }
+  ],
+  "category_counts": {}
+}
+

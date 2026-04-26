@@ -1,0 +1,168 @@
+{
+  "18": {
+    "extracted": {
+      "broker_name_snapshot": "Landstar Ranger Inc",
+      "customs_broker_name": null,
+      "broker_load_reference": "EL6596031",
+      "stops": [
+        {
+          "stop_type": "pickup",
+          "facility_name": "U S Extruders",
+          "city": "Westerly",
+          "state_or_province": "RI",
+          "appointment_date": "2025-06-19",
+          "appointment_time_text": "08:00 - 16:00",
+          "appointment_type": null
+        },
+        {
+          "stop_type": "drop",
+          "facility_name": "Vuteq",
+          "city": "Woodstock",
+          "state_or_province": "ON",
+          "appointment_date": "2025-06-20",
+          "appointment_time_text": "07:45 - 12:00",
+          "appointment_type": null
+        }
+      ]
+    }
+  },
+  "17": {
+    "extracted": {
+      "broker_name_snapshot": "TQL",
+      "customs_broker_name": null,
+      "broker_load_reference": "35893933",
+      "stops": [
+        {
+          "stop_type": "pickup",
+          "facility_name": "OIL DRI CORP OF GEORGIA",
+          "city": "Ochlocknee",
+          "state_or_province": "GA",
+          "appointment_date": "2026-03-16",
+          "appointment_time_text": "FCFS 08:00 to 21:00",
+          "appointment_type": null
+        },
+        {
+          "stop_type": "delivery",
+          "facility_name": "DC 02 - Hannaford",
+          "city": "Schodack Landing",
+          "state_or_province": "NY",
+          "appointment_date": "2026-03-18",
+          "appointment_time_text": "Appt 21:00",
+          "appointment_type": null
+        }
+      ]
+    }
+  },
+  "15": {
+    "extracted": {
+      "broker_name_snapshot": "TQL",
+      "customs_broker_name": "Buckland Customs Broker",
+      "broker_load_reference": "36109605",
+      "trailer_type": "Van",
+      "trailer_size": "53 ft",
+      "temperature_requirement": null,
+      "stops": [
+        {
+          "stop_type": "pickup",
+          "facility_name": "Hastech MFG Inc. - A Linimar Co.",
+          "city": "Guelph",
+          "state_or_province": "ON",
+          "appointment_date": "2026-03-25",
+          "appointment_time_text": "10:30",
+          "appointment_type": "APPT"
+        },
+        {
+          "stop_type": "delivery",
+          "facility_name": "ZF FoxHill Warehouse",
+          "city": "FOUNTAIN INN",
+          "state_or_province": "SC",
+          "appointment_date": "2026-03-26",
+          "appointment_time_text": "02:00 to 23:59",
+          "appointment_type": "FCFS"
+        }
+      ]
+    }
+  },
+  "12": {
+    "extracted": {
+      "broker_name_snapshot": "RXO",
+      "customs_broker_name": null,
+      "broker_load_reference": "179967",
+      "stops": [
+        {
+          "stop_type": "pickup",
+          "facility_name": "Old Orchard Brands LLC",
+          "city": "Sparta",
+          "state_or_province": "MI",
+          "appointment_date": "2025-05-29",
+          "appointment_time_text": "09:00",
+          "appointment_type": null
+        },
+        {
+          "stop_type": "delivery",
+          "facility_name": "WINDSORDC 10",
+          "city": "Windsor",
+          "state_or_province": "CT",
+          "appointment_date": "2025-05-30",
+          "appointment_time_text": "12:30",
+          "appointment_type": null
+        }
+      ]
+    }
+  },
+  "11": {
+    "extracted": {
+      "broker_name_snapshot": "Hub Group",
+      "customs_broker_name": "Tahoco Logistics",
+      "broker_load_reference": "2398968",
+      "stops": [
+        {
+          "stop_type": "pickup",
+          "facility_name": "Agrocrop Exports Ltd.",
+          "city": "BOLTON",
+          "state_or_province": "ON",
+          "appointment_date": "2025-05-16",
+          "appointment_time_text": "1100",
+          "appointment_type": null
+        },
+        {
+          "stop_type": "delivery",
+          "facility_name": "ALDI",
+          "city": "SOUTH WINDSOR",
+          "state_or_province": "CT",
+          "appointment_date": "2025-05-17",
+          "appointment_time_text": "0100",
+          "appointment_type": null
+        }
+      ]
+    }
+  },
+  "10": {
+    "extracted": {
+      "broker_name_snapshot": "BM2 Freight Services Inc.",
+      "customs_broker_name": null,
+      "broker_load_reference": "612845",
+      "stops": [
+        {
+          "stop_type": "pickup",
+          "facility_name": "ASPIRE",
+          "city": "Brantford",
+          "state_or_province": "ON",
+          "appointment_date": "2026-03-31",
+          "appointment_time_text": "19:00",
+          "appointment_type": null
+        },
+        {
+          "stop_type": "delivery",
+          "facility_name": "Romeoville IL Hub",
+          "city": "Romeoville",
+          "state_or_province": "IL",
+          "appointment_date": "2026-04-01",
+          "appointment_time_text": "12:30",
+          "appointment_type": null
+        }
+      ]
+    }
+  }
+}
+

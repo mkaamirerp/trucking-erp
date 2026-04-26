@@ -1,0 +1,88 @@
+{
+  "critical_extraction_contract_version": "1.1",
+  "broker_name": {
+    "value": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  },
+  "broker_load_reference": {
+    "value": null,
+    "label": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  },
+  "carrier_rate_total": {
+    "amount": null,
+    "currency": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  },
+  "stops": [
+    {
+      "stop_sequence": null,
+      "stop_type": null,
+      "facility_name": null,
+      "street": null,
+      "city": null,
+      "state_province": null,
+      "postal_zip": null,
+      "country": null,
+      "date": null,
+      "time_window": null,
+      "reference_numbers": [],
+      "address_quality": null,
+      "confidence": null,
+      "source_section": null,
+      "source_text": null,
+      "page_number": null,
+      "needs_review": true,
+      "reason": null
+    }
+  ],
+  "equipment": {
+    "equipment_type": null,
+    "trailer_size": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  },
+  "temperature_requirement": {
+    "temperature_required": null,
+    "temperature_min": null,
+    "temperature_max": null,
+    "temperature_unit": null,
+    "run_type": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  },
+  "commodity": {
+    "value": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  },
+  "weight": {
+    "weight_lbs": null,
+    "confidence": null,
+    "source_text": null,
+    "page_number": null,
+    "needs_review": true,
+    "reason": null
+  }
+}
