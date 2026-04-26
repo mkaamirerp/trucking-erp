@@ -19,6 +19,7 @@ from app.routers.admin_onboarding import router as admin_onboarding_router
 from app.routers.driver_onboarding import router as driver_onboarding_router
 from app.routers.public_signup import router as public_signup_router
 from app.routers.workspace_intake import router as workspace_intake_router
+from app.routers.platform_extraction_learning import router as platform_extraction_learning_router
 from app.routers.platform_global_booking_brokers import router as platform_global_booking_brokers_router
 from app.routers.platform_tenants import router as platform_tenants_router
 from app.routers.platform_diagnostics import router as platform_diagnostics_router
@@ -32,6 +33,7 @@ from app.routers.auth import router as auth_router
 from app.routers.brokers import router as brokers_router
 from app.routers.customs_brokers import router as customs_brokers_router
 from app.routers.loads import router as loads_router
+from app.routers.load_lab import router as load_lab_router
 from app.routers.audit_events import router as audit_events_router
 from app.routers.dispatch import router as dispatch_router
 from app.routers.trucks import router as trucks_router
@@ -109,6 +111,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(public_signup_router)
 app.include_router(workspace_intake_router, prefix="/api/v1/public")
 app.include_router(platform_tenants_router)
+app.include_router(platform_extraction_learning_router)
 app.include_router(platform_global_booking_brokers_router)
 app.include_router(platform_diagnostics_router)
 app.include_router(platform_testing_router)
@@ -129,6 +132,7 @@ app.include_router(auth_router)
 app.include_router(brokers_router, prefix="/api/v1")
 app.include_router(customs_brokers_router, prefix="/api/v1")
 app.include_router(loads_router, prefix="/api/v1")
+app.include_router(load_lab_router, prefix="/api/v1")
 app.include_router(audit_events_router, prefix="/api/v1")
 app.include_router(dispatch_router, prefix="/api/v1")
 app.include_router(trucks_router, prefix="/api/v1")

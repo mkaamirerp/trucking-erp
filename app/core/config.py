@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     # HMAC secret for Graph subscription clientState and validation (signs tenant_id). Falls back to jwt_secret if unset.
     microsoft_webhook_client_state_secret: str | None = None
 
+    # OpenAI (optional). Used for future Load Lab semantic mapping; see docs/OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md.
+    # SSM → /run/secrets/truckerp.env as OPENAI_API_KEY; must not be required for API startup.
+    openai_api_key: str | None = None
+    # Chat model for Load Lab v2 structured extraction (optional override).
+    openai_extraction_model: str = "gpt-4o-mini"
+
     # Storage (S3 or local)
     storage_provider: str = "local"
     aws_region: str = "us-east-1"

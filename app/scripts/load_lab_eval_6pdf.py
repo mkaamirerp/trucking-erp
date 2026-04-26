@@ -37,6 +37,24 @@ DEFAULT_FIELDS = [
 ]
 
 
+def _reference_digital_snapshot(actual: dict[str, Any]) -> dict[str, Any]:
+    """Pre-OCR reference extraction summary (parse_response + parse_diagnostics)."""
+    ex = actual.get("extracted") if isinstance(actual.get("extracted"), dict) else {}
+    refs = ex.get("references") if isinstance(ex.get("references"), list) else []
+    pd = actual.get("parse_diagnostics") if isinstance(actual.get("parse_diagnostics"), dict) else {}
+    acc = pd.get("accepted_references") if isinstance(pd.get("accepted_references"), list) else []
+    rej = pd.get("rejected_reference_candidates") if isinstance(pd.get("rejected_reference_candidates"), list) else []
+    cands = pd.get("reference_candidates") if isinstance(pd.get("reference_candidates"), list) else []
+    return {
+        "extracted_references_count": len(refs),
+        "reference_candidates_count": len(cands),
+        "accepted_references_count": len(acc),
+        "rejected_reference_candidates_count": len(rej),
+        "primary_reference_selection_reason": pd.get("primary_reference_selection_reason"),
+        "reference_extraction_gap_analysis": pd.get("reference_extraction_gap_analysis"),
+    }
+
+
 def _get(obj: Any, path: str) -> Any:
     cur = obj
     for part in path.split("."):
@@ -253,6 +271,7 @@ async def main() -> int:
                 "categories": cats,
                 "diffs": [{"field": d.field, "expected": d.expected, "actual": d.actual} for d in diffs],
                 "stop_diffs": _stop_diff(exp, act),
+                "reference_digital_snapshot": _reference_digital_snapshot(act),
             }
         )
 

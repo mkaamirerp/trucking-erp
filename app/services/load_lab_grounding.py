@@ -31,24 +31,68 @@ async def ground_party_mentions_to_brokers(
     """Return list of broker match evidence records."""
     out: list[dict[str, Any]] = []
 
-    # 1) Authority (MC/DOT) — strongest
-    mc_list = (authority_candidates or {}).get("mc_numbers")
-    dot_list = (authority_candidates or {}).get("dot_numbers")
-    if isinstance(mc_list, list) or isinstance(dot_list, list):
-        mc = mc_list[0] if isinstance(mc_list, list) and mc_list else None
-        dot = dot_list[0] if isinstance(dot_list, list) and dot_list else None
-        matched_by, broker = await resolve_broker_by_authority(db, tenant_id, mc_number=mc, dot_number=dot)
-        if broker is not None:
-            out.append(
-                {
-                    "matched_by": matched_by,
-                    "broker_id": broker.id,
-                    "broker_display": broker.display_name or broker.legal_name or broker.name,
-                    "mc_number": broker.mc_number,
-                    "dot_number": broker.dot_number,
-                    "confidence": "high",
-                }
-            )
+    # 1) Authority (MC/DOT) — iterate every distinct candidate; record matched authority value.
+    ac = authority_candidates or {}
+    entries = ac.get("entries") if isinstance(ac, dict) else None
+    seen_match: set[tuple[Any, ...]] = set()
+
+    async def _append_authority_match(
+        *,
+        matched_by: str | None,
+        broker: Any,
+        matched_value: str | None,
+        page: int | None = None,
+    ) -> None:
+        if broker is None or not matched_by:
+            return
+        key = (matched_by, int(broker.id), _digits(matched_value or ""))
+        if key in seen_match:
+            return
+        seen_match.add(key)
+        rec: dict[str, Any] = {
+            "matched_by": matched_by,
+            "broker_id": broker.id,
+            "broker_display": broker.display_name or broker.legal_name or broker.name,
+            "mc_number": broker.mc_number,
+            "dot_number": broker.dot_number,
+            "matched_authority_value": matched_value,
+            "confidence": "high",
+        }
+        if page is not None:
+            rec["authority_entry_page"] = page
+        out.append(rec)
+
+    if isinstance(entries, list) and entries:
+        for ent in entries[:80]:
+            if not isinstance(ent, dict):
+                continue
+            kind = str(ent.get("type") or ent.get("kind") or "").casefold()
+            val = ent.get("value")
+            if not isinstance(val, str) or not val.strip():
+                continue
+            page = ent.get("page") if isinstance(ent.get("page"), int) else None
+            v = val.strip()
+            if kind == "mc":
+                mb, br = await resolve_broker_by_authority(db, tenant_id, mc_number=v, dot_number=None)
+                await _append_authority_match(matched_by=mb, broker=br, matched_value=v, page=page)
+            elif kind == "dot":
+                mb, br = await resolve_broker_by_authority(db, tenant_id, mc_number=None, dot_number=v)
+                await _append_authority_match(matched_by=mb, broker=br, matched_value=v, page=page)
+    else:
+        mc_list = ac.get("mc_numbers") if isinstance(ac.get("mc_numbers"), list) else []
+        dot_list = ac.get("dot_numbers") if isinstance(ac.get("dot_numbers"), list) else []
+        if isinstance(mc_list, list):
+            for mc in mc_list:
+                if not isinstance(mc, str) or not mc.strip():
+                    continue
+                mb, br = await resolve_broker_by_authority(db, tenant_id, mc_number=mc.strip(), dot_number=None)
+                await _append_authority_match(matched_by=mb, broker=br, matched_value=mc.strip(), page=None)
+        if isinstance(dot_list, list):
+            for dot in dot_list:
+                if not isinstance(dot, str) or not dot.strip():
+                    continue
+                mb, br = await resolve_broker_by_authority(db, tenant_id, mc_number=None, dot_number=dot.strip())
+                await _append_authority_match(matched_by=mb, broker=br, matched_value=dot.strip(), page=None)
 
     if not party_mentions:
         return out

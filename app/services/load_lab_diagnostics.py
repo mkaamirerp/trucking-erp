@@ -38,10 +38,27 @@ _LABELLED_PARTY_RE = re.compile(
     re.I,
 )
 
-_ORG_SUFFIX_RE = re.compile(
-    r"\b(inc\.?|llc|ltd\.?|limited|corp\.?|corporation|logistics|transport(?:ation)?|brokerage|freight|supply\s*chain)\b",
+# Legal-entity tokens only (do not require logistics/transport/etc. as "suffix").
+_LEGAL_ENTITY_SUFFIX_RE = re.compile(
+    r"\b(inc\.?|llc|ltd\.?|limited|corp\.?|corporation)\b",
     re.I,
 )
+# Meaningful business-identity words stay in company names (not stripped as disposable).
+_BUSINESS_IDENTITY_TOKEN_RE = re.compile(
+    r"\b(logistics|transport(?:ation)?|freight|brokerage|supply\s*chain|group)\b",
+    re.I,
+)
+
+
+def _looks_like_header_org_candidate(cand: str) -> bool:
+    """Header/corporate line looks like an operating company name (legal suffix OR sector word OR long title)."""
+    if not cand:
+        return False
+    return bool(
+        _LEGAL_ENTITY_SUFFIX_RE.search(cand)
+        or _BUSINESS_IDENTITY_TOKEN_RE.search(cand)
+        or len(cand) > 28
+    )
 
 _HEADER_SKIP_PREFIX_RE = re.compile(r"^\s*(broker|carrier|customer|bill to|customs\s*broker|shipper|consignee)\s*[:\-]\s*", re.I)
 _HEADER_BRAND_TOKEN_RE = re.compile(r"\b([A-Z]{2,6})\b")
@@ -217,7 +234,7 @@ def _party_mentions_from_pages(page_texts: list[str], *, stop_blocks: list[dict[
                     recb["is_header_level"] = True
                     recb["is_document_identity_level"] = True
 
-            if not _ORG_SUFFIX_RE.search(cand):
+            if not _looks_like_header_org_candidate(cand):
                 continue
             if any(x in cand.lower() for x in ("rate", "confirmation", "tender", "pickup", "delivery")):
                 continue
@@ -262,8 +279,8 @@ def _party_mentions_from_pages(page_texts: list[str], *, stop_blocks: list[dict[
                     continue
                 if " dba " in cand.casefold():
                     continue
-                # allow org-ish names like "Armstrong Transport Group"
-                if not _ORG_SUFFIX_RE.search(cand) and "transport" not in cand.casefold():
+                # allow org-ish names like "Armstrong Transport Group" without forcing legal suffix
+                if not _looks_like_header_org_candidate(cand):
                     continue
                 key = f"name:{cand.casefold()}"
                 rec = mentions.setdefault(
@@ -519,15 +536,163 @@ def _stop_block_candidates(page_texts: list[str]) -> list[dict[str, Any]]:
     return out[:200]
 
 
+# Authority line context: role labels + hint for broker vs carrier MC/DOT separation.
+# Generic document/broker cues only (no tenant-specific brands or domains).
+_AUTHORITY_BROKER_LABEL_RE = re.compile(
+    r"\b(corporate\s*information|freight\s*broker|broker(?:age)?\s+agreement|"
+    r"invoice\s*instructions|payment\s*status|quickpay|general\s*load\s*questions|"
+    r"dispatch\s*(?:to|for)\s*carrier|accounts?\s*payable)\b",
+    re.I,
+)
+_AUTHORITY_CARRIER_LABEL_RE = re.compile(
+    r"\b(carrier\s*name|carrier\s*signature|driver\s*phone|for\s*load\s*information|"
+    r"\battn\s*:|dispatcher\b|\bdba\b|primary\s*driver|truck\s*#|trailer\s*#)\b",
+    re.I,
+)
+
+
+def _authority_role_labels(surrounding_text: str) -> list[str]:
+    s = surrounding_text or ""
+    out: list[str] = []
+    if _AUTHORITY_CARRIER_LABEL_RE.search(s):
+        out.append("carrier")
+    if _AUTHORITY_BROKER_LABEL_RE.search(s):
+        out.append("corporate")
+    if re.search(r"\bfreight\s*broker\b|\bbroker\b", s, re.I):
+        out.append("broker")
+    if re.search(r"\bsignature\b", s, re.I):
+        out.append("signature")
+    if re.search(r"\bdriver\b", s, re.I):
+        out.append("driver")
+    # de-dupe preserve order
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for x in out:
+        k = x.casefold()
+        if k not in seen:
+            seen.add(k)
+            uniq.append(x)
+    return uniq
+
+
+def _authority_role_hint_and_reason(surrounding_text: str) -> tuple[str, str]:
+    s = surrounding_text or ""
+    sc = s.casefold()
+    c = bool(_AUTHORITY_CARRIER_LABEL_RE.search(s))
+    b = bool(_AUTHORITY_BROKER_LABEL_RE.search(s))
+    if b and not c:
+        return "broker_context", "broker_or_corporate_document_cues_without_carrier_block_cues"
+    if c and not b:
+        return "carrier_context", "carrier_driver_or_signature_block_cues_without_broker_document_cues"
+    if b and c:
+        return "unknown", "mixed_broker_and_carrier_cues_in_window"
+    if re.search(r"\bfreight\s*broker\b|\bbroker\b", sc, re.I) and not c:
+        return "broker_context", "generic_broker_keyword_without_carrier_cues"
+    return "unknown", "no_strong_role_keywords_in_window"
+
+
+def _authority_role_hint(surrounding_text: str) -> str:
+    return _authority_role_hint_and_reason(surrounding_text)[0]
+
+
+def _nearby_company_candidate(line_text: str, surrounding: str) -> str:
+    """Best-effort company fragment on the authority line or an adjacent line (no DB)."""
+    line = (line_text or "").strip()
+    if not line:
+        return ""
+
+    def _reject_label_only(s: str) -> bool:
+        sl = (s or "").strip()
+        if not sl:
+            return True
+        if re.fullmatch(r"[\W\d_]+", sl):
+            return True
+        # Banner / instruction lines, not company names
+        if re.search(r"^(for\s+load\s+information|attn|note|please)\b", sl, re.I):
+            return True
+        if sl.endswith(":") and len(sl) < 50 and "dba" not in sl.casefold() and "inc" not in sl.casefold():
+            return True
+        return False
+
+    cleaned = _MC_RE.sub(" ", line)
+    cleaned = _DOT_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:|")
+    if 6 <= len(cleaned) <= 100 and re.search(r"[A-Za-z]{3,}", cleaned):
+        if not re.fullmatch(r"[\d\s#:.\-]+", cleaned) and not _reject_label_only(cleaned):
+            return cleaned[:120]
+    for ln in (surrounding or "").splitlines():
+        t = ln.strip()
+        if not t or t == line:
+            continue
+        if _MC_RE.search(t) or _DOT_RE.search(t):
+            continue
+        if 8 <= len(t) <= 90 and re.search(r"[A-Za-z]{3,}", t) and not _reject_label_only(t):
+            return t[:120]
+    return ""
+
+
 def _authority_candidates(page_texts: list[str]) -> dict[str, Any]:
-    mcs: list[str] = []
-    dots: list[str] = []
-    for txt in page_texts:
-        mcs.extend([m.group(1) for m in _MC_RE.finditer(txt)])
-        dots.extend([m.group(1) for m in _DOT_RE.finditer(txt)])
-    # de-dupe, stable
+    entries: list[dict[str, Any]] = []
+    mcs: set[str] = set()
+    dots: set[str] = set()
+
+    for page_num, txt in enumerate(page_texts, start=1):
+        lines = txt.splitlines()
+        for line_idx, line in enumerate(lines):
+            line_text = line
+            if not line_text.strip():
+                continue
+            lo = max(0, line_idx - 3)
+            hi = min(len(lines), line_idx + 4)
+            surrounding = "\n".join(lines[lo:hi])
+
+            for m in _MC_RE.finditer(line_text):
+                val = m.group(1)
+                if val:
+                    mcs.add(val)
+                    labels = _authority_role_labels(surrounding)
+                    rh, rr = _authority_role_hint_and_reason(surrounding)
+                    entries.append(
+                        {
+                            "value": val,
+                            "kind": "mc",
+                            "type": "MC",
+                            "page": page_num,
+                            "line_index": line_idx,
+                            "line_text": line_text.strip()[:500],
+                            "surrounding_text": surrounding.strip()[:1200],
+                            "nearby_role_labels": labels,
+                            "nearby_company_candidate": _nearby_company_candidate(line_text, surrounding),
+                            "role_hint": rh,
+                            "reason_for_role_hint": rr,
+                        }
+                    )
+
+            for m in _DOT_RE.finditer(line_text):
+                val = m.group(1)
+                if val:
+                    dots.add(val)
+                    labels = _authority_role_labels(surrounding)
+                    rh, rr = _authority_role_hint_and_reason(surrounding)
+                    entries.append(
+                        {
+                            "value": val,
+                            "kind": "dot",
+                            "type": "DOT",
+                            "page": page_num,
+                            "line_index": line_idx,
+                            "line_text": line_text.strip()[:500],
+                            "surrounding_text": surrounding.strip()[:1200],
+                            "nearby_role_labels": labels,
+                            "nearby_company_candidate": _nearby_company_candidate(line_text, surrounding),
+                            "role_hint": rh,
+                            "reason_for_role_hint": rr,
+                        }
+                    )
+
     return {
-        "mc_numbers": sorted(set(mcs))[:10],
-        "dot_numbers": sorted(set(dots))[:10],
+        "entries": entries[:80],
+        "mc_numbers": sorted(mcs)[:20],
+        "dot_numbers": sorted(dots)[:20],
     }
 

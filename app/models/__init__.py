@@ -33,6 +33,9 @@ from app.models.payee import (
 from app.models.broker import Broker, BrokerAlias, BrokerContact, BrokerDomain, BrokerKnownSender
 from app.models.customs_broker import CustomsBroker, CustomsBrokerContact, LoadCustomsSnapshot
 from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
+from app.models.load_lab import LoadLabExtractionRun, LoadLabPromoteAudit
+from app.models.extraction_field_learning import ExtractionFieldLearningEvent
+from app.models.platform_extraction_learning import PlatformExtractionSanitizedPattern
 from app.models.dispatch_trip import TenantDispatchNumbering, DispatchTrip
 
 # Platform models (B3 onboarding)

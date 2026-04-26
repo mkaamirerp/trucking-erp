@@ -15,25 +15,95 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.load_lab import LoadLabExtractionRun
-from app.schemas.load_document_parse import LoadDocumentParseResponse
-from app.schemas.load_lab_semantic import LoadLabSemanticModelOutput
+from app.schemas.critical_extraction_v11 import CriticalExtractionV11Root
+from app.schemas.load_document_parse import (
+    LoadDocumentParseResponse,
+    LoadParseDocumentMeta,
+)
+from app.schemas.load_lab_semantic import LoadLabSemanticModelOutput, StrictExtracted
+from app.schemas.load_document_parse import LoadParseExtractedFields, LoadParseReferenceItem, LoadParseStopItem
+from app.services.critical_extraction_v11_guardrails import (
+    apply_critical_extraction_v11_guardrails,
+    coercive_prune_critical_payload,
+)
+from app.services.critical_extraction_v11_map import map_critical_v11_to_extracted_fields
+from app.services.critical_extraction_v11_prompt import build_critical_v11_system_prompt
+from app.services.extraction_field_learning import record_extraction_field_learning_load_lab_ai_snapshot
 from app.services import load_lab as load_lab_v1
 from app.services import load_lab_review as load_lab_review_v3
+from app.services.load_lab_broker_contact_email_diagnostics import build_broker_contact_email_parse_diagnostics
+from app.services.load_lab_broker_matrix import build_broker_confidence_matrix, load_broker_match_signals
 from app.services.load_lab_diagnostics import build_parse_diagnostics
 from app.services.load_lab_grounding import ground_party_mentions_to_brokers
+from app.services.load_lab_reference_extract import (
+    augment_diagnostic_reference_resolution,
+    merge_structured_references_into_extracted_dict,
+)
+
+
+def _broker_identity_selection_reason(diag: dict[str, Any] | None) -> str:
+    """
+    Diagnostics-only explanation for broker identity grounding/ranking.
+    Does not mutate extracted fields.
+    """
+    if not diag or not isinstance(diag, dict):
+        return "No parse_diagnostics available; broker identity selection reason unavailable."
+
+    matches = diag.get("broker_directory_matches") if isinstance(diag.get("broker_directory_matches"), list) else []
+    mc = next((m for m in matches if isinstance(m, dict) and m.get("matched_by") == "mc"), None)
+    dot = next((m for m in matches if isinstance(m, dict) and m.get("matched_by") == "dot"), None)
+    if mc and isinstance(mc.get("broker_display"), str):
+        v = str(mc.get("matched_authority_value") or mc.get("mc_number") or "").strip()
+        return f"Grounded broker identity via MC match ({v or 'mc'}) to broker_directory_matches broker_display={mc.get('broker_display')!r}."
+    if dot and isinstance(dot.get("broker_display"), str):
+        v = str(dot.get("matched_authority_value") or dot.get("dot_number") or "").strip()
+        return f"Grounded broker identity via DOT match ({v or 'dot'}) to broker_directory_matches broker_display={dot.get('broker_display')!r}."
+
+    # Otherwise use broker confidence matrix top row if present.
+    bcm = diag.get("broker_confidence_matrix") if isinstance(diag.get("broker_confidence_matrix"), list) else []
+    if bcm:
+        top = bcm[0] if isinstance(bcm[0], dict) else None
+        if top:
+            nm = str(top.get("name") or "").strip()
+            grounded = bool(top.get("is_grounded_to_broker_db") is True)
+            conf = str(top.get("confidence") or "")
+            tot = top.get("total_score")
+            if grounded:
+                return f"Top broker candidate {nm!r} is grounded to broker DB; confidence={conf!r} total_score={tot!r}."
+            return f"Top broker candidate {nm!r} selected from document identity signals (not DB-grounded); confidence={conf!r} total_score={tot!r}."
+
+    # Fall back to ranking preview if available.
+    prev = diag.get("pre_ai_score_buckets") if isinstance(diag.get("pre_ai_score_buckets"), dict) else {}
+    rp = prev.get("ranking_preview") if isinstance(prev.get("ranking_preview"), dict) else {}
+    pref = rp.get("preferred_document_level_broker")
+    if isinstance(pref, str) and pref.strip():
+        return f"Preferred document-level broker candidate from ranking preview: {pref.strip()!r} (not directory-grounded)."
+
+    return "No grounded broker identity match found in tenant/global broker reference; broker identity remains ungrounded."
 
 # Contract pins (bump when prompt or JSON shape changes).
-SEMANTIC_PROMPT_VERSION = "load_lab_semantic_v2"
+SEMANTIC_PROMPT_VERSION = "load_lab_semantic_v2_1"
 SEMANTIC_SCHEMA_VERSION = "load_lab_candidate_truckerjson_v1"
+CRITICAL_EXTRACTION_V11_SCHEMA_VERSION = "critical_extraction_v1_1"
 
 _MAX_TEXT_FOR_MODEL = 100_000
 _OPENAI_TIMEOUT_S = 120.0
 
 _ALLOWED_STOP_TYPES = frozenset({"pickup", "delivery", "drop", "other"})
 
-_ORG_SUFFIX_RE = re.compile(r"\\b(inc|llc|ltd|limited|corp|corporation|co\\.|company)\\b", re.IGNORECASE)
+_LEGAL_ENTITY_SUFFIX_RE = re.compile(
+    r"\b(inc\.?|llc|ltd\.?|limited|corp\.?|corporation)\b",
+    re.IGNORECASE,
+)
+_BUSINESS_IDENTITY_TOKEN_RE = re.compile(
+    r"\b(logistics|transport(?:ation)?|freight|brokerage|supply\s*chain|group)\b",
+    re.IGNORECASE,
+)
 
-_CARRIER_ROLE_CTX_RE = re.compile(r"\\b(carrier name|carrier signature|driver phone|attn:|dispatcher|driver)\\b", re.IGNORECASE)
+_CARRIER_ROLE_CTX_RE = re.compile(
+    r"\b(carrier\s*name|carrier\s*signature|driver\s*phone|attn:|dispatcher|driver)\b",
+    re.IGNORECASE,
+)
 
 
 def _carrier_role_penalty(name: str, *, raw_text: str | None) -> int:
@@ -51,7 +121,7 @@ def _carrier_role_penalty(name: str, *, raw_text: str | None) -> int:
     # quick path: if the name itself looks like a carrier legal registration line.
     if " dba " in n.casefold():
         return 6
-    if re.match(r"^\\d{4,}\\b", n):
+    if re.match(r"^\d{4,}\b", n):
         return 6
     # contextual penalty: carrier labels near the name.
     idx = t.casefold().find(n.casefold())
@@ -67,59 +137,14 @@ def _document_broker_identity_score(m: dict[str, Any], *, raw_text: str | None) 
         score += 6
     if m.get("is_header_level") is True:
         score += 2
-    if _ORG_SUFFIX_RE.search(str(m.get("name") or "")):
+    nm0 = str(m.get("name") or "")
+    if _LEGAL_ENTITY_SUFFIX_RE.search(nm0) or _BUSINESS_IDENTITY_TOKEN_RE.search(nm0):
         score += 1
     # Prefer repeated document-level mentions (coarse but stable).
     nm = str(m.get("name") or "").strip()
     if raw_text and nm:
         score += min((raw_text.casefold().count(nm.casefold())), 10)
     return score
-
-
-def _compute_broker_candidate_matrix(diag: dict[str, Any], *, raw_text: str | None) -> dict[str, Any]:
-    """
-    Debug-only scoring matrix for booking broker ranking.
-    Grounding is a strong positive, but not required to win.
-    Carrier-role evidence is a strong negative.
-    """
-    pm = diag.get("party_mentions") if isinstance(diag.get("party_mentions"), list) else []
-    matches = diag.get("broker_directory_matches") if isinstance(diag.get("broker_directory_matches"), list) else []
-    grounded_names = {str(m.get("broker_display")).strip().casefold() for m in matches if isinstance(m, dict) and m.get("broker_display")}
-    out_rows: list[dict[str, Any]] = []
-    for m in pm:
-        if not isinstance(m, dict):
-            continue
-        nm = m.get("name")
-        if not isinstance(nm, str) or not nm.strip():
-            continue
-        name = nm.strip()
-        grounding = 8 if name.casefold() in grounded_names else 0
-        doc_score = _document_broker_identity_score(m, raw_text=raw_text)
-        carrier_pen = _carrier_role_penalty(name, raw_text=raw_text)
-        total = grounding + doc_score - carrier_pen
-        out_rows.append(
-            {
-                "name": name,
-                "total_score": total,
-                "dimensions": {
-                    "broker_directory_grounding_score": grounding,
-                    "document_broker_identity_score": doc_score,
-                    "carrier_role_penalty": carrier_pen,
-                },
-                "signals": {
-                    "is_document_identity_level": m.get("is_document_identity_level"),
-                    "is_header_level": m.get("is_header_level"),
-                    "is_stop_level": m.get("is_stop_level"),
-                    "mention_count": m.get("mention_count"),
-                },
-            }
-        )
-    out_rows.sort(key=lambda r: int(r.get("total_score") or 0), reverse=True)
-    return {
-        "broker_confidence_matrix": out_rows[:15],
-        "broker_losing_candidates": out_rows[1:6],
-        "broker_confidence_factors": (out_rows[0]["dimensions"] if out_rows else {}),
-    }
 
 
 def _best_ranked_document_level_broker(diag: dict[str, Any] | None, *, raw_text: str | None = None) -> str | None:
@@ -266,12 +291,15 @@ def _rank_reference_candidates(diag: dict[str, Any] | None) -> dict[str, Any]:
         if any(x in label for x in ("el", "freight", "bill", "po", "pickup", "delivery", "load", "order", "reference")):
             s += 3
         # Preference buckets
-        if kind in ("order_number", "load_number", "order_token"):
+        if kind in ("broker_load_number", "shipment_number", "dispatch_number"):
+            s += 10
+        elif kind in ("order_number", "load_number", "order_token"):
             s += 8
         elif kind in ("el_number",):
             s += 6
-        elif kind in ("freight_bill_number",):
-            s += 5
+        elif kind in ("freight_bill_number", "invoice_number", "audit_id"):
+            # Accounting labels must not become primary by default.
+            s -= 40
         elif kind in ("po_number",):
             s += 3
         # avoid decimals as IDs
@@ -298,7 +326,17 @@ def _rank_reference_candidates(diag: dict[str, Any] | None) -> dict[str, Any]:
             best_by_kind[k] = c
 
     # Primary reference preference order (broker_load_reference)
-    for k in ("order_number", "order_token", "load_number", "el_number", "freight_bill_number", "po_number", "reference"):
+    for k in (
+        "broker_load_number",
+        "shipment_number",
+        "dispatch_number",
+        "order_number",
+        "order_token",
+        "load_number",
+        "el_number",
+        "po_number",
+        "reference",
+    ):
         if k in best_by_kind:
             return {"best_by_kind": best_by_kind, "primary_reference": best_by_kind[k]}
     return {"best_by_kind": best_by_kind, "primary_reference": None}
@@ -506,6 +544,157 @@ def _normalize_broker_display_name(name: str | None) -> str | None:
     return s
 
 
+def _norm_auth_digits(v: Any) -> str | None:
+    if not isinstance(v, str):
+        return None
+    d = re.sub(r"\D+", "", v.strip())
+    return d if d else None
+
+
+def _authority_entry_kind(ent: dict[str, Any]) -> str:
+    k = str(ent.get("type") or ent.get("kind") or "").strip().casefold()
+    if k == "mc":
+        return "mc"
+    if k == "dot":
+        return "dot"
+    return ""
+
+
+def _authority_entries_from_diag(diag: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not diag or not isinstance(diag, dict):
+        return []
+    ac = diag.get("authority_candidates")
+    if not isinstance(ac, dict):
+        return []
+    ent = ac.get("entries")
+    if not isinstance(ent, list):
+        return []
+    return [e for e in ent if isinstance(e, dict)]
+
+
+def _apply_broker_authority_context_repair(
+    *,
+    extracted: dict[str, Any],
+    diag: dict[str, Any],
+    broker_name: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[str], dict[str, str]]:
+    """
+    Deterministic broker MC/DOT repair using authority_candidates[].role_hint.
+
+    - Never assign carrier_context MC/DOT to broker snapshot fields.
+    - Prefer broker_context (or unknown with broker-supporting surrounding text) MC/DOT.
+    - broker_dot_number_snapshot is cleared unless a broker_context DOT exists matching the value.
+    """
+    flags: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    field_conf: dict[str, str] = {}
+    entries = _authority_entries_from_diag(diag)
+    if not entries:
+        return extracted, flags, warnings, field_conf
+
+    bn_cf = (broker_name or "").casefold()
+    name_tokens = [t for t in re.split(r"\W+", bn_cf) if len(t) > 3]
+
+    _dom_list = diag.get("broker_match_domains") if isinstance(diag.get("broker_match_domains"), list) else []
+    broker_domain_hints = [str(d).strip().casefold() for d in _dom_list if isinstance(d, str) and str(d).strip()]
+
+    def _unknown_supports_broker(e: dict[str, Any]) -> bool:
+        if e.get("role_hint") != "unknown":
+            return False
+        sur = (e.get("surrounding_text") or "").casefold()
+        if name_tokens and any(t in sur for t in name_tokens):
+            return True
+        for dom in broker_domain_hints:
+            if dom and dom in sur:
+                return True
+        return any(
+            x in sur
+            for x in (
+                "corporate information",
+                "freight broker",
+                "invoice instructions",
+                "quickpay",
+            )
+        )
+
+    carrier_mc = {
+        v
+        for e in entries
+        if _authority_entry_kind(e) == "mc" and e.get("role_hint") == "carrier_context" and (v := _norm_auth_digits(e.get("value")))
+    }
+    carrier_dot = {
+        v
+        for e in entries
+        if _authority_entry_kind(e) == "dot" and e.get("role_hint") == "carrier_context" and (v := _norm_auth_digits(e.get("value")))
+    }
+
+    broker_mc_ordered: list[str] = []
+    for e in entries:
+        if _authority_entry_kind(e) != "mc" or e.get("role_hint") != "broker_context":
+            continue
+        v = _norm_auth_digits(e.get("value"))
+        if v and v not in carrier_mc and v not in broker_mc_ordered:
+            broker_mc_ordered.append(v)
+    for e in entries:
+        if _authority_entry_kind(e) != "mc" or e.get("role_hint") != "unknown":
+            continue
+        v = _norm_auth_digits(e.get("value"))
+        if not v or v in carrier_mc or v in broker_mc_ordered:
+            continue
+        if _unknown_supports_broker(e):
+            broker_mc_ordered.append(v)
+
+    broker_dot_allowed = {
+        v
+        for e in entries
+        if _authority_entry_kind(e) == "dot" and e.get("role_hint") == "broker_context" and (v := _norm_auth_digits(e.get("value")))
+    }
+
+    cur_mc = _norm_auth_digits(extracted.get("broker_mc_number_snapshot"))
+    cur_dot = _norm_auth_digits(extracted.get("broker_dot_number_snapshot"))
+
+    if cur_mc and cur_mc in carrier_mc:
+        replacement = next((x for x in broker_mc_ordered if x not in carrier_mc), None)
+        if replacement:
+            extracted["broker_mc_number_snapshot"] = replacement
+            flags.append(
+                {
+                    "id": "broker_authority_context_mismatch_mc",
+                    "severity": "warning",
+                    "detail": f"broker_mc_number_snapshot {cur_mc!r} matched a carrier-context authority line; replaced with {replacement!r}.",
+                }
+            )
+            warnings.append("[review] Broker MC/DOT repaired using authority role hints (carrier vs broker context).")
+            field_conf["broker_mc_number_snapshot"] = "low"
+        else:
+            extracted["broker_mc_number_snapshot"] = None
+            flags.append(
+                {
+                    "id": "broker_authority_carrier_mc_cleared",
+                    "severity": "warning",
+                    "detail": f"Cleared broker_mc_number_snapshot {cur_mc!r} (carrier-context only; no broker-context MC found).",
+                }
+            )
+            warnings.append("[review] Cleared broker MC that came from carrier-context authority.")
+            field_conf["broker_mc_number_snapshot"] = "low"
+        cur_mc = _norm_auth_digits(extracted.get("broker_mc_number_snapshot"))
+
+    if cur_dot:
+        if cur_dot in carrier_dot or cur_dot not in broker_dot_allowed:
+            extracted["broker_dot_number_snapshot"] = None
+            flags.append(
+                {
+                    "id": "broker_authority_dot_cleared_or_carrier",
+                    "severity": "warning",
+                    "detail": f"Cleared broker_dot_number_snapshot {cur_dot!r} (carrier-context or not broker-context DOT).",
+                }
+            )
+            warnings.append("[review] Broker DOT cleared: only broker-context DOT lines may populate broker_dot_number_snapshot.")
+            field_conf["broker_dot_number_snapshot"] = "low"
+
+    return extracted, flags, warnings, field_conf
+
+
 def _apply_broker_display_name_normalization(
     *,
     extracted: dict[str, Any],
@@ -609,11 +798,6 @@ def _compute_pre_ai_score_buckets(diag: dict[str, Any], *, raw_text: str | None)
             "grounded_broker_displays": grounded_displays[:10],
         },
     }
-    # Debug-only scoring comparison / losing candidates.
-    try:
-        out.update(_compute_broker_candidate_matrix(diag, raw_text=raw_text))
-    except Exception:
-        pass
     return out
 
 
@@ -730,7 +914,10 @@ def _system_prompt() -> str:
         "Do not invent broker MC/DOT numbers; use null if not clearly present in the text. "
         "CRITICAL role rules: document-level identity beats stop-level one-off labels; "
         "MC-backed broker evidence outranks customs/local mentions; "
-        "do not treat weight-like / money-like decimals as primary load references unless label evidence is strong."
+        "do not treat weight-like / money-like decimals as primary load references unless label evidence is strong. "
+        "Populate extracted.references with {kind,value} objects for each distinct labeled identifier you see "
+        "(load_number, order_number, bol_number, po_number, pro_number, shipment_number, broker_load_number, etc.); "
+        "use parse_diagnostics.reference_candidates as hints, not ground truth."
     )
 
 
@@ -824,12 +1011,73 @@ def _parse_openai_payload(data: dict[str, Any]) -> tuple[str | None, dict[str, A
         return None, None, str(exc)[:500]
 
 
+def _coerce_model_payload_to_schema(obj: Any) -> dict[str, Any]:
+    """Best-effort prune/coerce model JSON into our strict schema shape."""
+    allowed_ex_keys = set(LoadParseExtractedFields.model_fields.keys())
+    allowed_stop_keys = set(LoadParseStopItem.model_fields.keys())
+    allowed_ref_keys = set(LoadParseReferenceItem.model_fields.keys())
+
+    o = obj if isinstance(obj, dict) else {}
+    doc = o.get("document") if isinstance(o.get("document"), dict) else {}
+    ex = o.get("extracted") if isinstance(o.get("extracted"), dict) else {}
+    warnings = o.get("extraction_warnings") if isinstance(o.get("extraction_warnings"), list) else []
+
+    cleaned_ex: dict[str, Any] = {}
+    for k in allowed_ex_keys:
+        if k in ex:
+            cleaned_ex[k] = ex.get(k)
+
+    # references: coerce each item to {kind,value}
+    refs_in = cleaned_ex.get("references")
+    if isinstance(refs_in, list):
+        refs_out: list[dict[str, Any]] = []
+        for it in refs_in:
+            if not isinstance(it, dict):
+                continue
+            r: dict[str, Any] = {}
+            for rk in allowed_ref_keys:
+                if rk in it:
+                    r[rk] = it.get(rk)
+            if isinstance(r.get("kind"), str) and isinstance(r.get("value"), str):
+                refs_out.append({"kind": r["kind"], "value": r["value"]})
+            if len(refs_out) >= 40:
+                break
+        cleaned_ex["references"] = refs_out
+
+    # stops: coerce each item to allowed keys only
+    stops_in = cleaned_ex.get("stops")
+    if isinstance(stops_in, list):
+        stops_out: list[dict[str, Any]] = []
+        for it in stops_in:
+            if not isinstance(it, dict):
+                continue
+            s: dict[str, Any] = {}
+            for sk in allowed_stop_keys:
+                if sk in it:
+                    s[sk] = it.get(sk)
+            # require minimal fields
+            if isinstance(s.get("stop_type"), str) and isinstance(s.get("sequence"), int):
+                stops_out.append(s)
+            if len(stops_out) >= 60:
+                break
+        cleaned_ex["stops"] = stops_out
+
+    cleaned = {
+        "document": {"filename": str(doc.get("filename") or "")[:512]},
+        "extracted": cleaned_ex,
+        "extraction_warnings": [str(x)[:500] for x in warnings if isinstance(x, (str, int, float))][:50],
+    }
+    return cleaned
+
+
 async def semantic_extract_run(
     db: AsyncSession,
     *,
     tenant_id: int,
     run_id: int,
     force: bool = False,
+    mode: str = "guarded",
+    response_contract: str = "truckerjson",
 ) -> LoadLabExtractionRun | None:
     run = await load_lab_v1.get_run(db, tenant_id, run_id)
     if run is None:
@@ -849,8 +1097,20 @@ async def semantic_extract_run(
     ):
         return run
 
+    mode_cf = (mode or "guarded").strip().casefold()
+    if mode_cf not in ("guarded", "pure_ai", "ai_validate_only"):
+        mode_cf = "guarded"
+
+    rc_raw = (response_contract or "truckerjson").strip().casefold()
+    use_critical_v11 = rc_raw in ("critical_v1_1", "critical_extraction_v1_1")
+    if rc_raw not in ("truckerjson", "critical_v1_1", "critical_extraction_v1_1"):
+        use_critical_v11 = False
+        rc_raw = "truckerjson"
+
     run.semantic_prompt_version = SEMANTIC_PROMPT_VERSION
-    run.semantic_schema_version = SEMANTIC_SCHEMA_VERSION
+    run.semantic_schema_version = (
+        CRITICAL_EXTRACTION_V11_SCHEMA_VERSION if use_critical_v11 else SEMANTIC_SCHEMA_VERSION
+    )
 
     if run.status != "text_extracted":
         run.semantic_extract_status = "skipped_bad_status"
@@ -863,7 +1123,7 @@ async def semantic_extract_run(
         run.ai_model_output = {
             "outcome": "skipped_bad_status",
             "prompt_version": SEMANTIC_PROMPT_VERSION,
-            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "schema_version": run.semantic_schema_version,
         }
         run.warnings = base_warnings
         load_lab_review_v3.clear_lab_review_if_no_candidate(run)
@@ -879,7 +1139,7 @@ async def semantic_extract_run(
         run.ai_model_output = {
             "outcome": "skipped_no_text",
             "prompt_version": SEMANTIC_PROMPT_VERSION,
-            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "schema_version": run.semantic_schema_version,
         }
         run.warnings = base_warnings
         if force:
@@ -898,7 +1158,7 @@ async def semantic_extract_run(
         run.ai_model_output = {
             "outcome": "skipped_missing_key",
             "prompt_version": SEMANTIC_PROMPT_VERSION,
-            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "schema_version": run.semantic_schema_version,
         }
         run.warnings = base_warnings + ["[semantic] OPENAI_API_KEY not configured; extraction skipped."]
         if force:
@@ -918,9 +1178,17 @@ async def semantic_extract_run(
         text_for_model = text_for_model[:_MAX_TEXT_FOR_MODEL]
         truncated = True
 
-    schema = LoadLabSemanticModelOutput.model_json_schema()
+    if use_critical_v11:
+        schema = CriticalExtractionV11Root.model_json_schema()
+        system_for_model = build_critical_v11_system_prompt()
+        schema_name_openai = "critical_extraction_v1_1"
+    else:
+        schema = LoadLabSemanticModelOutput.model_json_schema()
+        system_for_model = _system_prompt()
+        schema_name_openai = "load_lab_semantic_extract"
     # Build Phase 2 pre-AI evidence packet (diagnostics + broker directory grounding).
     diag: dict[str, Any] | None = None
+    reference_merge_pack: dict[str, Any] | None = None
     try:
         pkg = run.normalized_package or {}
         pages = pkg.get("page_texts") if isinstance(pkg, dict) else None
@@ -943,36 +1211,87 @@ async def semantic_extract_run(
         diag["broker_directory_matches"] = matches
         diag["pre_ai_score_buckets"] = _compute_pre_ai_score_buckets(diag, raw_text=raw_full)
         diag.update(_classify_broker_role_candidates(diag, raw_text=raw_full))
+        try:
+            signals = await load_broker_match_signals(db, tenant_id)
+            merged_domains: set[str] = set()
+            td = signals.get("tenant_domains")
+            gd = signals.get("global_domains")
+            if isinstance(td, set):
+                merged_domains |= td
+            if isinstance(gd, set):
+                merged_domains |= gd
+            diag["broker_match_domains"] = sorted(merged_domains)[:120]
+            diag["broker_confidence_matrix"] = build_broker_confidence_matrix(
+                diag=diag, raw_text=raw_full, signals=signals
+            )
+        except Exception:
+            diag.setdefault("broker_match_domains", [])
+            diag.setdefault("broker_confidence_matrix", [])
+        # Diagnostics-only: explain broker identity selection/grounding separately from reference selection.
+        try:
+            diag["broker_identity_selection_reason"] = _broker_identity_selection_reason(diag)
+        except Exception:
+            diag["broker_identity_selection_reason"] = "broker_identity_selection_reason_unavailable"
+        try:
+            reference_merge_pack = augment_diagnostic_reference_resolution(
+                diag, raw_full, page_texts, run.filename
+            )
+        except Exception:
+            reference_merge_pack = None
     except Exception:
         diag = None
+        reference_merge_pack = None
 
-    user_body = (
-        f"Filename for document.filename: {run.filename}\n\n"
-        "You will receive structured pre-extraction evidence (party mentions, numeric candidates, zones). "
-        "Use it to resolve roles carefully, but do not assume any single hint is truth.\n\n"
-        "--- BEGIN PARSE_DIAGNOSTICS (JSON) ---\n"
-        + (json.dumps(diag)[:20000] if diag is not None else "{}")
-        + "\n--- END PARSE_DIAGNOSTICS ---\n\n"
-        f"--- BEGIN EXTRACTED PDF TEXT ---\n{text_for_model}\n--- END ---\n"
-    )
+    if use_critical_v11:
+        if mode_cf == "pure_ai":
+            user_body = (
+                f"Document filename: {run.filename}\n\n"
+                f"--- BEGIN EXTRACTED PDF TEXT ---\n{text_for_model}\n--- END ---\n"
+            )
+        else:
+            user_body = (
+                f"Document filename: {run.filename}\n\n"
+                "Structured pre-extraction evidence (hints only; verify against the PDF text):\n\n"
+                "--- BEGIN PARSE_DIAGNOSTICS (JSON) ---\n"
+                + (json.dumps(diag)[:20000] if diag is not None else "{}")
+                + "\n--- END PARSE_DIAGNOSTICS ---\n\n"
+                f"--- BEGIN EXTRACTED PDF TEXT ---\n{text_for_model}\n--- END ---\n"
+            )
+    elif mode_cf == "pure_ai":
+        # Minimal instruction: rely on schema only. Do not send diagnostics hints.
+        user_body = (
+            f"Filename for document.filename: {run.filename}\n\n"
+            f"--- BEGIN EXTRACTED PDF TEXT ---\n{text_for_model}\n--- END ---\n"
+        )
+    else:
+        user_body = (
+            f"Filename for document.filename: {run.filename}\n\n"
+            "You will receive structured pre-extraction evidence (party mentions, numeric candidates, zones). "
+            "Use it to resolve roles carefully, but do not assume any single hint is truth.\n\n"
+            "--- BEGIN PARSE_DIAGNOSTICS (JSON) ---\n"
+            + (json.dumps(diag)[:20000] if diag is not None else "{}")
+            + "\n--- END PARSE_DIAGNOSTICS ---\n\n"
+            f"--- BEGIN EXTRACTED PDF TEXT ---\n{text_for_model}\n--- END ---\n"
+        )
     if truncated:
         user_body += f"\n(note: text truncated to {_MAX_TEXT_FOR_MODEL} characters for the model)\n"
 
     ai_meta: dict[str, Any] = {
         "outcome": "pending",
         "prompt_version": SEMANTIC_PROMPT_VERSION,
-        "schema_version": SEMANTIC_SCHEMA_VERSION,
+        "schema_version": run.semantic_schema_version,
         "model": model,
+        "response_contract": rc_raw,
     }
     # Forensics (temporary): persist exact OpenAI I/O for a specific run.
     forensic_enabled = int(run_id) == 20
     if forensic_enabled:
         ai_meta["forensics"] = {
-            "schema_name": "load_lab_semantic_extract",
-            "schema_version": SEMANTIC_SCHEMA_VERSION,
+            "schema_name": schema_name_openai,
+            "schema_version": run.semantic_schema_version,
             "prompt_version": SEMANTIC_PROMPT_VERSION,
             "model": model,
-            "system_prompt": _system_prompt(),
+            "system_prompt": system_for_model,
             "user_prompt": user_body,
             "parse_diagnostics_json_full": diag,
             "text_truncated_for_model": bool(truncated),
@@ -983,10 +1302,10 @@ async def semantic_extract_run(
         data = await _openai_chat_json_schema(
             api_key=key,
             model=model,
-            system=_system_prompt(),
+            system=system_for_model,
             user_text=user_body,
             schema=schema,
-            schema_name="load_lab_semantic_extract",
+            schema_name=schema_name_openai,
         )
     except httpx.HTTPStatusError as exc:
         resp = exc.response
@@ -1040,8 +1359,18 @@ async def semantic_extract_run(
         await db.refresh(run)
         return run
 
+    crit: CriticalExtractionV11Root | None = None
+    crit_glog: list[str] = []
+    model_out: LoadLabSemanticModelOutput | None = None
     try:
-        model_out = LoadLabSemanticModelOutput.model_validate_json(content)
+        raw_obj = json.loads(content)
+        if use_critical_v11:
+            coerced_c = coercive_prune_critical_payload(raw_obj)
+            crit = CriticalExtractionV11Root.model_validate(coerced_c)
+            crit, crit_glog = apply_critical_extraction_v11_guardrails(crit, raw_text=raw_full)
+        else:
+            coerced = _coerce_model_payload_to_schema(raw_obj)
+            model_out = LoadLabSemanticModelOutput.model_validate(coerced)
     except Exception as exc:  # noqa: BLE001
         run.semantic_extract_status = "validation_failed"
         run.parse_response = None
@@ -1063,20 +1392,105 @@ async def semantic_extract_run(
         await db.refresh(run)
         return run
 
+    if use_critical_v11 and crit is not None:
+        ex_map = map_critical_v11_to_extracted_fields(crit)
+        crit_warnings = [f"[critical v1.1] guardrail events: {len(crit_glog)}"]
+        if truncated:
+            crit_warnings.append(f"[semantic] Model input text was truncated to {_MAX_TEXT_FOR_MODEL} characters")
+        full_cv = LoadDocumentParseResponse(
+            document=LoadParseDocumentMeta(filename=run.filename[:512]),
+            extracted=ex_map,
+            raw_text=raw_full,
+            warnings=crit_warnings,
+            field_confidence={},
+            context={
+                "load_lab_semantic": True,
+                "load_lab_response_contract": rc_raw,
+                "semantic_prompt_version": SEMANTIC_PROMPT_VERSION,
+                "semantic_schema_version": CRITICAL_EXTRACTION_V11_SCHEMA_VERSION,
+                "semantic_model": model,
+                "load_lab_semantic_mode": mode_cf,
+                "critical_extraction_v1_1": crit.model_dump(mode="json"),
+                "critical_extraction_v1_1_guardrails": crit_glog,
+            },
+        )
+        det_cv = _deterministic_validate(full_cv)
+        if not det_cv["ok"]:
+            run.semantic_extract_status = "validation_failed"
+            run.parse_response = None
+            run.semantic_validation_result = {**det_cv, "candidate_preview": full_cv.model_dump(mode="json")}
+            run.pipeline_error = "Load Lab semantic: deterministic validation failed (critical v1.1)"
+            ai_meta["outcome"] = "deterministic_failed"
+            ai_meta["message_content"] = content[:12000]
+            run.ai_model_output = ai_meta
+            run.warnings = base_warnings + crit_warnings + [f"[semantic] {x}" for x in det_cv.get("issues", [])]
+            load_lab_review_v3.clear_lab_review_if_no_candidate(run)
+            _persist()
+            await db.commit()
+            await db.refresh(run)
+            return run
+        payload_cv = full_cv.model_dump(mode="json")
+        if isinstance(diag, dict):
+            d2 = dict(diag)
+            d2["critical_extraction_v1_1_guardrails"] = crit_glog
+            payload_cv["parse_diagnostics"] = d2
+        else:
+            payload_cv["parse_diagnostics"] = {"critical_extraction_v1_1_guardrails": crit_glog}
+        run.semantic_extract_status = "success"
+        run.parse_response = payload_cv
+        run.semantic_validation_result = det_cv
+        run.pipeline_error = None
+        ai_meta["outcome"] = "success"
+        ai_meta["message_content"] = content[:12000]
+        run.ai_model_output = ai_meta
+        run.warnings = base_warnings + crit_warnings
+        load_lab_review_v3.attach_lab_review_to_run(run)
+        load_lab_review_v3.merge_lab_review_warnings(run, base_warnings + crit_warnings)
+        try:
+            await record_extraction_field_learning_load_lab_ai_snapshot(
+                db, tenant_id=tenant_id, run=run, parse_response=payload_cv
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        _persist()
+        await db.commit()
+        await db.refresh(run)
+        return run
+
+    if model_out is None:
+        run.semantic_extract_status = "validation_failed"
+        run.parse_response = None
+        run.pipeline_error = "Load Lab semantic: internal state (no model output)"
+        run.warnings = base_warnings
+        _persist()
+        await db.commit()
+        await db.refresh(run)
+        return run
+
     # Filename: prefer run.filename if model diverged slightly
     doc_meta = model_out.document.model_copy(update={"filename": run.filename[:512]})
 
+    merged_ex = model_out.extracted.model_dump(mode="json")
+    if reference_merge_pack:
+        try:
+            merged_ex = merge_structured_references_into_extracted_dict(merged_ex, reference_merge_pack)
+        except Exception:
+            pass
+    extracted_model = StrictExtracted.model_validate(merged_ex)
+
     full = LoadDocumentParseResponse(
         document=doc_meta,
-        extracted=model_out.extracted,
+        extracted=extracted_model,
         raw_text=raw_full,
         warnings=list(model_out.extraction_warnings),
         field_confidence={},
         context={
             "load_lab_semantic": True,
+            "load_lab_response_contract": rc_raw,
             "semantic_prompt_version": SEMANTIC_PROMPT_VERSION,
-            "semantic_schema_version": SEMANTIC_SCHEMA_VERSION,
+            "semantic_schema_version": run.semantic_schema_version,
             "semantic_model": model,
+            "load_lab_semantic_mode": mode_cf,
         },
     )
 
@@ -1137,12 +1551,25 @@ async def semantic_extract_run(
         await db.refresh(run)
         return run
 
-    # Phase 2: post-AI guardrails. Prefer best-ranked document-level booking broker over stop-level one-offs,
-    # and enforce numeric gating for references. These adjustments keep the stable parse contract intact.
+    ai_extracted_snapshot: dict[str, Any] | None = None
+    email_before_post_ai_guardrails: str | None = None
     try:
-        if diag is not None and isinstance(payload := full.model_dump(mode="json"), dict):
-            ex = payload.get("extracted") if isinstance(payload.get("extracted"), dict) else None
-            if ex is not None:
+        ai_extracted_snapshot = model_out.extracted.model_dump(mode="json")
+        dump_pre = full.model_dump(mode="json")
+        extr_pre = dump_pre.get("extracted") if isinstance(dump_pre.get("extracted"), dict) else {}
+        evp = extr_pre.get("broker_contact_email_snapshot")
+        email_before_post_ai_guardrails = evp.strip() if isinstance(evp, str) and evp.strip() else None
+    except Exception:
+        ai_extracted_snapshot = None
+        email_before_post_ai_guardrails = None
+
+    # Phase 2: post-AI guardrails (skipped in pure_ai / ai_validate_only modes).
+    if mode_cf == "guarded":
+        try:
+            if diag is not None and isinstance(payload := full.model_dump(mode="json"), dict):
+                ex = payload.get("extracted") if isinstance(payload.get("extracted"), dict) else None
+                if ex is None:
+                    raise RuntimeError("missing extracted block")
                 chosen = (ex.get("broker_name_snapshot") or "").strip()
                 doc_name = (_best_ranked_document_level_broker(diag, raw_text=payload.get("raw_text")) or "").strip() or None
 
@@ -1271,13 +1698,26 @@ async def semantic_extract_run(
                     field_conf = {**field_conf, **fc5}
                 ex = ex5
 
+                ex6, fl_auth, w_auth, fc_auth = _apply_broker_authority_context_repair(
+                    extracted=ex,
+                    diag=diag,
+                    broker_name=(ex.get("broker_name_snapshot") or "").strip(),
+                )
+                ex = ex6
+                if fl_auth:
+                    review_flags = list(review_flags) + fl_auth
+                if w_auth:
+                    warnings_out.extend(w_auth)
+                if fc_auth:
+                    field_conf = {**field_conf, **fc_auth}
+
                 diag["review_flags"] = review_flags
                 payload["extracted"] = ex
                 payload["warnings"] = warnings_out
                 payload["field_confidence"] = field_conf
                 full = LoadDocumentParseResponse.model_validate(payload)
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     if forensic_enabled and isinstance(ai_meta.get("forensics"), dict):
         try:
@@ -1296,6 +1736,23 @@ async def semantic_extract_run(
     run.semantic_extract_status = "success"
     payload = full.model_dump(mode="json")
     if diag is not None:
+        try:
+            ex_fin = payload.get("extracted") if isinstance(payload.get("extracted"), dict) else {}
+            pkg = run.normalized_package if isinstance(run.normalized_package, dict) else None
+            doms = diag.get("broker_match_domains") if isinstance(diag.get("broker_match_domains"), list) else []
+            email_diag = await build_broker_contact_email_parse_diagnostics(
+                db,
+                tenant_id=tenant_id,
+                final_extracted=ex_fin,
+                ai_extracted=ai_extracted_snapshot,
+                email_before_post_ai_guardrails=email_before_post_ai_guardrails,
+                raw_pdf_text=payload.get("raw_text") if isinstance(payload.get("raw_text"), str) else raw_full,
+                normalized_package=pkg,
+                broker_match_domains=doms,
+            )
+            diag.update(email_diag)
+        except Exception:
+            pass
         payload["parse_diagnostics"] = diag
     run.parse_response = payload
     run.semantic_validation_result = det
@@ -1306,6 +1763,12 @@ async def semantic_extract_run(
     run.warnings = base_warnings + sem_warnings
     load_lab_review_v3.attach_lab_review_to_run(run)
     load_lab_review_v3.merge_lab_review_warnings(run, base_warnings + sem_warnings)
+    try:
+        await record_extraction_field_learning_load_lab_ai_snapshot(
+            db, tenant_id=tenant_id, run=run, parse_response=payload
+        )
+    except Exception:  # noqa: BLE001
+        pass
     _persist()
     await db.commit()
     await db.refresh(run)

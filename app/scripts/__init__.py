@@ -1,1 +1,1 @@
-"""Maintenance CLIs (run inside API container with platform DB env)."""
+"""Utility / maintenance CLIs (container-safe; run with platform DB env from /run/secrets)."""

@@ -14,6 +14,10 @@ class LoadParseDocumentMeta(BaseModel):
 class LoadParseReferenceItem(BaseModel):
     kind: str = Field(..., max_length=32)
     value: str = Field(..., max_length=120)
+    # Optional provenance/selection metadata (Load Lab + workspace hydration safe).
+    label: Optional[str] = Field(default=None, max_length=80)
+    primary_candidate: Optional[bool] = None
+    confidence: Optional[str] = Field(default=None, max_length=32)
 
 
 class LoadParseStopItem(BaseModel):
