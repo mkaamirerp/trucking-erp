@@ -1367,7 +1367,7 @@ async def semantic_extract_run(
         if use_critical_v11:
             coerced_c = coercive_prune_critical_payload(raw_obj)
             crit = CriticalExtractionV11Root.model_validate(coerced_c)
-            crit, crit_glog = apply_critical_extraction_v11_guardrails(crit, raw_text=raw_full)
+            crit, crit_glog, crit_blr_trace = apply_critical_extraction_v11_guardrails(crit, raw_text=raw_full)
         else:
             coerced = _coerce_model_payload_to_schema(raw_obj)
             model_out = LoadLabSemanticModelOutput.model_validate(coerced)
@@ -1394,9 +1394,36 @@ async def semantic_extract_run(
 
     if use_critical_v11 and crit is not None:
         ex_map = map_critical_v11_to_extracted_fields(crit)
+        exd: dict[str, Any] = ex_map.model_dump(mode="json")
+        pre_merge_br = (exd.get("broker_load_reference") or "").strip()
+        if reference_merge_pack:
+            exd = merge_structured_references_into_extracted_dict(exd, reference_merge_pack)
+        post_merge_br = (exd.get("broker_load_reference") or "").strip()
+        merge_fb = (not pre_merge_br) and bool(post_merge_br)
+        try:
+            ex_map = LoadParseExtractedFields.model_validate(exd)
+        except Exception:
+            ex_map = map_critical_v11_to_extracted_fields(crit)
         crit_warnings = [f"[critical v1.1] guardrail events: {len(crit_glog)}"]
+        if merge_fb:
+            crit_warnings.append("[critical v1.1] broker_load_reference filled from diagnostic primary merge (model/guardrail gap)")
         if truncated:
             crit_warnings.append(f"[semantic] Model input text was truncated to {_MAX_TEXT_FOR_MODEL} characters")
+        br_diag: dict[str, Any] = {
+            "after_map_before_merge": pre_merge_br or None,
+            "after_diagnostic_merge": post_merge_br or None,
+            "diagnostic_merge_fallback_applied": merge_fb,
+            "broker_load_reference_chosen_source": (
+                "diagnostic_merge_fallback" if merge_fb else "critical_v11_map"
+            ),
+            "merge_fallback_needs_review": bool(merge_fb),
+            "primary_broker_load_reference_merge": (
+                (reference_merge_pack or {}).get("primary_broker_load_reference_merge")
+                if isinstance(reference_merge_pack, dict)
+                else None
+            ),
+        }
+        br_diag.update(crit_blr_trace.get("broker_load_reference", {}))
         full_cv = LoadDocumentParseResponse(
             document=LoadParseDocumentMeta(filename=run.filename[:512]),
             extracted=ex_map,
@@ -1412,6 +1439,7 @@ async def semantic_extract_run(
                 "load_lab_semantic_mode": mode_cf,
                 "critical_extraction_v1_1": crit.model_dump(mode="json"),
                 "critical_extraction_v1_1_guardrails": crit_glog,
+                "broker_load_reference_diagnostics": br_diag,
             },
         )
         det_cv = _deterministic_validate(full_cv)

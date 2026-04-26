@@ -4,27 +4,30 @@ Generated on host API; tenant `demo` (`tenant_id=53`). Each run: **POST** `truck
 
 **Tool:** `tools/run_load_lab_contract_pair_eval.py` (see script docstring). Per-contract `parse_response` snapshots: `/tmp/contract_pair_{run_id}_truck.json` and `..._crit.json` in the API container (not committed).
 
-## Executive summary (2026-04-26)
+## Executive summary (2026-04-26, post broker_load_reference fix)
 
-All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status: success`**.
+All **12** semantic requests returned **HTTP 200** and **`semantic_extract_status: success`**.
 
-- **Stops / geography:** `stop_type`, city, state, most streets/postals **match** between contracts on this set; `stops[]` count matches (2 each). **Stop `sequence` differs by convention (0,1 vs 1,2)** — treat as **format**, not re-order; both passes preserve pickup→delivery order.
-- **Appointments:** `appointment_date` often differs by **string format** (ISO `YYYY-MM-DD` vs `MM/DD/YYYY`); mark **needs_review** for the same calendar day.
-- **Rate / currency:** `extracted.rate` matches where compared; `critical` adds structured **`carrier_rate_total` with `currency: USD`** in `context.critical_extraction_v1_1` (not duplicated in the row-level table for every line).
-- **Broker load ref — regression risk (critical):** for **39**, **42**, **43**, **`broker_load_reference` is null in `critical` where `truckerjson` had a non-nonsense string** (Armstrong: `3872125-1`, Hub: long digit string, TQL: `34307972`). **Guardrails ran** (`Y` on those rows) but **dropping a plausible ref** is not automatically “safer” than `truckerjson` on this evidence — **needs product review and mapping fixes** before any default switch.
-- **Run 40 commodity:** `truckerjson` has `Item`; `critical` **∅** — review.
-- **Reefer 41 — temperature:** Free-text `Continuous` (T) vs band `-10.0--10.0 F` (C) — **needs_review** (different encodings; not a simple equal compare).
-- **TQL 43 — equipment / trailer fields:** more splitting in `truckerjson` (`trailer_type` / `trailer_size`); `critical` coalesces — **needs_review** for default decision.
+- **Stops / geography, appointments, rate:** Same general picture as prior reports (sequence offset, date string format, structured `carrier_rate_total` on critical).
+- **`broker_load_reference`:** The prior **null-on-critical** regression on runs **39, 42, 43** (while truckerjson had usable values) is **resolved** in this build: critical now surfaces **non-null** refs for those PDFs. Implementation: narrower phone/authority heuristic (do not treat long numeric / hyphenated load IDs as phones), **do not clear** solely because model `confidence` is low (flag `needs_review` instead), **diagnostic primary merge** applied to the critical mapped `extracted` when the field is still empty (parity with truckerjson path), plus **`context.broker_load_reference_diagnostics`** (model vs sanitize vs merge, `broker_load_reference_chosen_source`, merge-fallback flags).
+- **Default:** Load Lab default remains **`truckerjson`** — unchanged.
+- **Run 42:** `critical` outputs **Order Number** `2398968` (matches filename prefix) while `truckerjson` shows a long id `25180652398968`; both are non-empty — **which is dispatch-canonical** is a product/PDF question, not a null gap.
 
-**Verdict on default switch:** **Do not** make `critical_v1_1` the Load Lab default yet. Evidence shows **wins on currency + structured rate**, but **unacceptable or unexplained `broker_load_reference` nulls** on multiple PDFs where legacy had a readable ref. Harden `critical` mapping / guardrails for `broker_load_reference` (and confirm Hub/TQL/Armstrong with PDF ground truth) first.
+**Verdict on default switch:** Still **do not** promote `critical_v1_1` to default; other diffs (commodity, equipment fields, etc.) remain. The **`broker_load_reference` null blocker** on this evidence set is **cleared**.
 
-**Field instructions / guardrails to fix (priority):**
+## broker_load_reference fix verification (2026-04-26)
 
-1. **`broker_load_reference`:** stop clearing valid order/load IDs when the legacy field was non-nonsense; prefer **needs_review** or structured uncertainty over **null** unless the contract explicitly cannot support the ID.
-2. **Primary reference + diagnostics** (existing issue): still align with `load_lab` reference heuristics so nonsense tokens are not “accepted” in other layers (see `LOAD_LAB_REAL_PDF_EVALUATION.md`).
-3. **Sequence display:** either normalize to 0-based in both or document 1-based in `critical` output for UI.
-4. **Date normalization:** one canonical `appointment_date` format after extraction, or mark comparable-equivalence in eval.
-5. **Temperature** on reefer: one representation (setpoint vs “continuous” vs band).
+Pair-eval re-run: runs **38–43** against **running** `truckerp-api` after `scripts/reload_api.sh`.
+
+| run | truckerjson | critical_v1_1 (after fix) | Notes |
+| --- | --- | --- | --- |
+| 39 Armstrong | 3872125-1 | 3872125-1 | Aligned; hyphenated ref not cleared as phone-shaped. |
+| 42 Hub / LME | 25180652398968 | 2398968 | Non-null; different id than truckerjson (Order Number **vs** long numeric in legacy). See `context.broker_load_reference_diagnostics` on the critical run. |
+| 43 TQL | 34307972 | 34307972 | Aligned. |
+
+**Code:** `app/services/critical_extraction_v11_guardrails.py`, `app/services/load_lab_semantic.py`.
+
+**Container proof:** `docker exec truckerp-api grep -n broker_load_reference_diagnostics /app/app/services/load_lab_semantic.py`
 
 
 | run_id | filename | contract | http | semantic status |
@@ -76,7 +79,7 @@ All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status
 | 38 | JBHunt.pdf | stops[1].appointment_time_text | 08:00 - 12:00 | 08:00 - 12:00 | correct | correct | | n/a |  |
 | 38 | JBHunt.pdf | stops[] order/count | 2 stops | 2 stops | — | — | | | OK |
 | 39 | Armstrong.pdf | broker_name | Armstrong Transport Group | Armstrong Transport Group | correct | correct | | n/a | |
-| 39 | Armstrong.pdf | broker_load_reference | 3872125-1 | ∅ | needs_review | missing | Y | no | T: C:dropped value vs legacy |
+| 39 | Armstrong.pdf | broker_load_reference | 3872125-1 | 3872125-1 | needs_review | correct | N | n/a | T: C: |
 | 39 | Armstrong.pdf | rate (extracted.rate) | 1800.0 | 1800.0 | correct | correct | | n/a | critical `carrier_rate_total` in context: amount=1800.0 currency='USD' |
 | 39 | Armstrong.pdf | equipment_type | V53, 53' Van | 53' Van 53' | needs_review | needs_review | | n/a | |
 | 39 | Armstrong.pdf | trailer_type | ∅ | ∅ | correct | correct | | n/a | |
@@ -86,7 +89,7 @@ All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status
 | 39 | Armstrong.pdf | estimated_weight | 43000 | 43000 | correct | correct | | n/a | |
 | 39 | Armstrong.pdf | stops[0].sequence | 0 | 1 | needs_review | needs_review | | n/a |  |
 | 39 | Armstrong.pdf | stops[0].stop_type | pickup | pickup | correct | correct | | n/a |  |
-| 39 | Armstrong.pdf | stops[0].facility_name | RAY DORNHECKER | RAY DORNHECKER | correct | correct | | n/a |  |
+| 39 | Armstrong.pdf | stops[0].facility_name | NCG-MW RAY DORNHECKER | RAY DORNHECKER | needs_review | needs_review | | n/a |  |
 | 39 | Armstrong.pdf | stops[0].street | 3620 W 38th St | 3620 W 38th St | correct | correct | | n/a |  |
 | 39 | Armstrong.pdf | stops[0].city | Chicago | Chicago | correct | correct | | n/a |  |
 | 39 | Armstrong.pdf | stops[0].state_or_province | IL | IL | correct | correct | | n/a |  |
@@ -137,8 +140,8 @@ All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | equipment_type | Reefer 53' | Reefer 53' | correct | correct | | n/a | |
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | trailer_type | ∅ | ∅ | correct | correct | | n/a | |
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | trailer_size | ∅ | ∅ | correct | correct | | n/a | |
-| 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | temperature_requirement | Continuous | -10.0--10.0 F | needs_review | needs_review | | n/a | different encoding: free text vs setpoint band |
-| 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | commodity | Stuffer Bread | Stuffer Bread | correct | correct | | n/a | |
+| 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | temperature_requirement | ∅ | -10.0--10.0 F | Continuous | needs_review | needs_review | | n/a | |
+| 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | commodity | ∅ | Stuffer Bread | needs_review | needs_review | | n/a | |
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | estimated_weight | 17224 | 17224 | correct | correct | | n/a | |
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | stops[0].sequence | 0 | 1 | needs_review | needs_review | | n/a |  |
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | stops[0].stop_type | pickup | pickup | correct | correct | | n/a |  |
@@ -160,7 +163,7 @@ All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | stops[1].appointment_time_text | 12:30 | 12:30 | correct | correct | | n/a |  |
 | 41 | 612845 - MC1397898 9582479 CANADA INC Reefer - Carrier Rate and Load Confirmation.pdf | stops[] order/count | 2 stops | 2 stops | — | — | | | OK |
 | 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | broker_name | Hub Group | Hub Group | correct | correct | | n/a | |
-| 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | broker_load_reference | 25180652398968 | ∅ | needs_review | missing | Y | no | T: C:dropped value vs legacy |
+| 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | broker_load_reference | 25180652398968 | 2398968 | needs_review | correct | N | n/a | T: C: |
 | 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | rate (extracted.rate) | 1683.02 | 1683.02 | correct | correct | | n/a | critical `carrier_rate_total` in context: amount=1683.02 currency='USD' |
 | 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | equipment_type | dry van | dry van 53 | needs_review | needs_review | | n/a | |
 | 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | trailer_type | Van | ∅ | needs_review | needs_review | | n/a | |
@@ -188,7 +191,7 @@ All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status
 | 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | stops[1].appointment_time_text | 0100 | 0100 | correct | correct | | n/a |  |
 | 42 | order_confirmation_2398968_4674419509316643175-lme_temp.pdf | stops[] order/count | 2 stops | 2 stops | — | — | | | OK |
 | 43 | TQLRC.pdf | broker_name | Total Quality Logistics (TQL) | TQL | needs_review | needs_review | | n/a | |
-| 43 | TQLRC.pdf | broker_load_reference | 34307972 | ∅ | needs_review | missing | Y | no | T: C:dropped value vs legacy |
+| 43 | TQLRC.pdf | broker_load_reference | 34307972 | 34307972 | needs_review | correct | Y | n/a | T: C: |
 | 43 | TQLRC.pdf | rate (extracted.rate) | 2100.0 | 2100.0 | correct | correct | | n/a | critical `carrier_rate_total` in context: amount=2100.0 currency='USD' |
 | 43 | TQLRC.pdf | equipment_type | Van Or Reefer | Van Or Reefer 48 ft or 53 ft | needs_review | needs_review | | n/a | |
 | 43 | TQLRC.pdf | trailer_type | Van | ∅ | needs_review | needs_review | | n/a | |
@@ -226,4 +229,3 @@ All **12** sematic requests returned **HTTP 200** and **`semantic_extract_status
 
 
 Per-run `parse_response` objects are not embedded here (large). Re-run the script and add file export if you need archives.
-

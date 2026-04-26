@@ -44,11 +44,29 @@ def _has_digit(s: str) -> bool:
     return bool(re.search(r"\d", s))
 
 
-def _looks_like_phone_or_mc(s: str) -> bool:
+def _looks_like_phone_or_authority_not_load_ref(s: str) -> bool:
+    """
+    Reject *only* values that are clearly a phone, fax, or MC/DOT line — not long numeric
+    load/PO/EL reference IDs. The previous `[\d\-]{7,30}`-style test incorrectly nulled
+    high-value fields like 34307972, 25180652398968, and 3872125-1.
+    """
     t = s.strip()
-    if re.match(r"^[\d\s().+\-x]{7,30}$", t):
+    if not t:
+        return False
+    if re.match(r"^(?:MC|DOT|USDOT)\s*[#:]*\s*\d{4,8}$", t, re.IGNORECASE):
         return True
-    if re.match(r"^(?:MC|DOT)[\s#:-]*\d{4,8}$", t, re.IGNORECASE):
+    digits = re.sub(r"[^\d]", "", t)
+    if 4 <= len(digits) <= 24 and "(" not in t and "+" not in t:
+        if re.fullmatch(r"[\dA-Za-z\-\#\/\.\,]+", t) or re.fullmatch(r"[\d\-]+", t):
+            return False
+    if re.search(r"\(\d{3}\)\s*[\d\-\s]{6,12}\d{4}", t) or re.search(
+        r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b", t
+    ):
+        if re.search(r"[\s().+\-x]", t) and 10 <= len(digits) <= 11:
+            return True
+    if re.match(r"^\+?\d{1,2}\s*[\d\s().\-]{7,20}$", t) and 10 <= len(digits) <= 15 and re.search(
+        r"[\s().x]", t
+    ):
         return True
     return False
 
@@ -92,7 +110,7 @@ def _sanitize_broker_load_reference(
             "guardrail: broker_load_reference must include at least one digit (no learned mapping) — cleared",
         )
         log.append("broker_load_reference: cleared (no digit)")
-    elif _looks_like_phone_or_mc(v):
+    elif _looks_like_phone_or_authority_not_load_ref(v):
         d["value"] = None
         d["needs_review"] = True
         d["reason"] = _append_reason(
@@ -101,17 +119,17 @@ def _sanitize_broker_load_reference(
         )
         log.append("broker_load_reference: cleared (phone/authority-shaped)")
 
-    # Re-read value after possible clears
+    # Re-read value after possible clears. Do *not* clear when model confidence is "low" —
+    # digit-heavy refs are still useful for dispatch; `needs_review` is enough (schema default).
     v2 = (d.get("value") or "").strip() if isinstance(d.get("value"), str) else ""
     c_low = str(d.get("confidence") or "").strip().casefold()
     if v2 and c_low == "low":
-        d["value"] = None
         d["needs_review"] = True
         d["reason"] = _append_reason(
             d.get("reason") if isinstance(d.get("reason"), str) else None,
-            "guardrail: low confidence — return null, not a weak guess",
+            "note: model confidence low; keep value for review (not cleared by guardrails)",
         )
-        log.append("broker_load_reference: cleared (low confidence)")
+        log.append("broker_load_reference: kept (low model confidence; needs_review)")
 
     return CriticalBrokerLoadReference.model_validate(d), log
 
@@ -120,12 +138,13 @@ def apply_critical_extraction_v11_guardrails(
     root: CriticalExtractionV11Root,
     *,
     raw_text: str = "",
-) -> tuple[CriticalExtractionV11Root, list[str]]:
+) -> tuple[CriticalExtractionV11Root, list[str], dict[str, Any]]:
     """
-    Returns (possibly-mutated root, human-readable guardrail log lines for diagnostics).
+    Returns (possibly-mutated root, guardrail log lines, small diagnostics for parse_diagnostics).
     """
     log: list[str] = []
     _ = (raw_text or "")[:200000]  # reserved for future text-pinned checks
+    pre_blr = root.broker_load_reference.model_dump(mode="json")
 
     blr, lg = _sanitize_broker_load_reference(root.broker_load_reference)
     log.extend(lg)
@@ -171,7 +190,14 @@ def apply_critical_extraction_v11_guardrails(
             "stops": new_stops,
         }
     )
-    return out, log
+    trace = {
+        "broker_load_reference": {
+            "model_before_sanitize": pre_blr,
+            "after_sanitize": blr.model_dump(mode="json"),
+            "guardrail_lines": list(lg),
+        }
+    }
+    return out, log, trace
 
 
 def coercive_prune_critical_payload(obj: Any) -> dict[str, Any]:
