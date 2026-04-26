@@ -83,7 +83,7 @@ def _broker_identity_selection_reason(diag: dict[str, Any] | None) -> str:
     return "No grounded broker identity match found in tenant/global broker reference; broker identity remains ungrounded."
 
 # Contract pins (bump when prompt or JSON shape changes).
-SEMANTIC_PROMPT_VERSION = "load_lab_semantic_v2_2"
+SEMANTIC_PROMPT_VERSION = "load_lab_semantic_v2_3"
 SEMANTIC_SCHEMA_VERSION = "load_lab_candidate_truckerjson_v1"
 CRITICAL_EXTRACTION_V11_SCHEMA_VERSION = "critical_extraction_v1_1"
 
