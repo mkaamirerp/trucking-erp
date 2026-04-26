@@ -1,0 +1,96 @@
+{
+  "document": {
+    "filename": "RateConfirmation_Example_12345.pdf"
+  },
+  "extracted": {
+    "broker_name_snapshot": "Example Logistics LLC",
+    "broker_contact_name_snapshot": "Dispatch Team",
+    "broker_contact_phone_snapshot": "8005550100",
+    "broker_contact_email_snapshot": "dispatch@examplelogistics.com",
+    "broker_load_reference": "LD-987654",
+    "broker_mc_number_snapshot": "123456",
+    "broker_dot_number_snapshot": "7654321",
+    "mode": "TL",
+    "equipment_type": "53' Dry Van",
+    "trailer_type": "Van",
+    "trailer_size": "53",
+    "commodity": "FAK - General freight",
+    "estimated_weight": 42000,
+    "temperature_requirement": null,
+    "rate": 2500.0,
+    "customer_rate": null,
+    "miles": 612.4,
+    "customs_broker_name": null,
+    "references": [
+      {
+        "kind": "load_number",
+        "value": "LD-987654",
+        "label": "Load #",
+        "primary_candidate": true,
+        "confidence": "high"
+      },
+      {
+        "kind": "order_number",
+        "value": "PO-2026-001",
+        "label": "PO #",
+        "primary_candidate": false,
+        "confidence": "medium"
+      }
+    ],
+    "stops": [
+      {
+        "stop_type": "pickup",
+        "sequence": 0,
+        "facility_name": "Shipper DC",
+        "street": "100 Industrial Pkwy",
+        "city": "Columbus",
+        "state_or_province": "OH",
+        "postal_code": "43215",
+        "country": "US",
+        "reference_number": "PU-REF-1",
+        "appointment_type": "FCFS",
+        "appointment_date": "2026-04-28",
+        "appointment_time_text": "08:00-14:00",
+        "notes": null
+      },
+      {
+        "stop_type": "delivery",
+        "sequence": 1,
+        "facility_name": "Receiver Warehouse",
+        "street": "200 Logistics Blvd",
+        "city": "Indianapolis",
+        "state_or_province": "IN",
+        "postal_code": "46204",
+        "country": "US",
+        "reference_number": "DEL-REF-2",
+        "appointment_type": "Appt",
+        "appointment_date": "2026-04-29",
+        "appointment_time_text": "10:00",
+        "notes": null
+      }
+    ]
+  },
+  "raw_text": "…full OCR/text from the PDF; hydration code does not require this to be non-empty for field mapping, but the API always returns it when present…",
+  "warnings": [
+    "[semantic] Example warning line",
+    "[review] Optional human review note"
+  ],
+  "field_confidence": {
+    "broker_name_snapshot": "high",
+    "broker_load_reference": "medium",
+    "rate": "high"
+  },
+  "context": {
+    "load_lab_semantic": true,
+    "load_lab_response_contract": "truckerjson",
+    "semantic_prompt_version": "load_lab_semantic_v2_2",
+    "semantic_schema_version": "load_lab_candidate_truckerjson_v1",
+    "semantic_model": "gpt-4o-mini",
+    "load_lab_semantic_mode": "guarded"
+  },
+  "parse_diagnostics": {
+    "reference_candidates": [],
+    "broker_directory_matches": [],
+    "primary_reference_selection_reason": "example: populated by server on Load Lab semantic success"
+  }
+}
