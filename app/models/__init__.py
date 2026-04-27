@@ -37,6 +37,7 @@ from app.models.load_lab import LoadLabExtractionRun, LoadLabPromoteAudit
 from app.models.extraction_field_learning import ExtractionFieldLearningEvent
 from app.models.platform_extraction_learning import PlatformExtractionSanitizedPattern
 from app.models.dispatch_trip import TenantDispatchNumbering, DispatchTrip
+from app.models.trip import Trip, TripLoad
 
 # Platform models (B3 onboarding)
 from app.models.platform import (

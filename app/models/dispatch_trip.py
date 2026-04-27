@@ -36,7 +36,10 @@ class TenantDispatchNumbering(Base):
 
 
 class DispatchTrip(Base):
-    """Canonical trip_number and lifecycle. Exactly one of load_id / trailer_move_id (v1: freight load only)."""
+    """Canonical trip_number and lifecycle. Exactly one of load_id / trailer_move_id (v1: freight load only).
+
+    Phase 1: rows are mirrored into app.models.trip.Trip via legacy_dispatch_trip_id (backfill + future dual-write).
+    """
 
     __tablename__ = "dispatch_trips"
     __table_args__ = (

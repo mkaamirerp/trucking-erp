@@ -104,6 +104,14 @@ class TestTripNumberSchema:
         with pytest.raises(ValidationError):
             LoadUpdate(active_dispatch_trip_id=99, expected_concurrency_version=1)
 
+    def test_load_update_rejects_active_trip_id(self) -> None:
+        from pydantic import ValidationError
+
+        from app.schemas.load import LoadUpdate
+
+        with pytest.raises(ValidationError):
+            LoadUpdate(active_trip_id=99, expected_concurrency_version=1)
+
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
 class TestTripNumber01Early409:

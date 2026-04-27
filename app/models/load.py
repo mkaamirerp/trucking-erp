@@ -42,6 +42,10 @@ class Load(Base):
     #: Read-model only — canonical trip state lives on dispatch_trips.
     #: DB-level FK exists (Alembic); omit ORM ForeignKey to avoid ambiguous Load↔DispatchTrip paths.
     active_dispatch_trip_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    #: Read-model mirror of trips.id (Phase 1 backfill); writers still set dispatch_trips + active_dispatch_trip_id.
+    active_trip_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("trips.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     #: Denormalized from active dispatch_trips.trip_number for search/list convenience only.
     trip_number: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
@@ -106,6 +110,7 @@ class Load(Base):
     truck = relationship("Truck", backref="loads")
     trailer = relationship("Trailer", backref="loads")
     dispatch_trips = relationship("DispatchTrip", back_populates="load")
+    active_trip = relationship("Trip", foreign_keys=[active_trip_id], viewonly=True)
     stops = relationship("LoadStop", back_populates="load", order_by="LoadStop.sequence", cascade="all, delete-orphan")
     notes_rel = relationship("LoadNote", back_populates="load", order_by="LoadNote.created_at", cascade="all, delete-orphan")
 

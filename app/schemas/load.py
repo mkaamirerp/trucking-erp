@@ -113,7 +113,7 @@ class LoadCreate(LoadBase):
     @classmethod
     def reject_read_only_trip_fields(cls, data):
         if isinstance(data, dict):
-            for k in ("trip_number", "active_dispatch_trip_id"):
+            for k in ("trip_number", "active_dispatch_trip_id", "active_trip_id"):
                 if k in data:
                     raise ValueError(f"{k} is read-only (set by dispatch trip allocation)")
         return data
@@ -156,7 +156,7 @@ class LoadUpdate(BaseModel):
     @classmethod
     def reject_read_only_trip_fields(cls, data):
         if isinstance(data, dict):
-            for k in ("trip_number", "active_dispatch_trip_id"):
+            for k in ("trip_number", "active_dispatch_trip_id", "active_trip_id"):
                 if k in data:
                     raise ValueError(f"{k} is read-only (set by dispatch trip allocation)")
         return data
