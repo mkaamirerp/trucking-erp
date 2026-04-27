@@ -3,6 +3,7 @@
  */
 import type { Load, LoadStop, LoadStopWrite, LoadWritePayload } from "@/api";
 import { sortedStops as sortStops } from "@/utils/loadStops";
+import { hasUsefulStopIdentity } from "./loadParseStops";
 
 /** Workspace shell mode — drives data source, save path, and chrome only; fields are identical. */
 export type LoadWorkspaceMode = "manual" | "intake" | "detail" | "payroll" | "audit";
@@ -366,6 +367,36 @@ export function buildVerificationTabIndexMap(sortedStops: DraftStop[]): Map<stri
   return map;
 }
 
+function isManualPickupDeliveryPair(a: DraftStop, b: DraftStop): boolean {
+  const u = (x: string) => (x || "").toUpperCase();
+  const t0 = u(a.stop_type);
+  const t1 = u(b.stop_type);
+  return (
+    (t0 === "PICKUP" && (t1 === "DELIVERY" || t1 === "DROP")) ||
+    (t1 === "PICKUP" && (t0 === "DELIVERY" || t0 === "DROP"))
+  );
+}
+
+/**
+ * Second line of defense: when more than two rows exist, drop stop rows with no useful
+ * identity, **except** the leading PICKUP + DELIVERY (or DELIVERY + PICKUP) pair when
+ * present — that pair is the manual template and may have empty address fields. Rows
+ * with real location/reference data are always kept.
+ */
+export function selectDraftStopsForPersist(draftStops: DraftStop[]): DraftStop[] {
+  const sorted = [...draftStops].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+  if (sorted.length <= 2) return sorted;
+
+  const leadIsManualPair =
+    sorted.length >= 2 && isManualPickupDeliveryPair(sorted[0], sorted[1]);
+
+  return sorted.filter((s, index) => {
+    if (hasUsefulStopIdentity(s)) return true;
+    if (leadIsManualPair && (index === 0 || index === 1)) return true;
+    return false;
+  });
+}
+
 /** Body for PATCH (edit) or POST (create) — matches LoadWorkspacePage save shape. */
 export function buildLoadPersistPayload(params: {
   status: string;
@@ -397,7 +428,7 @@ export function buildLoadPersistPayload(params: {
   internalNotes: string;
   draftStops: DraftStop[];
 }): LoadWritePayload {
-  const sorted = [...params.draftStops].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+  const sorted = selectDraftStopsForPersist(params.draftStops);
   const stopsPayload = sorted.map((s, i) => stopToPayload(s, i));
   const estW = params.estimatedWeight.trim();
   const rateN = params.rate.trim();
