@@ -26,7 +26,6 @@ import {
   listAuditEventsByEntity,
   parseLoadVersionConflict,
   parseLoadWorkspaceDocument,
-  resolveBrokerIdentity,
   updateLoad,
   type Broker,
   type BrokerContact,
@@ -35,7 +34,6 @@ import {
   type InboxMessageItem,
   type InboxThreadListItem,
   type Load,
-  type LoadDocumentParseStop,
   type LoadNote,
   type AuditEventRow,
   type Trailer,
@@ -44,7 +42,6 @@ import {
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops as sortStops } from "@/utils/loadStops";
-import { matchBrokerContactFromParsed } from "@/utils/matchBrokerFromSnapshot";
 import { DispatchAssignmentStrip } from "@/loadWorkspace/DispatchAssignmentStrip";
 import { LoadWorkspaceForm } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
@@ -62,8 +59,8 @@ import {
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
-import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
 import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
+import { applyLoadDocumentParseResponse } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import { SectionSettlement } from "@/components/load/SectionSettlement";
 
 type WorkspaceToolbarTone = "success" | "warning" | "error" | "neutral";
@@ -256,39 +253,6 @@ function ReferenceTextRail({
       </div>
     </div>
   );
-}
-
-function extractedStopsToDraft(stops: LoadDocumentParseStop[]): DraftStop[] {
-  const ts = Date.now();
-  return stops.map((s, i) => {
-    const t = (s.stop_type || "").toLowerCase();
-    let stop_type: DraftStop["stop_type"] = "DELIVERY";
-    if (t === "pickup") stop_type = "PICKUP";
-    else if (t === "drop") stop_type = "DROP";
-    else if (t === "delivery") stop_type = "DELIVERY";
-    return {
-      id: 0,
-      load_id: 0,
-      stop_type,
-      sequence: s.sequence ?? i,
-      facility_name: s.facility_name ?? null,
-      street: s.street ?? null,
-      city: s.city ?? null,
-      state_or_province: s.state_or_province ?? null,
-      postal_code: s.postal_code ?? null,
-      country: s.country ?? null,
-      reference_number: s.reference_number ?? null,
-      appointment_type: s.appointment_type ?? null,
-      appointment_date: s.appointment_date ?? null,
-      appointment_time_text: s.appointment_time_text ?? null,
-      scheduled_at: null,
-      notes: s.notes ?? null,
-      commodity_notes: null,
-      created_at: null,
-      updated_at: null,
-      _key: `pdf-${ts}-${i}-${Math.random().toString(36).slice(2, 8)}`,
-    };
-  });
 }
 
 function ContextRow({
@@ -643,95 +607,37 @@ export default function LoadWorkspacePage() {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
         });
-        const ex = res.extracted;
-        let resolvedBrokerIdForSummary: number | null = null;
-        let brokerContactMatchedForSummary = false;
-        const brokerNameSnap = ex.broker_name_snapshot?.trim() ?? "";
-        if (brokerNameSnap) {
-          setBrokerNameSnapshot(brokerNameSnap);
-        }
-        const mcSnap = ex.broker_mc_number_snapshot?.trim() ?? "";
-        const dotSnap = ex.broker_dot_number_snapshot?.trim() ?? "";
-        if (mcSnap || dotSnap) {
-          let resolvedBrokerId: number | null = null;
-          try {
-            const resolved = await resolveBrokerIdentity({
-              mc_number: mcSnap || undefined,
-              dot_number: dotSnap || undefined,
-            });
-            resolvedBrokerId = resolved.broker_id ?? null;
-          } catch {
-            resolvedBrokerId = null;
-          }
-          resolvedBrokerIdForSummary = resolvedBrokerId;
-          setBrokerId(resolvedBrokerId);
-          setBrokerContactId(null);
-          if (resolvedBrokerId != null) {
-            try {
-              const paged = await listBrokerContacts(resolvedBrokerId, {
-                page: 1,
-                size: 200,
-                include_archived: false,
-              });
-              const items = paged.items || [];
-              setBrokerContacts(items);
-              const matchedContact = matchBrokerContactFromParsed(items, {
-                name: ex.broker_contact_name_snapshot,
-                email: ex.broker_contact_email_snapshot,
-                phone: ex.broker_contact_phone_snapshot,
-              });
-              if (matchedContact) {
-                brokerContactMatchedForSummary = true;
-                setBrokerContactId(matchedContact.id);
-              }
-            } catch {
-              setBrokerContacts([]);
-            }
-          } else {
-            setBrokerContacts([]);
-          }
-        }
-        if (ex.broker_contact_name_snapshot?.trim()) {
-          setBrokerContactNameSnapshot(ex.broker_contact_name_snapshot.trim());
-        }
-        if (ex.broker_contact_phone_snapshot?.trim()) {
-          setBrokerContactPhoneSnapshot(ex.broker_contact_phone_snapshot.trim());
-        }
-        if (ex.broker_contact_email_snapshot?.trim()) {
-          setBrokerContactEmailSnapshot(ex.broker_contact_email_snapshot.trim());
-        }
-        if (ex.broker_load_reference?.trim()) setBrokerLoadReference(ex.broker_load_reference.trim());
-        if (ex.mode?.trim()) setFreightMode(ex.mode.trim());
-        if (ex.equipment_type?.trim()) setEquipmentType(ex.equipment_type.trim());
-        if (ex.trailer_type?.trim()) setTrailerType(ex.trailer_type.trim());
-        if (ex.trailer_size?.trim()) setTrailerSize(ex.trailer_size.trim());
-        if (ex.commodity?.trim()) setCommodity(ex.commodity.trim());
-        if (ex.estimated_weight != null) setEstimatedWeight(String(ex.estimated_weight));
-        if (ex.temperature_requirement?.trim()) {
-          setTemperatureRequirement(ex.temperature_requirement.trim());
-        }
-        if (ex.rate != null) setRate(String(ex.rate));
-        if (ex.customer_rate != null) setCustomerRate(String(ex.customer_rate));
-        if (ex.miles != null) setMiles(String(Math.round(ex.miles)));
-        let notesBody = res.raw_text?.trim() || "";
-        if (ex.customs_broker_name?.trim()) {
-          const cline = `Customs broker (from document): ${ex.customs_broker_name.trim()}`;
-          notesBody = notesBody ? `${notesBody}\n\n---\n${cline}` : cline;
-        }
-        setInternalNotes(notesBody);
-        const meaningfulStops = filterMeaningfulParsedStops(ex.stops ?? []);
-        if (meaningfulStops.length > 0) {
-          setDraftStops(extractedStopsToDraft(meaningfulStops));
-        }
+        const summary = await applyLoadDocumentParseResponse(res, {
+          setBrokerNameSnapshot,
+          setBrokerId,
+          setBrokerContactId,
+          setBrokerContacts,
+          setBrokerContactNameSnapshot,
+          setBrokerContactPhoneSnapshot,
+          setBrokerContactEmailSnapshot,
+          setBrokerLoadReference,
+          setFreightMode,
+          setEquipmentType,
+          setTrailerType,
+          setTrailerSize,
+          setCommodity,
+          setEstimatedWeight,
+          setTemperatureRequirement,
+          setRate,
+          setCustomerRate,
+          setMiles,
+          setInternalNotes,
+          setDraftStops,
+        });
         setParseWarnings(res.warnings ?? []);
         const outcome = describeWorkspacePdfParseOutcome(res.extracted, res.raw_text, res.warnings ?? []);
         const tone: WorkspaceToolbarTone =
           outcome.tone === "success" ? "success" : outcome.tone === "warning" ? "warning" : "neutral";
         setToolbarMessage({ text: outcome.headline, tone });
         const appliedLabels = buildWorkspacePdfParseAppliedLabels(res.extracted, res.raw_text, {
-          mcOrDotAttempted: Boolean(mcSnap || dotSnap),
-          resolvedBrokerId: resolvedBrokerIdForSummary,
-          brokerContactMatched: brokerContactMatchedForSummary,
+          mcOrDotAttempted: summary.mcOrDotAttempted,
+          resolvedBrokerId: summary.resolvedBrokerId,
+          brokerContactMatched: summary.brokerContactMatched,
         });
         setLastParseAppliedLabels(appliedLabels.length > 0 ? appliedLabels : null);
       } catch (e: unknown) {

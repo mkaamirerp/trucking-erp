@@ -8,11 +8,33 @@ function withTenantHeaders(init?: RequestInit): RequestInit {
 }
 
 export function fetchWithTenant(input: RequestInfo | URL, init?: RequestInit) {
-  return fetch(input, withTenantHeaders(init));
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input instanceof Request
+          ? input.url
+          : String(input);
+  return fetch(input, withTenantHeaders(init)).catch((e) => {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`Network error calling ${url}: ${reason || "Failed to fetch"}`);
+  });
 }
 
 export function fetchPublic(input: RequestInfo | URL, init?: RequestInit) {
-  return fetch(input, { ...init, credentials: "include" });
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input instanceof Request
+          ? input.url
+          : String(input);
+  return fetch(input, { ...init, credentials: "include" }).catch((e) => {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`Network error calling ${url}: ${reason || "Failed to fetch"}`);
+  });
 }
 
 async function handle<T>(res: Response): Promise<T> {
@@ -823,7 +845,13 @@ export async function createLoad(payload: LoadWritePayload) {
   return handle<Load>(res);
 }
 
-export type LoadDocumentParseReference = { kind: string; value: string };
+export type LoadDocumentParseReference = {
+  kind: string;
+  value: string;
+  label?: string | null;
+  primary_candidate?: boolean | null;
+  confidence?: string | null;
+};
 
 export type LoadDocumentParseStop = {
   stop_type: string;
@@ -892,6 +920,105 @@ export async function parseLoadWorkspaceDocument(
     body: fd,
   });
   return handle<LoadDocumentParseResponse>(res);
+}
+
+/** Load Lab — persisted extraction run (tenant DB). */
+export type LoadLabRun = {
+  id: number;
+  tenant_id: number;
+  created_at: string;
+  updated_at: string;
+  source_route: string;
+  created_by_platform_user_id: string | null;
+  file_sha256: string;
+  filename: string;
+  mime_type: string;
+  file_size_bytes: number;
+  status: string;
+  extraction_path: string | null;
+  dedupe_prior_run_id: number | null;
+  parser_version: string;
+  schema_version: string;
+  prompt_version: string;
+  model_name: string;
+  ocr_engine_version: string | null;
+  normalizer_version: string;
+  classification_label: string | null;
+  relevance: string | null;
+  normalized_package: Record<string, unknown> | null;
+  parse_response?: Record<string, unknown> | null;
+  ai_model_output?: Record<string, unknown> | null;
+  warnings: unknown[] | null;
+  pipeline_error: string | null;
+  semantic_model_name?: string | null;
+  semantic_prompt_version?: string | null;
+  semantic_schema_version?: string | null;
+  semantic_extract_status?: string | null;
+  semantic_validation_result?: Record<string, unknown> | null;
+  lab_confidence?: Record<string, unknown> | null;
+  contradictions?: unknown[] | null;
+  lab_review_status?: string | null;
+  lab_review_summary?: string | null;
+};
+
+export type LoadLabRunUploadResult = {
+  run: LoadLabRun;
+  reused_existing_run: boolean;
+};
+
+export async function uploadLoadLabRun(file: File, opts?: { forceRerun?: boolean }) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (opts?.forceRerun) fd.append("force_rerun", "true");
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/runs/upload`, { method: "POST", body: fd });
+  return handle<LoadLabRunUploadResult>(res);
+}
+
+export async function listLoadLabRuns(limit = 30) {
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/runs?limit=${encodeURIComponent(String(limit))}`);
+  return handle<LoadLabRun[]>(res);
+}
+
+export async function clearLoadLabRuns() {
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/runs`, { method: "DELETE" });
+  return handle<{ deleted: number }>(res);
+}
+
+export async function getLoadLabRun(runId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/runs/${runId}`);
+  return handle<LoadLabRun>(res);
+}
+
+/** Tenant admin only — OpenAI connectivity (GET /v1/models); does not parse PDFs. */
+export type LoadLabOpenaiSmokeResult = {
+  ok: boolean;
+  http_status: number | null;
+  sample_model_id?: string | null;
+  detail?: string | null;
+};
+
+export async function postLoadLabOpenaiSmoke() {
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/openai-smoke`, { method: "POST" });
+  return handle<LoadLabOpenaiSmokeResult>(res);
+}
+
+export async function postLoadLabSemanticExtract(
+  runId: number,
+  opts?: { force?: boolean; mode?: string; responseContract?: string }
+) {
+  const qs: string[] = [];
+  if (opts?.force) qs.push("force=true");
+  if (opts?.mode?.trim()) qs.push(`mode=${encodeURIComponent(opts.mode.trim())}`);
+  if (opts?.responseContract?.trim())
+    qs.push(`response_contract=${encodeURIComponent(opts.responseContract.trim())}`);
+  const q = qs.length ? `?${qs.join("&")}` : "";
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/runs/${runId}/semantic-extract${q}`, { method: "POST" });
+  return handle<LoadLabRun>(res);
+}
+
+export async function postLoadLabRecomputeReview(runId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/load-lab/runs/${runId}/lab-review`, { method: "POST" });
+  return handle<LoadLabRun>(res);
 }
 
 export type BrokerResolveIdentity = {

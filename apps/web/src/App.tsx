@@ -20,6 +20,7 @@ import LoadsListPage from "./pages/LoadsListPage";
 import DispatchPage from "./pages/DispatchPage";
 import LoadInboxPage from "./pages/LoadInboxPage";
 import LoadWorkspacePage from "./pages/LoadWorkspacePage";
+import LoadLabPage from "./pages/LoadLabPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
@@ -96,7 +97,7 @@ function App() {
   // Wait for auth bootstrap before making auth decisions
   if (isAppRoute && !authReady) {
     return (
-      <div className="flex items-center justify-center min-h-screen text-sm text-gray-700">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--trk-bg)] text-sm text-[var(--trk-text-muted)]">
         Loading session...
       </div>
     );
@@ -110,7 +111,7 @@ function App() {
   // Authenticated; wait for /me to check requires_account_setup
   if (isAppRoute && authReady && isValid && loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen text-sm text-gray-700">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--trk-bg)] text-sm text-[var(--trk-text-muted)]">
         Loading session...
       </div>
     );
@@ -208,6 +209,14 @@ function App() {
         element={
           <Layout>
             <LoadsListPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/loads/lab"
+        element={
+          <Layout>
+            <LoadLabPage />
           </Layout>
         }
       />

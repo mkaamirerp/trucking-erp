@@ -22,6 +22,8 @@ export const OPS = {
   BROKERS: "/brokers",
   BROKER_DETAIL: (id: number | string) => `/brokers/${id}`,
   LOADS: "/loads",
+  /** Load Lab — isolated PDF extraction testing and audit (does not replace main load workspace). */
+  LOAD_LAB: "/loads/lab",
   /** Manual load creation — canonical workspace in create mode; then continue at LOAD_DETAIL. */
   LOAD_NEW: "/loads/new",
   LOAD_DETAIL: (id: number | string) => `/loads/${id}`,

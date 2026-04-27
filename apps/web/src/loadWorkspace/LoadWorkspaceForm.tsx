@@ -121,6 +121,8 @@ export type LoadWorkspaceFormProps = {
   visibleSections?: WorkspaceSection[];
   /** Sections that allow editing. When omitted, all visible sections are editable. */
   editableSections?: WorkspaceSection[];
+  /** When true, all controls are disabled (e.g. Load Lab read-only preview). Uses a disabled fieldset. */
+  readOnly?: boolean;
 };
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
@@ -140,6 +142,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   }
 
   return (
+    <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
     <div className="flex flex-col gap-2.5 pb-4">
       {/* Broker — WorkspaceSection: Parties */}
       {vis("Parties") && <section className={wsSectionCard} data-editable={editable("Parties")}>
@@ -278,7 +281,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               return (
               <div
                 key={stop._key}
-                className={`rounded-md border border-[var(--trk-border)] bg-[#1e2330] py-2.5 pl-2.5 pr-3 shadow-sm border-l-[3px] ${edge}`}
+                className={`rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface-2)] py-2.5 pl-2.5 pr-3 shadow-sm border-l-[3px] ${edge}`}
               >
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span
@@ -762,7 +765,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           <span className={wsSectionTitle}>Customs</span>
         </div>
         <div className={wsSectionBody}>
-        {p.customsMessage ? <p className="mb-3 text-sm text-gray-700">{p.customsMessage}</p> : null}
+        {p.customsMessage ? <p className="mb-3 text-sm text-[var(--trk-text)]">{p.customsMessage}</p> : null}
         <div className="space-y-4">
           <div>
             <label className={L}>Customs broker</label>
@@ -780,11 +783,11 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               ))}
             </select>
             {modeCreate ? (
-              <p className="mt-1 text-xs text-gray-500">
+              <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
                 Stored on the new load. Document snapshot confirmation is available after you create the load.
               </p>
             ) : !p.customsBrokerLocked ? (
-              <p className="mt-1 text-xs text-amber-400">
+              <p className="mt-1 text-xs text-[var(--trk-warning)]">
                 Changing this selection saves immediately (before snapshot confirm).
               </p>
             ) : null}
@@ -802,9 +805,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           )}
           {!modeCreate &&
             (p.customsBrokerLocked ? (
-              <p className="text-xs text-gray-600">Customs broker link is frozen after snapshot confirm.</p>
+              <p className="text-xs text-[var(--trk-text-muted)]">Customs broker link is frozen after snapshot confirm.</p>
             ) : (
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-[var(--trk-text-muted)]">
                 Link a customs broker, then confirm to freeze customs snapshot fields on this load.
               </p>
             ))}
@@ -865,7 +868,8 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </div>
       </section>}
 
-      <p className="text-center text-[10px] text-gray-400">UI bundle {__UI_BUILD_ID__}</p>
+      <p className="text-center text-[10px] text-[var(--trk-text-muted)]">UI bundle {__UI_BUILD_ID__}</p>
     </div>
+    </fieldset>
   );
 }
