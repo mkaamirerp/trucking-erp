@@ -1,0 +1,92 @@
+{
+  "_comment": "Illustrative truckerjson-shaped output (document.extracted + extraction_warnings). Load Lab does not read this file; upload the matching .pdf and compare parse_response.extracted after semantic-extract.",
+  "document": {
+    "filename": "load_lab_fixture_3pickups_1delivery.pdf"
+  },
+  "extracted": {
+    "broker_name_snapshot": "Fixture Express Inc",
+    "broker_contact_name_snapshot": null,
+    "broker_contact_phone_snapshot": null,
+    "broker_contact_email_snapshot": null,
+    "broker_load_reference": "FIX-3P1D-002",
+    "broker_mc_number_snapshot": "900002",
+    "broker_dot_number_snapshot": "8000002",
+    "mode": "LTL",
+    "equipment_type": null,
+    "trailer_type": null,
+    "trailer_size": null,
+    "commodity": "Mixed",
+    "estimated_weight": null,
+    "temperature_requirement": null,
+    "rate": 1200.0,
+    "customer_rate": null,
+    "miles": null,
+    "customs_broker_name": null,
+    "references": [
+      { "kind": "load_number", "value": "FIX-3P1D-002" }
+    ],
+    "stops": [
+      {
+        "stop_type": "pickup",
+        "sequence": 0,
+        "facility_name": "Pickup A",
+        "street": "10 Harbor Way",
+        "city": "Miami",
+        "state_or_province": "FL",
+        "postal_code": "33101",
+        "country": "USA",
+        "reference_number": "P1",
+        "appointment_type": null,
+        "appointment_date": "2025-12-01",
+        "appointment_time_text": "07:00",
+        "notes": null
+      },
+      {
+        "stop_type": "pickup",
+        "sequence": 1,
+        "facility_name": "Pickup B",
+        "street": "20 Sun Blvd",
+        "city": "Orlando",
+        "state_or_province": "FL",
+        "postal_code": "32801",
+        "country": "USA",
+        "reference_number": "P2",
+        "appointment_type": null,
+        "appointment_date": "2025-12-01",
+        "appointment_time_text": "15:00",
+        "notes": null
+      },
+      {
+        "stop_type": "pickup",
+        "sequence": 2,
+        "facility_name": "Pickup C",
+        "street": "30 Bay Dr",
+        "city": "Tampa",
+        "state_or_province": "FL",
+        "postal_code": "33602",
+        "country": "USA",
+        "reference_number": "P3",
+        "appointment_type": null,
+        "appointment_date": "2025-12-02",
+        "appointment_time_text": "08:00",
+        "notes": null
+      },
+      {
+        "stop_type": "delivery",
+        "sequence": 3,
+        "facility_name": "Single Drop",
+        "street": "500 Peachtree",
+        "city": "Atlanta",
+        "state_or_province": "GA",
+        "postal_code": "30301",
+        "country": "USA",
+        "reference_number": "D-FINAL",
+        "appointment_type": null,
+        "appointment_date": "2025-12-03",
+        "appointment_time_text": "10:00-16:00",
+        "notes": null
+      }
+    ]
+  },
+  "extraction_warnings": []
+}

@@ -1,0 +1,92 @@
+%PDF-1.4
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+/Resources <<
+  /Font <<
+    /F1 5 0 R
+  >>
+>>
+>>
+endobj
+4 0 obj
+<<
+/Length 862
+>>
+stream
+BT
+/F1 10 Tf
+50 760 Td
+(RATE CONFIRMATION  Load #FIX-1P3D-001) Tj
+0 -11 Td
+(FOR LOAD INFORMATION:) Tj
+0 -11 Td
+(Broker: Fixture Logistics LLC  MC: 900001  DOT: 8000001) Tj
+0 -11 Td
+(Commodity: Test commodity  Mode: Full Truckload  Rate: $2,500.00 USD) Tj
+0 -11 Td
+() Tj
+0 -11 Td
+(Stop 0 PICKUP  Chicago, IL 60601) Tj
+0 -11 Td
+(  Acme Shippers - 100 Industrial Rd - Appt 2025-11-01 08:00-12:00 CST  Ref: PU-A) Tj
+0 -11 Td
+() Tj
+0 -11 Td
+(Stop 1 DELIVERY  Dallas, TX 75201) Tj
+0 -11 Td
+(  First Consignee - 200 Main St - Appt 2025-11-02 10:00 CST  Ref: D1) Tj
+0 -11 Td
+() Tj
+0 -11 Td
+(Stop 2 DELIVERY  Houston, TX 77002) Tj
+0 -11 Td
+(  Second Consignee - 300 Port Ave - Appt 2025-11-03 12:00 CST  Ref: D2) Tj
+0 -11 Td
+() Tj
+0 -11 Td
+(Stop 3 DELIVERY  San Antonio, TX 78201) Tj
+0 -11 Td
+(  Third Consignee - 400 River Rd - Appt 2025-11-04 14:00 CST  Ref: D3) Tj
+ET
+endstream
+endobj
+5 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000249 00000 n 
+0000001161 00000 n 
+trailer
+<<
+/Size 6
+/Root 1 0 R
+>>
+startxref
+1231
+%%EOF
