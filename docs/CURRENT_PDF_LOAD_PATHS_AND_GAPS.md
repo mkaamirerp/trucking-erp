@@ -6,6 +6,7 @@ For the **approved target** pipeline (fingerprinting, classification, canonical 
 
 **Related:**
 
+- [`MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md`](./MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md) — multi-document load candidate, grouping, and merge design contract (not implemented yet; applies beyond current single-document Lab/workspace paths).
 - [`LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md`](./LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md) — design + **as-implemented** Load Lab notes.
 - [`LoadLabCleaner.md`](./LoadLabCleaner.md) — temporary bridges and cleanup ledger.
 - [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) — future OpenAI integration (not wired to parsing yet).

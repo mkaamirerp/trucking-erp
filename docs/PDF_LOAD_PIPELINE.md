@@ -6,6 +6,7 @@
 
 **Related:**
 
+- [`MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md`](./MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md) — one load candidate may have many source documents; identity, classification, field authority, merge/conflict rules (design only; not TQL-specific).
 - [`LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md`](./LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md) — isolated rollout surface, persistence, promote, audit.
 - [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) — where OpenAI fits when the semantic layer is implemented.
 - [`LoadLabCleaner.md`](./LoadLabCleaner.md) — temporary bridges and cleanup ledger for Load Lab work.
