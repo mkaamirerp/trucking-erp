@@ -17,6 +17,9 @@ export const OPS = {
   PEOPLE: "/operations/people",
   PEOPLE_DETAIL: (id: number | string) => `/operations/people/${id}`,
   DISPATCH: "/dispatch",
+  /** Trip (operational container) — read-only shell; member loads link to /loads/:id. */
+  TRIPS: "/trips",
+  TRIP_DETAIL: (id: number | string) => `/trips/${id}`,
   FLEET: "/fleet",
   /** Freight brokers (MC / intake identity), not customs brokers. */
   BROKERS: "/brokers",

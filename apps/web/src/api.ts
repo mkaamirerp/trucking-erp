@@ -836,6 +836,88 @@ export async function getLoad(id: number) {
   return handle<Load>(res);
 }
 
+/** Read-only trip container (operational) — members from trip_loads. */
+export type TripMemberLoad = {
+  trip_load_id: number;
+  load_id: number;
+  status_within_trip: string;
+  sequence_hint: number | null;
+  added_at: string;
+  removed_at: string | null;
+  load_number: string;
+  broker_name_snapshot?: string | null;
+  broker_load_reference?: string | null;
+  commodity?: string | null;
+  rate?: number | null;
+  customer_rate?: number | null;
+  stop_route_summary?: string | null;
+};
+
+export type TripDetail = {
+  id: number;
+  tenant_id: number;
+  trip_number: string;
+  status: string;
+  job_type: string;
+  driver_id?: number | null;
+  driver?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
+  truck_id?: number | null;
+  truck?: { id: number; unit_number: string } | null;
+  trailer_id?: number | null;
+  trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
+  assigned_at?: string | null;
+  cancelled_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  legacy_dispatch_trip_id?: number | null;
+  member_loads: TripMemberLoad[];
+};
+
+export async function getTrip(tripId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}`);
+  return handle<TripDetail>(res);
+}
+
+export type TripListItem = {
+  id: number;
+  trip_number: string;
+  status: string;
+  job_type: string;
+  driver_id?: number | null;
+  driver?: TripDetail["driver"];
+  truck_id?: number | null;
+  truck?: { id: number; unit_number: string } | null;
+  trailer_id?: number | null;
+  trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
+  assigned_at?: string | null;
+  cancelled_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  member_load_count: number;
+  first_member?: {
+    load_number: string;
+    broker_name_snapshot?: string | null;
+    broker_load_reference?: string | null;
+    stop_route_summary?: string | null;
+  } | null;
+};
+
+export async function listTrips(params: { search?: string; status?: string; page?: number; size?: number } = {}) {
+  const url = new URL(`${API_BASE}/trips`, window.location.origin);
+  if (params.search?.trim()) url.searchParams.set("search", params.search.trim());
+  if (params.status?.trim()) url.searchParams.set("status", params.status.trim());
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.size) url.searchParams.set("size", String(params.size));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle<PagedResponse<TripListItem>>(res);
+}
+
 export async function createLoad(payload: LoadWritePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads`, {
     method: "POST",
@@ -3472,6 +3554,8 @@ export type Load = {
   /** Denormalized from active dispatch trip; read-only in UI. */
   trip_number?: string | null;
   active_dispatch_trip_id?: number | null;
+  /** Mirrored from trips when assigned; use trip workspace for operational view. */
+  active_trip_id?: number | null;
   broker_match_method?: string | null;
   broker_match_confidence_tier?: string | null;
   broker_match_explanation?: string | null;

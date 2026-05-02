@@ -1258,6 +1258,17 @@ export default function LoadWorkspacePage() {
                   ) : (
                     <span className="italic">No trip number</span>
                   )}
+                  {load.active_trip_id != null ? (
+                    <>
+                      <span>·</span>
+                      <Link
+                        to={OPS.TRIP_DETAIL(load.active_trip_id)}
+                        className="font-medium text-[var(--trk-heading)] hover:underline"
+                      >
+                        View Trip
+                      </Link>
+                    </>
+                  ) : null}
                   <span>·</span>
                   <span>{hasActiveDispatchTrip ? "Dispatch linked" : "No dispatch trip"}</span>
                   {routeSubtitle !== "—" ? (

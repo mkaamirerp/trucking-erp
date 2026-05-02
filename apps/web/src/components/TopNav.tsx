@@ -10,6 +10,7 @@ import { OPS, ADMIN, USER } from "../routes";
 const dispatchLinks = [
   { label: "Dispatch", to: OPS.DISPATCH },
   { label: "Loads", to: OPS.LOADS },
+  { label: "Trips", to: OPS.TRIPS },
   { label: "Email", to: OPS.EMAIL_LOAD },
   { label: "Intake", to: OPS.INTAKE },
 ];
@@ -63,6 +64,7 @@ function usePageLabel(): string {
   const { pathname } = useLocation();
   if (pathname === OPS.DASHBOARD) return "Dashboard";
   if (pathname.startsWith("/dispatch")) return "Dispatch";
+  if (pathname.startsWith("/trips")) return "Trips";
   if (pathname.startsWith("/loads")) return "Loads";
   if (pathname.startsWith("/inbox")) return "Email";
   if (pathname.startsWith("/intake")) return "Intake";

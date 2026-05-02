@@ -20,6 +20,8 @@ import LoadsListPage from "./pages/LoadsListPage";
 import DispatchPage from "./pages/DispatchPage";
 import LoadInboxPage from "./pages/LoadInboxPage";
 import LoadWorkspacePage from "./pages/LoadWorkspacePage";
+import TripWorkspacePage from "./pages/TripWorkspacePage";
+import TripsListPage from "./pages/TripsListPage";
 import LoadLabPage from "./pages/LoadLabPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
@@ -72,6 +74,7 @@ function App() {
     /^\/fleet/.test(location.pathname) ||
     /^\/brokers/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
+    /^\/trips/.test(location.pathname) ||
     /^\/driver-onboarding/.test(location.pathname) ||
     /^\/operations/.test(location.pathname) ||
     /^\/admin/.test(location.pathname) ||
@@ -222,6 +225,22 @@ function App() {
       />
       <Route path="/loads/new" element={<LoadWorkspacePage />} />
       <Route path="/loads/:id" element={<LoadWorkspacePage />} />
+      <Route
+        path="/trips"
+        element={
+          <Layout>
+            <TripsListPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/trips/:id"
+        element={
+          <Layout>
+            <TripWorkspacePage />
+          </Layout>
+        }
+      />
       <Route
         path="/payroll/pay-periods"
         element={
