@@ -937,6 +937,21 @@ export async function createPlannedTrip(body: CreatePlannedTripBody): Promise<Tr
   return handle<TripDetail>(res);
 }
 
+/** POST /trips/{id}/loads — attach an existing load to the trip container. */
+export type AddTripLoadBody = {
+  load_id: number;
+  sequence_hint?: number | null;
+};
+
+export async function addLoadToTrip(tripId: number, body: AddTripLoadBody): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<TripDetail>(res);
+}
+
 export async function createLoad(payload: LoadWritePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads`, {
     method: "POST",

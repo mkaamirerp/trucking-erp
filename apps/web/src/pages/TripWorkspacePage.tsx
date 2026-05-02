@@ -3,12 +3,51 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getTrip, type TripDetail } from "@/api";
+import { addLoadToTrip, getTrip, type TripDetail } from "@/api";
 import { OPS } from "@/routes";
 
 function formatMoney(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "—";
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n);
+}
+
+function formatAddTripLoadError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not add load to trip.";
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (typeof detail === "string") {
+      if (/^load not found$/i.test(detail.trim())) return "Load not found.";
+      if (/^trip not found$/i.test(detail.trim())) return "Trip not found.";
+    }
+    if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+      const code = (detail as { code?: string }).code;
+      switch (code) {
+        case "TRIP_CANCELLED":
+          return "This trip is cancelled. You can't add loads.";
+        case "LOAD_ACTIVE_ON_OTHER_TRIP":
+          return "This load is already on another active trip.";
+        case "DUPLICATE_TRIP_LOAD_MEMBERSHIP":
+          return "This load is already on this trip.";
+        default:
+          break;
+      }
+      const msg =
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : null;
+      if (msg) return msg;
+    }
+  } catch {
+    /* use raw */
+  }
+  if (raw.length > 0 && raw.length < 400) return raw;
+  return "Could not add load to trip.";
+}
+
+function isPlannedTripOpenForAdds(trip: TripDetail): boolean {
+  return (trip.status || "").toLowerCase() === "planned" && trip.cancelled_at == null;
 }
 
 export default function TripWorkspacePage() {
@@ -18,6 +57,9 @@ export default function TripWorkspacePage() {
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [addLoadIdInput, setAddLoadIdInput] = useState("");
+  const [addLoadBusy, setAddLoadBusy] = useState(false);
+  const [addLoadError, setAddLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -41,6 +83,31 @@ export default function TripWorkspacePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setAddLoadError(null);
+    setAddLoadIdInput("");
+  }, [tripId]);
+
+  const onAddLoadToTrip = useCallback(async () => {
+    if (!Number.isFinite(tripId)) return;
+    const loadId = Number(addLoadIdInput.trim());
+    if (!Number.isFinite(loadId) || loadId < 1) {
+      setAddLoadError("Enter a valid load ID.");
+      return;
+    }
+    setAddLoadBusy(true);
+    setAddLoadError(null);
+    try {
+      const updated = await addLoadToTrip(tripId, { load_id: loadId });
+      setTrip(updated);
+      setAddLoadIdInput("");
+    } catch (e) {
+      setAddLoadError(formatAddTripLoadError(e));
+    } finally {
+      setAddLoadBusy(false);
+    }
+  }, [tripId, addLoadIdInput]);
 
   const toolBtn =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
@@ -124,6 +191,43 @@ export default function TripWorkspacePage() {
                 Trip is the operational container. Loads below remain commercial records. Open a load for rate, broker, and
                 document work.
               </p>
+              {isPlannedTripOpenForAdds(trip) ? (
+                <div className="mt-4 flex flex-col gap-2">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="flex flex-col gap-0.5 text-[11px] text-[var(--trk-text-muted)]">
+                      Load ID
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        value={addLoadIdInput}
+                        onChange={(e) => {
+                          setAddLoadIdInput(e.target.value);
+                          if (addLoadError) setAddLoadError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void onAddLoadToTrip();
+                          }
+                        }}
+                        disabled={addLoadBusy}
+                        placeholder="e.g. 526"
+                        className="w-32 rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={addLoadBusy}
+                      onClick={() => void onAddLoadToTrip()}
+                      className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {addLoadBusy ? "Adding…" : "Add load"}
+                    </button>
+                  </div>
+                  {addLoadError ? <p className="text-[11px] text-red-700">{addLoadError}</p> : null}
+                </div>
+              ) : null}
               {trip.member_loads.length === 0 ? (
                 <p className="mt-4 text-sm italic text-[var(--trk-text-muted)]">No loads on this trip yet.</p>
               ) : (
