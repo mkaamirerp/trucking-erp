@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -22,6 +23,20 @@ from app.constants.trip_dispatch import (
 )
 from app.models.dispatch_trip import DispatchTrip, TenantDispatchNumbering
 from app.models.load import Load
+from app.models.trip import Trip, TripLoad
+
+
+# Matches Phase 1 backfill: trip_loads.status_within_trip for active membership vs soft-removed.
+TRIP_LOAD_STATUS_WITHIN_ACTIVE = "active"
+TRIP_LOAD_STATUS_WITHIN_REMOVED = "removed"
+
+
+@dataclass(frozen=True, slots=True)
+class FreightActiveDispatchResult:
+    """Result of `ensure_active_trip_for_freight_load` after `dispatch_trips` + container mirror are aligned."""
+
+    dispatch_trip: DispatchTrip
+    container_trip_id: int
 
 
 _PREFIX_RE = re.compile(r"^[A-Z0-9]+$")
@@ -65,6 +80,21 @@ async def get_or_create_numbering_for_update(
     return row
 
 
+async def mint_next_trip_number(db: AsyncSession, tenant_id: int) -> str:
+    """Acquire tenant_dispatch_numbering row lock, increment sequence, return new full trip_number.
+
+    Single shared pool for all Trip containers (planned trips and legacy dispatch_trips paths).
+    Caller runs inside a DB transaction.
+    """
+    row = await get_or_create_numbering_for_update(db, tenant_id)
+    if row is None or row.prefix_locked_at is None or not (row.trip_number_prefix or "").strip():
+        raise numbering_config_error()
+    n = int(row.next_numeric)
+    trip_number = f"{row.trip_number_prefix}{n:0{TRIP_NUMERIC_WIDTH}d}"
+    row.next_numeric = n + 1
+    return trip_number
+
+
 async def lock_trip_prefix(db: AsyncSession, tenant_id: int, prefix: str) -> TenantDispatchNumbering:
     """Set and lock prefix (one-time). Creates numbering row if needed."""
     normalized = normalize_and_validate_trip_prefix(prefix)
@@ -105,34 +135,101 @@ async def get_active_trip_for_load(db: AsyncSession, tenant_id: int, load_id: in
     )
 
 
-async def ensure_active_trip_for_freight_load(db: AsyncSession, tenant_id: int, load_id: int) -> DispatchTrip:
-    """Mint trip on first dispatched; idempotent if active trip exists.
+async def _upsert_trip_and_membership(
+    db: AsyncSession, tenant_id: int, load_id: int, d_trip: DispatchTrip, load: Load
+) -> int:
+    """Create or update `trips` + ensure one active `trip_loads` row for this freight dispatch. Returns trips.id."""
+    container = await db.scalar(
+        select(Trip).where(
+            Trip.tenant_id == tenant_id,
+            Trip.legacy_dispatch_trip_id == d_trip.id,
+        )
+    )
+    now = datetime.now(timezone.utc)
+    if container is None:
+        container = Trip(
+            tenant_id=tenant_id,
+            trip_number=d_trip.trip_number,
+            status=d_trip.status,
+            job_type=d_trip.job_type,
+            trailer_move_id=d_trip.trailer_move_id,
+            legacy_dispatch_trip_id=d_trip.id,
+            driver_id=load.driver_id,
+            truck_id=load.truck_id,
+            trailer_id=load.trailer_id,
+            assigned_at=d_trip.assigned_at,
+            created_at=d_trip.created_at,
+            updated_at=d_trip.updated_at,
+        )
+        db.add(container)
+        await db.flush()
+    else:
+        container.trip_number = d_trip.trip_number
+        container.status = d_trip.status
+        container.job_type = d_trip.job_type
+        container.trailer_move_id = d_trip.trailer_move_id
+        container.driver_id = load.driver_id
+        container.truck_id = load.truck_id
+        container.trailer_id = load.trailer_id
+        container.updated_at = now
 
-    Does not mutate the Load ORM row — caller applies active_dispatch_trip_id / trip_number via CAS UPDATE.
+    active_tl = await db.scalar(
+        select(TripLoad).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.trip_id == container.id,
+            TripLoad.load_id == load_id,
+            TripLoad.removed_at.is_(None),
+        )
+    )
+    if active_tl is None:
+        add_ref = d_trip.assigned_at or d_trip.created_at
+        db.add(
+            TripLoad(
+                tenant_id=tenant_id,
+                trip_id=container.id,
+                load_id=load_id,
+                status_within_trip=TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+                sequence_hint=0,
+                added_at=add_ref,
+                removed_at=None,
+            )
+        )
+        await db.flush()
+
+    return int(container.id)
+
+
+async def ensure_active_trip_for_freight_load(
+    db: AsyncSession, tenant_id: int, load_id: int
+) -> FreightActiveDispatchResult:
+    """Mint dispatch_trip on first dispatched; idempotent. Mirrors `trips` + `trip_loads` for Phase 2A.
+
+    Does not mutate the Load ORM row — caller applies active_dispatch_trip_id, trip_number, active_trip_id
+    via CAS UPDATE.
     """
     existing = await get_active_trip_for_load(db, tenant_id, load_id)
     if existing is not None:
-        return existing
+        d_trip = existing
+    else:
+        trip_number = await mint_next_trip_number(db, tenant_id)
 
-    row = await get_or_create_numbering_for_update(db, tenant_id)
-    if row is None or row.prefix_locked_at is None or not (row.trip_number_prefix or "").strip():
-        raise numbering_config_error()
+        d_trip = DispatchTrip(
+            tenant_id=tenant_id,
+            trip_number=trip_number,
+            job_type=JOB_TYPE_FREIGHT_LOAD,
+            status=DISPATCH_TRIP_STATUS_ACTIVE,
+            load_id=load_id,
+            trailer_move_id=None,
+        )
+        db.add(d_trip)
+        await db.flush()
 
-    n = int(row.next_numeric)
-    trip_number = f"{row.trip_number_prefix}{n:0{TRIP_NUMERIC_WIDTH}d}"
-    row.next_numeric = n + 1
+    load = await db.scalar(select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id))
+    if load is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
-    trip = DispatchTrip(
-        tenant_id=tenant_id,
-        trip_number=trip_number,
-        job_type=JOB_TYPE_FREIGHT_LOAD,
-        status=DISPATCH_TRIP_STATUS_ACTIVE,
-        load_id=load_id,
-        trailer_move_id=None,
-    )
-    db.add(trip)
-    await db.flush()
-    return trip
+    container_trip_id = await _upsert_trip_and_membership(db, tenant_id, load_id, d_trip, load)
+    return FreightActiveDispatchResult(dispatch_trip=d_trip, container_trip_id=container_trip_id)
 
 
 async def _sync_load_read_model(db: AsyncSession, load: Load, trip: DispatchTrip | None) -> None:
@@ -152,5 +249,28 @@ async def cancel_active_trip_for_load(db: AsyncSession, tenant_id: int, load_id:
             load.trip_number = None
         return
     trip.status = DISPATCH_TRIP_STATUS_CANCELLED
+
+    now = datetime.now(timezone.utc)
+    mirror = await db.scalar(
+        select(Trip).where(
+            Trip.tenant_id == tenant_id,
+            Trip.legacy_dispatch_trip_id == trip.id,
+        )
+    )
+    if mirror is not None:
+        mirror.status = DISPATCH_TRIP_STATUS_CANCELLED
+        mirror.updated_at = now
+        active_tl = await db.scalar(
+            select(TripLoad).where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.trip_id == mirror.id,
+                TripLoad.load_id == load_id,
+                TripLoad.removed_at.is_(None),
+            )
+        )
+        if active_tl is not None:
+            active_tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_REMOVED
+            active_tl.removed_at = now
+
     if load is not None:
         await _sync_load_read_model(db, load, None)

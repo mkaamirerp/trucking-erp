@@ -11,7 +11,14 @@ PRE_DISPATCH_TRIP_CANCEL_STATUSES = frozenset({"draft", "ready", "unassigned"})
 DISPATCH_TRIP_STATUS_ACTIVE = "active"
 DISPATCH_TRIP_STATUS_CANCELLED = "cancelled"
 
+# Trip container (trips.status) — operational lifecycle; not the same as dispatch_trips.status strings.
+TRIP_CONTAINER_STATUS_PLANNED = "planned"
+TRIP_CONTAINER_STATUS_CANCELLED = "cancelled"
+
 JOB_TYPE_FREIGHT_LOAD = "freight_load"
+
+# trip_loads.status_within_trip
+TRIP_LOAD_STATUS_WITHIN_PLANNED = "planned"
 
 TRIP_NUMBER_PREFIX_MIN_LEN = 2
 TRIP_NUMBER_PREFIX_MAX_LEN = 16

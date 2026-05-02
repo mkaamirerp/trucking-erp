@@ -59,12 +59,16 @@ class Trip(Base):
         Integer, ForeignKey("trailers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
     trip_loads = relationship("TripLoad", back_populates="trip")
+    driver = relationship("Driver", foreign_keys=[driver_id], viewonly=True)
+    truck = relationship("Truck", foreign_keys=[truck_id], viewonly=True)
+    trailer = relationship("Trailer", foreign_keys=[trailer_id], viewonly=True)
 
 
 class TripLoad(Base):
