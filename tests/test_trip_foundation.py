@@ -93,8 +93,8 @@ class TestTripFoundationTables:
             assert dt_num == t_num
 
     async def test_freight_dispatch_has_trip_loads_membership(self, tenant_session: AsyncSession) -> None:
-        """Backfill inserts trip_loads only for freight at migration time. New freights may lack trip_loads
-        until Phase 2 — so join only mirrored (legacy-linked) freights, not all current load_id rows."""
+        """Backfill + Phase 2A ensure: trip_loads count for freight dispatches that have a mirrored trips row
+        (legacy link). Count may still diverge if dev has freight dispatches without mirror (pre-Phase-2 drift)."""
         n_freight_mirrored = (
             await tenant_session.execute(
                 text(

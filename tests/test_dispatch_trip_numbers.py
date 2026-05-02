@@ -282,6 +282,7 @@ class TestTripNumberDispatchLifecycle:
         assert suffix.isdigit()
         tid = body.get("active_dispatch_trip_id")
         assert tid is not None
+        assert body.get("active_trip_id") is not None
 
         d2 = await client.patch(
             f"/api/v1/loads/{load_id}",
@@ -362,6 +363,7 @@ class TestTripNumberDispatchLifecycle:
             },
         )
         assert d_disp.status_code == 200, d_disp.text
+        assert d_disp.json().get("active_trip_id") is not None
         r_back = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
@@ -372,6 +374,7 @@ class TestTripNumberDispatchLifecycle:
         assert body["status"] == "ready"
         assert body.get("trip_number") in (None, "")
         assert body.get("active_dispatch_trip_id") in (None,)
+        assert body.get("active_trip_id") in (None,)
 
     async def test_search_finds_load_by_trip_number(self, client, override_auth_tenant, locked_prefix) -> None:
         ids = await self._first_driver_truck(client)

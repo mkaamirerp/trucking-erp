@@ -223,6 +223,8 @@ class LoadResponse(LoadBase):
     concurrency_version: int = 1
     trip_number: Optional[str] = None
     active_dispatch_trip_id: Optional[int] = None
+    #: Phase 1+ mirror of `trips.id` when a freight dispatch is active; read-only (set with dispatch allocation).
+    active_trip_id: Optional[int] = None
     broker_match_method: Optional[str] = Field(default=None, max_length=32)
     broker_match_confidence_tier: Optional[str] = Field(default=None, max_length=8)
     broker_match_explanation: Optional[str] = None

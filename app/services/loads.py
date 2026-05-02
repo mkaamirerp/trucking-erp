@@ -359,7 +359,7 @@ async def update_load(
     merged_driver_id = _merged_scalar(load, data, "driver_id")
     merged_truck_id = _merged_scalar(load, data, "truck_id")
 
-    next_aid, next_tnum = load.active_dispatch_trip_id, load.trip_number
+    next_aid, next_tnum, next_atid = load.active_dispatch_trip_id, load.trip_number, load.active_trip_id
     if (
         new_status == TRIP_ALLOCATED_AT_LOAD_STATUS
         and old_status != TRIP_ALLOCATED_AT_LOAD_STATUS
@@ -372,19 +372,21 @@ async def update_load(
                     "code": DISPATCH_RESOURCES_REQUIRED,
                 },
             )
-        trip = await dispatch_trips_service.ensure_active_trip_for_freight_load(db, tenant_id, load.id)
-        next_aid, next_tnum = trip.id, trip.trip_number
+        dres = await dispatch_trips_service.ensure_active_trip_for_freight_load(db, tenant_id, load.id)
+        next_aid, next_tnum = dres.dispatch_trip.id, dres.dispatch_trip.trip_number
+        next_atid = dres.container_trip_id
     elif (
         old_status == TRIP_ALLOCATED_AT_LOAD_STATUS
         and new_status != TRIP_ALLOCATED_AT_LOAD_STATUS
         and new_status in PRE_DISPATCH_TRIP_CANCEL_STATUSES
     ):
         await dispatch_trips_service.cancel_active_trip_for_load(db, tenant_id, load.id, load=None)
-        next_aid, next_tnum = None, None
+        next_aid, next_tnum, next_atid = None, None, None
 
     values = {**data}
     values["active_dispatch_trip_id"] = next_aid
     values["trip_number"] = next_tnum
+    values["active_trip_id"] = next_atid
     values["updated_at"] = func.now()
     values["concurrency_version"] = Load.concurrency_version + 1
 
