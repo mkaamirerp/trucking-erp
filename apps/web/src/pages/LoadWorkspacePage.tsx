@@ -11,6 +11,7 @@ import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
   createLoad,
+  createPlannedTrip,
   getEmailThread,
   getEmailThreadMessages,
   getDriverAssignmentHints,
@@ -272,6 +273,38 @@ function ContextRow({
   );
 }
 
+function formatPlannedTripCreateError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not create trip. Try again.";
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+      const code = (detail as { code?: string }).code;
+      const msg =
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : null;
+      switch (code) {
+        case "TRIP_NUMBER_PREFIX_NOT_CONFIGURED":
+          return `${msg ?? "Trip number prefix is not configured."} Set it under Admin → Dispatch numbering.`;
+        case "LOAD_ACTIVE_ON_OTHER_TRIP":
+          return msg ?? "This load is already on another trip. Remove it there or open that trip.";
+        case "DUPLICATE_TRIP_LOAD_MEMBERSHIP":
+          return msg ?? "This load is already on this trip.";
+        default:
+          if (msg) return msg;
+          break;
+      }
+    }
+    if (typeof detail === "string") return detail;
+  } catch {
+    /* use raw message */
+  }
+  if (raw.length > 0 && raw.length < 400) return raw;
+  return "Could not create trip. Try again.";
+}
+
 export default function LoadWorkspacePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -322,6 +355,8 @@ export default function LoadWorkspacePage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
+  const [createPlannedTripError, setCreatePlannedTripError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toolbarMessage, setToolbarMessage] = useState<WorkspaceToolbarMessage | null>(null);
   const [customsMessage, setCustomsMessage] = useState<string | null>(null);
@@ -330,6 +365,25 @@ export default function LoadWorkspacePage() {
     serverSnapshot: Load | null;
   } | null>(null);
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
+
+  const onCreatePlannedTrip = useCallback(async () => {
+    if (!load || load.active_trip_id != null) return;
+    const lid = load.id;
+    setCreatePlannedTripBusy(true);
+    setCreatePlannedTripError(null);
+    try {
+      const created = await createPlannedTrip({
+        status: "planned",
+        job_type: "freight_load",
+        load_ids: [lid],
+      });
+      navigate(OPS.TRIP_DETAIL(created.id));
+    } catch (e) {
+      setCreatePlannedTripError(formatPlannedTripCreateError(e));
+    } finally {
+      setCreatePlannedTripBusy(false);
+    }
+  }, [load, navigate]);
 
   const [intakeMessages, setIntakeMessages] = useState<InboxMessageItem[]>([]);
   const [intakeThread, setIntakeThread] = useState<InboxThreadListItem | null>(null);
@@ -381,6 +435,10 @@ export default function LoadWorkspacePage() {
   useEffect(() => {
     loadConcurrencyRef.current = load?.concurrency_version ?? null;
   }, [load?.concurrency_version]);
+
+  useEffect(() => {
+    setCreatePlannedTripError(null);
+  }, [load?.id]);
 
   const docLines = useMemo(() => {
     const raw = internalNotes || "";
@@ -1268,7 +1326,19 @@ export default function LoadWorkspacePage() {
                         View Trip
                       </Link>
                     </>
-                  ) : null}
+                  ) : (
+                    <>
+                      <span>·</span>
+                      <button
+                        type="button"
+                        disabled={createPlannedTripBusy}
+                        onClick={() => void onCreatePlannedTrip()}
+                        className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {createPlannedTripBusy ? "Creating trip…" : "Create Planned Trip"}
+                      </button>
+                    </>
+                  )}
                   <span>·</span>
                   <span>{hasActiveDispatchTrip ? "Dispatch linked" : "No dispatch trip"}</span>
                   {routeSubtitle !== "—" ? (
@@ -1288,6 +1358,9 @@ export default function LoadWorkspacePage() {
                     </>
                   )}
                 </div>
+              ) : null}
+              {workspaceMode === "detail" && load && createPlannedTripError ? (
+                <p className="mt-1 text-[11px] text-red-700">{createPlannedTripError}</p>
               ) : null}
               {workspaceMode === "manual" ? (
                 <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Create saves the load and opens it for edits.</p>

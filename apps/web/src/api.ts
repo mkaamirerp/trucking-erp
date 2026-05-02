@@ -918,6 +918,25 @@ export async function listTrips(params: { search?: string; status?: string; page
   return handle<PagedResponse<TripListItem>>(res);
 }
 
+/** POST /trips — create planned trip container; mirrors CreatePlannedTripBody on the API. */
+export type CreatePlannedTripBody = {
+  status?: string | null;
+  job_type?: string | null;
+  driver_id?: number | null;
+  truck_id?: number | null;
+  trailer_id?: number | null;
+  load_ids?: number[];
+};
+
+export async function createPlannedTrip(body: CreatePlannedTripBody): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<TripDetail>(res);
+}
+
 export async function createLoad(payload: LoadWritePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads`, {
     method: "POST",
