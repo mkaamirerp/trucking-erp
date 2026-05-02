@@ -952,6 +952,14 @@ export async function addLoadToTrip(tripId: number, body: AddTripLoadBody): Prom
   return handle<TripDetail>(res);
 }
 
+/** POST /trips/{id}/loads/{loadId}/remove — soft-remove membership; no body. */
+export async function removeLoadFromTrip(tripId: number, loadId: number): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/remove`, {
+    method: "POST",
+  });
+  return handle<TripDetail>(res);
+}
+
 export async function createLoad(payload: LoadWritePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads`, {
     method: "POST",

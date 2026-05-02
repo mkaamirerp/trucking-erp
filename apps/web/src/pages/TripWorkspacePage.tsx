@@ -1,9 +1,9 @@
 /**
  * Read-only trip operational shell (Phase 3A). Execution/custody UI comes later.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { addLoadToTrip, getTrip, type TripDetail } from "@/api";
+import { addLoadToTrip, getTrip, removeLoadFromTrip, type TripDetail, type TripMemberLoad } from "@/api";
 import { OPS } from "@/routes";
 
 function formatMoney(n: number | null | undefined): string {
@@ -46,7 +46,40 @@ function formatAddTripLoadError(err: unknown): string {
   return "Could not add load to trip.";
 }
 
-function isPlannedTripOpenForAdds(trip: TripDetail): boolean {
+function formatRemoveTripLoadError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not remove load from trip.";
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (typeof detail === "string") {
+      if (/^trip not found$/i.test(detail.trim())) return "Trip not found.";
+    }
+    if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+      const code = (detail as { code?: string }).code;
+      switch (code) {
+        case "TRIP_CANCELLED":
+          return "This trip is cancelled. You can't remove loads.";
+        case "TRIP_LOAD_NOT_FOUND":
+          return "This load is not active on this trip.";
+        default:
+          break;
+      }
+      const msg =
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : null;
+      if (msg) return msg;
+    }
+  } catch {
+    /* use raw */
+  }
+  if (raw.length > 0 && raw.length < 400) return raw;
+  return "Could not remove load from trip.";
+}
+
+/** Planned trip and not cancelled — same gate for Add load and Remove (3G/3H). */
+function isPlannedTripOpenForMembershipActions(trip: TripDetail): boolean {
   return (trip.status || "").toLowerCase() === "planned" && trip.cancelled_at == null;
 }
 
@@ -60,6 +93,8 @@ export default function TripWorkspacePage() {
   const [addLoadIdInput, setAddLoadIdInput] = useState("");
   const [addLoadBusy, setAddLoadBusy] = useState(false);
   const [addLoadError, setAddLoadError] = useState<string | null>(null);
+  const [removingLoadId, setRemovingLoadId] = useState<number | null>(null);
+  const [removeLoadError, setRemoveLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -87,6 +122,8 @@ export default function TripWorkspacePage() {
   useEffect(() => {
     setAddLoadError(null);
     setAddLoadIdInput("");
+    setRemoveLoadError(null);
+    setRemovingLoadId(null);
   }, [tripId]);
 
   const onAddLoadToTrip = useCallback(async () => {
@@ -108,6 +145,33 @@ export default function TripWorkspacePage() {
       setAddLoadBusy(false);
     }
   }, [tripId, addLoadIdInput]);
+
+  const activeMemberLoads = useMemo(
+    () => (trip?.member_loads ?? []).filter((m: TripMemberLoad) => m.removed_at == null),
+    [trip?.member_loads],
+  );
+
+  const onRemoveLoadFromTrip = useCallback(
+    async (loadId: number, loadLabel: string) => {
+      if (!Number.isFinite(tripId)) return;
+      if (
+        !window.confirm(`Remove load ${loadLabel} (ID ${loadId}) from this trip? This does not delete the commercial load.`)
+      ) {
+        return;
+      }
+      setRemovingLoadId(loadId);
+      setRemoveLoadError(null);
+      try {
+        const updated = await removeLoadFromTrip(tripId, loadId);
+        setTrip(updated);
+      } catch (e) {
+        setRemoveLoadError(formatRemoveTripLoadError(e));
+      } finally {
+        setRemovingLoadId(null);
+      }
+    },
+    [tripId],
+  );
 
   const toolBtn =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
@@ -191,7 +255,7 @@ export default function TripWorkspacePage() {
                 Trip is the operational container. Loads below remain commercial records. Open a load for rate, broker, and
                 document work.
               </p>
-              {isPlannedTripOpenForAdds(trip) ? (
+              {isPlannedTripOpenForMembershipActions(trip) ? (
                 <div className="mt-4 flex flex-col gap-2">
                   <div className="flex flex-wrap items-end gap-2">
                     <label className="flex flex-col gap-0.5 text-[11px] text-[var(--trk-text-muted)]">
@@ -228,11 +292,12 @@ export default function TripWorkspacePage() {
                   {addLoadError ? <p className="text-[11px] text-red-700">{addLoadError}</p> : null}
                 </div>
               ) : null}
-              {trip.member_loads.length === 0 ? (
+              {removeLoadError ? <p className="mt-3 text-[11px] text-red-700">{removeLoadError}</p> : null}
+              {activeMemberLoads.length === 0 ? (
                 <p className="mt-4 text-sm italic text-[var(--trk-text-muted)]">No loads on this trip yet.</p>
               ) : (
                 <ul className="mt-4 divide-y divide-[var(--trk-border)] rounded-lg border border-[var(--trk-border)]">
-                  {trip.member_loads.map((m) => (
+                  {activeMemberLoads.map((m) => (
                     <li key={m.trip_load_id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                       <div className="min-w-0">
                         <Link
@@ -250,11 +315,21 @@ export default function TripWorkspacePage() {
                           <div className="mt-1 text-xs text-[var(--trk-text-muted)]">{m.stop_route_summary}</div>
                         ) : null}
                       </div>
-                      <div className="shrink-0 text-right text-xs text-[var(--trk-text-muted)]">
+                      <div className="flex shrink-0 flex-col items-end gap-1 text-right text-xs text-[var(--trk-text-muted)]">
                         <div>{m.status_within_trip}</div>
-                        <div className="mt-1">
+                        <div>
                           {formatMoney(m.rate)} / {formatMoney(m.customer_rate)}
                         </div>
+                        {isPlannedTripOpenForMembershipActions(trip) ? (
+                          <button
+                            type="button"
+                            disabled={removingLoadId === m.load_id}
+                            onClick={() => void onRemoveLoadFromTrip(m.load_id, m.load_number || `#${m.load_id}`)}
+                            className="mt-1 rounded border border-red-200/80 bg-[var(--trk-surface)] px-2 py-0.5 text-[10px] font-semibold text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {removingLoadId === m.load_id ? "Removing…" : "Remove"}
+                          </button>
+                        ) : null}
                       </div>
                     </li>
                   ))}
