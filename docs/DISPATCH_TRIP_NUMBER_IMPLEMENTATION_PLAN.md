@@ -1,15 +1,20 @@
 # Trip number — implementation plan
 
-**Baseline:** [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) (locked: technical + cross-module business intent).
+**Baseline:** [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) (locked: **mint at Trip plan/create**, single pool, never reuse, `trips` canonical).
 
 **Scope:** This report translates the baseline into **concrete schema, services, API, and UI work**. Trip number is **not** a dispatch-board-only field; it is the **operational reference** across dispatch, loads, issues, documents, and payroll **tracing**.
 
-### Canonical vs denormalized (non-negotiable)
+**Phase 3C (planned container):** [`PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md`](./PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md).
 
-- **`dispatch_trips` is canonical.** `trip_number`, lifecycle `status`, and links to load / trailer move are **owned** here.
-- If **`loads.active_dispatch_trip_id`** and/or **`loads.trip_number`** exist, they are **read-model / convenience fields only** (lists, search, fewer joins). They are **not** a second source of truth.
-- **All writes** that materially change “what is the active trip for this load?” flow through **`dispatch_trips`** + the allocation/cancel services, which then **sync** denormalized columns in the same transaction. No random `UPDATE loads SET trip_number = …` elsewhere.
-- Later contributors must **not** “fix” trip display by editing load rows; that pattern would drift from truth.
+### Canonical vs denormalized (evolving — non-negotiable direction)
+
+- **`trips` is canonical for the Trip container** and its **`trip_number`** (minted at **planned Trip create**).
+- **`trip_loads`** is canonical for Trip↔Load membership.
+- **`dispatch_trips`** may remain **legacy or mirrored** during migration; it **must not** introduce a **second numbering pool** or competing trip identity. Align per Phase 3C / dual-write notes below.
+- If **`loads.active_dispatch_trip_id`**, **`loads.active_trip_id`**, and/or **`loads.trip_number`** exist, they are **read-model / convenience** only unless a doc explicitly states otherwise for a transitional window.
+- **All writes** that create a new trip identity flow through the **shared allocator** (`tenant_dispatch_numbering` **FOR UPDATE**) in the same transaction as **`trips`** insert (and any mirrored `dispatch_trips` write). No random `UPDATE loads SET trip_number = …` elsewhere.
+
+**Historical note (pre–Phase 3C code):** Some implementations minted only on load **`dispatched`** via **`dispatch_trips`**. New product rules **supersede** that timing; implementation work should **move/extend** the allocator to **`trips`** per Phase 3C proposal.
 
 **Current codebase touchpoints (reference):**
 
@@ -139,19 +144,38 @@ baseline: issues should tie to **trip** for “driver called about IKL10001” �
 
 **Module:** e.g. `app/services/dispatch_trips.py` (or `trip_numbers.py`).
 
-**Core function signature (conceptual):**
+**Core function signatures (conceptual — Phase 3C+):**
 
 ```text
+async def create_planned_trip(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    job_type: str,
+    status: str = "planned",
+    # optional: driver_id, truck_id, trailer_id — all nullable
+) -> Trip
+
 async def ensure_active_trip_for_load_assignment(
     db: AsyncSession,
     tenant_id: int,
     load: Load,
     *,
     assigned_at: datetime | None = None,
-) -> DispatchTrip
+) -> DispatchTrip  # legacy signature; may return Trip or align to trips.id — see Phase 3C
 ```
 
-**Steps (single transaction with `update_load` or called from it):**
+**`create_planned_trip` steps (single transaction):**
+
+1. Load `tenant_dispatch_numbering` **FOR UPDATE** (same as freight allocator).
+2. If `prefix_locked_at` is NULL or prefix empty → raise **`TRIP_NUMBER_PREFIX_NOT_CONFIGURED`**.
+3. Build `trip_number`, bump `next_numeric`.
+4. `INSERT INTO trips` (`status` e.g. `planned`, nullable equipment, **`trip_number`** set).
+5. **Do not** require `trip_loads` rows; **zero active loads** is allowed at create.
+
+**`ensure_active_trip_for_load_assignment` (legacy / until unified):** If the load already participates in a **non-cancelled Trip** via **`trip_loads`**, **attach or update** per product rules **without** minting a second number. Otherwise follow dual-write alignment in Phase 3C (link new `trip_loads` row to existing **`trips`** or create Trip first—implementation choice must preserve **one pool, one mint per new Trip identity**).
+
+**Steps (historical freight path — to be reconciled with `trips` first):**
 
 1. If load already has **active** `dispatch_trips` row (`active_dispatch_trip_id` or query), **return existing** (resource-only reassignment).
 2. Load `tenant_dispatch_numbering` **FOR UPDATE**.
@@ -171,7 +195,12 @@ async def ensure_active_trip_for_load_assignment(
 
 ## 3b. Trip row lifecycle (cancelled, completed, superseded, resource-only)
 
-Canonical state is always on **`dispatch_trips.status`**. Suggested **v1 vocabulary** (adjust enum names in code, not concepts):
+**Evolving ownership:**
+
+- **`trips.status`** (and **`trips.cancelled_at`** when present) are **canonical** for the **Trip container** (planned Trip cancel, execution progression).
+- **`dispatch_trips.status`** describes **legacy / mirrored freight assignment** rows until retired; must stay **consistent** with the **`trips`** row for the same logical Trip.
+
+Suggested **v1 vocabulary** on **`dispatch_trips`** (adjust enum names in code, not concepts):
 
 | Status | Meaning |
 |--------|---------|
@@ -186,7 +215,7 @@ Canonical state is always on **`dispatch_trips.status`**. Suggested **v1 vocabul
 
 **Payroll references:** If a pay line or entry recorded **`trip_number`** (or optional `dispatch_trip_id`) while the trip was **active**, that reference **remains valid** after **`cancelled`** or **`completed`** — it is **historical tracing**, not “trip must be active to pay.” Numbers are **not** recycled onto new trips.
 
-**Resource-only reassignment:** Changing **driver / truck / trailer** on the load **without** undoing dispatch commit does **not** change `dispatch_trips.status` or `trip_number`; only resource FKs on **`loads`** update.
+**Resource-only reassignment:** Changing **driver / truck / trailer** **without** undoing dispatch commit does **not** change **`trip_number`**; update assignment on **`trips`** when that table is canonical, and legacy **`loads`** / **`dispatch_trips`** fields only as aligned by dual-write.
 
 ---
 
@@ -194,24 +223,26 @@ Canonical state is always on **`dispatch_trips.status`**. Suggested **v1 vocabul
 
 **Primary hook:** `app/services/loads.py` — **`update_load`**, after field validation, **before** `commit`.
 
-### 4.1 Locked commit point (business rule — not a loose enum)
+### 4.1 Allocation timing (two paths during migration)
 
-This matches [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) **§3 Allocation timing**.
+**Target (locked product):** **New Trip identity** → mint **`trip_number`** on **`trips`** insert (**planned Trip create**). See [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) §3.
 
-- **Trip number is born** on the **first transition of the load into `dispatched` status** (`old_status != 'dispatched'` → `new_status == 'dispatched'`).
-- Transition **only** into **`assigned`** (without `dispatched`) **does not** allocate a trip — resources may be “slotted” first; **dispatch commit** is the **`dispatched`** edge (aligned with `DispatchPage.tsx` **Dispatch** button today).
-- Implementation: one internal constant, e.g. `TRIP_ALLOCATED_AT_LOAD_STATUS = "dispatched"`, and a single branch in `update_load` — **do not** leave “maybe assigned, maybe dispatched” in code comments.
+**Legacy code path (until removed):** Some deployments still allocate **only** when a load first hits **`dispatched`**, via **`dispatch_trips`**. Phase 3C **moves/extends** the allocator so **`create_planned_trip`** uses the same **`tenant_dispatch_numbering`** transaction; **`update_load`** then **links** Loads via **`trip_loads`** and/or aligns **`dispatch_trips`** **without** a second mint for the same Trip.
 
-**Eligibility at commit:** Require valid dispatch commit per product — **recommend** **driver_id** and **truck_id** NOT NULL when entering `dispatched` (match current UI guard); allocator runs **after** status/resource checks succeed.
+**Do not** leave “maybe assigned, maybe dispatched” undocumented—implementation plan and Phase 3C proposal must name the **single** mint per new **`trips.id`**.
 
-### 4.2 Algorithm sketch
+### 4.1a Historical note (superseded for new work)
 
-- If **new status is `dispatched`** and **no active `dispatch_trips`** row for this load → call **`ensure_active_trip_for_load_assignment`** (allocates + syncs load read-model if present).
+Previously this section locked mint to **load `dispatched`** only. That rule is **superseded** for **new Trip containers**; see **§4.1** above.
+
+### 4.2 Algorithm sketch (legacy `dispatch_trips` path; align with `trips` in Phase 3C)
+
+- If **new status is `dispatched`** and **no active `dispatch_trips`** row for this load → call **`ensure_active_trip_for_load_assignment`** (must **not** mint a **second** `trip_number` if a **`trips`** row already exists for this movement—see Phase 3C dual-write).
 - If **already `dispatched`** and only **`driver_id` / `truck_id` / `trailer_id`** change → **do not** allocate; existing active trip unchanged ([§3b resource-only](#3b-trip-row-lifecycle-cancelled-completed-superseded-resource-only)).
-- If status moves **from `dispatched`** back to a **pre-dispatch** status (undo) → set active trip to **`cancelled`**, clear load **read-model** pointers; **never** delete row or reuse number.
-- New operational trip later → new `dispatch_trips` row + **`superseded`** or prior **`cancelled`** per [baseline lifecycle](./DISPATCH_TRIP_NUMBER_RULE.md#2-assignment-lifecycle).
+- If status moves **from `dispatched`** back to a **pre-dispatch** status (undo) → set active **`dispatch_trips`** to **`cancelled`**, clear load **read-model** pointers; **never** delete row or reuse number. **Trip container (`trips`)** lifecycle must stay **consistent** (may also set `trips.status` / memberships per product).
+- New operational trip later → **new** `trips` row + new number; legacy **`dispatch_trips`** row **`cancelled`** / **`superseded`** per [baseline lifecycle](./DISPATCH_TRIP_NUMBER_RULE.md#2-assignment-lifecycle).
 
-**Other entry points:** Bulk dispatch, mobile, etc. must call the **same** allocator on the **same** `dispatched` commit semantics.
+**Other entry points:** Bulk dispatch, mobile, etc. must call the **same** allocator rules after Phase 3C (no duplicate mint).
 
 **Idempotency:** Repeated saves while **`dispatched`** with existing active trip → no second allocation.
 
@@ -279,7 +310,7 @@ Code: `app/constants/trip_dispatch.py` (`PRE_DISPATCH_TRIP_CANCEL_STATUSES`) and
 
 | Surface | Change |
 |---------|--------|
-| **Admin — dispatch numbering** | Form: prefix, lock; show error link when dispatch blocked |
+| **Admin — dispatch numbering** | Form: prefix, lock; show error when **planned Trip create** **or** dispatch is blocked |
 | **`DispatchPage.tsx`** | Card / row / table: show **`trip_number`** when present; handle 409 from API with toast + link to admin |
 | **`LoadWorkspacePage.tsx`** | Header/summary / context: **`trip_number`** next to broker/load identity with clear labels (operational **Trip** vs broker refs / load #) |
 | **`LoadsListPage.tsx`** | List + export: `trip_number` column where applicable; search passes through `listLoads` `search` / backend filters as implemented |
@@ -294,8 +325,9 @@ Code: `app/constants/trip_dispatch.py` (`PRE_DISPATCH_TRIP_CANCEL_STATUSES`) and
 
 ### Intake and draft boundary
 
-- **Draft / email-intake loads** have **no** `trip_number` until dispatch assignment **commits** ([baseline](DISPATCH_TRIP_NUMBER_RULE.md): not at draft creation, not in intake pipeline).
-- UI: omit trip field or show “—” / “After dispatch” for pre-dispatch loads; **do not** call numbering APIs from intake.
+- **Draft / email-intake loads** do **not** receive a **`trip_number` by virtue of being draft** ([baseline](DISPATCH_TRIP_NUMBER_RULE.md)): no client-supplied number; intake does not bump the allocator.
+- **Planned Trip** may be created **without** any Load; that path **does** mint via **`trips`** create (not intake).
+- UI: for **loads** without an attached Trip, omit trip field or show “—”; for **Trips list/detail**, show planned trips with zero loads when applicable.
 
 ---
 
@@ -321,21 +353,23 @@ Code: `app/constants/trip_dispatch.py` (`PRE_DISPATCH_TRIP_CANCEL_STATUSES`) and
 
 ## 8. Implementation sequencing (recommended — reduces churn)
 
-1. **Schema** — migrations for `tenant_dispatch_numbering`, `dispatch_trips`, constraints, partial uniques, optional load read-model columns.  
-2. **Numbering config API** — admin prefix get/put + lock; block rules documented.  
-3. **Allocation service** — `FOR UPDATE` sequence; create `dispatch_trips`; sync load read-model; tests.  
-4. **Dispatch assignment integration** — `update_load` locked to **`dispatched`** transition ([§4.1](#41-locked-commit-point-business-rule--not-a-loose-enum)); cancel → [§3b](#3b-trip-row-lifecycle-cancelled-completed-superseded-resource-only).  
-5. **Read APIs + search** — `LoadResponse`, board, list filters by `trip_number`, optional trip-by-number GET.  
-6. **UI surfaces** — admin numbering, dispatch board, load detail, lists (intake: [boundary](#intake-and-draft-boundary)).  
-7. **Payroll + issue references** — proportional tracing ([§1.6](#16-settlement--payroll-proportional-tracing--do-not-redesign-payroll), [§7](#7-issue--exception-and-settlement-paths-cross-module)); trailer moves allocator when entity exists.
+1. **Schema** — existing: `tenant_dispatch_numbering`, `dispatch_trips`, …; **Phase 3C:** ensure **`trips`** + **`trip_loads`** receive allocator integration ([`PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md`](./PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md)).
+2. **Numbering config API** — admin prefix get/put + lock; block **planned Trip create** and dispatch when missing.
+3. **Allocation service** — `FOR UPDATE` sequence; **`create_planned_trip` → `INSERT trips`**; reconcile **`dispatch_trips`** / **`trip_loads`** / load read-models in one transaction where required.
+4. **Dispatch assignment integration** — **`update_load`** and board flows attach to **`trips`** via **`trip_loads`** without second mint; cancel / undo rules stay consistent with baseline.
+5. **Read APIs + search** — `LoadResponse`, board, **`GET /api/v1/trips`**, filters by `trip_number`.
+6. **UI surfaces** — Trip workspace, lists, dispatch (intake: [boundary](#intake-and-draft-boundary)).
+7. **Payroll + issue references** — proportional tracing; prefer **`trips.id`** / `trip_number` in metadata over time.
 
-**Prerequisite before coding:** Commit point in **§4.1** is **locked** to **`dispatched`** in v1 (also mirrored in baseline **§3**).
+**Prerequisite before coding:** Read [**`DISPATCH_TRIP_NUMBER_RULE.md` §3**](./DISPATCH_TRIP_NUMBER_RULE.md#3-allocation-timing) — mint on **planned Trip create**; single pool.
 
-### First slice (implemented in repo)
+### First slice (implemented in repo — historical)
 
 - Tenant migration **`e7f8a9b0c1d2`**: `tenant_dispatch_numbering`, `dispatch_trips`, load read-model columns + FK.
-- Models: `app/models/dispatch_trip.py`, `Load` extensions (read-model only).
-- Services: `app/services/dispatch_trips.py` (prefix lock, allocate, cancel active); `update_load` integration in `app/services/loads.py` (**mint only** on first **`dispatched`**; cancel trip when returning to draft/ready/unassigned).
+- **Subsequent evolution:** Phase 1 `trips` / `trip_loads` foundation ([`PHASE1_TRIP_FOUNDATION_PLAN.md`](./PHASE1_TRIP_FOUNDATION_PLAN.md)); **Phase 3C** moves allocator primary mint to **`trips`** per proposal doc.
+
+- Models: `app/models/dispatch_trip.py`, `Load` extensions (read-model only); `trips` / `trip_loads` per tenant migrations.
+- Services: `app/services/dispatch_trips.py` (prefix lock, allocate, cancel active); `update_load` integration in `app/services/loads.py` (historically **mint on first `dispatched`** — superseded for **new** planned-trip flow).
 - Admin API: `GET`/`PUT` `/api/v1/admin/dispatch-numbering` (`app/routers/dispatch_numbering_admin.py`).
 - Schemas: `LoadResponse` exposes read-model ids; `LoadCreate`/`LoadUpdate` reject client trip fields.
 
@@ -343,10 +377,10 @@ Code: `app/constants/trip_dispatch.py` (`PRE_DISPATCH_TRIP_CANCEL_STATUSES`) and
 
 ## 9. Verification checklist (post-implementation)
 
-- [ ] First transition to **`dispatched`** after prefix lock creates `dispatch_trips` + visible `trip_number` (not on **`assigned` alone`).  
-- [ ] Dispatch without locked prefix → **409/422** + stable `TRIP_NUMBER_PREFIX_NOT_CONFIGURED`.  
-- [ ] Resource-only reassignment → **same** trip number.  
-- [ ] Cancel dispatch → trip row **not** deleted; number **not** reused.  
-- [ ] Search finds load by **`trip_number`**.  
-- [ ] Payroll line or entry can show **`trip_number`** when linked.  
+- [ ] **Planned Trip create** after prefix lock mints **`trips.trip_number`** (may have **zero** `trip_loads`).  
+- [ ] Trip / dispatch without locked prefix → **409/422** + stable `TRIP_NUMBER_PREFIX_NOT_CONFIGURED`.  
+- [ ] Resource-only reassignment → **same** trip number on **same `trips` row**.  
+- [ ] Cancel / abandon → rows **retained**; number **not** reused.  
+- [ ] **Load cancel** does **not** auto **Trip cancel**; **manual Trip cancel** closes memberships, not commercial loads by default ([`TRIP_CONTAINER_VS_LOAD_FOUNDATION.md`](./TRIP_CONTAINER_VS_LOAD_FOUNDATION.md) §11.1).  
+- [ ] Search finds Trip / loads by **`trip_number`**.  
 - [ ] Baseline doc scenarios ([`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md)) satisfied.

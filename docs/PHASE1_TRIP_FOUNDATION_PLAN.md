@@ -18,6 +18,10 @@
 - **Do not** use `trips` / `trip_loads` (or `loads.active_trip_id` alone) as **live operational read authority** until **Phase 2** dual-write / service flip. Until then, treat them as backfilled + future-ready, not the source of truth for “what is running now.”
 - This slice does **not** change the live writer in `app/services/dispatch_trips.py` or `app/services/loads.py`.
 
+### Product lock after Phase 1 (docs only — 2026)
+
+**Does not retroactively change Phase 1 scope.** Subsequent work ([`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md), [`PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md`](./PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md)) locks: **trip number mint on planned `trips` create**, **zero-load planned trips**, **Load vs Trip cancellation separation**, and **allocator extension to `trips`**. Implementing that requires **later phases** (dual-write / service flip)—not reinterpretation of Phase 1 as having already done it.
+
 ## Scope
 
 - **In:** New tables, migration + backfill, ORM, schema guards (reject client `active_trip_id`), tests, comments.

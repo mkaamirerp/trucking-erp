@@ -389,6 +389,24 @@ If trip number remains load-owned, the system will create confusion as soon as o
 
 Legacy convenience display fields on Load may still exist as read-model/snapshot fields if needed, but the authority should be Trip.
 
+### 11.1 Planned Trip container, scheduling shell, and cancellation (locked — 2026)
+
+These rules are **product-locked** and align with [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) and [`TRIP_FIRST_DDL_CONTRACT.md`](./TRIP_FIRST_DDL_CONTRACT.md).
+
+1. **Trip number mint:** Minted when the **Trip container** is **created/planned** (`trips` row). **No** requirement to wait until a Load enters **`dispatched`**.
+2. **Assignment optional at plan time:** A Trip may exist **before** driver/truck/trailer assignment.
+3. **Zero active Loads (temporary):** A planned Trip may have **no active** `trip_loads` memberships for **scheduling/planning** shells.
+4. **Never reuse numbers:** Trip numbers are **never** recycled. **Cancelled, abandoned, or empty planned Trips** remain **rows for audit**; the `trip_number` string stays tied to that `trips.id`.
+5. **Load cancel ≠ Trip cancel:** Cancelling or removing one Load **must not** automatically cancel the Trip.
+6. **Multi-load Trip, one Load cancels:** The Load becomes **cancelled** (commercial **`loads.status`** per product vocabulary). **`trip_loads`** membership is **closed/removed**. The Trip **continues** if **other active Loads** remain on the Trip.
+7. **Only Load, cancels before assignment:** Load cancelled; membership removed. Trip **remains planned** with **zero active loads** until the dispatcher **explicitly cancels the Trip** or **adds another Load**.
+8. **Only Load, cancels after dispatch / on the way:** Load cancelled; membership removed. Trip **remains** an operational/audit record. The **dispatcher chooses**: cancel Trip, complete with exception, or add another Load later (product/UI flow—not automatic Trip cancel).
+9. **Dispatcher manually cancels Trip:** `trips.status = cancelled`; **`cancelled_at`** set when the schema supports it; **`trip_number` unchanged forever**; **active** `trip_loads` memberships are **closed/removed**; **commercial Loads are not** automatically cancelled unless a **separate explicit action** does that.
+
+### 11.2 `trip_loads` vs commercial cancel
+
+Authoritative **membership** end states live on **`trip_loads`** (e.g. `removed_at`, `status_within_trip`). **Commercial cancellation** is **`loads`** authority. Services must implement **both** per §11.1 without conflating “removed from trip” with “void the broker contract” unless the product explicitly runs both actions.
+
 ---
 
 ## 12) Dispatch board implication
@@ -453,7 +471,7 @@ Use this as the clean canonical wording:
 
 ### Trip
 
-A Trip is the primary dispatch/execution container representing one real-world movement by a driver/team with assigned equipment under one trip number.
+A Trip is the primary dispatch/execution container representing one real-world movement (or **scheduling shell** before movement) under one trip number. It may exist **before** driver/truck/trailer assignment and may temporarily have **zero active Loads** when used for planning.
 
 ### Load
 
@@ -461,7 +479,7 @@ A Load is the first-class commercial/broker/customer contract record with its ow
 
 ### Relationship
 
-A Trip may contain one or more Loads. Dispatch operates primarily on Trips, while billing, broker documentation, and commercial truth remain Load-based.
+A Trip may contain **zero or more** active Loads at a given time (planning shell); over its life it may carry one or more Loads for execution. Dispatch operates primarily on Trips, while billing, broker documentation, and commercial truth remain Load-based.
 
 ---
 
@@ -481,6 +499,7 @@ Before schema implementation, the following statements should be treated as lock
 10. **Contractual stop ownership and operational execution sequencing must be kept conceptually separate.**
 11. **Use an explicit TripLoad relationship model.**
 12. **Dispatch becomes Trip-based while billing and broker/commercial truth remain Load-based.**
+13. **Trip numbers are minted at Trip plan/create; Trips may have zero active Loads temporarily; Load cancellation and Trip cancellation are separate** (see §11.1).
 
 ---
 

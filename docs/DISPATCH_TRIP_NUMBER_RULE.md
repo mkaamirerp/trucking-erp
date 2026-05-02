@@ -1,21 +1,24 @@
 # Dispatch trip number — locked operational rule (baseline)
 
-This document is **product + engineering baseline**. Trip numbers are **not** display-only labels; they are **stable, system-assigned operational identifiers** created whenever dispatch assigns work.
+This document is **product + engineering baseline**. Trip numbers are **not** display-only labels; they are **stable, system-assigned operational identifiers** tied to a **Trip container**.
 
-**Implementation:** [`DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md`](./DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md) (schema, API, services, UI, payroll/issue tracing).
+**Locked evolution (2026):** Numbers are **minted when a Trip container is created/planned**, not only when a Load enters **`dispatched`**. Legacy paths that allocated via **`dispatch_trips`** on **`dispatched`** remain documented below for migration posture; **new work** aligns allocation with **`trips`** per [Trip container authority](#trip-container-authority-trips-vs-dispatch_trips).
+
+**Implementation:** [`DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md`](./DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md) (schema, API, services, UI, payroll/issue tracing). **Phase 3C proposal:** [`PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md`](./PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md).
 
 ## Business intent: trip number as shared operational reference
 
 Trip number is **not only** a dispatch-assignment identifier. It is the **shared operational reference** for the assigned work across **related workflows**—the main **human-durable handle** for “this piece of work we put on the road.”
 
-**Business meaning:** When dispatch assigns a job and the system creates a trip number (e.g. `IKL10001`), that value should become the **primary colloquial reference** people use to talk about that assignment: operations, drivers, safety, billing-related ops, etc.
+**Business meaning:** When the system creates a planned Trip container and mints a trip number (e.g. `IKL10001`), that value should become the **primary colloquial reference** people use to talk about that movement or scheduling shell: operations, drivers, safety, billing-related ops, etc.—**including** trips that temporarily have **no** active Loads or **no** driver/truck/trailer yet.
 
 **Example:** If a driver says “my trip `IKL10001` has an issue,” operations should be able to **find that exact assignment and related context quickly**—not only on the dispatch board, but wherever the product surfaces that work.
 
 **Trip number should help connect (cross-module):**
 
-- Dispatch assignment / `dispatch_trips` record  
-- Underlying **load** or **trailer move**  
+- Trip container / **`trips`** row (authoritative identity for planned and active operations)  
+- Dispatch assignment / **`dispatch_trips`** record **where still used** (legacy or mirrored lifecycle)  
+- Underlying **load(s)** via **`trip_loads`** and/or **trailer move**  
 - **Assigned driver** and **truck / trailer**  
 - **Route / stops** for that movement  
 - **Trip issues, notes, exceptions**  
@@ -27,7 +30,7 @@ Trip number is **not only** a dispatch-assignment identifier. It is the **shared
 | Concept | Role |
 |---------|------|
 | **Load number** | Broker / commercial / intake reference — **not** the same as trip number |
-| **Trip number** | **Operational movement identifier** for the dispatch-assigned work unit |
+| **Trip number** | **Operational identifier** for the Trip container (planning shell through execution); **not** the broker load number |
 | **Settlement / payroll** | **Not** owned solely by trip number; pay rules remain authoritative—but **trip number is a core cross-module key** for **tracing** operations → settlement / payroll |
 
 **Design expectation for implementation:** Make `trip_number` **visible and searchable** anywhere humans need to **trace the work**, including:
@@ -43,24 +46,33 @@ Together, the sections below define **(1)** technical ownership, allocation, and
 
 ## Locked operational rules
 
-1. **Creation trigger:** Any time **dispatch assigns a job**, a **trip number must be created** at that moment (same transaction as the assignment becoming effective).
-2. **Scope:** Applies to **normal dispatched freight loads** and **trailer moves** (non-freight dispatch work). Both use the **same numbering pool** for a tenant (see [Same trip-number pool](#same-trip-number-pool-freight--trailer-moves)).
-3. **Pre-dispatch:** A **load** (or future trailer-move draft) may exist **without** a trip number while it is **not** dispatch-assigned. Once dispatch assigns it, **trip number is mandatory** and must be present before the assignment is considered committed.
-4. **Format:** Fixed **tenant prefix** + **auto numeric** suffix, e.g. `IKL10001`. No spaces. Canonical storage is the **full string** (`trip_number`).
-5. **Prefix:** Configured **once** in **admin** (tenant operational settings). After lock, **it does not change** (no in-app edit path; support/data repair only if ever required).
-6. **Numeric portion:** Generated **only** by the **backend** inside the tenant DB transaction that performs assignment. The frontend **never** chooses or increments sequence values.
-7. **Stability:** After assignment, `trip_number` is **immutable** (no user rename, no regeneration). Corrections are **exception/support** processes, not normal product flows.
+1. **Creation trigger:** A **trip number is minted when a Trip container is created/planned** (same DB transaction as **`trips`** insert, using the shared allocator). It **does not** wait until a Load enters **`dispatched`**.
+2. **Scope:** **All** Trip containers that receive a system trip number (planning shells, multi-load trips, trailer moves when modeled) draw from the **same numbering pool** per tenant (see [Same trip-number pool](#same-trip-number-pool-freight--trailer-moves)).
+3. **Pre-assignment:** A Trip may exist **before** driver/truck/trailer assignment. A Trip may temporarily have **zero active Loads** for scheduling/planning (`trip_loads` membership absent or all closed—see product rules in [`TRIP_CONTAINER_VS_LOAD_FOUNDATION.md`](./TRIP_CONTAINER_VS_LOAD_FOUNDATION.md)).
+4. **Loads without a Trip:** A **commercial Load** may still exist **without** being on any Trip until planning/dispatch attaches it via **`trip_loads`**. **Load cancellation and Trip cancellation are separate**; closing membership or cancelling a Load **must not** automatically cancel the Trip (see foundation doc).
+5. **Format:** Fixed **tenant prefix** + **auto numeric** suffix, e.g. `IKL10001`. No spaces. Canonical storage on the **Trip container** is the **full string** (`trips.trip_number`).
+6. **Prefix:** Configured **once** in **admin** (tenant operational settings). After lock, **it does not change** (no in-app edit path; support/data repair only if ever required).
+7. **Numeric portion:** Generated **only** by the **backend** inside the tenant DB transaction that creates the Trip (or legacy **`dispatch_trips`** path during transition). The frontend **never** chooses or increments sequence values.
+8. **Stability:** After minting, `trip_number` is **immutable** (no user rename, no regeneration). Corrections are **exception/support** processes, not normal product flows.
+9. **Audit:** **Cancelled, abandoned, or empty planned Trips** remain rows forever for audit; **trip numbers are never reused** (see [Trip number re-use](#trip-number-re-use)).
 
-## Owning entity
+## Trip container authority (`trips` vs `dispatch_trips`)
 
-**Canonical owner:** a dedicated tenant row representing the **dispatched trip** (recommended table name: **`dispatch_trips`**).
+**Target architecture:**
 
-- One row is created **when dispatch assignment is committed** (see [Allocation timing](#allocation-timing)).
-- The row **holds** `trip_number` and links to exactly **one** operational target via **either** `load_id` **or** `trailer_move_id` — [exactly one target](#1-exactly-one-assignment-target-schema--design-rule).
+- **`trips`** is the **authoritative owner** of **`trip_number`** for the **Trip container** (planning through execution).
+- **`trip_loads`** is the **authoritative membership** between Trip and Load(s).
+- **`dispatch_trips`** may remain during migration as a **legacy or mirrored** row for freight flows that historically allocated on **`dispatched`**; **dual-write / alignment** is an implementation concern documented in the implementation plan. **Do not** introduce a second allocator or a second numbering pool.
 
-**Why not only `loads.trip_number`?** A single **`dispatch_trips`** table keeps **one sequence**, one uniqueness story, and one API shape for **both** loads and trailer moves. Optional denormalized columns on `loads` / `trailer_moves` are **read-model / convenience only**; **`dispatch_trips` remains the only source of truth** — application code must not treat load-level `trip_number` as authoritative or patch it independently (see implementation plan).
+**Until services fully flip:** code may still reflect **`dispatch_trips`** for some writes; the **product rule** is nonetheless: **one pool**, **mint at Trip plan/create**, **number lives on `trips`**.
 
-**Interim phase (until `trailer_moves` exists):** Backend allocates trip numbers for freight loads by creating `dispatch_trips` with `job_type = freight_load` and `load_id` set. Trailer moves **must** follow the same allocator and format when their entity ships.
+## Owning entity (historical note — `dispatch_trips`)
+
+**Legacy / transitional:** Where **`dispatch_trips`** still exists, each row **represented** a dispatched assignment and **held** `trip_number` with exactly **one** of `load_id` / `trailer_move_id` — [exactly one target](#1-exactly-one-assignment-target-schema--design-rule).
+
+**Going forward:** **`trips.trip_number`** is the **canonical** string for the container; **`dispatch_trips`** linkage (if retained) should **reference or mirror** that identity per implementation plan—**not** mint a competing number for the same logical Trip.
+
+**Why not only `loads.trip_number`?** Load-level **`trip_number`** (if present) is **read-model / convenience only** for search and UI; **`trips`** (and allocator) authorize identity.
 
 ## 1. Exactly one assignment target (schema + design rule)
 
@@ -79,6 +91,8 @@ Each `dispatch_trips` row **must** refer to **exactly one** dispatch target:
 This is a **locked design rule**, not optional validation in application code only.
 
 ## 2. Assignment lifecycle
+
+**Container-first note:** For **new** work, operational identity is the **`trips`** row (**`trip_number`** minted at **plan/create**). The bullets below describe **historical `dispatch_trips`** behavior and **must be reconciled** during dual-write so a **single** trip identity does not receive **two** numbers ([implementation plan](./DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md) §4.1–4.2). **Manual Trip cancel** and **`trip_loads`** membership rules: [`TRIP_CONTAINER_VS_LOAD_FOUNDATION.md`](./TRIP_CONTAINER_VS_LOAD_FOUNDATION.md) §11.1.
 
 ### One load vs many `dispatch_trips` rows over time
 
@@ -100,34 +114,31 @@ This is a **locked design rule**, not optional validation in application code on
 
 ### Trip number re-use
 
-- **Trip numbers are never re-used.** Once issued, that string remains tied to that `dispatch_trips.id` for the tenant forever. Sequence only moves **forward**. Gaps in the numeric sequence (e.g. after cancelled commits) are **acceptable**.
+- **Trip numbers are never re-used.** Once issued, that string remains tied to **`trips.id`** (and any legacy **`dispatch_trips.id`** row that referenced the same logical trip) for the tenant forever. Sequence only moves **forward**. Gaps in the numeric sequence (e.g. after cancelled or abandoned planned trips) are **acceptable**.
 
 ## 3. Allocation timing
 
-**Locked timing — generation happens only when:**
+**Locked timing (current product):** A trip number is minted in the **same DB transaction** as **`trips`** row creation for a **planned Trip container** (scheduling shell). **No** wait for Load **`dispatched`**.
 
-- Dispatch **assignment is committed** in the backend (DB transaction that persists “this job is assigned by dispatch” and triggers trip creation + sequence bump).
-
-**Locked business event (TruckERP v1 — freight loads):**  
-“Dispatch assigns the job” means the load **first enters `dispatched` status**. That transition is the **birth** of the trip number (`dispatch_trips` insert + allocation). Setting resources or moving to **`assigned`** alone is **not** dispatch commit in v1 and **does not** allocate a trip number. *(If the business ever redefines commit as `assigned`, that must be an explicit product change to this baseline—not an ad hoc code tweak.)*
-
-**Trailer moves (future):** Mirror the same idea: trip number is created when the trailer-move job enters its **committed assigned/dispatched state** (status name aligned with freight when that module ships).
+**Legacy / transitional note:** Earlier implementation tied the **first** allocation to the load entering **`dispatched`** via **`dispatch_trips`**. That timing is **superseded** for new work: **plan/create Trip → mint**. During migration, services may **align or dual-write** legacy rows per [`DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md`](./DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md)—**without** a second pool.
 
 **Trip numbers must not be allocated:**
 
-- On **draft load creation**, email/intake draft, or any pre-dispatch stage.
-- On **pre-assignment** placeholders (e.g. “saved” truck/driver picks that are not yet committed dispatch).
+- On **draft load creation**, email/intake draft, or any pre-dispatch **load** stage (unless/until product explicitly attaches that load to a Trip and that attach does **not** itself mint—a **new Trip** mint still flows from **Trip create**).
 - In the **frontend** or via any client-supplied value.
 
-If a request would commit assignment without a trip allocation path, the transaction **must fail** (and must not partially persist assignment without `dispatch_trips` + `trip_number`).
+**Missing allocator transaction:** If prefix is not locked or numbering row is incomplete, **planned Trip create** and **dispatch paths** that require a number **must fail** with the same class of error as [§4](#4-missing-prefix-behavior).
+
+**Cancellation:** Cancelling a **Load** or closing **`trip_loads`** membership **does not** free or recycle a trip number. **Manually cancelling a Trip** sets **`trips.status = cancelled`** and **`cancelled_at`** when available; **`trip_number` unchanged** (see foundation doc for Load vs Trip cancel).
 
 ## 4. Missing prefix behavior
 
 If the tenant admin has **not** configured and **locked** the trip-number prefix (or numbering row is incomplete):
 
-- **Dispatch assignment is blocked.**
+- **Planned Trip create is blocked** (same class of failure as dispatch).
+- **Dispatch assignment** that requires a new number is blocked.
 - API returns a **clear, actionable error** (e.g. HTTP **409 Conflict** or **422 Unprocessable Entity**) with a **stable machine-readable code** (e.g. `TRIP_NUMBER_PREFIX_NOT_CONFIGURED`) and a short message directing admins to operational/dispatch settings.
-- **No** silent fallback prefix and **no** assignment without `trip_number`.
+- **No** silent fallback prefix and **no** mint without `trip_number`.
 
 ## Same trip-number pool (freight + trailer moves)
 
@@ -135,7 +146,8 @@ If the tenant admin has **not** configured and **locked** the trip-number prefix
 
 ## Uniqueness scope
 
-- **`trip_number` is unique per tenant:** `UNIQUE (tenant_id, trip_number)` on **`dispatch_trips`** (authoritative).
+- **`trip_number` is unique per tenant on `trips`:** `UNIQUE (tenant_id, trip_number)` (**authoritative** for the container).
+- Historically **`dispatch_trips`** may also enforce `UNIQUE (tenant_id, trip_number)` during migration; **must not** allow two different meanings for the same string in one tenant.
 - **Not** globally unique across tenants (prefix may overlap between different companies in different tenants).
 - **`load_number`** (broker / commercial reference) remains **separate** from **`trip_number`**; neither replaces the other.
 
@@ -160,13 +172,14 @@ If the tenant admin has **not** configured and **locked** the trip-number prefix
 **Recommended pattern (PostgreSQL, tenant DB):**
 
 - Store **`next_numeric`** (bigint) on **`tenant_dispatch_numbering`** (or a dedicated sequence row keyed by `tenant_id`).
-- Inside the **same DB transaction** as creating **`dispatch_trips`**:
+- Inside the **same DB transaction** as creating **`trips`** (and during transition, when still inserting **`dispatch_trips`**, same rules):
   1. `SELECT … FROM tenant_dispatch_numbering WHERE tenant_id = :tid FOR UPDATE` (row lock).
   2. Assert prefix is present and locked; otherwise raise [missing prefix](#4-missing-prefix-behavior).
   3. Read `next_numeric`, form `trip_number = prefix || str(next_numeric)` (zero-pad width per policy, e.g. 5 digits).
   4. `UPDATE … SET next_numeric = next_numeric + 1 WHERE tenant_id = :tid`.
-  5. `INSERT INTO dispatch_trips (tenant_id, trip_number, …)`  
-     If insert hits **unique violation**, abort; do not “reuse” numbers.
+  5. `INSERT INTO trips (tenant_id, trip_number, …)` with immutable `trip_number`.  
+     If insert hits **unique violation**, abort; do not “reuse” numbers.  
+     (Legacy: `INSERT INTO dispatch_trips` only as aligned by implementation plan—not a second mint for the same logical Trip.)
 
 **Padding / width:** Fixed digit count for numeric segment (e.g. 5 digits → `10001`). Document in code constants; overflow handling (widen string or bump width) is a **future migration**, not silent truncation.
 
@@ -175,19 +188,23 @@ If the tenant admin has **not** configured and **locked** the trip-number prefix
 | Object | Purpose |
 |--------|---------|
 | `tenant_dispatch_numbering` | `trip_number_prefix`, `prefix_locked_at`, `next_numeric` (and optional audit columns) |
-| `dispatch_trips` | `id`, `tenant_id`, `trip_number`, `job_type`, `load_id` nullable, `trailer_move_id` nullable, lifecycle `status` if needed, `assigned_at`, FKs, `UNIQUE (tenant_id, trip_number)`, **exactly-one-target `CHECK`** |
-| `loads` | May expose `trip_number` via join to active `dispatch_trips`; optional cached column only if kept consistent |
-| `trailer_moves` | Future; links to `dispatch_trips` as above |
+| `trips` | **Trip container:** `trip_number` **canonical**; `status`; nullable assignment; `cancelled_at` when schema supports it; `UNIQUE (tenant_id, trip_number)` |
+| `trip_loads` | Authoritative Trip↔Load membership; partial unique active membership |
+| `dispatch_trips` | **Legacy / mirrored** freight assignment row where retained; must not contradict `trips.trip_number` for the same logical trip |
+| `loads` | Commercial record; optional read-model **`trip_number` / `active_dispatch_trip_id` / `active_trip_id`** only as documented |
+| `trailer_moves` | Future; same pool; ties to Trip container per implementation plan |
 
 ## API (target)
 
 | Area | Behavior |
 |------|-----------|
 | **Admin / settings** | `GET`/`PUT` prefix (PUT allowed only until `prefix_locked_at` is set); **no** sequence exposure |
-| **Dispatch assign** | Allocate trip only on **committed** assignment txn; return `trip_number` on relevant DTOs |
-| **Reads** | Load / board / trailer payloads include **`trip_number`** when an active (or requested) trip applies |
-| **Search / filter** | List and search endpoints support filtering by **`trip_number`** (exact and/or normalized prefix+number per API design); document in OpenAPI |
-| **Writes** | **No** public endpoint to set or change `trip_number` after assignment |
+| **Planned Trip create** | Mint `trip_number` in txn with `trips` insert; **zero active loads allowed** |
+| **Dispatch assign** | Same pool; legacy paths may touch `dispatch_trips` until unified — implementation plan |
+| **Reads** | Trip / load / board payloads include **`trip_number`** from **`trips`** (or derived read-model) |
+| **Search / filter** | List and search support **`trip_number`**; document in OpenAPI |
+| **Writes** | **No** public endpoint to set or change `trip_number` after mint |
+| **Trip cancel** | `trips.status = cancelled`; **`cancelled_at`** when available; number **immutable**; close active memberships per rules |
 
 ## UI and operational surfaces (implementation)
 
@@ -198,7 +215,7 @@ When implementation starts, **`trip_number`** must appear in at least:
 | **Dispatch board / assignment views** | Visible for assigned jobs; consistent with API |
 | **Load detail** | Where dispatch context is shown |
 | **Trip detail / movement detail** | Dedicated trip or trailer-move views show the canonical **`trip_number`** |
-| **Admin setup** | Prefix configuration and lock; link or message when assignment is blocked |
+| **Admin setup** | Prefix configuration and lock; link or message when **planned Trip create** or dispatch is blocked |
 | **Search / filters** | User can find loads/trips by **`trip_number`** where the product exposes search |
 | **Issue / exception workflows** | Trips, loads, and driver-reported issues tie back to **`trip_number`** for fast lookup |
 | **Settlement / payroll reference points** | Pay lines, exports, or support views include **`trip_number`** **where relevant** for tracing work → pay (without making trip number the sole owner of payroll logic) |
@@ -206,11 +223,10 @@ When implementation starts, **`trip_number`** must appear in at least:
 
 ## Compliance checklist for future PRs
 
-- [ ] **`dispatch_trips`** is canonical; **`CHECK`** enforces exactly one of `load_id` / `trailer_move_id`.
-- [ ] Assignment lifecycle matches [§2](#2-assignment-lifecycle): no number reuse; cancel keeps rows; resource-only reassignment does not mint new trip.
-- [ ] Allocation only on **committed** dispatch assignment — not draft, not placeholder, not frontend ([§3](#3-allocation-timing)).
-- [ ] Missing locked prefix → **blocked** dispatch + **clear admin-setup error** ([§4](#4-missing-prefix-behavior)).
-- [ ] **`UNIQUE (tenant_id, trip_number)`** enforced; sequence **never** driven from client.
-- [ ] Freight and trailer moves share **one** pool and format ([Same trip-number pool](#same-trip-number-pool-freight--trailer-moves)).
-- [ ] Surfaces include board, detail, trip/movement detail, search/filter contracts, and operational outputs ([UI and operational surfaces](#ui-and-operational-surfaces-implementation)).
-- [ ] **Cross-module tracing:** `trip_number` is visible and searchable per [Business intent](#business-intent-trip-number-as-shared-operational-reference) (issues/exceptions, documents, settlement/payroll tracing as applicable).
+- [ ] **`trips`** holds **canonical** `trip_number`; **`UNIQUE (tenant_id, trip_number)`**; mint on **planned Trip create** ([§3](#3-allocation-timing)).
+- [ ] **`trip_loads`** is authoritative membership; **not** `loads.active_trip_id` alone.
+- [ ] **`dispatch_trips`** (if still present) **does not** create duplicate identities or pools; lifecycle matches migration doc.
+- [ ] No number reuse; cancel / abandon keeps rows; sequence forward-only ([§2](#2-assignment-lifecycle)).
+- [ ] Missing locked prefix → **blocked** planned Trip create + dispatch + **clear admin-setup error** ([§4](#4-missing-prefix-behavior)).
+- [ ] **Load cancel ≠ Trip cancel** unless explicit separate action ([`TRIP_CONTAINER_VS_LOAD_FOUNDATION.md`](./TRIP_CONTAINER_VS_LOAD_FOUNDATION.md)).
+- [ ] **Cross-module tracing:** `trip_number` visible/searchable per [Business intent](#business-intent-trip-number-as-shared-operational-reference).

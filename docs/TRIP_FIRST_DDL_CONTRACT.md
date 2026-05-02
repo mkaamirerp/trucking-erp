@@ -70,8 +70,10 @@ Near-following tables, not required for the very first migration but must remain
 
 ### 3.1 Purpose
 
-Authoritative operational execution container.
-Represents one real-world movement assignment under one trip number.
+Authoritative operational execution container—and **scheduling/planning shell** before execution.
+Represents one real-world movement assignment (or **planned** movement) under **one trip number** minted at **Trip create**.
+
+A Trip may exist **without** driver/truck/trailer and **without** any **active** `trip_loads` rows temporarily; see [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) and [`TRIP_CONTAINER_VS_LOAD_FOUNDATION.md`](./TRIP_CONTAINER_VS_LOAD_FOUNDATION.md) §11.1.
 
 ### 3.2 Required columns
 
@@ -153,8 +155,10 @@ They must not remain authoritative on `loads`.
 
 ### Notes
 
+* `draft` / `planned`: Trip container may have **zero active** `trip_loads` (planning shell); **`trip_number` still minted at create** per dispatch rule doc.
 * `arrived_terminal` and `handed_off` may be introduced in first pass if useful; if rollout wants fewer values initially, they can still be reserved in shared enums now.
 * Trip status is operational only. Do not use it to represent commercial close/invoice/payment concepts.
+* **`cancelled`:** set with **`cancelled_at`** when column exists; **does not** delete row; **does not** recycle **`trip_number`**.
 
 ---
 
@@ -267,9 +271,9 @@ Do not let `loads.trip_id` or similar convenience fields replace this truth.
 
 ### Notes
 
-Keep this modest in V1.
-Do not try to encode all custody/handoff semantics here.
-Those belong in later event/custody tables.
+* `removed` / `completed` / `planned` / `active`: encode **membership** and sequence in trip, **not** the full commercial meaning of the Load.
+* **Load commercial cancellation** is **`loads.status`** (or explicit cancel vocabulary). **Closing membership** on **`trip_loads`** (e.g. `removed_at`, `status_within_trip`) **must not** imply Trip cancel unless separate trip workflow runs.
+* Keep this modest in V1. Do not try to encode all custody/handoff semantics here. Those belong in later event/custody tables.
 
 ---
 
@@ -362,7 +366,7 @@ Examples of things that should not rely only on `loads.status` after redesign:
 
 Keep current load status shape if necessary for migration, but do not expand it into a replacement for trip execution state.
 
----
+**Commercial load cancellation** (when represented in `loads.status` or a dedicated cancel flag) **must not** auto-set **`trips.status = cancelled`**. **Manual Trip cancel** is a separate dispatcher action and closes **`trip_loads`** active memberships without auto-cancelling Loads unless explicitly designed. See [`TRIP_CONTAINER_VS_LOAD_FOUNDATION.md`](./TRIP_CONTAINER_VS_LOAD_FOUNDATION.md) §11.1.
 
 ## 12) Table: `load_stops`
 
@@ -714,6 +718,7 @@ After this DDL contract, the next strict implementation note should define:
 * exact migration names / Alembic sequence
 * exact Postgres types and enum strategy
 * exact save/commit API contract between LoadWorkspacePage and TripWorkspacePage
-* exact trip number generation moment and collision rules
+* **trip number generation: mint on `trips` plan/create** (single pool with `tenant_dispatch_numbering`); alignment with legacy **`dispatch_trips`** during dual-write
 * exact backfill strategy for existing live data
+* **manual Trip cancel** API and **membership close** rules vs **Load cancel**
 
