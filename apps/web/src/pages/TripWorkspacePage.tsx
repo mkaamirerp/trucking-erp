@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   addLoadToTrip,
+  cancelTrip,
   getTrip,
   listLoads,
   removeLoadFromTrip,
@@ -86,9 +87,39 @@ function formatRemoveTripLoadError(err: unknown): string {
   return "Could not remove load from trip.";
 }
 
+function formatCancelTripError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not cancel trip.";
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (typeof detail === "string") {
+      if (/^trip not found$/i.test(detail.trim())) return "Trip not found.";
+    }
+    if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+      const code = (detail as { code?: string }).code;
+      if (code === "TRIP_ALREADY_CANCELLED") return "This trip is already cancelled.";
+      const msg =
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : null;
+      if (msg) return msg;
+    }
+  } catch {
+    /* use raw */
+  }
+  if (raw.length > 0 && raw.length < 400) return raw;
+  return "Could not cancel trip.";
+}
+
 /** Planned trip and not cancelled — same gate for Add load and Remove (3G/3H). */
 function isPlannedTripOpenForMembershipActions(trip: TripDetail): boolean {
   return (trip.status || "").toLowerCase() === "planned" && trip.cancelled_at == null;
+}
+
+/** Cancel trip control — explicit planned + open (matches backend planned cancel). */
+function isPlannedTripOpenForCancel(trip: TripDetail): boolean {
+  return trip.status === "planned" && trip.cancelled_at == null;
 }
 
 function pickerBrokerLine(row: Load): string {
@@ -114,6 +145,8 @@ export default function TripWorkspacePage() {
   const [loadSearchResults, setLoadSearchResults] = useState<Load[]>([]);
   const [loadSearchBusy, setLoadSearchBusy] = useState(false);
   const [loadSearchError, setLoadSearchError] = useState<string | null>(null);
+  const [cancelTripBusy, setCancelTripBusy] = useState(false);
+  const [cancelTripError, setCancelTripError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -146,6 +179,8 @@ export default function TripWorkspacePage() {
     setLoadSearchQuery("");
     setLoadSearchResults([]);
     setLoadSearchError(null);
+    setCancelTripError(null);
+    setCancelTripBusy(false);
   }, [tripId]);
 
   const clearPickerSearch = useCallback(() => {
@@ -234,6 +269,27 @@ export default function TripWorkspacePage() {
     [tripId],
   );
 
+  const onCancelPlannedTrip = useCallback(async () => {
+    if (!Number.isFinite(tripId)) return;
+    if (
+      !window.confirm(
+        "Cancel this trip container?\n\nThis only cancels the operational trip container. Loads are not deleted. Commercial load status is not changed.\n\nContinue?",
+      )
+    ) {
+      return;
+    }
+    setCancelTripBusy(true);
+    setCancelTripError(null);
+    try {
+      const updated = await cancelTrip(tripId);
+      setTrip(updated);
+    } catch (e) {
+      setCancelTripError(formatCancelTripError(e));
+    } finally {
+      setCancelTripBusy(false);
+    }
+  }, [tripId]);
+
   const toolBtn =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
 
@@ -266,6 +322,19 @@ export default function TripWorkspacePage() {
               ) : null}
             </div>
           </div>
+          {!loading && trip && isPlannedTripOpenForCancel(trip) ? (
+            <div className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                disabled={cancelTripBusy}
+                onClick={() => void onCancelPlannedTrip()}
+                className="rounded-md border border-red-300/80 bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {cancelTripBusy ? "Cancelling…" : "Cancel Trip"}
+              </button>
+              {cancelTripError ? <p className="max-w-xs text-right text-[10px] text-red-700">{cancelTripError}</p> : null}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -424,7 +493,11 @@ export default function TripWorkspacePage() {
               ) : null}
               {removeLoadError ? <p className="mt-3 text-[11px] text-red-700">{removeLoadError}</p> : null}
               {activeMemberLoads.length === 0 ? (
-                <p className="mt-4 text-sm italic text-[var(--trk-text-muted)]">No loads on this trip yet.</p>
+                <p className="mt-4 text-sm italic text-[var(--trk-text-muted)]">
+                  {trip.cancelled_at != null
+                    ? "No active loads on this trip. Active memberships were removed when the trip was cancelled."
+                    : "No loads on this trip yet."}
+                </p>
               ) : (
                 <ul className="mt-4 divide-y divide-[var(--trk-border)] rounded-lg border border-[var(--trk-border)]">
                   {activeMemberLoads.map((m) => (

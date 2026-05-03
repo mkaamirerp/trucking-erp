@@ -960,6 +960,14 @@ export async function removeLoadFromTrip(tripId: number, loadId: number): Promis
   return handle<TripDetail>(res);
 }
 
+/** POST /trips/{id}/cancel — cancel planned trip container; no body. */
+export async function cancelTrip(tripId: number): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/cancel`, {
+    method: "POST",
+  });
+  return handle<TripDetail>(res);
+}
+
 export async function createLoad(payload: LoadWritePayload) {
   const res = await fetchWithTenant(`${API_BASE}/loads`, {
     method: "POST",
