@@ -9,63 +9,110 @@
 
 ### Decision 1 — Trip terminal status name
 
-**Locked:**
+Locked:
 
-- Use **`Trip.status = completed`** as the positive terminal state for a trip container.
-- Do **not** use **`Trip.status = delivered`**.
+- Use `Trip.status = completed` as the positive terminal state for a trip container.
+- Do not use `Trip.status = delivered`.
 
-**Reason:**
+Reason:
 
 - Trip completion is not the same as load delivery.
 - A trip may complete when driver/equipment responsibility ends, even if freight is handed off to terminal/custody/another trip.
-- **`Load.status = delivered`** remains the commercial/final receiver truth.
-- Custody event **`delivered`** may still exist for receiver delivery proof.
-- **`Trip.status = completed`** means the operational trip responsibility is finished.
+- `Load.status = delivered` remains the commercial/final receiver truth.
+- Custody event `delivered` may still exist for receiver delivery proof.
+- `Trip.status = completed` means the operational trip responsibility is finished.
 
 ### Decision 2 — Voided vs cancelled
 
-**Locked:**
+Locked:
 
-- Do **not** add **`Trip.status = voided`** in V1.
-- Use **`Trip.status = cancelled`** for operational cancellations, mistakes, duplicate/accidental trips, broker/customer cancellations, driver unavailable, abandoned plans, and any cancellation before or after movement.
+- Do not add `Trip.status = voided` in V1.
+- Use `Trip.status = cancelled` for operational cancellations, mistakes, duplicate/accidental trips, broker/customer cancellations, driver unavailable, abandoned plans, and any cancellation before or after movement.
 
-**Cancellation history rules:**
+Cancellation history rules:
 
 - Trip number is not reused.
 - Record is not deleted.
-- Store **`cancelled_at`**.
-- Store **`cancelled_by`**.
-- Store **`cancel_reason`**.
-- Optional future **`cancel_category`**.
+- Store `cancelled_at`.
+- Store `cancelled_by`.
+- Store `cancel_reason`.
+- Optional future `cancel_category`.
 - Notes and audit trail required.
 
-**Cancellation / pay rules:**
+Cancellation/pay rules:
 
 - Cancellation does not automatically mean no pay.
 - If the truck moved before cancellation, ELD miles are evidence.
-- Dispatch / owner / payroll must make a pay decision.
+- Dispatch/owner/payroll must make a pay decision.
 - Decision depends on company policy and driver type.
 
-**Driver / pay cases to support later:**
+Driver/pay cases to support later:
 
 1. Company driver paid by miles.
 2. Owner-operator paid by miles.
 3. Owner-operator paid by commission/percentage.
 
-**Future cancellation workflow should support:**
+Future cancellation workflow should support:
 
-- **`movement_started`** yes/no.
-- **`eld_miles_before_cancel`**.
-- **`manual_miles_override`**.
-- **Pay decision options:** `no_pay`, `pay_eld_miles`, `pay_manual_miles`, `flat_amount`, `payroll_review`.
-- **`pay_decision_reason`** / note.
-- **`pay_decision_by_user_id`**.
-- **`pay_decision_at`**.
+- `movement_started` yes/no.
+- `eld_miles_before_cancel`.
+- `manual_miles_override`.
+- pay decision options:
+  - `no_pay`
+  - `pay_eld_miles`
+  - `pay_manual_miles`
+  - `flat_amount`
+  - `payroll_review`
+- `pay_decision_reason` / note.
+- `pay_decision_by_user_id`.
+- `pay_decision_at`.
 
-**Important:**
+Important:
 
-- No automatic pay decision should be encoded in **`Trip.status`**.
+- No automatic pay decision should be encoded in `Trip.status`.
 - Payroll/settlement policy handles money later.
+
+### Decision 3 — Terminal table
+
+Locked:
+
+- Add a tenant-scoped terminal / yard location table in V1.
+- Do not use free text as the custody terminal identity.
+- Admin can create and manage terminals.
+- Dispatch/custody UI should show a dropdown of terminal names.
+- Backend should store `terminal_id` on custody events.
+
+Minimum terminal fields:
+
+- `id`
+- `tenant_id`
+- `name`
+- `street`
+- `city`
+- `state_or_province`
+- `postal_code`
+- `country`
+- `is_active`
+- `created_at`
+- `updated_at`
+
+Dropdown display:
+
+- Show terminal name only.
+
+Examples:
+
+- Mississauga
+- Brampton
+- Boston
+- Quebec
+
+Reason:
+
+- Prevents duplicate/misspelled terminal identities.
+- Supports clean custody history.
+- Supports reporting by terminal.
+- Supports future terminal/yard board.
 
 ---
 
@@ -99,11 +146,12 @@
 
 | | |
 |--|--|
-| **Decision needed** | Add **`terminals`** (or **`yard_locations`**) in the **first** tenant migration that introduces custody, or **defer** and store free-form / payload only? |
-| **Recommended answer** | **Add a small tenant-scoped terminal table** if **custody at terminal** is in **v1** (e.g. **`arrived_terminal`**, **`dropped_at_terminal`**). |
-| **Why** | **3L-C** flags no first-class terminal today; structured **`terminal_id`** improves reporting, deduplication, and RBAC. Defer only if v1 is **road-only** events with no terminal routing. |
-| **Risk if undecided** | Painful backfill from JSON blobs; inconsistent terminal identity across events. |
-| **Impact on schema/API** | New table + FK on **`load_custody_events.terminal_id`**; optional seed/migrate; **`GET`** filters by terminal. |
+| **Status** | **LOCKED** |
+| **Decision needed** | Add **`terminals`** (or **`yard_locations`**) in V1, or defer / use free text? |
+| **Locked answer** | **Tenant-scoped terminal table required in V1** — not free-text custody identity; **`terminal_id`** on custody events; admin-managed rows; UI dropdown (**name** only); minimum fields per **Locked owner decisions §3**. |
+| **Why** | Stable identity for custody, reporting, and future yard board; avoids misspellings/duplicates. |
+| **Risk if undecided** | *(Resolved for V1 — see **Locked owner decisions §3**.)* |
+| **Impact on schema/API** | New **`terminals`** (or equivalent) table with listed columns; FK **`load_custody_events.terminal_id`**; admin CRUD + list for dropdown; custody **`POST`** validates `terminal_id` belongs to tenant. |
 
 ---
 
@@ -214,7 +262,7 @@ Schema/API may allow too many event types before product flow and validation rul
 |---|--------|-----------------------------------|
 | 1 | Terminal status name | **LOCKED** — `completed` only; not `delivered` on trip. |
 | 2 | Voided vs cancelled | **LOCKED** — no `voided` in V1; `cancelled` + audit (`cancelled_by`, `cancel_reason`, …) per **Locked owner decisions §2**. |
-| 3 | Terminal table | |
+| 3 | Terminal table | **LOCKED** — V1 tenant terminal table + `terminal_id` on custody; admin + name-only dropdown; no free-text terminal identity. |
 | 4 | First transition edges | |
 | 5 | Assignment before transition | |
 | 6 | Load.status coupling | |
