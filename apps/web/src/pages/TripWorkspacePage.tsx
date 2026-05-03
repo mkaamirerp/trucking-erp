@@ -1,5 +1,5 @@
 /**
- * Read-only trip operational shell (Phase 3A). Execution/custody UI comes later.
+ * Trip workspace: planned container, member loads, and cancellation controls.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -247,6 +247,15 @@ export default function TripWorkspacePage() {
     [trip?.member_loads],
   );
 
+  const historicalMemberLoads = useMemo(() => {
+    const rows = (trip?.member_loads ?? []).filter((m: TripMemberLoad) => m.removed_at != null);
+    return [...rows].sort((a, b) => {
+      const ta = a.removed_at ? new Date(a.removed_at).getTime() : 0;
+      const tb = b.removed_at ? new Date(b.removed_at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [trip?.member_loads]);
+
   const onRemoveLoadFromTrip = useCallback(
     async (loadId: number, loadLabel: string) => {
       if (!Number.isFinite(tripId)) return;
@@ -305,7 +314,7 @@ export default function TripWorkspacePage() {
               Dispatch
             </button>
             <div className="min-w-0">
-              <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">Trip container (read-only)</div>
+              <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">Operational trip workspace</div>
               <h1 className="truncate text-lg font-semibold tracking-tight text-[var(--trk-text)]">
                 {loading ? "Loading…" : trip ? `Trip #${trip.trip_number}` : "Trip"}
               </h1>
@@ -382,8 +391,10 @@ export default function TripWorkspacePage() {
             <section className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-5">
               <h2 className="text-sm font-semibold text-[var(--trk-text)]">Member loads</h2>
               <p className="mt-2 text-sm text-[var(--trk-text-muted)]">
-                Trip is the operational container. Loads below remain commercial records. Open a load for rate, broker, and
-                document work.
+                Trip is the operational container. <span className="font-medium text-[var(--trk-text)]">Active</span> loads
+                are listed below; ended memberships appear under{" "}
+                <span className="font-medium text-[var(--trk-text)]">Previously on this trip</span> when present. Open a load
+                for rate, broker, and document work — commercial records are not deleted when a load leaves a trip.
               </p>
               {isPlannedTripOpenForMembershipActions(trip) ? (
                 <div className="mt-4 flex flex-col gap-3">
@@ -495,7 +506,7 @@ export default function TripWorkspacePage() {
               {activeMemberLoads.length === 0 ? (
                 <p className="mt-4 text-sm italic text-[var(--trk-text-muted)]">
                   {trip.cancelled_at != null
-                    ? "No active loads on this trip. Active memberships were removed when the trip was cancelled."
+                    ? "No active loads. Memberships were ended when the trip was cancelled. Commercial loads are unchanged."
                     : "No loads on this trip yet."}
                 </p>
               ) : (
@@ -538,6 +549,41 @@ export default function TripWorkspacePage() {
                   ))}
                 </ul>
               )}
+              {historicalMemberLoads.length > 0 ? (
+                <div className="mt-6 border-t border-[var(--trk-border)] pt-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
+                    Previously on this trip
+                  </h3>
+                  <ul className="mt-3 divide-y divide-[var(--trk-border)] rounded-lg border border-[var(--trk-border)] border-dashed bg-[var(--trk-bg)]/40 opacity-95">
+                    {historicalMemberLoads.map((m) => (
+                      <li key={m.trip_load_id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                        <div className="min-w-0">
+                          <Link
+                            to={OPS.LOAD_DETAIL(m.load_id)}
+                            className="text-sm font-medium text-[var(--trk-text-muted)] hover:text-[var(--trk-heading)] hover:underline"
+                          >
+                            {m.load_number || `Load #${m.load_id}`}
+                          </Link>
+                          <div className="mt-1 text-xs text-[var(--trk-text-muted)]">
+                            {m.broker_name_snapshot || "—"}
+                            {m.broker_load_reference ? ` · Ref ${m.broker_load_reference}` : ""}
+                            {m.commodity ? ` · ${m.commodity}` : ""}
+                          </div>
+                          {m.stop_route_summary ? (
+                            <div className="mt-1 text-xs text-[var(--trk-text-muted)]">{m.stop_route_summary}</div>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 text-right text-[11px] text-[var(--trk-text-muted)]">
+                          <div>{m.status_within_trip}</div>
+                          {m.removed_at ? (
+                            <div className="mt-1">Removed {new Date(m.removed_at).toLocaleString()}</div>
+                          ) : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </section>
 
             <section className="rounded-xl border border-dashed border-[var(--trk-border)] bg-[var(--trk-bg)] p-5">
