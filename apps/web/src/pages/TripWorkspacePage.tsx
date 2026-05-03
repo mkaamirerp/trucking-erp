@@ -3,7 +3,15 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { addLoadToTrip, getTrip, removeLoadFromTrip, type TripDetail, type TripMemberLoad } from "@/api";
+import {
+  addLoadToTrip,
+  getTrip,
+  listLoads,
+  removeLoadFromTrip,
+  type Load,
+  type TripDetail,
+  type TripMemberLoad,
+} from "@/api";
 import { OPS } from "@/routes";
 
 function formatMoney(n: number | null | undefined): string {
@@ -83,6 +91,13 @@ function isPlannedTripOpenForMembershipActions(trip: TripDetail): boolean {
   return (trip.status || "").toLowerCase() === "planned" && trip.cancelled_at == null;
 }
 
+function pickerBrokerLine(row: Load): string {
+  const snap = (row.broker_name_snapshot || "").trim();
+  const fromRel = (row.broker?.name || "").trim();
+  const name = snap || fromRel;
+  return name || "—";
+}
+
 export default function TripWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const tripId = Number(id);
@@ -95,6 +110,10 @@ export default function TripWorkspacePage() {
   const [addLoadError, setAddLoadError] = useState<string | null>(null);
   const [removingLoadId, setRemovingLoadId] = useState<number | null>(null);
   const [removeLoadError, setRemoveLoadError] = useState<string | null>(null);
+  const [loadSearchQuery, setLoadSearchQuery] = useState("");
+  const [loadSearchResults, setLoadSearchResults] = useState<Load[]>([]);
+  const [loadSearchBusy, setLoadSearchBusy] = useState(false);
+  const [loadSearchError, setLoadSearchError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -124,7 +143,47 @@ export default function TripWorkspacePage() {
     setAddLoadIdInput("");
     setRemoveLoadError(null);
     setRemovingLoadId(null);
+    setLoadSearchQuery("");
+    setLoadSearchResults([]);
+    setLoadSearchError(null);
   }, [tripId]);
+
+  const clearPickerSearch = useCallback(() => {
+    setLoadSearchQuery("");
+    setLoadSearchResults([]);
+    setLoadSearchError(null);
+  }, []);
+
+  const runLoadSearch = useCallback(async () => {
+    const q = loadSearchQuery.trim();
+    if (!q) return;
+    setLoadSearchBusy(true);
+    setLoadSearchError(null);
+    try {
+      const p = await listLoads({ search: q, page: 1, size: 20 });
+      setLoadSearchResults(p.items);
+    } catch (e: unknown) {
+      setLoadSearchError(e instanceof Error ? e.message : "Search failed.");
+    } finally {
+      setLoadSearchBusy(false);
+    }
+  }, [loadSearchQuery]);
+
+  const onAddLoadFromPicker = useCallback(async (loadId: number) => {
+    if (!Number.isFinite(tripId)) return;
+    setAddLoadBusy(true);
+    setAddLoadError(null);
+    try {
+      const updated = await addLoadToTrip(tripId, { load_id: loadId });
+      setTrip(updated);
+      clearPickerSearch();
+      setAddLoadError(null);
+    } catch (e) {
+      setAddLoadError(formatAddTripLoadError(e));
+    } finally {
+      setAddLoadBusy(false);
+    }
+  }, [tripId, clearPickerSearch]);
 
   const onAddLoadToTrip = useCallback(async () => {
     if (!Number.isFinite(tripId)) return;
@@ -139,12 +198,14 @@ export default function TripWorkspacePage() {
       const updated = await addLoadToTrip(tripId, { load_id: loadId });
       setTrip(updated);
       setAddLoadIdInput("");
+      clearPickerSearch();
+      setAddLoadError(null);
     } catch (e) {
       setAddLoadError(formatAddTripLoadError(e));
     } finally {
       setAddLoadBusy(false);
     }
-  }, [tripId, addLoadIdInput]);
+  }, [tripId, addLoadIdInput, clearPickerSearch]);
 
   const activeMemberLoads = useMemo(
     () => (trip?.member_loads ?? []).filter((m: TripMemberLoad) => m.removed_at == null),
@@ -256,38 +317,107 @@ export default function TripWorkspacePage() {
                 document work.
               </p>
               {isPlannedTripOpenForMembershipActions(trip) ? (
-                <div className="mt-4 flex flex-col gap-2">
-                  <div className="flex flex-wrap items-end gap-2">
-                    <label className="flex flex-col gap-0.5 text-[11px] text-[var(--trk-text-muted)]">
-                      Load ID
+                <div className="mt-4 flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[11px] font-medium text-[var(--trk-text-muted)]">Search loads</span>
+                    <div className="flex flex-wrap items-end gap-2">
                       <input
-                        type="text"
-                        inputMode="numeric"
+                        type="search"
                         autoComplete="off"
-                        value={addLoadIdInput}
+                        value={loadSearchQuery}
                         onChange={(e) => {
-                          setAddLoadIdInput(e.target.value);
+                          setLoadSearchQuery(e.target.value);
+                          if (loadSearchError) setLoadSearchError(null);
                           if (addLoadError) setAddLoadError(null);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
-                            void onAddLoadToTrip();
+                            void runLoadSearch();
                           }
                         }}
-                        disabled={addLoadBusy}
-                        placeholder="e.g. 526"
-                        className="w-32 rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                        disabled={addLoadBusy || loadSearchBusy}
+                        placeholder="Load #, broker, or reference"
+                        className="min-w-[12rem] max-w-md flex-1 rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none disabled:opacity-50"
                       />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={addLoadBusy}
-                      onClick={() => void onAddLoadToTrip()}
-                      className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {addLoadBusy ? "Adding…" : "Add load"}
-                    </button>
+                      <button
+                        type="button"
+                        disabled={addLoadBusy || loadSearchBusy || !loadSearchQuery.trim()}
+                        onClick={() => void runLoadSearch()}
+                        className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {loadSearchBusy ? "Searching…" : "Search"}
+                      </button>
+                    </div>
+                    {loadSearchError ? <p className="text-[11px] text-red-700">{loadSearchError}</p> : null}
+                  </div>
+                  {loadSearchResults.length > 0 ? (
+                    <ul className="max-h-60 overflow-y-auto divide-y divide-[var(--trk-border)] rounded-lg border border-[var(--trk-border)] text-[11px]">
+                      {loadSearchResults.map((row) => (
+                        <li key={row.id} className="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="font-medium text-[var(--trk-text)]">
+                              #{row.id} · {row.load_number || "—"}{" "}
+                              <span className="font-normal text-[var(--trk-text-muted)]">({row.status})</span>
+                            </div>
+                            <div className="text-[var(--trk-text-muted)]">{pickerBrokerLine(row)}</div>
+                            {row.broker_load_reference ? (
+                              <div className="text-[var(--trk-text-muted)]">Ref {row.broker_load_reference}</div>
+                            ) : null}
+                            {row.active_trip_id != null ? (
+                              <div className="text-[10px] italic text-amber-800/80">
+                                Trip mirror hint: active_trip_id {row.active_trip_id}
+                              </div>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={addLoadBusy}
+                            onClick={() => void onAddLoadFromPicker(row.id)}
+                            className="shrink-0 rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-0.5 text-[10px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {addLoadBusy ? "…" : "Add"}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <div className="border-t border-[var(--trk-border)] pt-3">
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
+                      Add by ID
+                    </div>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="flex flex-col gap-0.5 text-[11px] text-[var(--trk-text-muted)]">
+                        Load ID
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          value={addLoadIdInput}
+                          onChange={(e) => {
+                            setAddLoadIdInput(e.target.value);
+                            if (addLoadError) setAddLoadError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void onAddLoadToTrip();
+                            }
+                          }}
+                          disabled={addLoadBusy}
+                          placeholder="e.g. 526"
+                          className="w-32 rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={addLoadBusy}
+                        onClick={() => void onAddLoadToTrip()}
+                        className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {addLoadBusy ? "Adding…" : "Add load"}
+                      </button>
+                    </div>
                   </div>
                   {addLoadError ? <p className="text-[11px] text-red-700">{addLoadError}</p> : null}
                 </div>
