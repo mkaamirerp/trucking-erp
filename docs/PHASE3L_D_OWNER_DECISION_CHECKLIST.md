@@ -5,27 +5,93 @@
 
 ---
 
+## Locked owner decisions so far
+
+### Decision 1 — Trip terminal status name
+
+**Locked:**
+
+- Use **`Trip.status = completed`** as the positive terminal state for a trip container.
+- Do **not** use **`Trip.status = delivered`**.
+
+**Reason:**
+
+- Trip completion is not the same as load delivery.
+- A trip may complete when driver/equipment responsibility ends, even if freight is handed off to terminal/custody/another trip.
+- **`Load.status = delivered`** remains the commercial/final receiver truth.
+- Custody event **`delivered`** may still exist for receiver delivery proof.
+- **`Trip.status = completed`** means the operational trip responsibility is finished.
+
+### Decision 2 — Voided vs cancelled
+
+**Locked:**
+
+- Do **not** add **`Trip.status = voided`** in V1.
+- Use **`Trip.status = cancelled`** for operational cancellations, mistakes, duplicate/accidental trips, broker/customer cancellations, driver unavailable, abandoned plans, and any cancellation before or after movement.
+
+**Cancellation history rules:**
+
+- Trip number is not reused.
+- Record is not deleted.
+- Store **`cancelled_at`**.
+- Store **`cancelled_by`**.
+- Store **`cancel_reason`**.
+- Optional future **`cancel_category`**.
+- Notes and audit trail required.
+
+**Cancellation / pay rules:**
+
+- Cancellation does not automatically mean no pay.
+- If the truck moved before cancellation, ELD miles are evidence.
+- Dispatch / owner / payroll must make a pay decision.
+- Decision depends on company policy and driver type.
+
+**Driver / pay cases to support later:**
+
+1. Company driver paid by miles.
+2. Owner-operator paid by miles.
+3. Owner-operator paid by commission/percentage.
+
+**Future cancellation workflow should support:**
+
+- **`movement_started`** yes/no.
+- **`eld_miles_before_cancel`**.
+- **`manual_miles_override`**.
+- **Pay decision options:** `no_pay`, `pay_eld_miles`, `pay_manual_miles`, `flat_amount`, `payroll_review`.
+- **`pay_decision_reason`** / note.
+- **`pay_decision_by_user_id`**.
+- **`pay_decision_at`**.
+
+**Important:**
+
+- No automatic pay decision should be encoded in **`Trip.status`**.
+- Payroll/settlement policy handles money later.
+
+---
+
 ## 1. Trip terminal status naming
 
 | | |
 |--|--|
+| **Status** | **LOCKED** |
 | **Decision needed** | For a **closed** trip **container**, should `Trip.status` use **`completed`**, **`delivered`**, or something else? |
-| **Recommended answer** | **`completed`**. |
-| **Why** | Matches **3L-A / 3L-C**: **`delivered`** belongs on **loads** and custody events; using **`delivered`** on the trip blurs “all freight commercially delivered” vs “assignment / responsibility ended.” |
-| **Risk if undecided** | Inconsistent APIs, wrong UI labels, and accidental coupling to **`Load.status == delivered`**. |
-| **Impact on schema/API** | Allowlist / CHECK / constants must include **`completed`** as terminal positive state; **`delivered`** omitted from `Trip.status` unless product overrides. |
+| **Locked answer** | **`Trip.status = completed`** only; **do not** use **`Trip.status = delivered`**. |
+| **Why** | Trip completion ≠ load delivery; operational responsibility can end with handoff. **`Load.status = delivered`** and custody **`delivered`** event handle commercial/receiver proof. |
+| **Risk if undecided** | *(Resolved for V1 — see **Locked owner decisions §1**.)* |
+| **Impact on schema/API** | Allowlist / CHECK / constants must include **`completed`** as terminal positive state; **`delivered`** must **not** appear on `Trip.status`. |
 
 ---
 
-## 2. Voided
+## 2. Voided vs cancelled
 
 | | |
 |--|--|
-| **Decision needed** | Introduce **`voided`** as a distinct `Trip.status` now, or **defer** and use **`cancelled`** + reason/category? |
-| **Recommended answer** | **Defer `voided`** unless operational or legal requires a hard separation **immediately**. |
-| **Why** | **3L-A** treats **`voided`** as optional; **`cancelled`** + **`cancelled_at`** + notes often suffice for v1. |
-| **Risk if undecided** | Two “cancel-like” states without rules → bad reports and confused transitions. |
-| **Impact on schema/API** | Deferring avoids extra enum value, migration branching, and permission rules; if **`voided`** is added later, expand allowlist and state machine in one focused change. |
+| **Status** | **LOCKED** |
+| **Decision needed** | Introduce **`voided`** as a distinct `Trip.status` now, or use **`cancelled`** + audit/reason? |
+| **Locked answer** | **No `voided` in V1.** Use **`cancelled`** for all cancellation cases; capture **`cancelled_at`**, **`cancelled_by`**, **`cancel_reason`** (+ optional **`cancel_category`**), notes, and audit. Future pay/cancellation workflow fields as in **Locked owner decisions §2**. |
+| **Why** | Single cancel path reduces ambiguity; **`voided`** deferred unless legal/operational requires it later. |
+| **Risk if undecided** | *(Resolved for V1 — see **Locked owner decisions §2**.)* |
+| **Impact on schema/API** | No **`voided`** in trip status allowlist for V1; migrations/API eventually add **`cancelled_by`**, **`cancel_reason`**, etc., as specified — **not** automatic pay encoding on **`Trip.status`**. |
 
 ---
 
@@ -146,8 +212,8 @@ Schema/API may allow too many event types before product flow and validation rul
 
 | # | Topic | Owner choice (agree / override) |
 |---|--------|-----------------------------------|
-| 1 | Terminal status name | |
-| 2 | Voided | |
+| 1 | Terminal status name | **LOCKED** — `completed` only; not `delivered` on trip. |
+| 2 | Voided vs cancelled | **LOCKED** — no `voided` in V1; `cancelled` + audit (`cancelled_by`, `cancel_reason`, …) per **Locked owner decisions §2**. |
 | 3 | Terminal table | |
 | 4 | First transition edges | |
 | 5 | Assignment before transition | |
