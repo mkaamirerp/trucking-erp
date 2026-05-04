@@ -74,13 +74,16 @@
 
 ### 3.1 Recommended canonical set (align with 3L-A §3)
 
+**Decision 7 (locked) — trip header ladder:** **`planned` → `assigned` → `in_progress` → `completed`**, plus **`cancelled`** as terminal negative. **`in_progress`** = **first real execution signal** (not assignment or Assign & Send alone) — see **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**. **Do not** introduce **`Trip.status = dispatched`** as the next container state after **`assigned`**. The rows below for **`dispatched`**, **`in_transit`**, and **`at_terminal`** are **pre–Decision-7 / exploratory granularity** — treat as **legacy trip-header vocabulary** or map to **stop-level**, **timeline**, or **sub-states under `in_progress`**; **Decision 7 supersedes** them for **`Trip.status`** after **`assigned`**.
+
 | Status | Container-level | Notes |
 |--------|-----------------|--------|
 | `planned` | Yes | Current. |
-| `assigned` | Yes | Resources committed (may pair with `assigned_at`). |
-| `dispatched` | Yes | Released to execute (align wording with load “dispatched” carefully). |
-| `in_transit` | Yes | Road/movement phase. |
-| `at_terminal` | Yes | Trip anchor at yard/terminal; **granular custody** still in events. |
+| `assigned` | Yes | Resources committed (may pair with `assigned_at`); package may be sent; **not** active execution yet (**Decision 7**). |
+| **`in_progress`** | Yes | **Locked** product state: **active execution** started (first accepted signal). |
+| `dispatched` | Historical note | **Not** the next **`Trip.status`** after **`assigned`**. **Legacy / ambiguous** label (often confused with **`Load.status = dispatched`**). |
+| `in_transit` | Historical note | **Pre–Decision-7** proposal; prefer **`in_progress`** + custody/timeline for trip header, or stop-level status. |
+| `at_terminal` | Historical note | **Pre–Decision-7** proposal; same reconciliation as `in_transit`. |
 | **`completed`** | Yes | **Recommended** as the trip-container terminal state meaning **assignment / operational responsibility ended** (including “delivered all” OR “handed off per custody” per 3L-A). |
 | `cancelled` | Yes | Existing; keep **`cancelled_at`**. |
 | **`voided`** | Optional | Admin “never happened”; only if audit needs ≠ `cancelled`. |
@@ -181,16 +184,13 @@ All endpoints: **`get_tenant_db`**, **`require_tenant`**, existing auth.
 
 ## 7. `Load.status` coupling
 
-**Important:** Do not make **`Trip.status = dispatched`** call the existing **load-status** dispatch path automatically in v1. Today **`load.status` → `dispatched`** triggers **`dispatch_trips`** trip number allocation behavior (`TRIP_ALLOCATED_AT_LOAD_STATUS` and related mirror rules). **Trip execution status** must **not** accidentally double-mint trip numbers or create competing `dispatch_trips` rows.
+**Important:** **`Trip.status`** must **not** use **`dispatched`** as the **execution** transition after **`assigned`** (**Decision 7**). **Legacy** **`load.status` → `dispatched`** still triggers **`dispatch_trips`** trip number allocation behavior (`TRIP_ALLOCATED_AT_LOAD_STATUS` and related mirror rules). **Trip execution** transitions (e.g. **`assigned` → `in_progress`**) must **not** auto-call that load-status/mint path in v1 — avoids **double-mint** and competing `dispatch_trips` rows.
 
 | Trip transition | v1 recommendation for `Load.status` |
 |-----------------|-------------------------------------|
 | `planned` → `assigned` | **No auto change** (or optional: only if all loads already `assigned` — **default off**). |
-| `assigned` → `dispatched` | **Optional** soft coupling: if policy wants parity with board, **could** set member loads to `dispatched` — **high risk** of breaking existing `dispatch_trips` / mint rules — **recommend no auto in v1**; use **explicit** separate workflow or later mapping table. |
-| `dispatched` → `in_transit` | **No auto** in v1. |
-| `in_transit` → `at_terminal` | **No auto**; custody events drive **perception**; load might stay `in_transit`. |
-| `at_terminal` → `in_transit` | **No auto**. |
-| `in_transit` → `completed` (trip) | **No automatic** `delivered` on loads. **completed** trip may coexist with loads still **`in_transit`/`arrived_delivery`** until custody **handoff** + load updates done elsewhere. |
+| `assigned` → `in_progress` | **No auto** in v1. **`Load.status = dispatched`** stays **legacy board/mint** vocabulary — **not** defined as the automatic mirror of **`Trip.status`** (**Decision 7**). |
+| `in_progress` → `completed` | **No automatic** `delivered` on loads. **completed** trip may coexist with loads still **`in_transit`/`arrived_delivery`** on the board until custody **handoff** + load updates done elsewhere. |
 
 **v1 principle:** **Trip transitions do not mutate `Load.status`** unless a **future** **`LOAD_STATUS_COUPLED_TRANSITIONS`** feature is explicitly specified and tested — default **decoupled** to protect board and legacy mint logic.
 
@@ -223,7 +223,7 @@ All endpoints: **`get_tenant_db`**, **`require_tenant`**, existing auth.
 | **A** | **Schema migration only** — `terminals` (optional), `load_custody_events`, optional `trip_status_events`; widen/check `trips.status` allowlist in app + optional DB CHECK. |
 | **B** | **Models + Pydantic DTOs + service skeleton** (no public routes or routes behind flag). |
 | **C** | **Assignment endpoint** (3L-B compliant, audit fields). |
-| **D** | **`POST transition`** — limited edges: e.g. `planned→assigned`, `assigned→dispatched` only until custody gating exists. |
+| **D** | **`POST transition`** — limited edges: e.g. **`planned→assigned`**, **`assigned→in_progress`** only until custody gating exists (**Decision 7** — **no** **`assigned→dispatched`** on **`Trip.status`**). |
 | **E** | **Custody append endpoint** + minimal types (`picked_up`, `handoff`, `arrived_terminal`). |
 | **F** | **`GET timeline` / `GET custody-events`**. |
 | **G** | **Trip workspace UI** execution controls (behind flag). |
@@ -247,9 +247,9 @@ All endpoints: **`get_tenant_db`**, **`require_tenant`**, existing auth.
 
 1. **`voided`:** separate status vs `cancelled` + reason?
 2. **`terminals` v1:** required table vs **integer id stub** + name in event payload?
-3. **First transition slice:** which **exact** edges ship without custody gating?
+3. **First transition slice:** which **exact** edges ship without custody gating? (Aligned with **Decision 7:** **`planned→assigned`** first; **`assigned→in_progress`** when signals exist — **no** **`Trip.status = dispatched`** after **`assigned`**.)
 4. **`completed` trip** with undelivered loads: **mandatory** custody event types / count?
-5. **Coupling to `dispatch_trips`:** when **first** trip container reaches `dispatched`, interaction with **existing** load-driven mint — **same release train** or **later**?
+5. **Coupling to `dispatch_trips`:** when **`Trip.status`** first reaches **`in_progress`** (or later execution states), interaction with **existing** **legacy** load-driven **`dispatched`** mint — **same release train** or **later**?
 6. **`event_at` vs server time:** allow backdated events? **Max backdate** window?
 7. **RBAC:** roles for transition vs custody vs void?
 8. **Mobile / ELD** as `source` — in scope for v1 schema?

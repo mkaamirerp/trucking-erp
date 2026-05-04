@@ -14,6 +14,7 @@ This document is the **navigation / source-of-truth map** for:
 - **Assignment** (trip vs load)
 - The **planned-trip lifecycle** that shipped before execution work
 - **Dispatcher load workspace** actions (**Decision 6**) — canonical verification screen, action bar, dispatch package concept
+- **Active execution signal** (**Decision 7**) — execution starts at **first real signal**, not assignment/package send
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
@@ -44,6 +45,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Implementation planning** | `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md` |
 | **Owner decision checklist** | `PHASE3L_D_OWNER_DECISION_CHECKLIST.md` (includes **locked** decisions in the opening section) |
 | **Dispatcher load workspace (Decision 6)** | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` |
+| **Active execution signal (Decision 7)** | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` |
 
 ---
 
@@ -67,6 +69,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `PAYROLL_TRIP_TRACING.md` | Read before designing payroll, settlement, cancellation-pay, or trip tracing logic. |
 | `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Read before coupling Trip transitions to Load.status or operational load events. |
 | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` | Read before changing **Load Workspace** dispatcher actions (**Save Draft / Ready / Assign / Assign & Send**) or **dispatch package** design. |
+| `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` | Read before defining **when a trip is “actively executing”**, **`Trip.status = in_progress`**, execution signals, or overlap guards vs **assignment**. |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -74,7 +77,7 @@ The **A–F** reading order remains the **required spine**; supporting reference
 
 ## 4. Consolidated locked principles
 
-The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D** and **Decision 6** (load workspace / dispatch package) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
+The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), and **Decision 7** (active execution signal) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
 
 - **Trip** is the **operational execution container** (movement, equipment assignment at trip level for active membership).
 - **Load** is the **commercial / broker / customer** truth (stops, docs, rates, board `Load.status` today).
@@ -90,10 +93,11 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 - **Trip numbers are not reused** after cancellation (per 3L-D). Load-number reuse policy is outside this Trip execution/custody index.
 - **Cancellation does not automatically mean no pay**; **ELD miles** may be evidence; **dispatch / owner / payroll** decides pay (policy-driven).
 - **Terminal table required in V1** for terminal custody: **tenant-scoped** terminal rows (admin-managed **name** + address fields per 3L-D); **dropdown shows name only**; **backend stores `terminal_id`** on custody events — **not** free-text as the identity of “which terminal.”
-- **First execution transition slice:** **`planned` → `assigned` only** (then expand later per 3L-C checklist).
+- **Canonical `Trip.status` ladder (Decision 7):** **`planned` → `assigned` → `in_progress` → `completed`**, **`cancelled`** terminal negative — see **3L-D §4** + **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**. **Do not** use **`Trip.status = dispatched`** after **`assigned`**; **`dispatched`** on **`Load.status`** / board remains **legacy** vocabulary for mint/board, not the trip header step after commitment.
+- **First execution transition slice (phasing):** **`planned` → `assigned` only** first; then **`assigned` → `in_progress`** when execution signals exist — **not** `assigned → dispatched`.
 - **Assignment** endpoint **`PUT /api/v1/trips/{id}/assignment`** should land **before** broad **transition** endpoint (per 3L-C slices).
 - **No `Load.status` auto-updates from `Trip.status` transitions in V1** (default decoupled).
-- **No `dispatch_trips` create/update** driven by **`Trip.status`** (including execution `dispatched`) in V1 — avoids collision with **`load.status → dispatched`** mint path (3L-C §7).
+- **No `dispatch_trips` create/update** driven by **`Trip.status`** (including **`in_progress`** or any future trip execution state) in V1 — avoids collision with **legacy** **`load.status → dispatched`** mint path (3L-C §7).
 - **Custody V1 `event_type` allowlist:** **`picked_up`**, **`handoff`**, **`arrived_terminal`**, **`dropped_at_terminal`**.
 - **Defer:** **`picked_up_from_terminal`**, **`trailer_transfer`** (until allowlist extended); **`trip_stops`** (events + projections first).
 - **Minimum audit** for assignment / transition / custody: **`actor_user_id`**, **`event_at` / `recorded_at`**, **reason/notes**, **`source`** (central vs local audit store still an open topic — see §5).
@@ -109,6 +113,18 @@ Full specification: [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./D
 - **Out of scope** for these actions: pickup complete, en route (unless separate execution action), **custody start**, **`Load.status = delivered`**, payroll, false movement/ELD events, **`dispatch_trips`** from **`Trip.status` in V1**, **silent trip→load assignment sync**, dispatch board rewrite.
 - **Queued** future **assigned** trips per driver/equipment **allowed**; **overlapping active execution** blocked or supervisor override (**define “active execution”** in implementation).
 - **Dispatch package** = proof of **sent / viewed** beyond **`Trip.status = assigned`**; terminology: avoid overloading **“Dispatched”** until execution vocabulary is fixed.
+
+### Decision 7 — Active execution starts from first real execution signal, not assignment (**locked**)
+
+Full specification: [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md).
+
+**Summary:**
+
+- **Assignment** / **Assign & Send** = commitment + optional **package send**; they **do not** start movement, pickup, custody, delivered, payroll, or board rewrite.
+- **Active execution** begins at the **first accepted execution signal** (driver app, dispatcher manual, **future** geofence with override — **geofence not implemented now**).
+- **Simple `Trip.status` product model:** `planned` → `assigned` → **`in_progress`** (first signal) → `completed` → `cancelled` (number not reused).
+- **Queued future assigned trips** allowed during a current trip; **overlapping active execution** blocked or supervisor override — **without** blocking planning/assignment.
+- **Cross-check Decision 6:** package send **≠** `in_progress`; only **first execution signal** sets **in progress**.
 
 ---
 
@@ -126,7 +142,8 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Terminal sub-states** in custody: on trailer / staged / transfer pending (granularity vs trip `at_terminal`).
 - **When** **`picked_up_from_terminal`** and **`trailer_transfer`** enter the custody allowlist.
 - **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; schema TBD.
-- **Definition of “active execution”** for overlap / queuing guards (**Decision 6**).
+- **Definition of “active execution”** for overlap / queuing guards — **partially locked** in **Decision 7** (`in_progress` from first signal); implementation detail and supervisor override UX remain TBD.
+- **Reconcile** **3L-C** granular trip-status proposal (`dispatched`, `in_transit`, `at_terminal`, etc.) with **Decision 7** **simple** `in_progress` model (mapping, sub-states, or deprecation).
 - Exact mapping of **Save Ready** / **Save Draft** to **`Load.status`** values (`draft` / `ready` vs existing board pool).
 
 ---
@@ -145,6 +162,7 @@ Before writing migrations or product code:
 - **Do not rewrite** the **dispatch board** as part of the first execution/custody slices.
 - **Do not** mix **stashed unrelated work** into trip execution workstreams (triage stash separately).
 - Implement **Load Workspace** dispatcher actions per **`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`**; **do not** treat **Assign** as legacy **`Load.status = dispatched`** or as **custody** / **payroll**.
+- **Do not** set **`Trip.status = in_progress`** (or treat trip as **actively executing**) from **assignment** or **dispatch package send** alone — **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**.
 
 ---
 

@@ -115,7 +115,7 @@ Any sync mode must remain consistent with **`active_trip_id`** and membership wr
 
 - **Today,** legacy **dispatch trip** behavior and **trip number minting** are still tied to **`Load.status`** transitions (`TRIP_ALLOCATED_AT_LOAD_STATUS`, `PRE_DISPATCH_TRIP_CANCEL_STATUSES` in `app/constants/trip_dispatch.py`).
 - **Planned container** `trips` and **`trip_loads`** are a **separate** product path.
-- **Contract:** This document does **not** merge the two worlds; it only defines **assignment authority** for loads with **trip container** membership (today primarily the **planned** lifecycle; future **`Trip.status`** values such as **assigned**, **dispatched**, **in_transit**, **at_terminal**, and **completed** do not change §3.1–§3.3 while the load remains an active member on a container that is not **cancelled** or **voided**). A **future** doc should map **when** legacy dispatch trip and planned container are unified (3L-A open question #8).
+- **Contract:** This document does **not** merge the two worlds; it only defines **assignment authority** for loads with **trip container** membership (today primarily the **planned** lifecycle; future **`Trip.status`** values per **Decision 7** — **`assigned`**, **`in_progress`**, **`completed`**, **`cancelled`** — do not change §3.1–§3.3 while the load remains an active member on a container that is not **cancelled** or **voided**). **Legacy / pre–Decision-7** granular labels (**`dispatched`**, **`in_transit`**, **`at_terminal`** as **trip header** states) must **not** be read as overriding the locked ladder; prefer **`in_progress`** plus stop/timeline granularity. A **future** doc should map **when** legacy dispatch trip and planned container are unified (3L-A open question #8).
 
 ---
 
@@ -132,7 +132,7 @@ Any sync mode must remain consistent with **`active_trip_id`** and membership wr
 ## 7. `assigned_at` (trips)
 
 - **Today:** Not set on planned-trip create.
-- **Contract placeholder:** When execution/assignment phases are introduced, define **`assigned_at`** as “movement assignment **committed**” (dispatcher/driver booked) **distinct** from **`dispatched`** / rollout. Exact trigger is an **open** implementation detail.
+- **Contract placeholder:** When execution/assignment phases are introduced, define **`assigned_at`** as “movement assignment **committed**” (dispatcher/driver booked) **distinct** from **`in_progress`** (first execution signal) and **distinct** from **legacy** **`Load.status = dispatched`** / “rolled out” wording on the board. Exact trigger is an **open** implementation detail.
 
 ---
 

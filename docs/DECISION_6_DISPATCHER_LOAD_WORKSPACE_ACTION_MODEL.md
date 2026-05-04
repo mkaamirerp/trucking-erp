@@ -124,6 +124,8 @@ Avoid using **“Dispatched”** too early as a heavy backend label — companie
 - sometimes = driver **started executing**
 - sometimes = truck **en route**
 
+**Cross-check — Decision 7 (locked):** The **`Trip.status`** ladder does **not** include **`dispatched`** as the step after **`assigned`**. After commitment, the next trip header state for **active execution** is **`in_progress`**, entered only on the **first real execution signal** — see **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**. **`Load.status` / board “dispatched”** remains **legacy** in that trip-header sense.
+
 ### Preferred terms (until execution layer fully defined)
 
 | Concept | Meaning |

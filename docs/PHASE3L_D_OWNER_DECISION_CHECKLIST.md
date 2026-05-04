@@ -124,6 +124,14 @@ Reason:
 
 ---
 
+### Decision 7 — Active execution starts from first real execution signal, not assignment
+
+**Locked:** **Active execution** does **not** start from **assignment** or **Assign & Send** alone. **First real execution signal** (driver app, dispatcher manual, future geofence w/ override) moves the trip to **`in_progress`**. **Simple `Trip.status`** ladder: `planned`, `assigned`, `in_progress`, `completed`, `cancelled`. **Queued** future assigned trips OK; **overlap** of **active execution** blocked or supervisor override. **Geofence:** future only, not implemented now.
+
+**Full specification:** [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md)
+
+---
+
 ## 1. Trip terminal status naming
 
 | | |
@@ -167,11 +175,14 @@ Reason:
 
 | | |
 |--|--|
-| **Decision needed** | Which **`Trip.status`** transitions ship in the **first** execution slice? |
-| **Recommended answer** | **`planned` → `assigned`** **only** first; **`assigned` → `dispatched`** (and beyond) **later**, with custody/guards when ready. |
-| **Why** | Smallest behavioral change; exercises state machine + audit without touching **load dispatch** or **`dispatch_trips`** semantics. |
-| **Risk if undecided** | Shipping **`dispatched`** or **`in_transit`** too early invites accidental **`Load.status`** coupling or mint bugs (**3L-C §7**). |
-| **Impact on schema/API** | Transition endpoint initially allows **one** edge; expand allowlist per release; tests stay narrow. |
+| **Status** | **LOCKED** (reconciled with **Decision 7** — [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md)). |
+| **Decision needed** | Which **`Trip.status`** transitions ship in the **first** execution slice, and what is the **canonical trip ladder**? |
+| **Locked answer — product ladder** | **`planned` → `assigned` → `in_progress` → `completed`**, with **`cancelled`** as the **terminal negative** state (number not reused). **Do not** use **`dispatched`** as the next **`Trip.status`** after **`assigned`** — that word is **legacy / ambiguous** (especially on **`Load.status`** and board vocabulary); **Decision 7 supersedes** it for the **new `Trip.status` ladder**. |
+| **Meanings (trip container)** | **`planned`** — trip exists; driver/equipment **not** committed yet. **`assigned`** — driver/truck/trailer **committed**; dispatch package **may** be sent; **not** moving yet. **`in_progress`** — **first real execution signal** has occurred (**not** assignment or package send alone). **`completed`** — trip **responsibility** finished. **`cancelled`** — trip cancelled; **number not reused**. |
+| **First slice (implementation phasing)** | Ship **`planned` → `assigned`** first when tightening rollout; add **`assigned` → `in_progress`** when **execution signals** + guards exist (still **no** trip-level **`dispatched`** step). |
+| **Why** | Smallest behavioral change first; ladder stays aligned with **active execution starts at first signal**, not assignment (**Decision 7**). |
+| **Risk if undecided** | Reintroducing **`Trip.status = dispatched`** blurs **commitment/send** vs **movement** and invites **`Load.status`** / **`dispatch_trips`** mint coupling (**3L-C §7**). |
+| **Impact on schema/API** | Transition allowlist follows the ladder above; expand per release; granular **pre–Decision-7** labels (**`in_transit`**, **`at_terminal`**, etc.) belong in **stop-level / timeline / sub-state** design — not as the **`assigned` → ?** hop on the trip header. |
 
 ---
 
@@ -203,8 +214,8 @@ Reason:
 
 | | |
 |--|--|
-| **Decision needed** | When **`Trip.status`** becomes **`dispatched`** (future slice), should the system **create or update** **`dispatch_trips`** (today driven largely by **`Load.status` → `dispatched`**)? |
-| **Recommended answer** | **No** in v1 — **do not** auto-wire new trip execution **`dispatched`** to the existing load-status **`dispatch_trips`** path. |
+| **Decision needed** | When **`Trip.status`** advances beyond **`assigned`** (e.g. to **`in_progress`** per **Decision 7**), should the system **create or update** **`dispatch_trips`** (today driven largely by **legacy** **`Load.status` → `dispatched`**)? |
+| **Recommended answer** | **No** in v1 — **do not** auto-wire **trip execution** transitions (including **`in_progress`**) to the existing **load-status** **`dispatch_trips`** path. **`Load.status = dispatched`** remains **legacy board/mint** vocabulary — not the **Decision 7** next step after **`Trip.status = assigned`**. |
 | **Why** | **3L-C §7**: today **`load.status` → `dispatched`** triggers trip number behavior on the **legacy** path; automatic linkage risks **double-mint** or competing rows. |
 | **Risk if undecided** | Data corruption, duplicate trip numbers, broken mirror logic. |
 | **Impact on schema/API** | Execution transition code paths stay **separate** from **`dispatch_trips`** until a **designed** unification (explicit **3L-A** follow-up). |
@@ -279,6 +290,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | 9 | trip_stops | |
 | 10 | RBAC / audit minimum | |
 | **11** | **Decision 6** — Load workspace (Draft/Ready/Assign/Assign&Send) | **LOCKED** — [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md) |
+| **12** | **Decision 7** — Active execution signal (not from assignment) | **LOCKED** — [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md) |
 
 ---
 
