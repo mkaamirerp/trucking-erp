@@ -45,6 +45,30 @@ Read in this order when onboarding or before migrations / implementation:
 
 ---
 
+## Supporting references
+
+These docs are **not** part of the required **A–F** reading spine, but should be checked when working near trip numbering, dispatch mirroring, DDL, load parser boundaries, or payroll tracing.
+
+| Document | When to read / why |
+|----------|-------------------|
+| `DISPATCH_TRIP_NUMBER_RULE.md` | Read before touching trip number prefix, trip number minting, or any logic involving `Load.status = dispatched` and `dispatch_trips`. |
+| `DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md` | Read before changing the existing dispatch trip number implementation, shared numbering pool, or load-status-driven dispatch path. |
+| `TRIP_FIRST_DDL_CONTRACT.md` | Read before designing tenant migrations or DDL for trip-first execution/custody tables. |
+| `TRIP_CONTAINER_VS_LOAD_FOUNDATION.md` | Read when revisiting Trip vs Load boundaries and product ownership. |
+| `trip-foundation.md` | Read for earlier trip foundation context and naming/scope history. |
+| `TRIP_CONTAINER_OPERATIONAL_RULES.md` | Read before changing operational rules for Trip containers. |
+| `PHASE1_TRIP_FOUNDATION_PLAN.md` | Historical phase-1 foundation plan; useful for why current `trips` / `trip_loads` shape exists. |
+| `TRIP_CONTAINER_ARCHITECTURE_GAP_REPORT.md` | Read before changing architecture or claiming gaps are closed. |
+| `PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md` | Pre-ship proposal for planned trips; mostly superseded by module closeout, but useful for rationale. |
+| `PHASE3D_TRIP_ACTION_READ_FIRST.md` | Read before changing trip service actions; preserves report-first/action safety discipline. |
+| `TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md` | Read only if Trip work touches LoadWorkspace or parser boundaries. |
+| `PAYROLL_TRIP_TRACING.md` | Read before designing payroll, settlement, cancellation-pay, or trip tracing logic. |
+| `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Read before coupling Trip transitions to Load.status or operational load events. |
+
+The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
+
+---
+
 ## 4. Consolidated locked principles
 
 The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D** unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
