@@ -116,6 +116,14 @@ Reason:
 
 ---
 
+### Decision 6 — Load workspace action model: Save Draft / Save Ready / Assign / Assign & Send
+
+**Locked:** Dispatchers use a **canonical Load Workspace** with a top action model: **Save Draft**, **Save Ready**, **Assign**, **Assign & Send** (buttons or primary + menu). **Assign** = trip assignment / commitment only; **Assign & Send** = composite backend steps including **versioned dispatch package** to driver + audit. **Hard boundaries** and **queuing rules** per full doc.
+
+**Full specification:** [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md)
+
+---
+
 ## 1. Trip terminal status naming
 
 | | |
@@ -270,6 +278,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | 8 | Custody v1 types | |
 | 9 | trip_stops | |
 | 10 | RBAC / audit minimum | |
+| **11** | **Decision 6** — Load workspace (Draft/Ready/Assign/Assign&Send) | **LOCKED** — [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md) |
 
 ---
 

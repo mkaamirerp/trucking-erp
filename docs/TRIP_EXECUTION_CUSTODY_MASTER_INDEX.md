@@ -13,6 +13,7 @@ This document is the **navigation / source-of-truth map** for:
 - **Terminal** routing and yard context
 - **Assignment** (trip vs load)
 - The **planned-trip lifecycle** that shipped before execution work
+- **Dispatcher load workspace** actions (**Decision 6**) — canonical verification screen, action bar, dispatch package concept
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
@@ -42,6 +43,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Decision records** | `PHASE3L_A_TRIP_EXECUTION_CUSTODY_DECISION_RECORD.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md` |
 | **Implementation planning** | `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md` |
 | **Owner decision checklist** | `PHASE3L_D_OWNER_DECISION_CHECKLIST.md` (includes **locked** decisions in the opening section) |
+| **Dispatcher load workspace (Decision 6)** | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` |
 
 ---
 
@@ -64,6 +66,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md` | Read only if Trip work touches LoadWorkspace or parser boundaries. |
 | `PAYROLL_TRIP_TRACING.md` | Read before designing payroll, settlement, cancellation-pay, or trip tracing logic. |
 | `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Read before coupling Trip transitions to Load.status or operational load events. |
+| `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` | Read before changing **Load Workspace** dispatcher actions (**Save Draft / Ready / Assign / Assign & Send**) or **dispatch package** design. |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -71,7 +74,7 @@ The **A–F** reading order remains the **required spine**; supporting reference
 
 ## 4. Consolidated locked principles
 
-The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D** unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
+The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D** and **Decision 6** (load workspace / dispatch package) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
 
 - **Trip** is the **operational execution container** (movement, equipment assignment at trip level for active membership).
 - **Load** is the **commercial / broker / customer** truth (stops, docs, rates, board `Load.status` today).
@@ -96,6 +99,17 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 - **Minimum audit** for assignment / transition / custody: **`actor_user_id`**, **`event_at` / `recorded_at`**, **reason/notes**, **`source`** (central vs local audit store still an open topic — see §5).
 - **No default silent sync** of **trip assignment → load assignment** (3L-B); named modes only if explicitly added later.
 
+### Decision 6 — Load workspace action model: Save Draft / Save Ready / Assign / Assign & Send (**locked**)
+
+Full specification: [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md). **Sits after** the **Assignment endpoint first** slice (§4 bullet above). Summary:
+
+- **Canonical Load Workspace** for dispatcher verification; top **action bar** (or primary + menu): **Save Draft**, **Save Ready**, **Assign**, **Assign & Send**.
+- **Assign** = trip **assignment / commitment** only (may set **`Trip.status = assigned`** from **`planned`** per policy); **does not** imply driver **send**.
+- **Assign & Send** = **composite** backend facts (save load, ready if needed, trip + membership, assignment, **versioned dispatch package**, send, **audit**) even if UI is one control.
+- **Out of scope** for these actions: pickup complete, en route (unless separate execution action), **custody start**, **`Load.status = delivered`**, payroll, false movement/ELD events, **`dispatch_trips`** from **`Trip.status` in V1**, **silent trip→load assignment sync**, dispatch board rewrite.
+- **Queued** future **assigned** trips per driver/equipment **allowed**; **overlapping active execution** blocked or supervisor override (**define “active execution”** in implementation).
+- **Dispatch package** = proof of **sent / viewed** beyond **`Trip.status = assigned`**; terminology: avoid overloading **“Dispatched”** until execution vocabulary is fixed.
+
 ---
 
 ## 5. Open decisions / still pending
@@ -111,6 +125,9 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Long-term `dispatch_trips` retirement** or unification with trip container (3L-A/C open questions).
 - **Terminal sub-states** in custody: on trailer / staged / transfer pending (granularity vs trip `at_terminal`).
 - **When** **`picked_up_from_terminal`** and **`trailer_transfer`** enter the custody allowlist.
+- **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; schema TBD.
+- **Definition of “active execution”** for overlap / queuing guards (**Decision 6**).
+- Exact mapping of **Save Ready** / **Save Draft** to **`Load.status`** values (`draft` / `ready` vs existing board pool).
 
 ---
 
@@ -127,6 +144,7 @@ Before writing migrations or product code:
 - **Do not hard-delete** custody history — void/correct patterns per foundation docs.
 - **Do not rewrite** the **dispatch board** as part of the first execution/custody slices.
 - **Do not** mix **stashed unrelated work** into trip execution workstreams (triage stash separately).
+- Implement **Load Workspace** dispatcher actions per **`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`**; **do not** treat **Assign** as legacy **`Load.status = dispatched`** or as **custody** / **payroll**.
 
 ---
 
