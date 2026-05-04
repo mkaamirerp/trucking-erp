@@ -31,6 +31,10 @@ Tighten tracing without overloading `reference_code`:
 
 Explicit `dispatch_trip_id` on notes or other exception artifacts is **out of scope** until product needs it; Phase A continues to rely on load payload / read-model for trip display.
 
+## Related product decisions (non-payroll)
+
+Future **driver-facing pay display**, **settlement basis** vs **broker/ratecon accounting truth**, and **what the driver sees** on the dispatch package may interact with pay-run **tracing** and exports. See **`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`** (**draft**, **not locked**) — especially **financial visibility** and **two pay branches** — before assuming tracing metadata should expose broker gross or internal-only amounts.
+
 ## Related code
 
 - `app/routers/pay_runs.py` — `generate_pay_run`, `_pay_run_item_metadata`

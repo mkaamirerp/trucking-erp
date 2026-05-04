@@ -14,7 +14,9 @@ This document is the **navigation / source-of-truth map** for:
 - **Assignment** (trip vs load)
 - The **planned-trip lifecycle** that shipped before execution work
 - **Dispatcher load workspace** actions (**Decision 6**) — canonical verification screen, action bar, dispatch package concept
+- **Trip number in the driver dispatch package** — **Trip Number** is the **primary operational identifier**; one number for the **whole** trip (not per stop); see §4
 - **Active execution signal** (**Decision 7**) — execution starts at **first real signal**, not assignment/package send
+- **Driver dispatch package & financial visibility** (**Decision 8**, **DRAFT**) — versioned package from **Assign & Send**, operational content vs driver-visible view, disclosure — see [`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`](./DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md)
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
@@ -46,6 +48,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Owner decision checklist** | `PHASE3L_D_OWNER_DECISION_CHECKLIST.md` (includes **locked** decisions in the opening section) |
 | **Dispatcher load workspace (Decision 6)** | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` |
 | **Active execution signal (Decision 7)** | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` |
+| **Driver dispatch package & financial visibility (Decision 8)** — **DRAFT / NOT LOCKED** | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` |
 
 ---
 
@@ -70,6 +73,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Read before coupling Trip transitions to Load.status or operational load events. |
 | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` | Read before changing **Load Workspace** dispatcher actions (**Save Draft / Ready / Assign / Assign & Send**) or **dispatch package** design. |
 | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` | Read before defining **when a trip is “actively executing”**, **`Trip.status = in_progress`**, execution signals, or overlap guards vs **assignment**. |
+| `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` — **draft** | Read when designing **Assign & Send** package **content**, **versioning**, **internal vs driver-visible** views, **financial disclosure**, or **driver-type** visibility (**not locked** until owner sign-off). |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -91,6 +95,17 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 - **No `Trip.status = voided` in V1** — use **`cancelled`** with reason, audit, and future pay-review workflow (see 3L-D).
 - **Cancelled** trips: record not deleted; **`cancelled_at`**, **`cancelled_by`**, **`cancel_reason`** (and notes/audit); **`cancel_category` optional later**.
 - **Trip numbers are not reused** after cancellation (per 3L-D). Load-number reuse policy is outside this Trip execution/custody index.
+
+### Trip number rule — driver dispatch package (**locked**)
+
+- The **driver dispatch package** must display the **Trip Number** as the **primary operational identifier**.
+- **Trip number** belongs to the **Trip** only.
+- **Do not** mint or display a **new** trip number for each pickup, delivery, stop, or second pickup.
+- If the trip has **multiple pickups or deliveries**, **all stops** remain under the **same** trip number.
+- Each stop may have its own **stop sequence number**, **pickup number**, **delivery number**, **PO number**, **appointment date/time**, **facility address**, and **notes/instructions** — those are **stop / load** references, **not** trip numbers.
+
+(See **`DISPATCH_TRIP_NUMBER_RULE.md`** and **`DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md`** when changing numbering or minting.)
+
 - **Cancellation does not automatically mean no pay**; **ELD miles** may be evidence; **dispatch / owner / payroll** decides pay (policy-driven).
 - **Terminal table required in V1** for terminal custody: **tenant-scoped** terminal rows (admin-managed **name** + address fields per 3L-D); **dropdown shows name only**; **backend stores `terminal_id`** on custody events — **not** free-text as the identity of “which terminal.”
 - **Canonical `Trip.status` ladder (Decision 7):** **`planned` → `assigned` → `in_progress` → `completed`**, **`cancelled`** terminal negative — see **3L-D §4** + **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**. **Do not** use **`Trip.status = dispatched`** after **`assigned`**; **`dispatched`** on **`Load.status`** / board remains **legacy** vocabulary for mint/board, not the trip header step after commitment.
@@ -113,6 +128,7 @@ Full specification: [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./D
 - **Out of scope** for these actions: pickup complete, en route (unless separate execution action), **custody start**, **`Load.status = delivered`**, payroll, false movement/ELD events, **`dispatch_trips`** from **`Trip.status` in V1**, **silent trip→load assignment sync**, dispatch board rewrite.
 - **Queued** future **assigned** trips per driver/equipment **allowed**; **overlapping active execution** blocked or supervisor override (**define “active execution”** in implementation).
 - **Dispatch package** = proof of **sent / viewed** beyond **`Trip.status = assigned`**; terminology: avoid overloading **“Dispatched”** until execution vocabulary is fixed.
+- **Dispatch package content — trip number:** Follow the **§4** subsection **Trip number rule — driver dispatch package** (one **Trip Number** for the whole trip; stop-level fields are **not** trip numbers).
 
 ### Decision 7 — Active execution starts from first real execution signal, not assignment (**locked**)
 
@@ -125,6 +141,14 @@ Full specification: [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7
 - **Simple `Trip.status` product model:** `planned` → `assigned` → **`in_progress`** (first signal) → `completed` → `cancelled` (number not reused).
 - **Queued future assigned trips** allowed during a current trip; **overlapping active execution** blocked or supervisor override — **without** blocking planning/assignment.
 - **Cross-check Decision 6:** package send **≠** `in_progress`; only **first execution signal** sets **in progress**.
+
+### Decision 8 — Driver dispatch package & financial visibility (**DRAFT / NOT LOCKED**)
+
+**Full draft:** [`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`](./DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md).
+
+**Summary:** Decision 8 defines the **Driver Dispatch Package**: the **versioned** package sent from **Load Workspace** / **Assign & Send**, including **trip number**, **driver/truck/trailer** header, **stop** details, **references**, **documents/instructions**, **driver-type disclosure** rules, and **financial visibility** boundaries (internal snapshot vs driver-visible view; broker rate hidden by default; future **two pay branches** preserved — **no** O/O settlement implementation in this draft).
+
+**Until locked:** treat §§ B–M as **design preservation** only; implementation slices remain gated on owner review (see also **§5** — dispatch package persistence).
 
 ---
 
@@ -141,7 +165,7 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Long-term `dispatch_trips` retirement** or unification with trip container (3L-A/C open questions).
 - **Terminal sub-states** in custody: on trailer / staged / transfer pending (granularity vs trip `at_terminal`).
 - **When** **`picked_up_from_terminal`** and **`trailer_transfer`** enter the custody allowlist.
-- **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; schema TBD.
+- **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; **detailed design draft** in **`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`** (**Decision 8**, **NOT LOCKED**); schema/API TBD after sign-off.
 - **Definition of “active execution”** for overlap / queuing guards — **partially locked** in **Decision 7** (`in_progress` from first signal); implementation detail and supervisor override UX remain TBD.
 - **Reconcile** **3L-C** granular trip-status proposal (`dispatched`, `in_transit`, `at_terminal`, etc.) with **Decision 7** **simple** `in_progress` model (mapping, sub-states, or deprecation).
 - Exact mapping of **Save Ready** / **Save Draft** to **`Load.status`** values (`draft` / `ready` vs existing board pool).
@@ -163,6 +187,7 @@ Before writing migrations or product code:
 - **Do not** mix **stashed unrelated work** into trip execution workstreams (triage stash separately).
 - Implement **Load Workspace** dispatcher actions per **`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`**; **do not** treat **Assign** as legacy **`Load.status = dispatched`** or as **custody** / **payroll**.
 - **Do not** set **`Trip.status = in_progress`** (or treat trip as **actively executing**) from **assignment** or **dispatch package send** alone — **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**.
+- **Do not** mint or surface a **new Trip Number** per stop, pickup, delivery, or second pickup — **one** trip number per **Trip**; driver **dispatch package** uses that number as **primary** operational ID (**§4**, **Trip number rule**, + **Decision 6**).
 
 ---
 
