@@ -17,6 +17,7 @@ This document is the **navigation / source-of-truth map** for:
 - **Trip number in the driver dispatch package** — **Trip Number** is the **primary operational identifier**; one number for the **whole** trip (not per stop); see §4
 - **Active execution signal** (**Decision 7**) — execution starts at **first real signal**, not assignment/package send
 - **Driver dispatch package & financial visibility** (**Decision 8**, **DRAFT**) — versioned package from **Assign & Send**, operational content vs driver-visible view, disclosure — see [`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`](./DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md)
+- **Load readiness & planning queue** (**Decision 9**, **LOCKED**) — **Save Draft / Save Ready** are load preparation, not trip execution; **Ready / Unassigned** planning queue semantics — see [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md)
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
@@ -49,8 +50,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Dispatcher load workspace (Decision 6)** | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` |
 | **Active execution signal (Decision 7)** | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` |
 | **Driver dispatch package & financial visibility (Decision 8)** — **DRAFT / NOT LOCKED** | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` |
-
----
+| **Load readiness / planning queue (Decision 9)** — **LOCKED** | `DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md` |
 
 ## Supporting references
 
@@ -74,6 +74,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` | Read before changing **Load Workspace** dispatcher actions (**Save Draft / Ready / Assign / Assign & Send**) or **dispatch package** design. |
 | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` | Read before defining **when a trip is “actively executing”**, **`Trip.status = in_progress`**, execution signals, or overlap guards vs **assignment**. |
 | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` — **draft** | Read when designing **Assign & Send** package **content**, **versioning**, **internal vs driver-visible** views, **financial disclosure**, or **driver-type** visibility (**not locked** until owner sign-off). |
+| `DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md` | Read before mapping **Save Draft / Save Ready** to **boards**, **queues**, or **`Load.status`** — **locked** semantics: readiness vs execution (**Decision 9**). |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -81,7 +82,7 @@ The **A–F** reading order remains the **required spine**; supporting reference
 
 ## 4. Consolidated locked principles
 
-The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), and **Decision 7** (active execution signal) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
+The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), **Decision 7** (active execution signal), and **Decision 9** (load readiness / planning queue) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
 
 - **Trip** is the **operational execution container** (movement, equipment assignment at trip level for active membership).
 - **Load** is the **commercial / broker / customer** truth (stops, docs, rates, board `Load.status` today).
@@ -118,7 +119,11 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 - **Minimum audit** for assignment / transition / custody: **`actor_user_id`**, **`event_at` / `recorded_at`**, **reason/notes**, **`source`** (central vs local audit store still an open topic — see §5).
 - **No default silent sync** of **trip assignment → load assignment** (3L-B); named modes only if explicitly added later.
 
+- **Save Draft / Save Ready (Decision 9)** are **load preparation / readiness** — **not** trip-execution states. **Save Ready** (without a **trip** action) implies **Ready / Unassigned Load Planning Queue** semantics: dispatch may plan, combine, split, or hold; **no** automatic trip, assignment, package, **`in_progress`**, **`Load.status = dispatched`**, custody, payroll, or board rewrite — see **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**.
+
 ### Decision 6 — Load workspace action model: Save Draft / Save Ready / Assign / Assign & Send (**locked**)
+
+**Cross-check Decision 9:** **Save Draft / Save Ready** = load **readiness** only; **Assign** / **Assign & Send** remain the path to **trip commitment** and **package send** per **Decision 6**.
 
 Full specification: [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md). **Sits after** the **Assignment endpoint first** slice (§4 bullet above). Summary:
 
@@ -150,6 +155,12 @@ Full specification: [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7
 
 **Until locked:** treat §§ B–M as **design preservation** only; implementation slices remain gated on owner review (see also **§5** — dispatch package persistence).
 
+### Decision 9 — Load readiness and planning queue mapping (**locked**)
+
+Full specification: [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md).
+
+**Summary:** **Save Draft / Save Ready** are **load-preparation** states, **not** **trip-execution** states. **Save Ready** without assigning places the load in **Ready / Unassigned Load Planning Queue** meaning: clean enough to plan; **not** committed to equipment; may be combined/split across trips; explicit **trip** actions create **`TripLoad`** — **not** automatic on Save Ready. **Does not** create trip, assign, send package, **`in_progress`**, **`Load.status = dispatched`**, custody, payroll, or rewrite board. Coexists with **legacy** board until deliberate migration.
+
 ---
 
 ## 5. Open decisions / still pending
@@ -168,7 +179,7 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; **detailed design draft** in **`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`** (**Decision 8**, **NOT LOCKED**); schema/API TBD after sign-off.
 - **Definition of “active execution”** for overlap / queuing guards — **partially locked** in **Decision 7** (`in_progress` from first signal); implementation detail and supervisor override UX remain TBD.
 - **Reconcile** **3L-C** granular trip-status proposal (`dispatched`, `in_transit`, `at_terminal`, etc.) with **Decision 7** **simple** `in_progress` model (mapping, sub-states, or deprecation).
-- Exact mapping of **Save Ready** / **Save Draft** to **`Load.status`** values (`draft` / `ready` vs existing board pool).
+- **Save Ready / Save Draft → `Load.status` / board pool:** **Readiness and planning-queue semantics** are **LOCKED** in **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**; **exact** literal `Load.status` values and **legacy** board column mapping remain **implementation / migration** decisions.
 
 ---
 
@@ -188,6 +199,7 @@ Before writing migrations or product code:
 - Implement **Load Workspace** dispatcher actions per **`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`**; **do not** treat **Assign** as legacy **`Load.status = dispatched`** or as **custody** / **payroll**.
 - **Do not** set **`Trip.status = in_progress`** (or treat trip as **actively executing**) from **assignment** or **dispatch package send** alone — **`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`**.
 - **Do not** mint or surface a **new Trip Number** per stop, pickup, delivery, or second pickup — **one** trip number per **Trip**; driver **dispatch package** uses that number as **primary** operational ID (**§4**, **Trip number rule**, + **Decision 6**).
+- **Save Ready** (without explicit **trip** / **assign** / **Assign & Send** actions) **must not** be treated as creating a **trip**, **`TripLoad`** rows, **assignment**, **dispatch package send**, **`Trip.status = assigned`/`in_progress`**, **`Load.status = dispatched`**, **custody**, **payroll**, or **board rewrite** — **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**.
 
 ---
 

@@ -132,6 +132,14 @@ Reason:
 
 ---
 
+### Decision 9 — Load readiness and planning queue mapping
+
+**Locked:** **Save Draft** and **Save Ready** are **load-preparation** states, **not** **trip-execution** states. A **Save Ready** load **without assignment** is intended for a **Ready / Unassigned Load Planning Queue**: dispatch can plan, combine, split, or hold; **no** automatic **trip**, **`TripLoad`**, **assignment**, **dispatch package**, **`in_progress`**, **`Load.status = dispatched`**, custody, payroll, or board rewrite. **Trip-first** boundary: Load = verification/preparation + commercial truth; Trip = execution container; TripLoad = explicit membership. Coexists with **legacy** board until deliberate migration.
+
+**Full specification:** [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md)
+
+---
+
 ## 1. Trip terminal status naming
 
 | | |
@@ -291,6 +299,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | 10 | RBAC / audit minimum | |
 | **11** | **Decision 6** — Load workspace (Draft/Ready/Assign/Assign&Send) | **LOCKED** — [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md) |
 | **12** | **Decision 7** — Active execution signal (not from assignment) | **LOCKED** — [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md) |
+| **13** | **Decision 9** — Load readiness / Ready–Unassigned planning queue | **LOCKED** — [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md) |
 
 ---
 
