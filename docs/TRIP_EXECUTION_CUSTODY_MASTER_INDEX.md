@@ -1,7 +1,7 @@
 # Trip execution & custody — master index
 
 **Type:** Navigation map and source-of-truth pointer.  
-**Status:** **Draft** — review before commit. Does **not** replace any detailed doc below.
+**Status:** **Approved index.** Does **not** replace any detailed doc below.
 
 ---
 
@@ -125,4 +125,4 @@ Before writing migrations or product code:
 
 ---
 
-*End of trip execution & custody master index (draft).*
+*End of trip execution & custody master index.*
