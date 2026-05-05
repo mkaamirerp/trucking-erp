@@ -3,6 +3,8 @@
 **Type:** Implementation-facing plan. **Not code.**  
 **Upstream:** `PHASE3L_A_TRIP_EXECUTION_CUSTODY_DECISION_RECORD.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`, `PLANNED_TRIP_LIFECYCLE_MODULE_CLOSE.md`.
 
+**Legacy dispatch cutover (Slice 1):** **Generic `Load` PATCH** no longer introduces **new** **`Load.status = dispatched`** (**`409`**, **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**). Board/read compatibility persists; writers for **new** dispatch/trip work are **Trip**-centric per this plan and **Decisions 6–7**.
+
 ---
 
 ## 1. Current schema / API baseline

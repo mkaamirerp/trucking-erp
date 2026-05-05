@@ -22,6 +22,8 @@ This document is the **navigation / source-of-truth map** for:
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
+**Legacy dispatch cutover (Slice 1, code):** **Generic `Load` PATCH** cannot create a **new** transition into **`Load.status = dispatched`** ( **`409`**, **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`** ). **Read**/**board** compatibility and **legacy cancel** paths for **already-dispatched** loads remain; **new** execution uses **Trip**/**`TripLoad`**/**planned trip** flows per locked decisions.
+
 ---
 
 ## 2. Reading order

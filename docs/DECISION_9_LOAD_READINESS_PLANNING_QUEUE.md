@@ -96,6 +96,8 @@ Both loads on **Trip IKL10001**:
 
 **Current production** may still use **`Load.status`** and **legacy** **dispatched** **board** behavior. Conclusion **for this decision:** **Do not rewrite the board** as a prerequisite of adopting Decision 9 semantics. Decision 9 defines the **target readiness / planning meaning** and should **coexist** with legacy behavior until a **deliberate** migration.
 
+**Legacy dispatch cutover (Slice 1, code):** Regardless of future queue UX, the API no longer allows **new** **`Load.status → dispatched`** via **generic PATCH**; use **Trip** / **`TripLoad`** / planned-trip flows for **new** operational commitment (**`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`** on violation).
+
 ---
 
 ## Production reality note

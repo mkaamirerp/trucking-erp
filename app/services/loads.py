@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.trip_dispatch import (
     DISPATCH_RESOURCES_REQUIRED,
+    LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
     PRE_DISPATCH_TRIP_CANCEL_STATUSES,
     TRIP_ALLOCATED_AT_LOAD_STATUS,
 )
@@ -360,10 +361,24 @@ async def update_load(
     merged_truck_id = _merged_scalar(load, data, "truck_id")
 
     next_aid, next_tnum, next_atid = load.active_dispatch_trip_id, load.trip_number, load.active_trip_id
+
+    # Slice 1: generic Load PATCH (source=ui) cannot create new transitions into legacy "dispatched".
+    # Internal seed/migration may pass source="seed" to allocate mirrors (legacy demo data scripts only).
     if (
         new_status == TRIP_ALLOCATED_AT_LOAD_STATUS
         and old_status != TRIP_ALLOCATED_AT_LOAD_STATUS
     ):
+        if source != "seed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": (
+                        "Load.status = dispatched is deprecated for new trip execution. "
+                        "Use explicit Trip assignment / Assign & Send flow."
+                    ),
+                    "code": LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
+                },
+            )
         if not merged_driver_id or not merged_truck_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
