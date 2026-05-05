@@ -1,5 +1,6 @@
 /**
- * Dispatch context panel: assign unassigned loads without leaving the canonical load workspace.
+ * Legacy dispatch context panel (URL flag only): patches Load driver/truck/trailer + status.
+ * Slice 15A: Prefer Create Planned Trip + Trip workspace for movement assignment. Does not replace Trip assignment.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
@@ -165,14 +166,17 @@ export function DispatchAssignmentStrip(p: {
       <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--trk-heading)]/90">Dispatch assignment</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--trk-heading)]/90">
+              Legacy load assignment
+            </p>
             <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">
-              Assign driver and equipment. This sets status to Assigned only — no trip number until the load is
-              Dispatched.
+              Prefer <span className="font-medium text-[var(--trk-text)]">Create Planned Trip</span>, then{" "}
+              <span className="font-medium text-[var(--trk-text)]">Save assignment</span> on the trip workspace. This path
+              updates the load record only — it does not start trip execution or dispatch loads.
             </p>
           </div>
           <Button type="button" variant="primary" disabled={!canAssign} onClick={() => p.onAssign()}>
-            {p.saving ? "Saving…" : "Assign load"}
+            {p.saving ? "Saving…" : "Save to load (legacy)"}
           </Button>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">

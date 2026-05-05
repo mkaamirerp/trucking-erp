@@ -1,6 +1,7 @@
 /**
  * Single load workspace route — manual create, saved load edit, or intake verify/edit.
  * Field UI is only in LoadWorkspaceForm; this page owns layout, data, save, and side panel.
+ * Slice 15A: commercial / readiness / save live here; movement assignment (driver/truck/trailer) on Trip workspace.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -59,9 +60,7 @@ import {
   type IntakeProposedFields,
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
-import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
-import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
-import { applyLoadDocumentParseResponse } from "@/loadWorkspace/applyLoadDocumentParseResponse";
+import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
 import { SectionSettlement } from "@/components/load/SectionSettlement";
 
 type WorkspaceToolbarTone = "success" | "warning" | "error" | "neutral";
@@ -347,6 +346,7 @@ export default function LoadWorkspacePage() {
     workspaceMode === "detail" &&
     !isManual &&
     load != null &&
+    load.active_trip_id == null &&
     (load.status || "").toLowerCase() === "unassigned" &&
     dispatchAssignContext;
 
@@ -656,6 +656,7 @@ export default function LoadWorkspacePage() {
   const onParseWorkspacePdf = useCallback(
     async (file: File) => {
       if (!canWorkspaceParsePdf) return;
+      // Load Lab / parser: hydrate commercial fields only — no trip creation, assignment, dispatch_trips, or dispatched status.
       setParseBusy(true);
       setParseWarnings([]);
       setToolbarMessage(null);
@@ -665,7 +666,7 @@ export default function LoadWorkspacePage() {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
         });
-        const summary = await applyLoadDocumentParseResponse(res, {
+        const hydration = await hydrateLoadWorkspaceFromParseResponse(res, {
           setBrokerNameSnapshot,
           setBrokerId,
           setBrokerContactId,
@@ -687,17 +688,10 @@ export default function LoadWorkspacePage() {
           setInternalNotes,
           setDraftStops,
         });
-        setParseWarnings(res.warnings ?? []);
-        const outcome = describeWorkspacePdfParseOutcome(res.extracted, res.raw_text, res.warnings ?? []);
-        const tone: WorkspaceToolbarTone =
-          outcome.tone === "success" ? "success" : outcome.tone === "warning" ? "warning" : "neutral";
-        setToolbarMessage({ text: outcome.headline, tone });
-        const appliedLabels = buildWorkspacePdfParseAppliedLabels(res.extracted, res.raw_text, {
-          mcOrDotAttempted: summary.mcOrDotAttempted,
-          resolvedBrokerId: summary.resolvedBrokerId,
-          brokerContactMatched: summary.brokerContactMatched,
-        });
-        setLastParseAppliedLabels(appliedLabels.length > 0 ? appliedLabels : null);
+        setParseWarnings(hydration.warnings);
+        const tone: WorkspaceToolbarTone = hydration.toolbar.tone;
+        setToolbarMessage({ text: hydration.toolbar.text, tone });
+        setLastParseAppliedLabels(hydration.appliedLabels);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "PDF parse failed";
         setToolbarMessage({ text: msg, tone: "error" });
@@ -1041,7 +1035,8 @@ export default function LoadWorkspacePage() {
       setLoad(updated);
       hydrateFromLoad(updated);
       setToolbarMessage({
-        text: "Load assigned (trip number starts at Dispatched).",
+        text:
+          "Load record updated (legacy path). For new work, create a planned trip and assign driver/truck/trailer on the trip workspace.",
         tone: "success",
       });
       setServerConflict(null);
@@ -1308,6 +1303,14 @@ export default function LoadWorkspacePage() {
               <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</div>
               <h1 className="truncate text-[15px] font-semibold tracking-tight text-[var(--trk-text)]">{headerTitle}</h1>
               {workspaceMode === "detail" && load ? (
+                <p className="mt-0.5 max-w-2xl text-[10px] leading-snug text-[var(--trk-text-muted)]">
+                  Load page: verify commercial data and readiness.{" "}
+                  <span className="font-medium text-[var(--trk-text)]">Trip workspace</span> owns driver/truck/trailer
+                  assignment — <span className="font-medium text-[var(--trk-text)]">Load.status</span> does not dispatch
+                  trips.
+                </p>
+              ) : null}
+              {workspaceMode === "detail" && load ? (
                 <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--trk-text-muted)]">
                   {load.trip_number?.trim() ? (
                     <span>
@@ -1323,9 +1326,11 @@ export default function LoadWorkspacePage() {
                         to={OPS.TRIP_DETAIL(load.active_trip_id)}
                         className="font-medium text-[var(--trk-heading)] hover:underline"
                       >
-                        View Trip
+                        View / Assign on Trip
                       </Link>
-                      <span className="text-[var(--trk-text-muted)]">(driver/truck/trailer on trip workspace)</span>
+                      <span className="text-[var(--trk-text-muted)]">
+                        Driver/truck/trailer assignment is managed on the trip workspace.
+                      </span>
                     </>
                   ) : (
                     <>
@@ -1333,11 +1338,15 @@ export default function LoadWorkspacePage() {
                       <button
                         type="button"
                         disabled={createPlannedTripBusy}
+                        title="Creates the trip container and opens the trip workspace to assign equipment."
                         onClick={() => void onCreatePlannedTrip()}
                         className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {createPlannedTripBusy ? "Creating trip…" : "Create Planned Trip"}
                       </button>
+                      <span className="text-[10px] text-[var(--trk-text-muted)]">
+                        (opens trip workspace — assign driver/truck/trailer there)
+                      </span>
                     </>
                   )}
                   <span>·</span>
@@ -1388,7 +1397,7 @@ export default function LoadWorkspacePage() {
               ) : null}
               {showDispatchAssignmentStrip ? (
                 <span className="rounded border border-[var(--trk-heading)]/40 bg-[var(--trk-heading)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-heading)]">
-                  Dispatch · Assign
+                  Legacy load assign
                 </span>
               ) : null}
             </div>
@@ -1755,6 +1764,7 @@ export default function LoadWorkspacePage() {
             setTruckId={setTruckId}
             trailerAssetId={trailerId}
             setTrailerAssetId={setTrailerId}
+            activeTripId={workspaceMode === "detail" && load ? load.active_trip_id ?? null : null}
             customsBrokerId={customsBrokerId}
             internalNotes={internalNotes}
             setInternalNotes={setInternalNotes}

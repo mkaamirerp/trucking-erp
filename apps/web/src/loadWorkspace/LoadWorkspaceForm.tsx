@@ -108,6 +108,8 @@ export type LoadWorkspaceFormProps = {
   setTruckId: (v: number | null) => void;
   trailerAssetId: number | null;
   setTrailerAssetId: (v: number | null) => void;
+  /** When set, operational movement assignment is owned on the trip workspace (Slice 15A). */
+  activeTripId?: number | null;
   customsBrokerId: number | null;
   internalNotes: string;
   setInternalNotes: (v: string) => void;
@@ -685,7 +687,8 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
       {/* Assignment — WorkspaceSection: Assignment */}
       {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
         <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Assignment</span>
+          <span className={wsSectionTitle}>Assignment & status</span>
+          <span className={wsSectionMeta}>Planning & load record — trip workspace owns movement assignment</span>
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
@@ -707,7 +710,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
             {p.status !== "dispatched" ? (
               <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
-                Dispatch via Trip assignment is being migrated. Use Trip workspace / planned trip flow.
+                Readiness and planning (e.g. draft → ready → unassigned) stay on this page. Committing driver/truck/trailer
+                for operations is on the <span className="font-medium text-[var(--trk-text)]">trip workspace</span>, not via
+                setting Load.status to dispatched.
               </p>
             ) : null}
           </div>
@@ -766,6 +771,13 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
           </div>
         </div>
+        {p.activeTripId != null && p.activeTripId > 0 ? (
+          <p className="mt-3 text-[10px] leading-snug text-[var(--trk-text-muted)]">
+            This load is on a trip — use{" "}
+            <span className="font-medium text-[var(--trk-text)]">View / Assign on Trip</span> in the header to set driver,
+            truck, and trailer.
+          </p>
+        ) : null}
         </div>
       </section>}
 

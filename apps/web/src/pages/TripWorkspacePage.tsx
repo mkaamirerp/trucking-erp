@@ -1,5 +1,5 @@
 /**
- * Trip workspace: planned container, member loads, and cancellation controls.
+ * Trip workspace: planned container, member loads, cancellation, and equipment assignment (Slice 14A+).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -426,7 +426,7 @@ export default function TripWorkspacePage() {
               Dispatch
             </button>
             <div className="min-w-0">
-              <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">Operational trip workspace</div>
+              <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">Trip workspace</div>
               <h1 className="truncate text-lg font-semibold tracking-tight text-[var(--trk-text)]">
                 {loading ? "Loading…" : trip ? `Trip #${trip.trip_number}` : "Trip"}
               </h1>
@@ -470,7 +470,9 @@ export default function TripWorkspacePage() {
               <h2 className="text-sm font-semibold text-[var(--trk-text)]">Equipment & assignment</h2>
               <p className="mt-2 text-[11px] text-[var(--trk-text-muted)]">
                 Trip movement assignment is owned here — not via Load.status. All three resources must be set for the trip
-                to move to <span className="font-medium text-[var(--trk-text)]">assigned</span>.
+                to move to <span className="font-medium text-[var(--trk-text)]">assigned</span>.{" "}
+                <span className="font-medium text-[var(--trk-text)]">Saving assignment does not start the trip</span> or
+                change execution state — use future execution controls when shipped.
               </p>
               <p className="mt-3 text-sm text-[var(--trk-text-muted)]">
                 <span className="font-medium text-[var(--trk-text)]">Driver: </span>
