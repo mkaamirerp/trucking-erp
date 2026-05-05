@@ -126,7 +126,7 @@ Reason:
 
 ### Decision 7 — Active execution starts from first real execution signal, not assignment
 
-**Locked:** **Active execution** does **not** start from **assignment** or **Assign & Send** alone. **First real execution signal** (driver app, dispatcher manual, future geofence w/ override) moves the trip to **`in_progress`**. **Simple `Trip.status`** ladder: `planned`, `assigned`, `in_progress`, `completed`, `cancelled`. **Queued** future assigned trips OK; **overlap** of **active execution** blocked or supervisor override. **Geofence:** future only, not implemented now.
+**Locked:** **Active execution** does **not** start from **assignment** or **Assign & Send** alone. **First real execution signal** (driver app, dispatcher manual, future geofence w/ override) moves the trip to **`in_progress`**. **Simple `Trip.status`** ladder: `planned`, `assigned`, `in_progress`, `completed`, `cancelled`. **Queued** future assigned trips **allowed** when **not** a **Decision 10** scheduling conflict; **impossible** date overlap blocked or **supervisor override** with audit. **Geofence:** future only, not implemented now.
 
 **Full specification:** [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md)
 
@@ -137,6 +137,14 @@ Reason:
 **Locked:** **Save Draft** and **Save Ready** are **load-preparation** states, **not** **trip-execution** states. A **Save Ready** load **without assignment** is intended for a **Ready / Unassigned Load Planning Queue**: dispatch can plan, combine, split, or hold; **no** automatic **trip**, **`TripLoad`**, **assignment**, **dispatch package**, **`in_progress`**, **`Load.status = dispatched`**, custody, payroll, or board rewrite. **Trip-first** boundary: Load = verification/preparation + commercial truth; Trip = execution container; TripLoad = explicit membership. Coexists with **legacy** board until deliberate migration.
 
 **Full specification:** [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md)
+
+---
+
+### Decision 10 — Future assignment and active execution conflict guard
+
+**Locked:** A **future assigned** trip on the **same** driver/truck/trailer is **allowed** while another trip is **`in_progress`**, but **not** if **next** trip **first pickup / planned start** is **before** **current** trip **final delivery / expected completion** — **scheduling conflict**; default **block** or **hard warning**; **supervisor override** with required reason, actor, timestamp, resource, linked trips, audit. **Assignment** does **not** start **active execution**, **custody**, **`Load.status = dispatched`**, **payroll**, or **board rewrite** (**Decisions 6–7**). **Per-resource** evaluation. **Do not implement** yet — design lock only.
+
+**Full specification:** [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md)
 
 ---
 
@@ -300,6 +308,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | **11** | **Decision 6** — Load workspace (Draft/Ready/Assign/Assign&Send) | **LOCKED** — [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md) |
 | **12** | **Decision 7** — Active execution signal (not from assignment) | **LOCKED** — [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md) |
 | **13** | **Decision 9** — Load readiness / Ready–Unassigned planning queue | **LOCKED** — [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md) |
+| **14** | **Decision 10** — Future assignment vs active execution conflict guard | **LOCKED** — [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md) |
 
 ---
 
