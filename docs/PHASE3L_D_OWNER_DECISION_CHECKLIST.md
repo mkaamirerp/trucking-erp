@@ -158,9 +158,17 @@ Reason:
 
 ### Decision 12 — Terminal / yard / custody foundation consolidation
 
-**Locked:** Business rules from [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) are **on the decision spine**: structured **terminal/yard** (`terminal_id`), **trip ≠ load delivery**, **trip close with undelivered** only with **recorded custody/handoff**, **append-only** custody with **void/correct**, **auditable trailer transfer** (no silent overwrite), **granular** terminal state (not one vague “at yard”), **after pickup** dispatcher may choose **final** vs **dispatch to terminal**, **load may span trips**, **quantity transfer** reserved. **Breakdown/repower/recovery** = trip exception domain (**future** decision). **Minimum V1 candidate event types** + later recovery set: see **Decision 12 §K**. Aligns with **Decision 3** (terminal table).
+**Locked:** Business rules from [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) are **on the decision spine**: structured **terminal/yard** (`terminal_id`), **trip ≠ load delivery**, **trip close with undelivered** only with **recorded custody/handoff**, **append-only** custody with **void/correct**, **auditable trailer transfer** (no silent overwrite), **granular** terminal state (not one vague “at yard”), **after pickup** dispatcher may choose **final** vs **dispatch to terminal**, **load may span trips**, **quantity transfer** reserved. **Breakdown/repower/recovery** business model: **`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`** (**Decision 13**). **Minimum V1 candidate custody `event_type`s** + later recovery candidates: **Decision 12 §K**. Aligns with **Decision 3** (terminal table).
 
 **Full specification:** [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md)
+
+---
+
+### Decision 13 — Trip exception, recovery, repower workflow and payroll guard
+
+**Locked:** **Trip exception** ≠ **load cancel**. **Preserve** original **`Trip`** + number; **recovery** = **new** **`Trip`** + number — **no** silent assignment swap. **Five** base recovery options; **custody** links chain (**Decision 12**). **Payroll:** **`review_required`** when **trip** responsibility incomplete — **no** auto full/zero until admin (**§F**). **Planned handoff complete** ≠ **failed final delivery** (**§G**). **Recovery** payroll separate (**§I**). Cross-checks **Decisions 8–12** in doc.
+
+**Full specification:** [`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`](./DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md)
 
 ---
 
@@ -329,6 +337,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | **14** | **Decision 10** — Future assignment vs active execution conflict guard | **LOCKED** — [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md) |
 | **15** | **Decision 11** — `Load.status` target / board migration (post–Slice 1) | **LOCKED** — [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md) |
 | **16** | **Decision 12** — Terminal / yard / custody foundation consolidation | **LOCKED** — [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md) |
+| **17** | **Decision 13** — Trip exception / recovery / repower + payroll guard | **LOCKED** — [`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`](./DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md) |
 
 ---
 

@@ -146,20 +146,20 @@ Prefer **more precise** concepts, e.g.:
 
 ---
 
-## J. Repower / breakdown / recovery (bridge — not fully designed here)
+## J. Repower / breakdown / recovery (bridge to Decision 13)
 
 Breakdown, **driver unavailable**, trailer issue, accident, border delay, **repower** — **must not** be modeled **only** as **`Load.status`**.
 
-These are **Trip exception / recovery** workflows (**separate future decision**): **Trip Exception / Load Recovery / Repower Model**.
+These are **Trip exception / recovery** workflows. **Business model and payroll guard** are **LOCKED** in **`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`** (**Decision 13**). **Decision 12** still requires **explicit custody/handoff** facts for any handoff or recovery chain (**Decision 13 §J**).
 
-Illustrative responses (product TBD):
+Illustrative responses (aligned with Decision 13):
 
 - **Commercial load** may stay **active**  
-- Current **Trip** may get exception/recovery treatment **later**  
+- **Original** **Trip** is **preserved**; **recovery** uses a **new** **Trip** + **new trip number**  
 - **Custody/handoff/recovery** events  
 - **Reassign/repower** to another trip; return load to **planning queue**; **`Load.status = cancelled`** only if broker load **truly** cancelled  
 
-**Decision 12** **does not** fully design that workflow.
+**Decision 12** does **not** replace **Decision 13** for exception/repower/repay rules.
 
 ---
 

@@ -7,6 +7,8 @@
 
 **Terminal / yard / custody (decision spine):** **`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`** (**LOCKED**) consolidates [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md); custody/schema/API slices here must **not** contradict those principles (exact tables and allowlist phasing remain **this** plan).
 
+**Trip exception / recovery / repower + payroll guard:** **`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`** (**LOCKED**) — original vs recovery **trip** identity, **no** silent driver swap, **`review_required`** payroll rule, planned handoff vs failed assignment; implementation slices still follow **this** plan.
+
 ---
 
 ## 1. Current schema / API baseline

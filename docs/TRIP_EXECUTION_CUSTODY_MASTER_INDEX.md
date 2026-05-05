@@ -21,6 +21,7 @@ This document is the **navigation / source-of-truth map** for:
 - **Future assignment vs active execution** (**Decision 10**, **LOCKED**) — queued **assigned** trips allowed, but **impossible** schedule overlap vs **`in_progress`** trip guarded; supervisor override with audit — see [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md)
 - **`Load.status` target & board migration** (**Decision 11**, **LOCKED**) — commercial/readiness **`draft` / `ready` / `cancelled`** for **new writes**; legacy **`Load.status`** read-side; **trip** board vs **load** planning queue — see [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md)
 - **Terminal / yard / custody foundation** (**Decision 12**, **LOCKED**) — consolidates [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) onto the decision spine; structured terminal, handoff, auditable trailer transfer, trip close with undelivered only with custody — see [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md)
+- **Trip exception / recovery / repower + payroll guard** (**Decision 13**, **LOCKED**) — preserve original trip + new recovery trip number; no silent assignment swap; planned handoff vs failed assignment; **`review_required`** payroll block on incomplete trip responsibility — see [`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`](./DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md)
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
@@ -49,7 +50,7 @@ Read in this order when onboarding or before migrations / implementation:
 |----------------|-----------|
 | **Background foundation** | `TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md` |
 | **Shipped module closeout** | `PLANNED_TRIP_LIFECYCLE_MODULE_CLOSE.md` |
-| **Decision records** | `PHASE3L_A_TRIP_EXECUTION_CUSTODY_DECISION_RECORD.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`; **terminal/custody spine** — `DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md` (**LOCKED**, consolidates foundation doc) |
+| **Decision records** | `PHASE3L_A_TRIP_EXECUTION_CUSTODY_DECISION_RECORD.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`; **terminal/custody spine** — `DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md` (**LOCKED**); **exception/recovery/repower spine** — `DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md` (**LOCKED**) |
 | **Implementation planning** | `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md` |
 | **Owner decision checklist** | `PHASE3L_D_OWNER_DECISION_CHECKLIST.md` (includes **locked** decisions in the opening section) |
 | **Dispatcher load workspace (Decision 6)** | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` |
@@ -59,6 +60,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Future assignment / conflict guard (Decision 10)** — **LOCKED** | `DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md` |
 | **Load.status target / board migration (Decision 11)** — **LOCKED** | `DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md` |
 | **Terminal / yard / custody foundation (Decision 12)** — **LOCKED** | `DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md` |
+| **Trip exception / recovery / repower + payroll guard (Decision 13)** — **LOCKED** | `DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md` |
 
 ---
 
@@ -88,6 +90,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md` | Read before **assigning** a **future** trip to **driver/truck/trailer** already **`in_progress`** elsewhere — **locked** scheduling conflict + override rules (**Decision 10**). |
 | `DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md` | Read before changing **`Load.status`** **new-write** allowlists, **dispatch board** migration, or conflating **load readiness** with **trip execution** — **Decision 11** + Slice 1 compatibility. |
 | `DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md` | Read before custody/terminal/trailer-transfer design — **LOCKED** consolidation of [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) on the decision spine (**Decision 12**). |
+| `DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md` | Read before exception/repower/recovery flows, **original vs recovery trip** rules, **payroll review** / **`review_required`** guard, or **planned handoff vs failed assignment** — **LOCKED** (**Decision 13**). |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -95,7 +98,7 @@ The **A–F** reading order remains the **required spine**; supporting reference
 
 ## 4. Consolidated locked principles
 
-The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), **Decision 7** (active execution signal), **Decision 9** (load readiness / planning queue), **Decision 10** (future assignment scheduling vs active execution), **Decision 11** (`Load.status` target + board migration direction), and **Decision 12** (terminal/yard/custody foundation consolidation — plus **3L-D Decision 3** terminal table) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
+The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), **Decision 7** (active execution signal), **Decision 9** (load readiness / planning queue), **Decision 10** (future assignment scheduling vs active execution), **Decision 11** (`Load.status` target + board migration direction), **Decision 12** (terminal/yard/custody foundation), and **Decision 13** (trip exception/recovery/repower + payroll guard — plus **3L-D Decision 3** terminal table) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
 
 - **Trip** is the **operational execution container** (movement, equipment assignment at trip level for active membership).
 - **Load** is the **commercial / broker / customer** truth (stops, docs, rates); **`Load.status`** **target** for **new writes** is **commercial/readiness** only — **`draft`**, **`ready`**, **`cancelled`** (**Decision 11**) — **not** trip execution state.
@@ -128,6 +131,7 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 - **No `Load.status` auto-updates from `Trip.status` transitions in V1** (default decoupled).
 - **No `dispatch_trips` create/update** driven by **`Trip.status`** (including **`in_progress`** or any future trip execution state) in V1 — avoids collision with **legacy** **`load.status → dispatched`** mint path (3L-C §7).
 - **Custody / terminal foundation (Decision 12):** Principles from [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) — structured terminal routing, **auditable** trailer transfer, **trip** may complete with undelivered loads **only** with recorded custody/handoff, **append-only** history with **void/correct** — **`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`**. Terminal/yard state must be **more granular** than a single vague “at yard” label (**Decision 12 §H**).
+- **Trip exception / recovery / repower (Decision 13):** **Preserve** **original** **`Trip`** + **trip number**; **recovery** = **new** **`Trip`** + **new** number — **no** silent in-place driver/truck/trailer **swap** on original trip. **Five** base dispatcher options (repower, terminal handoff, planning queue, broker cancel, hold). **`Load.status = cancelled`** only for **true** commercial cancel (**Decision 11**). **Payroll:** incomplete **trip** responsibility → **`review_required`** — **no** auto full pay, **no** auto zero; **planned terminal linehaul complete** ≠ **failed final delivery** (**Decision 13 §G**). Recovery trip payroll **separate** from original (**Decision 13 §I**). **Custody chain** for recovery — **Decision 12** + **Decision 13 §J**.
 - **Custody first *write* allowlist slice (implementation phasing):** **3L-D §8** may still ship a **narrow** first set (e.g. **`picked_up`**, **`handoff`**, **`arrived_terminal`**, **`dropped_at_terminal`**) — **not** because **`trailer_transfer`** or **`picked_up_from_terminal`** are optional **forever**; the **foundation** (**Decision 12**) **requires** them for full terminal/transfer stories. **Expand** allowlist and UI in **later** slices.
 - **Defer (implementation):** **`trip_stops`** table CRUD — prefer **custody events** + **timeline** projections first (**3L-C §2.2**).
 - **Minimum audit** for assignment / transition / custody: **`actor_user_id`**, **`event_at` / `recorded_at`**, **reason/notes**, **`source`** (central vs local audit store still an open topic — see §5).
@@ -199,7 +203,9 @@ Full specification: [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISI
 
 **Source (detailed background):** [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) — **not** superseded; **Decision 12** is the **concise lock** on the decision spine.
 
-**Summary:** **Trip** = operational execution container; **Load** = commercial truth; **trip completion ≠ load delivered**; **yard/terminal** = structured custody location (**`terminal_id`**, not free-text identity); **after pickup**, dispatcher may choose **del final** or **dispatch to terminal**; **trip** cannot close with active undelivered freight **without** recorded custody/handoff; custody history **append-only** with **void/correct**; **trailer-to-trailer transfer** is **auditable**, never silent **`trailer_id` overwrite**; terminal freight state **more granular** than one vague “at yard”; **quantity-based transfer** reserved for later. **Breakdown/repower/recovery** are **trip exception** workflows — **not** `Load.status` alone — future decision (**Decision 12 §J**). **Minimum V1 candidate event types** and later recovery candidates: **Decision 12 §K**.
+**Summary:** **Trip** = operational execution container; **Load** = commercial truth; **trip completion ≠ load delivered**; **yard/terminal** = structured custody location (**`terminal_id`**, not free-text identity); **after pickup**, dispatcher may choose **del final** or **dispatch to terminal**; **trip** cannot close with active undelivered freight **without** recorded custody/handoff; custody history **append-only** with **void/correct**; **trailer-to-trailer transfer** is **auditable**, never silent **`trailer_id` overwrite**; terminal freight state **more granular** than one vague “at yard”; **quantity-based transfer** reserved for later. **Breakdown/repower/recovery** model (original vs recovery trip, payroll guard): **`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`** (**Decision 13**). **Decision 12 §J** bridges custody requirements; **Decision 12 §K**: minimum custody **`event_type`** candidates + slice discipline.
+
+**Cross-check Decision 13:** Exception/repower flows **must** use **explicit custody** links (**Decision 13 §J**).
 
 **Cross-check Decision 7:** **`Trip.status = completed`** = trip responsibility ended; **not** proof all member loads are commercially **delivered**.
 
@@ -208,6 +214,14 @@ Full specification: [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISI
 **Cross-check Decision 11:** **`Load.status`** = commercial/readiness; **not** terminal/custody location; **not** trip execution.
 
 **Cross-check Slice 1:** **Do not** reintroduce **`Load.status = dispatched`** as custody/execution trigger.
+
+### Decision 13 — Trip exception, recovery, repower workflow and payroll guard (**locked**)
+
+Full specification: [`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`](./DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md).
+
+**Summary:** Separates **trip exception truth**, **load commercial truth**, **custody**, and **payroll review**. **Trip exception ≠ automatic load cancel.** **Preserve** original **`Trip`** + **trip number**; **recovery** = **new** **`Trip`** + **new** number — **no** silent in-place assignment swap. **Five** base dispatcher options (**§C**). **Albany breakdown** + **planned terminal handoff vs failed final delivery** (**§G**). **Payroll guard:** incomplete **trip** responsibility → **`review_required`**; **no** automatic full or zero settlement until admin resolution (**§F**). **Recovery trip payroll** separate from original (**§I**). **Decision 10:** recovery assignment + **emergency override** still audited (**§L**). **Decision 8:** O/O agreed amount not blindly paid if assignment incomplete (**§M**). **Decision 12:** custody chain mandatory (**§J**).
+
+**Cross-check Decision 11:** **`Load.status = cancelled`** only for **true** commercial cancel — **not** trip exception alone.
 
 ---
 
@@ -224,7 +238,8 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Long-term `dispatch_trips` retirement** or unification with trip container (3L-A/C open questions).
 - **Exact custody `event_type` enum names** and **allowlist per implementation slice** — **Decision 12 §K** locks **principle** + **minimum candidates**; a **narrow** first slice is allowed, but **`trailer_transfer`** / **`picked_up_from_terminal`** are **required** by foundation for full terminal stories (**not** “optional forever” — see §4).
 - **Exact trip completion gating**, **required custody event sequences**, and **RBAC** for closing trips with undelivered freight (**Decision 12** locks that gating **exists**).
-- **Trip exception / load recovery / repower model** — separate future owner decision (**Decision 12 §J**); not fully designed here.
+- **Trip exception / recovery / repower — implementation** (**Decision 13** locks **principles**): exact **exception** table/schema, **reason-code** enum, **recovery** API + UI, **payroll review** table and **`review_required` block** mechanism, admin adjustment UX, **RBAC** for override/recovery/payroll decision, **custody** linkage for recovery events, **ELD/miles** evidence, **settlement/payrun** integration, driver **notifications**, **board/timeline** for issue/recovery (**Decision 13 §O**).
+- **Future `assigned_responsibility_type` / completion-expectation** field (or equivalent) — **Decision 13 §H** preserves the concept; exact naming/schema TBD.
 - **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; **detailed design draft** in **`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`** (**Decision 8**, **NOT LOCKED**); schema/API TBD after sign-off.
 - **Definition of “active execution”** for overlap / queuing guards — **partially locked** in **Decision 7** (`in_progress` from first signal); **scheduling conflict** vs **future assignment** **locked** in **Decision 10**; exact **date fields**, **timezone**, and **supervisor override UX** remain TBD.
 - **Reconcile** **3L-C** granular trip-status proposal (`dispatched`, `in_transit`, `at_terminal`, etc.) with **Decision 7** **simple** `in_progress` model (mapping, sub-states, or deprecation).
@@ -251,6 +266,7 @@ Before writing migrations or product code:
 - **Save Ready** (without explicit **trip** / **assign** / **Assign & Send** actions) **must not** be treated as creating a **trip**, **`TripLoad`** rows, **assignment**, **dispatch package send**, **`Trip.status = assigned`/`in_progress`**, **`Load.status = dispatched`**, **custody**, **payroll**, or **board rewrite** — **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**.
 - **Do not** **silently** accept **impossible** **future assignment** schedules when **Decision 10** applies (**first pickup** before **current expected completion** on **same** driver/truck/trailer) — **`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`** (implementation **deferred**).
 - **`Load.status` migration:** target **new-write** semantics and **boards** per **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**; **do not** treat **`Load.status = dispatched`** as a **new** execution trigger (**Slice 1**).
+- **Exception / repower / recovery:** **do not** silently replace **original** trip **driver/truck/trailer** in place for **recovery** — **new** **`Trip`** + **new** trip number per **`DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md`**. **Do not** auto-settle **full** or **zero** pay on **incomplete trip responsibility** without **`review_required`** / admin resolution (**Decision 13**).
 
 ---
 
