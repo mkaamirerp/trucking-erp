@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps.auth import get_current_user
+from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.trip_read import (
     AddTripLoadBody,
     CreatePlannedTripBody,
+    TripAssignmentBody,
     TripDetailResponse,
     TripListPageResponse,
 )
@@ -109,4 +110,34 @@ async def get_trip(
     detail = await trips_service.get_trip_detail(db, tenant_id, trip_id)
     if not detail:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    return detail
+
+
+@router.put("/{trip_id}/assignment", response_model=TripDetailResponse)
+async def put_trip_assignment(
+    trip_id: int,
+    body: TripAssignmentBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> TripDetailResponse:
+    """Decision 14A: update trip movement assignment only (no loads, custody, or dispatch_trips).
+
+    TODO(RBAC): Matches sibling trip routes (require_tenant + get_current_user) for this slice only;
+    tie assignment updates to dispatch/trip-operation permissions when RBAC for trip ops is tightened.
+    """
+    actor_user_id = int(user.tenant_user.id) if user.tenant_user else None
+    actor_label = None if user.tenant_user else f"platform:{user.user.id}"
+    rid = getattr(request.state, "request_id", None)
+    detail = await trips_service.update_trip_assignment(
+        db,
+        tenant_id,
+        trip_id,
+        body,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=str(rid) if rid else None,
+    )
+    await db.commit()
     return detail

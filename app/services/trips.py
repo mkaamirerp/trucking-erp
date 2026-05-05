@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.trip_dispatch import (
     JOB_TYPE_FREIGHT_LOAD,
+    TRIP_CONTAINER_STATUS_ASSIGNED,
     TRIP_CONTAINER_STATUS_CANCELLED,
     TRIP_CONTAINER_STATUS_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
@@ -22,6 +23,7 @@ from app.models.trailer import Trailer
 from app.models.truck import Truck
 from app.schemas.load import NestedDriver, NestedTrailer, NestedTruck
 from app.schemas.trip_read import (
+    TripAssignmentBody,
     TripDetailResponse,
     TripFirstMemberSummary,
     TripListItemResponse,
@@ -534,6 +536,94 @@ async def remove_load_from_trip(
     await db.flush()
 
     await _sync_load_active_trip_pointer(db, tenant_id, load_id)
+
+    detail = await get_trip_detail(db, tenant_id, trip_id)
+    assert detail is not None
+    return detail
+
+
+def _assignment_snapshot(trip: Trip) -> dict[str, object | None]:
+    return {
+        "driver_id": trip.driver_id,
+        "truck_id": trip.truck_id,
+        "trailer_id": trip.trailer_id,
+        "status": trip.status,
+        "assigned_at": trip.assigned_at.isoformat() if trip.assigned_at else None,
+    }
+
+
+async def update_trip_assignment(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    body: TripAssignmentBody,
+    *,
+    actor_user_id: int | None,
+    actor_label: str | None,
+    request_id: str | None = None,
+) -> TripDetailResponse:
+    """Decision 14A: update trip driver/truck/trailer; optional planned→assigned; audit only (no loads/dispatch_trips)."""
+    trip = await db.get(Trip, trip_id)
+    if trip is None or trip.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
+        )
+
+    await _validate_assignment_targets(
+        db,
+        tenant_id,
+        driver_id=body.driver_id,
+        truck_id=body.truck_id,
+        trailer_id=body.trailer_id,
+    )
+
+    before = _assignment_snapshot(trip)
+
+    trip.driver_id = body.driver_id
+    trip.truck_id = body.truck_id
+    trip.trailer_id = body.trailer_id
+
+    complete = (
+        body.driver_id is not None and body.truck_id is not None and body.trailer_id is not None
+    )
+    now = datetime.now(timezone.utc)
+    if complete:
+        if trip.assigned_at is None:
+            trip.assigned_at = now
+        if trip.status == TRIP_CONTAINER_STATUS_PLANNED:
+            trip.status = TRIP_CONTAINER_STATUS_ASSIGNED
+    else:
+        if trip.status == TRIP_CONTAINER_STATUS_ASSIGNED:
+            trip.status = TRIP_CONTAINER_STATUS_PLANNED
+
+    trip.updated_at = now
+    await db.flush()
+
+    after = _assignment_snapshot(trip)
+    if before != after:
+        from app.services.audit_events import write_audit_event
+
+        await write_audit_event(
+            db,
+            tenant_id=int(tenant_id),
+            module="trips",
+            entity_type="trip",
+            entity_id=str(int(trip.id)),
+            entity_label=str(trip.trip_number),
+            action="trip_assignment_updated",
+            source="api",
+            actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            request_id=request_id,
+            correlation_id=request_id,
+            snapshot_before=dict(before),
+            snapshot_after=dict(after),
+            context_json={"trip_number": trip.trip_number},
+            best_effort=True,
+        )
 
     detail = await get_trip_detail(db, tenant_id, trip_id)
     assert detail is not None

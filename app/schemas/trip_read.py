@@ -108,3 +108,13 @@ class CreatePlannedTripBody(BaseModel):
 class AddTripLoadBody(BaseModel):
     load_id: int
     sequence_hint: Optional[int] = None
+
+
+class TripAssignmentBody(BaseModel):
+    """Decision 14A: set trip movement assignment; use null to clear a slot (all keys required in JSON)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    driver_id: int | None
+    truck_id: int | None
+    trailer_id: int | None

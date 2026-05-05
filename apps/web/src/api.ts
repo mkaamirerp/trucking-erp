@@ -960,10 +960,26 @@ export async function removeLoadFromTrip(tripId: number, loadId: number): Promis
   return handle<TripDetail>(res);
 }
 
-/** POST /trips/{id}/cancel — cancel planned trip container; no body. */
+/** POST /api/v1/trips/{id}/cancel — cancel planned trip container; no body. */
 export async function cancelTrip(tripId: number): Promise<TripDetail> {
   const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/cancel`, {
     method: "POST",
+  });
+  return handle<TripDetail>(res);
+}
+
+/** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
+export type TripAssignmentPayload = {
+  driver_id: number | null;
+  truck_id: number | null;
+  trailer_id: number | null;
+};
+
+export async function updateTripAssignment(tripId: number, body: TripAssignmentPayload): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/assignment`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   return handle<TripDetail>(res);
 }

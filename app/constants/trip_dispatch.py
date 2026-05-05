@@ -19,6 +19,7 @@ DISPATCH_TRIP_STATUS_CANCELLED = "cancelled"
 
 # Trip container (trips.status) — operational lifecycle; not the same as dispatch_trips.status strings.
 TRIP_CONTAINER_STATUS_PLANNED = "planned"
+TRIP_CONTAINER_STATUS_ASSIGNED = "assigned"
 TRIP_CONTAINER_STATUS_CANCELLED = "cancelled"
 
 JOB_TYPE_FREIGHT_LOAD = "freight_load"

@@ -7,11 +7,18 @@ import {
   addLoadToTrip,
   cancelTrip,
   getTrip,
+  listDrivers,
   listLoads,
+  listTrailers,
+  listTrucks,
   removeLoadFromTrip,
+  updateTripAssignment,
+  type Driver,
   type Load,
+  type Trailer,
   type TripDetail,
   type TripMemberLoad,
+  type Truck,
 } from "@/api";
 import { OPS } from "@/routes";
 
@@ -87,6 +94,31 @@ function formatRemoveTripLoadError(err: unknown): string {
   return "Could not remove load from trip.";
 }
 
+function formatAssignmentError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not save assignment.";
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (typeof detail === "string") {
+      if (/^trip not found$/i.test(detail.trim())) return "Trip not found.";
+    }
+    if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+      const code = (detail as { code?: string }).code;
+      if (code === "TRIP_CANCELLED") return "This trip is cancelled. Assignment cannot be changed.";
+      const msg =
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : null;
+      if (msg) return msg;
+    }
+  } catch {
+    /* use raw */
+  }
+  if (raw.length > 0 && raw.length < 400) return raw;
+  return "Could not save assignment.";
+}
+
 function formatCancelTripError(err: unknown): string {
   if (!(err instanceof Error)) return "Could not cancel trip.";
   const raw = err.message?.trim() || "";
@@ -147,6 +179,15 @@ export default function TripWorkspacePage() {
   const [loadSearchError, setLoadSearchError] = useState<string | null>(null);
   const [cancelTripBusy, setCancelTripBusy] = useState(false);
   const [cancelTripError, setCancelTripError] = useState<string | null>(null);
+  const [assignPickBusy, setAssignPickBusy] = useState(false);
+  const [assignSaveBusy, setAssignSaveBusy] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignDrivers, setAssignDrivers] = useState<Driver[]>([]);
+  const [assignTrucks, setAssignTrucks] = useState<Truck[]>([]);
+  const [assignTrailers, setAssignTrailers] = useState<Trailer[]>([]);
+  const [draftDriverId, setDraftDriverId] = useState("");
+  const [draftTruckId, setDraftTruckId] = useState("");
+  const [draftTrailerId, setDraftTrailerId] = useState("");
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -181,7 +222,53 @@ export default function TripWorkspacePage() {
     setLoadSearchError(null);
     setCancelTripError(null);
     setCancelTripBusy(false);
+    setAssignError(null);
+    setAssignPickBusy(false);
+    setAssignSaveBusy(false);
+    setAssignDrivers([]);
+    setAssignTrucks([]);
+    setAssignTrailers([]);
+    setDraftDriverId("");
+    setDraftTruckId("");
+    setDraftTrailerId("");
   }, [tripId]);
+
+  const assignmentEditable = Boolean(trip && trip.cancelled_at == null);
+
+  useEffect(() => {
+    if (!trip) return;
+    setDraftDriverId(trip.driver_id != null ? String(trip.driver_id) : "");
+    setDraftTruckId(trip.truck_id != null ? String(trip.truck_id) : "");
+    setDraftTrailerId(trip.trailer_id != null ? String(trip.trailer_id) : "");
+  }, [trip?.id, trip?.driver_id, trip?.truck_id, trip?.trailer_id]);
+
+  useEffect(() => {
+    if (!assignmentEditable) return;
+    let cancelled = false;
+    void (async () => {
+      setAssignPickBusy(true);
+      setAssignError(null);
+      try {
+        const [dRes, tRes, rRes] = await Promise.all([
+          listDrivers({ limit: 200 }),
+          listTrucks({ page: 1, size: 200 }),
+          listTrailers({ page: 1, size: 200 }),
+        ]);
+        if (!cancelled) {
+          setAssignDrivers(dRes);
+          setAssignTrucks(tRes.items);
+          setAssignTrailers(rRes.items);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) setAssignError(e instanceof Error ? e.message : "Could not load drivers/trucks/trailers.");
+      } finally {
+        if (!cancelled) setAssignPickBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [assignmentEditable, tripId]);
 
   const clearPickerSearch = useCallback(() => {
     setLoadSearchQuery("");
@@ -278,6 +365,31 @@ export default function TripWorkspacePage() {
     [tripId],
   );
 
+  const onSaveAssignment = useCallback(async () => {
+    if (!Number.isFinite(tripId) || !trip) return;
+    setAssignSaveBusy(true);
+    setAssignError(null);
+    try {
+      const driver_id = draftDriverId.trim() === "" ? null : Number(draftDriverId);
+      const truck_id = draftTruckId.trim() === "" ? null : Number(draftTruckId);
+      const trailer_id = draftTrailerId.trim() === "" ? null : Number(draftTrailerId);
+      if (
+        (driver_id != null && !Number.isFinite(driver_id)) ||
+        (truck_id != null && !Number.isFinite(truck_id)) ||
+        (trailer_id != null && !Number.isFinite(trailer_id))
+      ) {
+        setAssignError("Select valid driver, truck, and trailer, or clear each dropdown.");
+        return;
+      }
+      const updated = await updateTripAssignment(tripId, { driver_id, truck_id, trailer_id });
+      setTrip(updated);
+    } catch (e: unknown) {
+      setAssignError(formatAssignmentError(e));
+    } finally {
+      setAssignSaveBusy(false);
+    }
+  }, [tripId, trip, draftDriverId, draftTruckId, draftTrailerId]);
+
   const onCancelPlannedTrip = useCallback(async () => {
     if (!Number.isFinite(tripId)) return;
     if (
@@ -355,7 +467,11 @@ export default function TripWorkspacePage() {
         ) : trip ? (
           <div className="space-y-8">
             <section className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-5">
-              <h2 className="text-sm font-semibold text-[var(--trk-text)]">Equipment</h2>
+              <h2 className="text-sm font-semibold text-[var(--trk-text)]">Equipment & assignment</h2>
+              <p className="mt-2 text-[11px] text-[var(--trk-text-muted)]">
+                Trip movement assignment is owned here — not via Load.status. All three resources must be set for the trip
+                to move to <span className="font-medium text-[var(--trk-text)]">assigned</span>.
+              </p>
               <p className="mt-3 text-sm text-[var(--trk-text-muted)]">
                 <span className="font-medium text-[var(--trk-text)]">Driver: </span>
                 {trip.driver
@@ -385,6 +501,76 @@ export default function TripWorkspacePage() {
                 <p className="mt-2 text-xs font-medium text-red-700/90">
                   Cancelled {new Date(trip.cancelled_at).toLocaleString()}
                 </p>
+              ) : null}
+
+              {assignmentEditable ? (
+                <div className="mt-4 space-y-3 border-t border-[var(--trk-border)] pt-4">
+                  <div className="text-[11px] font-medium text-[var(--trk-text-muted)]">Update assignment</div>
+                  {assignPickBusy ? (
+                    <p className="text-[11px] text-[var(--trk-text-muted)]">Loading drivers/trucks/trailers…</p>
+                  ) : null}
+                  <div className="grid max-w-xl gap-2 sm:grid-cols-3">
+                    <label className="flex flex-col gap-1 text-[11px]">
+                      <span className="text-[var(--trk-text-muted)]">Driver</span>
+                      <select
+                        value={draftDriverId}
+                        onChange={(e) => setDraftDriverId(e.target.value)}
+                        disabled={assignSaveBusy}
+                        className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
+                      >
+                        <option value="">— None —</option>
+                        {assignDrivers.map((d) => (
+                          <option key={d.id} value={String(d.id)}>
+                            #{d.id} {d.first_name} {d.last_name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px]">
+                      <span className="text-[var(--trk-text-muted)]">Truck</span>
+                      <select
+                        value={draftTruckId}
+                        onChange={(e) => setDraftTruckId(e.target.value)}
+                        disabled={assignSaveBusy}
+                        className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
+                      >
+                        <option value="">— None —</option>
+                        {assignTrucks.map((t) => (
+                          <option key={t.id} value={String(t.id)}>
+                            #{t.id} {t.unit_number}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-[11px]">
+                      <span className="text-[var(--trk-text-muted)]">Trailer</span>
+                      <select
+                        value={draftTrailerId}
+                        onChange={(e) => setDraftTrailerId(e.target.value)}
+                        disabled={assignSaveBusy}
+                        className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
+                      >
+                        <option value="">— None —</option>
+                        {assignTrailers.map((r) => (
+                          <option key={r.id} value={String(r.id)}>
+                            #{r.id} {r.unit_number}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={assignSaveBusy || assignPickBusy}
+                      onClick={() => void onSaveAssignment()}
+                      className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {assignSaveBusy ? "Saving…" : "Save assignment"}
+                    </button>
+                  </div>
+                  {assignError ? <p className="text-[11px] text-red-700">{assignError}</p> : null}
+                </div>
               ) : null}
             </section>
 

@@ -1325,6 +1325,7 @@ export default function LoadWorkspacePage() {
                       >
                         View Trip
                       </Link>
+                      <span className="text-[var(--trk-text-muted)]">(driver/truck/trailer on trip workspace)</span>
                     </>
                   ) : (
                     <>
