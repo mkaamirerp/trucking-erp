@@ -1,5 +1,7 @@
 # Trip number — implementation plan
 
+**Legacy dispatch cutover (Slice 1, code):** **Generic `Load` PATCH** may no longer transition a load **into** **`Load.status = dispatched`** (API returns **`409`**, code **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**). **Read** paths, **board display**, and **legacy cancel** (dispatched → `draft` / `ready` / `unassigned`) remain for compatibility. **Mint** **`trip_number`** for **new** execution is via **Trip** / planned-trip flows — **not** this load-status hop. **Target `Load.status` (new-write) and board direction** — **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`** (**LOCKED**).
+
 **Baseline:** [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md) (locked: **mint at Trip plan/create**, single pool, never reuse, `trips` canonical).
 
 **Scope:** This report translates the baseline into **concrete schema, services, API, and UI work**. Trip number is **not** a dispatch-board-only field; it is the **operational reference** across dispatch, loads, issues, documents, and payroll **tracing**.

@@ -696,10 +696,20 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.status}
               onChange={(e) => p.setStatus(e.target.value)}
             >
-              {LOAD_STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
+              {LOAD_STATUSES.map((s) => {
+                const legacyDispatchedBlocked = s === "dispatched" && p.status !== "dispatched";
+                return (
+                  <option key={s} value={s} disabled={legacyDispatchedBlocked}>
+                    {legacyDispatchedBlocked ? "dispatched (legacy — use Trip workspace)" : s}
+                  </option>
+                );
+              })}
             </select>
+            {p.status !== "dispatched" ? (
+              <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
+                Dispatch via Trip assignment is being migrated. Use Trip workspace / planned trip flow.
+              </p>
+            ) : null}
           </div>
           <div>
             <label className={L}>Driver</label>

@@ -440,7 +440,7 @@ async def _patch(
 ) -> Any:
     payload = LoadUpdate(expected_concurrency_version=cv, **fields)
     try:
-        return await loads_service.update_load(db, tenant_id, load_id, payload)
+        return await loads_service.update_load(db, tenant_id, load_id, payload, source="seed")
     except HTTPException as e:
         report.append({"event": "rejected_transition", "load_id": load_id, "label": label, "detail": str(e.detail)})
         raise

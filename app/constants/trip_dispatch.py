@@ -1,6 +1,12 @@
 """Locked trip-number rules — see docs/DISPATCH_TRIP_NUMBER_RULE.md."""
 
-# V1: trip minted only when load first enters this status (not on "assigned" alone).
+# API error code: generic Load PATCH must not create new transitions into dispatched (Slice 1+).
+# Load.status = dispatched is legacy board/mint vocabulary. New trip execution must use explicit
+# Trip assignment, TripLoad membership, and future package / execution endpoints.
+LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED = "LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED"
+
+# V1 legacy: mint path historically keyed off load entering this status (generic PATCH). Slice 1
+# blocks NEW transitions via Load PATCH; service helpers may still use this constant for docs/cancel.
 TRIP_ALLOCATED_AT_LOAD_STATUS = "dispatched"
 
 # Active trip is cancelled + load read-model cleared ONLY when leaving `dispatched` for a pre-dispatch

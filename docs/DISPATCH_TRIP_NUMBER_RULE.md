@@ -2,6 +2,8 @@
 
 This document is **product + engineering baseline**. Trip numbers are **not** display-only labels; they are **stable, system-assigned operational identifiers** tied to a **Trip container**.
 
+**Legacy dispatch cutover (Slice 1, code):** New **generic `Load` PATCH** transitions **into** **`Load.status = dispatched`** are **rejected** (`409`, code `LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`). Existing loads that already have **`dispatched`** and legacy mirror columns remain **readable**; **cancellation** back to pre-dispatch pool statuses via PATCH is unchanged. **New** trip execution must use **explicit Trip** assignment / **`TripLoad`** / planned-trip flows — not **`Load.status`** as a writer. **Target commercial `Load.status` and boards** — **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`** (**LOCKED**): **`draft` / `ready` / `cancelled`** for **new writes**; legacy values **read-side** until migration.
+
 **Locked evolution (2026):** Numbers are **minted when a Trip container is created/planned**, not only when a Load enters **`dispatched`**. Legacy paths that allocated via **`dispatch_trips`** on **`dispatched`** remain documented below for migration posture; **new work** aligns allocation with **`trips`** per [Trip container authority](#trip-container-authority-trips-vs-dispatch_trips).
 
 **Implementation:** [`DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md`](./DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md) (schema, API, services, UI, payroll/issue tracing). **Phase 3C proposal:** [`PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md`](./PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md).
