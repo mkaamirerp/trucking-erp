@@ -5,6 +5,8 @@
 
 **Legacy dispatch cutover (Slice 1):** **Generic `Load` PATCH** no longer introduces **new** **`Load.status = dispatched`** (**`409`**, **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**). Board/read compatibility persists; writers for **new** dispatch/trip work are **Trip**-centric per this plan and **Decisions 6–7**. **Target `Load.status` (new-write) and board migration** — **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`** (**LOCKED**).
 
+**Terminal / yard / custody (decision spine):** **`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`** (**LOCKED**) consolidates [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md); custody/schema/API slices here must **not** contradict those principles (exact tables and allowlist phasing remain **this** plan).
+
 ---
 
 ## 1. Current schema / API baseline

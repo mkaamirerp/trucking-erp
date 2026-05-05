@@ -156,6 +156,14 @@ Reason:
 
 ---
 
+### Decision 12 — Terminal / yard / custody foundation consolidation
+
+**Locked:** Business rules from [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) are **on the decision spine**: structured **terminal/yard** (`terminal_id`), **trip ≠ load delivery**, **trip close with undelivered** only with **recorded custody/handoff**, **append-only** custody with **void/correct**, **auditable trailer transfer** (no silent overwrite), **granular** terminal state (not one vague “at yard”), **after pickup** dispatcher may choose **final** vs **dispatch to terminal**, **load may span trips**, **quantity transfer** reserved. **Breakdown/repower/recovery** = trip exception domain (**future** decision). **Minimum V1 candidate event types** + later recovery set: see **Decision 12 §K**. Aligns with **Decision 3** (terminal table).
+
+**Full specification:** [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md)
+
+---
+
 ## 1. Trip terminal status naming
 
 | | |
@@ -259,13 +267,15 @@ Use only these four in v1:
 - **`arrived_terminal`**
 - **`dropped_at_terminal`**
 
-**Defer:**
+**Defer (first implementation slice only — not “optional forever”):**
 
 - **`picked_up_from_terminal`**
 - **`trailer_transfer`**
 
-**Why:**  
-This keeps the first custody slice small while covering the main terminal/handoff story. Trailer transfer needs extra trailer-pair validation and clearer UI. Picked-up-from-terminal can be phase 1b when outbound terminal workflow is implemented.
+**Why (first slice):**  
+This keeps the first custody slice small while covering the main terminal/handoff story. **`trailer_transfer`** needs extra trailer-pair validation and clearer UI. **`picked_up_from_terminal`** can ship when outbound terminal workflow is implemented.
+
+**Reconciliation — Decision 12:** **`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`** (**LOCKED**) requires **auditable** **`trailer_transfer`** and **terminal continuation** (including **`picked_up_from_terminal`**-class events) for the **full** foundation story. **§8** here still recommends a **narrow** first **`event_type`** allowlist for **shipping**; later slices **expand** the allowlist so implementation **cannot** violate the foundation (**see also** master index §4 — custody first-write slice vs locked principles).
 
 **Risk if undecided:**  
 Schema/API may allow too many event types before product flow and validation rules are clear.
@@ -318,6 +328,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | **13** | **Decision 9** — Load readiness / Ready–Unassigned planning queue | **LOCKED** — [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md) |
 | **14** | **Decision 10** — Future assignment vs active execution conflict guard | **LOCKED** — [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md) |
 | **15** | **Decision 11** — `Load.status` target / board migration (post–Slice 1) | **LOCKED** — [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md) |
+| **16** | **Decision 12** — Terminal / yard / custody foundation consolidation | **LOCKED** — [`DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md`](./DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md) |
 
 ---
 
