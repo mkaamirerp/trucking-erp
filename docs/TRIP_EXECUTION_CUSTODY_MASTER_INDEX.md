@@ -19,10 +19,11 @@ This document is the **navigation / source-of-truth map** for:
 - **Driver dispatch package & financial visibility** (**Decision 8**, **DRAFT**) — versioned package from **Assign & Send**, operational content vs driver-visible view, disclosure — see [`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`](./DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md)
 - **Load readiness & planning queue** (**Decision 9**, **LOCKED**) — **Save Draft / Save Ready** are load preparation, not trip execution; **Ready / Unassigned** planning queue semantics — see [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md)
 - **Future assignment vs active execution** (**Decision 10**, **LOCKED**) — queued **assigned** trips allowed, but **impossible** schedule overlap vs **`in_progress`** trip guarded; supervisor override with audit — see [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md)
+- **`Load.status` target & board migration** (**Decision 11**, **LOCKED**) — commercial/readiness **`draft` / `ready` / `cancelled`** for **new writes**; legacy **`Load.status`** read-side; **trip** board vs **load** planning queue — see [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md)
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
-**Legacy dispatch cutover (Slice 1, code):** **Generic `Load` PATCH** cannot create a **new** transition into **`Load.status = dispatched`** ( **`409`**, **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`** ). **Read**/**board** compatibility and **legacy cancel** paths for **already-dispatched** loads remain; **new** execution uses **Trip**/**`TripLoad`**/**planned trip** flows per locked decisions.
+**Legacy dispatch cutover (Slice 1, code — e.g. `7012f40a`):** **Generic `Load` PATCH** cannot create a **new** transition into **`Load.status = dispatched`** ( **`409`**, **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`** ). **Read**/**board** compatibility and **legacy cancel** paths for **already-dispatched** loads remain; **new** execution uses **Trip**/**`TripLoad`**/**planned trip** flows per locked decisions. **Target `Load.status` and board direction** are **LOCKED** in **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**.
 
 ---
 
@@ -55,6 +56,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Driver dispatch package & financial visibility (Decision 8)** — **DRAFT / NOT LOCKED** | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` |
 | **Load readiness / planning queue (Decision 9)** — **LOCKED** | `DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md` |
 | **Future assignment / conflict guard (Decision 10)** — **LOCKED** | `DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md` |
+| **Load.status target / board migration (Decision 11)** — **LOCKED** | `DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md` |
 
 ---
 
@@ -82,6 +84,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` — **draft** | Read when designing **Assign & Send** package **content**, **versioning**, **internal vs driver-visible** views, **financial disclosure**, or **driver-type** visibility (**not locked** until owner sign-off). |
 | `DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md` | Read before mapping **Save Draft / Save Ready** to **boards**, **queues**, or **`Load.status`** — **locked** semantics: readiness vs execution (**Decision 9**). |
 | `DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md` | Read before **assigning** a **future** trip to **driver/truck/trailer** already **`in_progress`** elsewhere — **locked** scheduling conflict + override rules (**Decision 10**). |
+| `DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md` | Read before changing **`Load.status`** **new-write** allowlists, **dispatch board** migration, or conflating **load readiness** with **trip execution** — **Decision 11** + Slice 1 compatibility. |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -89,16 +92,16 @@ The **A–F** reading order remains the **required spine**; supporting reference
 
 ## 4. Consolidated locked principles
 
-The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), **Decision 7** (active execution signal), **Decision 9** (load readiness / planning queue), and **Decision 10** (future assignment scheduling vs active execution) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
+The following are **locked** for V1-oriented execution/custody work as of **3L-A–3L-D**, **Decision 6** (load workspace / dispatch package), **Decision 7** (active execution signal), **Decision 9** (load readiness / planning queue), **Decision 10** (future assignment scheduling vs active execution), and **Decision 11** (`Load.status` target + board migration direction) unless explicitly reopened in a later owner decision. (Detail and nuance live in the linked docs.)
 
 - **Trip** is the **operational execution container** (movement, equipment assignment at trip level for active membership).
-- **Load** is the **commercial / broker / customer** truth (stops, docs, rates, board `Load.status` today).
+- **Load** is the **commercial / broker / customer** truth (stops, docs, rates); **`Load.status`** **target** for **new writes** is **commercial/readiness** only — **`draft`**, **`ready`**, **`cancelled`** (**Decision 11**) — **not** trip execution state.
 - **TripLoad** (`trip_loads`) is **explicit membership** between trip and load.
 - **Active membership** = `trip_loads` row with **`removed_at IS NULL`** — **source of truth** for “load on trip.”
 - **`loads.active_trip_id`** is a **backend mirror only**; **UI must not “repair” drift** (membership APIs own consistency).
 - **Trip completion ≠ load delivery** (trip can end with handoff; loads may remain active).
 - **`Trip.status` positive terminal state = `completed`** — **not** `delivered` on the trip container.
-- **`Load.status`** may still use **`delivered`** for commercial/final receiver milestones.
+- **Legacy `Load.status`** values (**`dispatched`**, **`in_transit`**, **`delivered`**, etc.) **may persist** on **old rows** and **read** paths (**Decision 11**); **target new-write** set is **`draft` / `ready` / `cancelled`**. **`Load.status = dispatched`** is **not** a **new** execution trigger (Slice 1 + **Decision 11**).
 - **Custody** event type **`delivered`** may still exist for receiver / proof (distinct from `Trip.status`).
 - **No `Trip.status = voided` in V1** — use **`cancelled`** with reason, audit, and future pay-review workflow (see 3L-D).
 - **Cancelled** trips: record not deleted; **`cancelled_at`**, **`cancelled_by`**, **`cancel_reason`** (and notes/audit); **`cancel_category` optional later**.
@@ -134,6 +137,8 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 **Cross-check Decision 9:** **Save Draft / Save Ready** = load **readiness** only; **Assign** / **Assign & Send** remain the path to **trip commitment** and **package send** per **Decision 6**.
 
 **Cross-check Decision 10:** **Future** **assignment** must respect **scheduling conflict** rules vs **`in_progress`** trips on the **same** resource — see **`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`**.
+
+**Cross-check Decision 11:** **`Load.status`** **new writes** align with **`draft` / `ready` / `cancelled`** — **not** **`dispatched`** as execution (**Slice 1**).
 
 Full specification: [`DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`](./DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md). **Sits after** the **Assignment endpoint first** slice (§4 bullet above). Summary:
 
@@ -178,6 +183,12 @@ Full specification: [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISI
 
 **Summary:** **Future assigned** trips on the **same** driver/truck/trailer are **allowed** while a trip is **`in_progress`**, but **next** trip **first pickup / planned start** must **not** precede current trip **final delivery / expected completion** — else **scheduling conflict** (default **block** or **hard warning**; **no** silent allow). **Per-resource** checks. **Supervisor override** with reason, actor, time, trips, resource, audit. **Assignment** still **does not** start execution, custody, **`Load.status = dispatched`**, payroll, or board rewrite (**Decisions 6–7**). **Assign & Send** does **not** bypass this guard when implemented.
 
+### Decision 11 — Load.status target model and board migration (**locked**)
+
+Full specification: [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md).
+
+**Summary:** **`Load.status`** = **commercial/readiness**, **not** trip execution. **Target new-write** values: **`draft`**, **`ready`**, **`cancelled`**; **`ready`** aligns with **Decision 9** planning queue. **Legacy** `Load.status` values remain for **read**/history — **`dispatched`** **not** a **new** execution trigger (Slice 1 `7012f40a` + **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**). **Trip** `Trip.status` / **`TripLoad`** / package / custody own **operational** state. **Target boards:** **load** planning queue + **trip** workspace — **no** immediate schema strip or board rewrite required by this doc alone.
+
 ---
 
 ## 5. Open decisions / still pending
@@ -196,7 +207,7 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; **detailed design draft** in **`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`** (**Decision 8**, **NOT LOCKED**); schema/API TBD after sign-off.
 - **Definition of “active execution”** for overlap / queuing guards — **partially locked** in **Decision 7** (`in_progress` from first signal); **scheduling conflict** vs **future assignment** **locked** in **Decision 10**; exact **date fields**, **timezone**, and **supervisor override UX** remain TBD.
 - **Reconcile** **3L-C** granular trip-status proposal (`dispatched`, `in_transit`, `at_terminal`, etc.) with **Decision 7** **simple** `in_progress` model (mapping, sub-states, or deprecation).
-- **Save Ready / Save Draft → `Load.status` / board pool:** **Readiness and planning-queue semantics** are **LOCKED** in **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**; **exact** literal `Load.status` values and **legacy** board column mapping remain **implementation / migration** decisions.
+- **Save Ready / Save Draft + `Load.status` + boards:** **Planning-queue semantics** **LOCKED** in **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**; **target new-write `Load.status` values** (`draft` / `ready` / `cancelled`) and **load vs trip board direction** **LOCKED** in **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**; **legacy** read paths and **phased** migration remain **implementation**.
 
 ---
 
@@ -218,6 +229,7 @@ Before writing migrations or product code:
 - **Do not** mint or surface a **new Trip Number** per stop, pickup, delivery, or second pickup — **one** trip number per **Trip**; driver **dispatch package** uses that number as **primary** operational ID (**§4**, **Trip number rule**, + **Decision 6**).
 - **Save Ready** (without explicit **trip** / **assign** / **Assign & Send** actions) **must not** be treated as creating a **trip**, **`TripLoad`** rows, **assignment**, **dispatch package send**, **`Trip.status = assigned`/`in_progress`**, **`Load.status = dispatched`**, **custody**, **payroll**, or **board rewrite** — **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**.
 - **Do not** **silently** accept **impossible** **future assignment** schedules when **Decision 10** applies (**first pickup** before **current expected completion** on **same** driver/truck/trailer) — **`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`** (implementation **deferred**).
+- **`Load.status` migration:** target **new-write** semantics and **boards** per **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**; **do not** treat **`Load.status = dispatched`** as a **new** execution trigger (**Slice 1**).
 
 ---
 

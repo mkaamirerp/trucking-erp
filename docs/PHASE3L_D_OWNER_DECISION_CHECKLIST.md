@@ -148,6 +148,14 @@ Reason:
 
 ---
 
+### Decision 11 — Load.status target model and board migration
+
+**Locked:** **`Load.status`** = **commercial/readiness** (**not** trip execution). **Target new-write:** **`draft`**, **`ready`**, **`cancelled`**; **`ready`** = planning queue (**Decision 9**). **Legacy** statuses (**`dispatched`**, **`in_transit`**, **`delivered`**, etc.) **read**/history only until migration. **`Load.status = dispatched`** **not** **new** execution trigger (**Slice 1** + **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**). **Operational** state: **`Trip.status`**, **`TripLoad`**, package, custody/events. **Boards:** **load** planning queue + **trip** workspace — **no** forced schema drop in doc. **Cross-check Decisions 6–10** and **`7012f40a`**.
+
+**Full specification:** [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md)
+
+---
+
 ## 1. Trip terminal status naming
 
 | | |
@@ -309,6 +317,7 @@ Schema/API may allow too many event types before product flow and validation rul
 | **12** | **Decision 7** — Active execution signal (not from assignment) | **LOCKED** — [`DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`](./DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md) |
 | **13** | **Decision 9** — Load readiness / Ready–Unassigned planning queue | **LOCKED** — [`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`](./DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md) |
 | **14** | **Decision 10** — Future assignment vs active execution conflict guard | **LOCKED** — [`DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md`](./DECISION_10_FUTURE_ASSIGNMENT_CONFLICT_GUARD.md) |
+| **15** | **Decision 11** — `Load.status` target / board migration (post–Slice 1) | **LOCKED** — [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md) |
 
 ---
 
