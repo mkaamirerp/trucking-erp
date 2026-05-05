@@ -2,6 +2,12 @@
 
 This document is the **product bar** for the Gmail intake feature. Do not mark the feature complete until **all** items below are true for the target environment.
 
+## Health warning: `CONNECTED` vs automatic ingestion
+
+A mailbox row may still show **`CONNECTED`** even when **automatic ingestion** is broken. **`CONNECTED`** only proves the account was connected previously — not that Google will still accept the **stored refresh token**.
+
+If watch renewal or any Gmail API call fails with **`invalid_grant`**, treat the refresh token as **invalid**. The tenant admin must **reconnect Gmail** through OAuth (new refresh token). A **renewal timer** or **`renew-watch`** job only helps **after** refresh works; it **cannot** repair an invalid refresh token by itself.
+
 ## Definition of done
 
 1. **Mailbox connects** — OAuth completes; refresh token stored; tenant can sign in without errors.

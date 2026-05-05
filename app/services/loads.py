@@ -120,6 +120,13 @@ def _merged_scalar(load: Load, data: dict, key: str):
     return getattr(load, key)
 
 
+def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
+    """True for DROP or DELIVERY (Load Page default second stop uses DELIVERY)."""
+    if not stop_type:
+        return False
+    u = stop_type.strip().upper()
+    return u in ("DROP", "DELIVERY")
+
 
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
     stmt = select(Load).where(Load.tenant_id == tenant_id, Load.load_number == load_number)
@@ -604,7 +611,7 @@ async def list_loads_for_board(
 async def mark_load_ready(
     db: AsyncSession, tenant_id: int, load_id: int, *, expected_concurrency_version: int
 ) -> Load:
-    """Mark draft as ready. Validates minimum: broker, broker_load_reference, at least one pickup and one drop."""
+    """Mark draft as ready. Validates minimum: broker, broker_load_reference, at least one pickup and one delivery/drop."""
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
@@ -626,17 +633,17 @@ async def mark_load_ready(
             detail="Broker load reference must be set before marking ready",
         )
 
-    pickups = [s for s in load.stops if s.stop_type.upper() == "PICKUP"]
-    drops = [s for s in load.stops if s.stop_type.upper() == "DROP"]
+    pickups = [s for s in load.stops if (s.stop_type or "").strip().upper() == "PICKUP"]
+    deliveries = [s for s in load.stops if _stop_is_delivery_or_drop(s.stop_type)]
     if not pickups:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one pickup stop is required before marking ready",
         )
-    if not drops:
+    if not deliveries:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one drop stop is required before marking ready",
+            detail="At least one delivery or drop stop is required before marking ready",
         )
 
     stmt = (

@@ -81,6 +81,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md` | Pre-ship proposal for planned trips; mostly superseded by module closeout, but useful for rationale. |
 | `PHASE3D_TRIP_ACTION_READ_FIRST.md` | Read before changing trip service actions; preserves report-first/action safety discipline. |
 | `TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md` | Read only if Trip work touches LoadWorkspace or parser boundaries. |
+| **Email Intake Filtering and Load Intake Safety** (`email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md`) | Cross-provider filtering/report before Load Intake (A/B/C/D/E routing, signals, human review, safety boundaries vs trips/dispatch/payroll). See also **`DOCUMENTATION_MASTER_INDEX.md`**. |
 | `PAYROLL_TRIP_TRACING.md` | Read before designing payroll, settlement, cancellation-pay, or trip tracing logic. |
 | `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Read before coupling Trip transitions to Load.status or operational load events. |
 | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` | Read before changing **Load Workspace** dispatcher actions (**Save Draft / Ready / Assign / Assign & Send**) or **dispatch package** design. |

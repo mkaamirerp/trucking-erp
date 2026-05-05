@@ -4,6 +4,8 @@
 **Canonical Rule:** If it’s not in this blueprint or a decision record, it is not considered agreed.
 
 ## 1. Purpose
+**Documentation map:** [`DOCUMENTATION_MASTER_INDEX.md`](./DOCUMENTATION_MASTER_INDEX.md) — entry point for email intake, trip/custody spine, parser/Load Page, and engineering docs.
+
 Build an industry-grade Trucking ERP that supports:
 - Driver + employee management
 - Operations/dispatch + mileage capture — **dispatch trip numbers** are a locked system rule (see [`DISPATCH_TRIP_NUMBER_RULE.md`](./DISPATCH_TRIP_NUMBER_RULE.md))

@@ -84,7 +84,7 @@ export interface WorkspaceDraftFields {
 
 export function initialWorkspaceFieldsManual(): WorkspaceDraftFields {
   return {
-    status: "unassigned",
+    status: "draft",
     loadNumber: "",
     brokerId: null,
     brokerContactId: null,

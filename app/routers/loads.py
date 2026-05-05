@@ -16,9 +16,11 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
+from app.core.config import settings
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.services import loads as loads_service
-from app.services.load_document_parse import parse_load_workspace_from_pdf_bytes
+from app.services.load_document_parse_openai import parse_document_openai_chat_json_schema
+from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 
 router = APIRouter(prefix="/loads", tags=["loads"])
 
@@ -82,6 +84,10 @@ async def parse_load_workspace_document(
     """
     Extract normalized load fields from an uploaded PDF for workspace hydration only.
     Does not create or update a load row. Optional thread/load ids are echo-only context.
+
+    When ``LOAD_PARSE_DOCUMENT_SEMANTIC_ADAPTER_ENABLED`` is true, uses the semantic adapter
+    path only (no silent regex fallback); failures surface as semantic outcomes + warnings.
+    Default remains legacy regex extraction.
     """
     data = await file.read()
     if not data:
@@ -90,13 +96,19 @@ async def parse_load_workspace_document(
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
     if not data.startswith(b"%PDF-"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
-    raw = parse_load_workspace_from_pdf_bytes(
+    injectable = (
+        parse_document_openai_chat_json_schema
+        if settings.load_parse_document_semantic_adapter_enabled
+        else None
+    )
+    return await parse_load_workspace_document_orchestrated(
         data,
-        filename=file.filename,
+        filename=file.filename or "upload.pdf",
         email_thread_id=email_thread_id,
         load_id=load_id,
+        semantic_enabled=settings.load_parse_document_semantic_adapter_enabled,
+        openai_chat_json_schema=injectable,
     )
-    return LoadDocumentParseResponse.model_validate(raw)
 
 
 @router.get("/{load_id}", response_model=LoadResponse)

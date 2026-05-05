@@ -14,6 +14,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.openai_chat_json_schema import openai_chat_json_schema_raw
 from app.models.load_lab import LoadLabExtractionRun
 from app.schemas.critical_extraction_v11 import CriticalExtractionV11Root
 from app.schemas.load_document_parse import (
@@ -88,7 +89,6 @@ SEMANTIC_SCHEMA_VERSION = "load_lab_candidate_truckerjson_v1"
 CRITICAL_EXTRACTION_V11_SCHEMA_VERSION = "critical_extraction_v1_1"
 
 _MAX_TEXT_FOR_MODEL = 100_000
-_OPENAI_TIMEOUT_S = 120.0
 
 _ALLOWED_STOP_TYPES = frozenset({"pickup", "delivery", "drop", "other"})
 
@@ -955,49 +955,14 @@ async def _openai_chat_json_schema(
     schema_name: str,
 ) -> dict[str, Any]:
     """POST /v1/chat/completions with json_schema; falls back to json_object on unsupported model."""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body_schema = {
-        "model": model,
-        "temperature": 0.1,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
-        ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": {"name": schema_name, "strict": False, "schema": schema},
-        },
-    }
-    async with httpx.AsyncClient(timeout=_OPENAI_TIMEOUT_S) as client:
-        r = await client.post(url, headers=headers, json=body_schema)
-        if r.status_code == 200:
-            return r.json()
-        err_snip = (r.text or "")[:800]
-        # Some models return 400 for json_schema — retry plain json_object.
-        if r.status_code == 400 and "json_schema" in err_snip.lower():
-            body_obj = {
-                "model": model,
-                "temperature": 0.1,
-                "messages": [
-                    {"role": "system", "content": system + " Respond with a single JSON object only."},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Extract load fields. Required top-level keys: document (object with filename), "
-                            "extracted (object with broker fields, references array, stops array), "
-                            "extraction_warnings (array of strings, may be empty).\n\n---\n\n"
-                            f"{user_text}"
-                        ),
-                    },
-                ],
-                "response_format": {"type": "json_object"},
-            }
-            r2 = await client.post(url, headers=headers, json=body_obj)
-            r2.raise_for_status()
-            return r2.json()
-        r.raise_for_status()
-        return r.json()
+    return await openai_chat_json_schema_raw(
+        api_key=api_key,
+        model=model,
+        system=system,
+        user_text=user_text,
+        schema=schema,
+        schema_name=schema_name,
+    )
 
 
 def _parse_openai_payload(data: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None, str | None]:

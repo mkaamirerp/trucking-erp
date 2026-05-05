@@ -26,6 +26,7 @@ import {
   listTrailers,
   listTrucks,
   listAuditEventsByEntity,
+  markLoadReady,
   parseLoadVersionConflict,
   parseLoadWorkspaceDocument,
   updateLoad,
@@ -304,6 +305,24 @@ function formatPlannedTripCreateError(err: unknown): string {
   return "Could not create trip. Try again.";
 }
 
+/** Human-readable message from FastAPI-style JSON error body in Error.message. */
+function formatApiErrorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const d = parsed.detail;
+    if (typeof d === "string") return d;
+    if (d && typeof d === "object" && !Array.isArray(d) && typeof (d as { detail?: unknown }).detail === "string") {
+      return (d as { detail: string }).detail;
+    }
+  } catch {
+    /* use raw */
+  }
+  if (raw.length > 0 && raw.length < 500) return raw;
+  return fallback;
+}
+
 export default function LoadWorkspacePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -355,6 +374,7 @@ export default function LoadWorkspacePage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [markReadyBusy, setMarkReadyBusy] = useState(false);
   const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
   const [createPlannedTripError, setCreatePlannedTripError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -394,7 +414,7 @@ export default function LoadWorkspacePage() {
     isManual ? initialManualCreateStops() : [],
   );
 
-  const [status, setStatus] = useState(isManual ? "unassigned" : "");
+  const [status, setStatus] = useState(isManual ? "draft" : "");
   const [loadNumber, setLoadNumber] = useState("");
   const [brokerId, setBrokerId] = useState<number | null>(null);
   const [brokerContactId, setBrokerContactId] = useState<number | null>(null);
@@ -850,41 +870,48 @@ export default function LoadWorkspacePage() {
     [sortedDraftStops],
   );
 
+  const buildWorkspacePersistPayload = () =>
+    buildLoadPersistPayload({
+      status,
+      loadNumber,
+      brokerId,
+      brokerContactId,
+      brokerNameSnapshot,
+      brokerContactNameSnapshot,
+      brokerContactPhoneSnapshot,
+      brokerContactExtensionSnapshot,
+      brokerContactEmailSnapshot,
+      brokerLoadReference,
+      mode: freightMode,
+      equipmentType,
+      trailerType,
+      trailerSize,
+      commodity,
+      estimatedWeight,
+      hazmat,
+      temperatureRequirement,
+      palletCaseCount,
+      rate,
+      customerRate,
+      miles,
+      driverId,
+      truckId,
+      trailerId,
+      customsBrokerId,
+      internalNotes,
+      draftStops,
+    });
+
+  const showMarkReadyAction =
+    load != null &&
+    (workspaceMode === "detail" || workspaceMode === "intake") &&
+    (load.status || "").toLowerCase() === "draft";
+
   async function onCreate() {
     setSaving(true);
     setToolbarMessage(null);
     try {
-      const payload = buildLoadPersistPayload({
-        status,
-        loadNumber,
-        brokerId,
-        brokerContactId,
-        brokerNameSnapshot,
-        brokerContactNameSnapshot,
-        brokerContactPhoneSnapshot,
-        brokerContactExtensionSnapshot,
-        brokerContactEmailSnapshot,
-        brokerLoadReference,
-        mode: freightMode,
-        equipmentType,
-        trailerType,
-        trailerSize,
-        commodity,
-        estimatedWeight,
-        hazmat,
-        temperatureRequirement,
-        palletCaseCount,
-        rate,
-        customerRate,
-        miles,
-        driverId,
-        truckId,
-        trailerId,
-        customsBrokerId,
-        internalNotes,
-        draftStops,
-      });
-      const created = await createLoad(payload);
+      const created = await createLoad(buildWorkspacePersistPayload());
       navigate(OPS.LOAD_DETAIL(created.id), { replace: true });
     } catch (e: unknown) {
       setToolbarMessage({ text: (e as Error)?.message || "Could not create load", tone: "error" });
@@ -922,36 +949,7 @@ export default function LoadWorkspacePage() {
     setError(null);
     try {
       const updated = await updateLoad(load.id, {
-        ...buildLoadPersistPayload({
-          status,
-          loadNumber,
-          brokerId,
-          brokerContactId,
-          brokerNameSnapshot,
-          brokerContactNameSnapshot,
-          brokerContactPhoneSnapshot,
-          brokerContactExtensionSnapshot,
-          brokerContactEmailSnapshot,
-          brokerLoadReference,
-          mode: freightMode,
-          equipmentType,
-          trailerType,
-          trailerSize,
-          commodity,
-          estimatedWeight,
-          hazmat,
-          temperatureRequirement,
-          palletCaseCount,
-          rate,
-          customerRate,
-          miles,
-          driverId,
-          truckId,
-          trailerId,
-          customsBrokerId,
-          internalNotes,
-          draftStops,
-        }),
+        ...buildWorkspacePersistPayload(),
         expected_concurrency_version: expectedVersion,
       });
       setLoad(updated);
@@ -970,10 +968,71 @@ export default function LoadWorkspacePage() {
           tone: "warning",
         });
       } else {
-        setToolbarMessage({ text: (e as Error)?.message || "Save failed", tone: "error" });
+        setToolbarMessage({ text: formatApiErrorMessage(e, "Save failed"), tone: "error" });
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onMarkReady() {
+    if (!load) return;
+    const expectedVersion = load.concurrency_version ?? 1;
+    setMarkReadyBusy(true);
+    setToolbarMessage(null);
+    setError(null);
+    try {
+      const afterSave = await updateLoad(load.id, {
+        ...buildWorkspacePersistPayload(),
+        expected_concurrency_version: expectedVersion,
+      });
+      setLoad(afterSave);
+      hydrateFromLoad(afterSave);
+      setServerConflict(null);
+      try {
+        const ready = await markLoadReady(load.id, afterSave.concurrency_version ?? 1);
+        setLoad(ready);
+        hydrateFromLoad(ready);
+        setToolbarMessage({ text: "Load marked ready.", tone: "success" });
+        setServerConflict(null);
+      } catch (me: unknown) {
+        const mc = parseLoadVersionConflict(me);
+        if (mc) {
+          setServerConflict({
+            serverVersion: mc.server_version,
+            serverSnapshot: mc.server_snapshot,
+          });
+          setToolbarMessage({
+            text: "Saved, but mark ready conflicted — see details above.",
+            tone: "warning",
+          });
+          if (mc.server_snapshot) {
+            setLoad(mc.server_snapshot);
+            hydrateFromLoad(mc.server_snapshot);
+          }
+        } else {
+          setToolbarMessage({
+            text: formatApiErrorMessage(me, "Could not mark load ready."),
+            tone: "error",
+          });
+        }
+      }
+    } catch (e: unknown) {
+      const c = parseLoadVersionConflict(e);
+      if (c) {
+        setServerConflict({
+          serverVersion: c.server_version,
+          serverSnapshot: c.server_snapshot,
+        });
+        setToolbarMessage({
+          text: "Load was modified elsewhere — see conflict details above.",
+          tone: "warning",
+        });
+      } else {
+        setToolbarMessage({ text: formatApiErrorMessage(e, "Save failed"), tone: "error" });
+      }
+    } finally {
+      setMarkReadyBusy(false);
     }
   }
 
@@ -1373,7 +1432,10 @@ export default function LoadWorkspacePage() {
                 <p className="mt-1 text-[11px] text-red-700">{createPlannedTripError}</p>
               ) : null}
               {workspaceMode === "manual" ? (
-                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Create saves the load and opens it for edits.</p>
+                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">
+                  New manual loads start as <span className="font-medium text-[var(--trk-text)]">draft</span>. Create saves
+                  and opens the load for edits — change status if needed.
+                </p>
               ) : workspaceMode === "intake" ? (
                 <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Source rail + save updates this load.</p>
               ) : null}
@@ -1454,7 +1516,7 @@ export default function LoadWorkspacePage() {
           onTruckSelect={onDispatchStripTruckSelect}
           onTrailerSelect={onDispatchStripTrailerSelect}
           onAssign={() => void onDispatchAssign()}
-          saving={saving}
+          saving={saving || markReadyBusy}
         />
       ) : null}
 
@@ -1490,20 +1552,43 @@ export default function LoadWorkspacePage() {
             <Button
               variant="secondary"
               type="button"
-              disabled={saving || parseBusy || loading}
+              disabled={saving || markReadyBusy || parseBusy || loading}
               onClick={() => pdfInputRef.current?.click()}
             >
               {parseBusy ? "Parsing…" : "Upload & parse PDF"}
             </Button>
           ) : null}
           {workspaceMode === "manual" ? (
-            <Button variant="primary" type="button" disabled={saving} onClick={() => void onCreate()}>
+            <Button
+              variant="primary"
+              type="button"
+              disabled={saving || markReadyBusy}
+              onClick={() => void onCreate()}
+            >
               {saving ? "Creating…" : "Create load"}
             </Button>
           ) : (
-            <Button variant="primary" type="button" disabled={saving} onClick={() => void onSave()}>
-              {saving ? "Saving…" : "Save load"}
-            </Button>
+            <>
+              <Button
+                variant="primary"
+                type="button"
+                disabled={saving || markReadyBusy}
+                onClick={() => void onSave()}
+              >
+                {saving ? "Saving…" : "Save load"}
+              </Button>
+              {showMarkReadyAction ? (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  disabled={saving || markReadyBusy || loading || parseBusy}
+                  title="Saves your edits, then marks this load ready when broker, load reference, and pickup + delivery stops are set."
+                  onClick={() => void onMarkReady()}
+                >
+                  {markReadyBusy ? "Marking ready…" : "Mark ready"}
+                </Button>
+              ) : null}
+            </>
           )}
           {toolbarMessage ? (
             <span
@@ -1692,7 +1777,7 @@ export default function LoadWorkspacePage() {
             visibleSections={sectionConfig.visible}
             editableSections={sectionConfig.editable}
             intakeProposed={intakeProposed}
-            saving={saving}
+            saving={saving || markReadyBusy}
             freightBrokers={freightBrokers}
             brokerContacts={brokerContacts}
             drivers={drivers}

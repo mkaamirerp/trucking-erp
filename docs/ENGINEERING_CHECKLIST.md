@@ -1,5 +1,6 @@
 # Engineering Playbook Checklist
 - [ ] Read docs/ENGINEERING_PLAYBOOK.md before changes
+- [ ] For **documentation navigation** (email intake, trips, parser, platform): **[`docs/README.md`](README.md)** → **[`docs/DOCUMENTATION_MASTER_INDEX.md`](DOCUMENTATION_MASTER_INDEX.md)**
 - [ ] App boots on 8000 & /api/v1/health returns 200
 - [ ] **After code change (deploy to truckerp.me):**  
   1. Rebuild API image: `docker compose -f docker-compose.yml build truckerp-api`  

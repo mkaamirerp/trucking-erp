@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoadParseDocumentMeta(BaseModel):
@@ -70,3 +70,18 @@ class LoadDocumentParseResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     field_confidence: dict[str, str] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
+
+
+class ParseDocumentSemanticModelOutput(BaseModel):
+    """B4: OpenAI `json_schema` output for parse-document semantic path.
+
+    Excludes ``raw_text`` and ``context`` — the server attaches PDF text and allowlisted context.
+    Extra root keys from the model are ignored (forward tolerance).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    document: LoadParseDocumentMeta
+    extracted: LoadParseExtractedFields = Field(default_factory=LoadParseExtractedFields)
+    warnings: list[str] = Field(default_factory=list)
+    field_confidence: dict[str, str] = Field(default_factory=dict)

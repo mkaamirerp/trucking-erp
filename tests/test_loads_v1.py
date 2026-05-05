@@ -285,4 +285,120 @@ class TestMarkReadyFlow:
             headers=AUTH_HEADERS,
         )
         assert mr.status_code == 200
-        assert mr.json()["status"] == "ready"
+        body = mr.json()
+        assert body["status"] == "ready"
+        assert body.get("active_dispatch_trip_id") in (None, 0)
+        assert body.get("active_trip_id") in (None, 0)
+
+    async def test_mark_ready_success_with_delivery_stop(self, client, override_auth_tenant) -> None:
+        """Default Load Page manual pair is PICKUP + DELIVERY; mark-ready must accept DELIVERY."""
+        load_num = f"L-READY-DLV-{uuid.uuid4().hex[:8]}"
+        cr = await client.post(
+            "/api/v1/loads",
+            json={
+                "load_number": load_num,
+                "broker_name_snapshot": "TQL",
+                "broker_load_reference": "PO-DLV-1",
+                "status": "draft",
+                "stops": [
+                    {"stop_type": "PICKUP", "sequence": 0, "facility_name": "S"},
+                    {"stop_type": "DELIVERY", "sequence": 1, "facility_name": "D"},
+                ],
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert cr.status_code == 201
+        load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
+        mr = await client.post(
+            f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cv},
+            headers=AUTH_HEADERS,
+        )
+        assert mr.status_code == 200, mr.text
+        body = mr.json()
+        assert body["status"] == "ready"
+        assert body.get("active_dispatch_trip_id") in (None, 0)
+        assert body.get("active_trip_id") in (None, 0)
+
+    async def test_mark_ready_rejects_non_draft(self, client, override_auth_tenant) -> None:
+        load_num = f"L-READY-ND-{uuid.uuid4().hex[:8]}"
+        cr = await client.post(
+            "/api/v1/loads",
+            json={
+                "load_number": load_num,
+                "broker_name_snapshot": "TQL",
+                "broker_load_reference": "PO-ND",
+                "status": "ready",
+                "stops": [
+                    {"stop_type": "PICKUP", "sequence": 0, "facility_name": "S"},
+                    {"stop_type": "DROP", "sequence": 1, "facility_name": "D"},
+                ],
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert cr.status_code == 201
+        load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
+        mr = await client.post(
+            f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cv},
+            headers=AUTH_HEADERS,
+        )
+        assert mr.status_code == 400
+        assert "draft" in mr.json().get("detail", "").lower()
+
+    async def test_mark_ready_rejects_pickup_only(self, client, override_auth_tenant) -> None:
+        load_num = f"L-READY-PO-{uuid.uuid4().hex[:8]}"
+        cr = await client.post(
+            "/api/v1/loads",
+            json={
+                "load_number": load_num,
+                "broker_name_snapshot": "TQL",
+                "broker_load_reference": "PO-PO",
+                "status": "draft",
+                "stops": [
+                    {"stop_type": "PICKUP", "sequence": 0, "facility_name": "S"},
+                    {"stop_type": "PICKUP", "sequence": 1, "facility_name": "S2"},
+                ],
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert cr.status_code == 201
+        load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
+        mr = await client.post(
+            f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cv},
+            headers=AUTH_HEADERS,
+        )
+        assert mr.status_code == 400
+        detail = mr.json().get("detail", "").lower()
+        assert "delivery" in detail or "drop" in detail
+
+    async def test_mark_ready_rejects_missing_broker_load_reference(self, client, override_auth_tenant) -> None:
+        load_num = f"L-READY-NOREF-{uuid.uuid4().hex[:8]}"
+        cr = await client.post(
+            "/api/v1/loads",
+            json={
+                "load_number": load_num,
+                "broker_name_snapshot": "TQL",
+                "broker_load_reference": None,
+                "status": "draft",
+                "stops": [
+                    {"stop_type": "PICKUP", "sequence": 0, "facility_name": "S"},
+                    {"stop_type": "DELIVERY", "sequence": 1, "facility_name": "D"},
+                ],
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert cr.status_code == 201
+        load_id = cr.json()["id"]
+        cv = cr.json()["concurrency_version"]
+        mr = await client.post(
+            f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cv},
+            headers=AUTH_HEADERS,
+        )
+        assert mr.status_code == 400
+        assert "broker" in mr.json().get("detail", "").lower() and "reference" in mr.json().get("detail", "").lower()

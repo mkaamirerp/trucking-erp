@@ -710,9 +710,11 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </select>
             {p.status !== "dispatched" ? (
               <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
-                Readiness and planning (e.g. draft → ready → unassigned) stay on this page. Committing driver/truck/trailer
-                for operations is on the <span className="font-medium text-[var(--trk-text)]">trip workspace</span>, not via
-                setting Load.status to dispatched.
+                Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> in the toolbar for validated
+                draft → ready (broker, reference, stops). Legacy operational statuses in the list remain for historical
+                compatibility. Driver/truck/trailer commitment lives on the{" "}
+                <span className="font-medium text-[var(--trk-text)]">trip workspace</span> — not via setting{" "}
+                <span className="font-mono text-[var(--trk-text-muted)]">Load.status</span> to dispatched.
               </p>
             ) : null}
           </div>

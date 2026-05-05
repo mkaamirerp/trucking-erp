@@ -123,6 +123,10 @@ class Settings(BaseSettings):
     # Chat model for Load Lab v2 structured extraction (optional override).
     openai_extraction_model: str = "gpt-4o-mini"
 
+    # POST /loads/parse-document: when False (default), legacy regex parser only.
+    # When True, semantic stateless path only — no silent regex fallback (Track B1).
+    load_parse_document_semantic_adapter_enabled: bool = False
+
     # Storage (S3 or local)
     storage_provider: str = "local"
     aws_region: str = "us-east-1"

@@ -5,6 +5,8 @@ Last updated: 2025-12-31
 This document is REQUIRED reading before adding any new module, router, model, or operational procedure.
 Its purpose is to prevent startup failures, tenant data leaks, database drift, and unsafe production actions.
 
+**Documentation map:** For navigation across design docs (email intake, trips, parser, platform), see [`docs/DOCUMENTATION_MASTER_INDEX.md`](DOCUMENTATION_MASTER_INDEX.md).
+
 1) Runtime Basics (Ports + Base URLs)
 
 (unchanged — verified correct)

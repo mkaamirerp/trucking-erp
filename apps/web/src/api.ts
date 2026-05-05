@@ -1194,6 +1194,16 @@ export async function updateLoad(id: number, payload: LoadUpdatePayload) {
   return handle<Load>(res);
 }
 
+/** POST /loads/{id}/mark-ready — draft → ready; requires expected_concurrency_version from last read/save. */
+export async function markLoadReady(loadId: number, expectedConcurrencyVersion: number) {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/mark-ready`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_concurrency_version: expectedConcurrencyVersion }),
+  });
+  return handle<Load>(res);
+}
+
 export type CustomsBroker = {
   id: number;
   tenant_id?: number;
