@@ -16,10 +16,8 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
-from app.core.config import settings
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.services import loads as loads_service
-from app.services.load_document_parse_openai import parse_document_openai_chat_json_schema
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 
 router = APIRouter(prefix="/loads", tags=["loads"])
@@ -78,16 +76,15 @@ async def parse_load_workspace_document(
     file: UploadFile = File(...),
     email_thread_id: int | None = Form(None),
     load_id: int | None = Form(None),
-    _tenant_id: int = Depends(require_tenant),
+    tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
     """
     Extract normalized load fields from an uploaded PDF for workspace hydration only.
     Does not create or update a load row. Optional thread/load ids are echo-only context.
 
-    When ``LOAD_PARSE_DOCUMENT_SEMANTIC_ADAPTER_ENABLED`` is true, uses the semantic adapter
-    path only (no silent regex fallback); failures surface as semantic outcomes + warnings.
-    Default remains legacy regex extraction.
+    Uses the product guarded parser path only; no legacy parser fallback.
     """
     data = await file.read()
     if not data:
@@ -96,18 +93,14 @@ async def parse_load_workspace_document(
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
     if not data.startswith(b"%PDF-"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
-    injectable = (
-        parse_document_openai_chat_json_schema
-        if settings.load_parse_document_semantic_adapter_enabled
-        else None
-    )
     return await parse_load_workspace_document_orchestrated(
         data,
         filename=file.filename or "upload.pdf",
         email_thread_id=email_thread_id,
         load_id=load_id,
-        semantic_enabled=settings.load_parse_document_semantic_adapter_enabled,
-        openai_chat_json_schema=injectable,
+        openai_chat_json_schema=None,
+        tenant_id=tenant_id,
+        db=db,
     )
 
 
