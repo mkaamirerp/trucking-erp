@@ -1,19 +1,18 @@
-"""Digital PDF text extraction and narrow TQL rate-confirmation heuristics (no OCR)."""
+"""Digital PDF text access and plain-text heuristics for intake hints (no OCR).
+
+Full load-document parsing uses ``parse_pdf_bytes_to_load_document_response``.
+"""
 
 from __future__ import annotations
 
-import io
 import re
 
-from pypdf import PdfReader
+from app.services.pdf_text_extract import extract_text_and_pages_from_pdf_bytes
 
 
 def extract_pdf_text_bytes(data: bytes) -> str:
-    reader = PdfReader(io.BytesIO(data))
-    parts: list[str] = []
-    for page in reader.pages:
-        parts.append(page.extract_text() or "")
-    return "\n".join(parts).strip()
+    full, _pages, _warnings = extract_text_and_pages_from_pdf_bytes(data)
+    return full.strip()
 
 
 def guess_broker_load_reference(text: str) -> str | None:
@@ -44,8 +43,8 @@ def extract_broker_mc_dot_hints(text: str | None) -> tuple[str | None, str | Non
 
 def extract_tql_rate_con_hints(text: str) -> dict[str, float | int | str]:
     """
-    Best-effort parse of common TQL / digital rate-con text (no OCR).
-    Used only to prefill load fields on high-confidence PDF intake.
+    Best-effort rate/miles/commodity from plain text (fixtures / legacy tests only).
+    Prefer ``LoadDocumentParseResponse.extracted`` in product code.
     """
     out: dict[str, float | int | str] = {}
     if not text or len(text.strip()) < 20:
@@ -81,21 +80,3 @@ def extract_tql_rate_con_hints(text: str) -> dict[str, float | int | str]:
         if line and len(line) > 2:
             out["commodity"] = line[:255]
     return out
-
-
-def tql_digital_pdf_high_confidence(text: str) -> tuple[bool, str]:
-    """
-    Hardcoded high-confidence gate for TQL digital PDFs only:
-    sufficient extracted text + TQL / rate confirmation markers + pickup/delivery cues.
-    """
-    t = (text or "").strip()
-    if len(t) < 200:
-        return False, "extracted_text_too_short"
-    u = t.upper()
-    marker_rc = "RATE CONFIRMATION" in u
-    marker_tql = "TQL" in u or "TOTAL QUALITY LOGISTICS" in u
-    loc_pick = bool(re.search(r"\b(PICKUP|ORIGIN|SHIPPER)\b", u))
-    loc_del = bool(re.search(r"\b(DELIVERY|DESTINATION|CONSIGNEE|DROP|RECEIVER)\b", u))
-    if marker_tql and marker_rc and loc_pick and loc_del:
-        return True, "tql_digital_pdf_rate_confirmation"
-    return False, "tql_pdf_keyword_gate_failed"

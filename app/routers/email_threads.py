@@ -232,8 +232,8 @@ async def recompute_email_thread_intake(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Re-apply Gmail intake routing (e.g. TQL heuristics) without waiting for a new sync event."""
-    return await email_threads_service.recompute_gmail_intake_for_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    """Re-apply email PDF intake routing for a Gmail-connected thread (same path as post-ingest)."""
+    return await email_threads_service.recompute_email_thread_intake(db, tenant_id=tenant_id, thread_id=thread_id)
 
 
 @router.post("/{thread_id}/upload-pdf", response_model=EmailThreadOut)
@@ -245,7 +245,7 @@ async def upload_pdf_to_email_thread(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Attach a PDF from the intake UI; stored in tenant object storage and included in TQL PDF intake."""
+    """Attach a PDF from the intake UI; stored in tenant object storage and included in email PDF intake."""
     return await email_threads_service.upload_pdf_to_intake_thread(
         db,
         tenant_id=tenant_id,

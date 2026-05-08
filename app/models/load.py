@@ -56,7 +56,7 @@ class Load(Base):
     broker_contact_extension_snapshot: Mapped[str | None] = mapped_column(String(20), nullable=True)
     broker_contact_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     broker_load_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    #: Intake-only: how broker snapshot was chosen (exact_known_sender, domain, alias, fallback_tql, …).
+    #: Intake-only: how broker snapshot was chosen (exact_known_sender, domain, alias, fallback_tenant_default, …).
     broker_match_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     broker_match_confidence_tier: Mapped[str | None] = mapped_column(String(8), nullable=True)
     broker_match_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.storage import resolve_storage_path
 from app.models.load_lab import LoadLabExtractionRun
-from app.services.load_document_parse import _extract_text_and_pages_from_pdf_bytes
+from app.services.pdf_text_extract import extract_text_and_pages_from_pdf_bytes
 from app.services import load_lab_semantic as load_lab_semantic_service
 from app.services.load_lab_diagnostics import build_parse_diagnostics
 
@@ -240,7 +240,7 @@ async def ingest_pdf_and_run_pipeline(
         # Never fail the extraction pipeline if persistence fails; it is a convenience for eval/replay.
         pass
 
-    raw_text, page_texts, warnings = _extract_text_and_pages_from_pdf_bytes(file_bytes)
+    raw_text, page_texts, warnings = extract_text_and_pages_from_pdf_bytes(file_bytes)
     extraction_method = "pypdf_text_v1"
     run.normalized_package = _build_normalized_package(
         filename=run.filename,

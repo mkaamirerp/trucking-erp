@@ -11,5 +11,5 @@ from app.services.openai_chat_json_schema import openai_chat_json_schema_content
 
 
 async def parse_document_openai_chat_json_schema(**kwargs: Any) -> dict[str, Any]:
-    """Injectable for ``parse_load_workspace_from_pdf_semantic_stateless`` — returns a JSON object dict."""
+    """Injectable for guarded parse (``parse_pdf_bytes_to_load_document_response``) — JSON object dict."""
     return await openai_chat_json_schema_content(**kwargs)

@@ -22,7 +22,7 @@ from app.schemas.load_document_parse import (
     LoadParseExtractedFields,
     ParseDocumentSemanticModelOutput,
 )
-from app.services.load_document_parse import _extract_text_and_pages_from_pdf_bytes
+from app.services.pdf_text_extract import extract_text_and_pages_from_pdf_bytes
 from app.services.load_document_parse_diagnostics import build_load_document_parse_diagnostics
 from app.services.load_document_parse_guardrails import apply_guarded_load_document_repairs
 from app.services.load_document_parse_openai import parse_document_openai_chat_json_schema
@@ -76,7 +76,7 @@ async def parse_pdf_bytes_to_load_document_response(
 
 
 def _build_normalized_package(*, pdf_bytes: bytes, filename: str) -> dict[str, Any]:
-    raw_full_text, page_texts, warnings = _extract_text_and_pages_from_pdf_bytes(pdf_bytes)
+    raw_full_text, page_texts, warnings = extract_text_and_pages_from_pdf_bytes(pdf_bytes)
     return {
         "file_metadata": {
             "filename": (filename or "upload.pdf")[:512],
@@ -136,15 +136,18 @@ async def _run_guarded_truckerjson_ai(
 
 def _build_system_prompt() -> str:
     return (
-        "You extract freight load/rate confirmation fields for a TruckERP product parser. "
-        "Return JSON matching the provided schema. Use guarded, conservative extraction: "
-        "only populate fields supported by the PDF text, preserve uncertain details in warnings, "
-        "and do not invent broker, stop, equipment, reference, rate, or appointment values. "
-        "For broker_contact_name_snapshot, broker_contact_phone_snapshot, and broker_contact_email_snapshot: "
-        "use only the freight broker / logistics office or broker dispatch contact, not the motor carrier's "
-        "dispatcher, driver, or \"carrier contact\" block. "
-        "If diagnostics list contacts.broker_party vs contacts.carrier_party, never copy carrier_party "
-        "values into broker_contact_* fields."
+        "You are a TruckERP product parser for freight PDFs. Return JSON matching the provided schema. "
+        "Work in two phases: (1) Set document_type from the enum and write classification_reasoning: "
+        "a short justification for the document class and how you will read route stops and contacts. "
+        "(2) Then populate extracted only in line with that classification—conservatively; do not invent "
+        "broker, stop, equipment, reference, rate, or appointments; put uncertainty in warnings. "
+        "Rate confirmations (Broker→Carrier): interpret STOP DETAIL / pickup-delivery tables as route stops; "
+        "PU/PICKUP→pickup, DEL/DELIVERY→delivery, SO in a stop-detail row after pickup→delivery; "
+        "when one line has a stop label plus a date and the next line is a time, combine into appointment_date "
+        "(YYYY-MM-DD) and appointment_time_text. "
+        "broker_contact_* must be the broker/agent for the load only—not motor carrier, driver, payment desk, "
+        "or shipper/receiver location contacts. If diagnostics show broker_party vs carrier_party, never put "
+        "carrier_party values in broker_contact_*."
     )
 
 
@@ -184,14 +187,31 @@ def _build_user_text_with_diagnostics(
     )
     return (
         f"Filename for document.filename: {(filename or 'upload.pdf')[:512]}\n\n"
-        "Extract a LoadDocumentParseResponse-like JSON object with root keys document, "
-        "extracted, warnings, and field_confidence. Do not include parse_diagnostics.\n\n"
-        "Structured pre-extraction diagnostics are provided as hints only. Verify all values against the PDF text. "
-        "When present, contact_candidates[] lists names/emails/phones with role broker_party|carrier_party|… "
-        "Rate confirmations are Broker→Carrier: CARRIER INFORMATION / motor-carrier rows are carrier_party; "
-        "CONTACT INFORMATION rows are broker_party (broker/agent for this load). "
-        "Never put carrier_party or driver_party values into broker_contact_*; prefer primary broker_party "
-        "name/email/phone for broker_contact_* and treat tracking/after-hours broker emails as secondary.\n"
+        "Extract JSON with root keys: document, document_type (required enum), classification_reasoning, "
+        "extracted, warnings, field_confidence. Do not include parse_diagnostics.\n\n"
+        "PHASE 1 — document_type: Choose rate_confirmation | driver_information_sheet | invoice | bol | other. "
+        "Rate/load confirmations normally Broker→Carrier with pickup and delivery stops and broker load references.\n"
+        "PHASE 2 — classification_reasoning: Briefly state why you chose that type and how you will map stops "
+        "(e.g. STOP DETAIL rows) and broker vs carrier contacts before filling extracted.\n\n"
+        "When document_type is rate_confirmation, extract from the text: broker identity, broker_contact_* "
+        "(broker/agent only), broker_load_reference, carrier rate, equipment, commodity/weight/temperature, "
+        "pickup/delivery stops with appointment_date (YYYY-MM-DD) and appointment_time_text, stop references.\n\n"
+        "STOP DETAIL / stop tables: Rows may be split across lines. Example pattern:\n"
+        "  PU 05/29/25\n"
+        "  09:00\n"
+        "  Facility Name\n"
+        "  Address…\n"
+        "means appointment_date=2025-05-29 (normalize MM/DD/YY to ISO), appointment_time_text=09:00 "
+        "for that stop. Same for DEL/DELIVERY lines. SO (stop-off) as a stop row after pickup maps to stop_type delivery. "
+        "Do not drop date/time when you attach facility_name, street, city, or state.\n\n"
+        "If you cannot extract appointment_date for a rate_confirmation stop that has facility or address, "
+        "omit it only when unsupported by the text; otherwise the server may add: "
+        "[review] Stop has facility/address but appointment date was not extracted; verify STOP DETAIL table. "
+        "Prefer extracting the date from STOP DETAIL when present.\n\n"
+        "Contacts: CARRIER INFORMATION = motor carrier side; CONTACT INFORMATION = broker/agent unless labels say otherwise. "
+        "Never fill broker_contact_* from carrier, driver, payment/paperwork, or shipper/receiver blocks.\n\n"
+        "Diagnostics (hints only; verify in PDF): contact_candidates[] broker_party|carrier_party|… "
+        "Prefer primary broker_party for broker_contact_*; tracking/after-hours broker channels are secondary.\n"
         f"--- BEGIN PRODUCT_PARSE_DIAGNOSTICS ---\n{json.dumps(diagnostics, ensure_ascii=True)[:20000]}\n"
         "--- END PRODUCT_PARSE_DIAGNOSTICS ---\n\n"
         f"--- BEGIN EXTRACTED PDF TEXT ---\n{text_for_model}\n--- END ---"
@@ -209,9 +229,16 @@ def _map_ai_payload_to_load_document_parse_response(
     payload = dict(ai_payload)
     payload.pop("parse_diagnostics", None)
 
+    doc_type = payload.pop("document_type", None)
+    classification_reasoning = payload.pop("classification_reasoning", None)
+
     context = dict(payload.get("context") or {})
     context.pop("parse_diagnostics", None)
     context["parse_path"] = _PARSE_PATH
+    if doc_type is not None:
+        context["document_type"] = doc_type
+    if classification_reasoning:
+        context["classification_reasoning"] = str(classification_reasoning)[:2000]
 
     payload["document"] = payload.get("document") or {"filename": filename[:512]}
     payload["raw_text"] = payload.get("raw_text")

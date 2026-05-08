@@ -3,7 +3,8 @@
 from app.constants.email_intake_routing import (
     append_qr_extractions_tag,
     format_duplicate_pdf_sha256,
-    format_tql_pdf_not_high_confidence,
+    format_email_intake_pdf_low_confidence,
+    format_email_intake_pdf_parse_review,
     strip_qr_extractions_tag,
 )
 
@@ -22,14 +23,20 @@ def test_format_duplicate_pdf_sha256() -> None:
     )
 
 
-def test_format_tql_pdf_not_high_confidence_pipe_tail() -> None:
-    assert format_tql_pdf_not_high_confidence("extracted_text_too_short") == (
+def test_format_email_intake_pdf_low_confidence_pipe_tail() -> None:
+    assert format_email_intake_pdf_low_confidence("extracted_text_too_short") == (
         "tql_pdf_not_high_confidence|gate_detail=extracted_text_too_short"
     )
 
 
+def test_format_email_intake_pdf_parse_review() -> None:
+    assert format_email_intake_pdf_parse_review(gate_detail="ok") == (
+        "email_intake_pdf_parse_review|gate_detail=ok"
+    )
+
+
 def test_append_qr_extractions_tag_idempotent_strip() -> None:
-    base = format_tql_pdf_not_high_confidence("x")
+    base = format_email_intake_pdf_low_confidence("x")
     tagged = append_qr_extractions_tag(base, 3)
     assert tagged.endswith("|qr_extractions=3")
     assert strip_qr_extractions_tag(tagged) == base

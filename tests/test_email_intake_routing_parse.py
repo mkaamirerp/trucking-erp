@@ -24,7 +24,7 @@ def test_detail_normalized_sorts_keys() -> None:
     assert detail_json_normalized({"b": 1, "a": 2}) == detail_json_normalized({"a": 2, "b": 1})
 
 
-def test_parse_tql_low_confidence_pipe() -> None:
+def test_parse_email_intake_pdf_low_confidence_legacy_primary_pipe() -> None:
     raw = "tql_pdf_not_high_confidence|gate_detail=pdf_text_extract_failed"
     primary, detail = parse_routing_reason_structured(raw)
     assert primary == "tql_pdf_not_high_confidence"

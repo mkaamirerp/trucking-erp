@@ -10,6 +10,9 @@ from app.services.load_document_parse_diagnostics import _normalize_person_name_
 from app.services.load_document_parse_reference import merge_ranked_references_into_extracted
 
 _DECIMAL_RE = re.compile(r"^\d+\.\d+$")
+_REVIEW_STOP_APPT_MSG = (
+    "[review] Stop has facility/address but appointment date was not extracted; verify STOP DETAIL table."
+)
 
 
 def apply_guarded_load_document_repairs(
@@ -29,6 +32,14 @@ def apply_guarded_load_document_repairs(
     extracted, route_warnings, route_conf = _apply_route_stop_hints(extracted, diagnostics)
     warnings.extend(route_warnings)
     field_confidence.update(route_conf)
+
+    extracted, review_stop_warnings, review_stop_conf = _flag_rate_confirmation_stop_appointment_review(
+        extracted,
+        raw_text=str(payload.get("raw_text") or ""),
+        context=payload.get("context") if isinstance(payload.get("context"), dict) else {},
+    )
+    warnings.extend(review_stop_warnings)
+    field_confidence.update(review_stop_conf)
 
     extracted, cleanup_warnings, cleanup_conf = _cleanup_trailer_temp_and_reference(extracted, diagnostics)
     warnings.extend(cleanup_warnings)
@@ -98,6 +109,42 @@ def _apply_route_stop_hints(
     if not changed:
         return out, [], {}
     return out, ["[guarded] Filled missing stop details from structured route lines."], {"stops": "medium"}
+
+
+def _flag_rate_confirmation_stop_appointment_review(
+    extracted: dict[str, Any],
+    *,
+    raw_text: str,
+    context: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], dict[str, str]]:
+    doc_type = context.get("document_type")
+    raw_u = (raw_text or "").upper()
+    rate_like = doc_type == "rate_confirmation" or (
+        "CARRIER RATE CONFIRMATION" in raw_u or "STOP DETAIL" in raw_u
+    )
+    if not rate_like:
+        return extracted, [], {}
+
+    stops = extracted.get("stops") if isinstance(extracted.get("stops"), list) else None
+    if not stops:
+        return extracted, [], {}
+
+    for stop in stops:
+        if not isinstance(stop, dict):
+            continue
+        st = str(stop.get("stop_type") or "").strip().casefold()
+        if st not in {"pickup", "delivery", "drop"}:
+            continue
+        if stop.get("appointment_date"):
+            continue
+        fn = str(stop.get("facility_name") or "").strip()
+        street = str(stop.get("street") or "").strip()
+        city = str(stop.get("city") or "").strip()
+        state = str(stop.get("state_or_province") or "").strip()
+        has_addr = bool(fn or street or (city and state))
+        if has_addr:
+            return extracted, [_REVIEW_STOP_APPT_MSG], {"stops": "low"}
+    return extracted, [], {}
 
 
 def _cleanup_trailer_temp_and_reference(

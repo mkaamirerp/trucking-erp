@@ -1,7 +1,8 @@
-"""Orchestration for POST /loads/parse-document.
+"""HTTP helper for POST /loads/parse-document.
 
-Product parse-document always uses the guarded product parser. The old regex parser
-remains in the repo only for cleanup after successful UI parity testing.
+This module is **not** a second parser. It validates caller context and forwards bytes to the
+single product entrypoint ``parse_pdf_bytes_to_load_document_response`` (see
+``app.services.load_document_product_parser``).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.load_document_parse import LoadDocumentParseResponse
-from app.services.load_document_parse_guarded import parse_pdf_bytes_to_load_document_response
+from app.services.load_document_product_parser import parse_pdf_bytes_to_load_document_response
 
 
 async def parse_load_workspace_document_orchestrated(

@@ -6,7 +6,8 @@ Pipe-separated tails here are a temporary bridge for UI, not a growing mini-sche
 Convention:
 - Primary code is the first segment (before ``:`` or ``|``).
 - Optional ``key=value`` pairs after ``|`` (repeatable).
-- ``tql_pdf_not_high_confidence|gate_detail=...`` — stable first segment for parse/review ``primary_code``.
+- ``tql_pdf_not_high_confidence|gate_detail=...`` — legacy primary for low-confidence PDF gate (value unchanged).
+- ``email_intake_pdf_parse_review|gate_detail=...`` — guarded parse snapshot stored for operator review (no auto-load).
   Legacy colon form ``tql_pdf_not_high_confidence:...`` may still exist on old rows; UI accepts both.
 """
 
@@ -23,7 +24,8 @@ from app.constants.email_intake_review_reason_codes import (
 # --- Primary codes (first segment) ---
 
 MAILBOX_INTAKE_REVIEW_ONLY = "mailbox_intake_review_only"
-TQL_AFFILIATED_NO_PDF_ATTACHMENT = "tql_affiliated_no_pdf_attachment"
+# Stored value unchanged (existing rows / UI). "Touchpoints" = booking-broker intake signals, not a single broker name.
+EMAIL_INTAKE_TOUCHPOINTS_NO_PDF_ATTACHMENT = "tql_affiliated_no_pdf_attachment"
 BROKER_RESOLVE_AMBIGUOUS = "broker_resolve_ambiguous"
 GLOBAL_BROKER_RESOLVE_AMBIGUOUS = "global_broker_resolve_ambiguous"
 GLOBAL_BROKER_MATCH_REQUIRES_WORKSPACE = "global_broker_match_requires_workspace"
@@ -34,21 +36,25 @@ INTAKE_BROKER_CONFLICTING_SIGNALS = "intake_broker_conflicting_signals"
 INTAKE_BROKER_CONFLICTING_REVIEW_DETAIL_HEADER_VS_SUPP_GLOBAL = "header_broker_vs_supplemental_global"
 BROKER_INTAKE_BLOCKED = "broker_intake_blocked"
 DUPLICATE_PDF_SHA256 = "duplicate_pdf_sha256"
-# Parse-stable first segment for ``format_tql_pdf_not_high_confidence`` / review ``primary_code``.
-TQL_PDF_NOT_HIGH_CONFIDENCE_PREFIX = "tql_pdf_not_high_confidence"
+# Legacy primary string (do not change value).
+EMAIL_INTAKE_PDF_LOW_CONFIDENCE_PRIMARY = "tql_pdf_not_high_confidence"
+# Product parser ran; operator reviews — no automatic Load creation from email.
+EMAIL_INTAKE_PDF_PARSE_REVIEW_PRIMARY = "email_intake_pdf_parse_review"
 
 # primary_code values that use the duplicate / merge operator workflow
 DUPLICATE_INTAKE_REVIEW_PRIMARIES = frozenset({DUPLICATE_PDF_SHA256})
 
-# Primaries also written at Gmail TQL intake source via ``upsert_intake_review_from_intake_source`` (not exhaustive).
+# Primaries also written from email PDF intake via ``upsert_intake_review_from_intake_source`` (not exhaustive).
 INTAKE_REVIEW_SOURCE_WRITTEN_PRIMARIES = frozenset({
     DUPLICATE_PDF_SHA256,
     BROKER_RESOLVE_AMBIGUOUS,
     GLOBAL_BROKER_RESOLVE_AMBIGUOUS,
     BROKER_INTAKE_BLOCKED,
-    TQL_PDF_NOT_HIGH_CONFIDENCE_PREFIX,
+    EMAIL_INTAKE_PDF_LOW_CONFIDENCE_PRIMARY,
+    EMAIL_INTAKE_PDF_PARSE_REVIEW_PRIMARY,
 })
-AUTO_TQL_DIGITAL_PDF_RATE_CONFIRMATION = "auto_tql_digital_pdf_rate_confirmation"
+# Historical routing_reason only (wire string unchanged; no longer written).
+LEGACY_EMAIL_INTAKE_AUTO_DIGITAL_PDF_RATE_CONFIRMATION = "auto_tql_digital_pdf_rate_confirmation"
 AUTO_NON_INTAKE_MAIL_BACKGROUND = "auto_non_intake_mail_background"
 GMAIL_MISSING_TOKEN_FOR_INTAKE_GATE = "gmail_missing_token_for_intake_gate"
 MANUAL_CREATE_DRAFT_FROM_REVIEW = "manual_create_draft_from_review"
@@ -75,10 +81,16 @@ def format_duplicate_pdf_sha256(
     return base
 
 
-def format_tql_pdf_not_high_confidence(gate_detail: str) -> str:
-    """Machine line with parse-stable primary ``tql_pdf_not_high_confidence`` (pipe tail)."""
+def format_email_intake_pdf_low_confidence(gate_detail: str) -> str:
+    """PDF present but guarded parse did not yield a storable snapshot (pipe tail)."""
     g = str(gate_detail).strip().replace("|", "_").replace("\n", " ")[:512]
-    return f"{TQL_PDF_NOT_HIGH_CONFIDENCE_PREFIX}|gate_detail={g}"
+    return f"{EMAIL_INTAKE_PDF_LOW_CONFIDENCE_PRIMARY}|gate_detail={g}"
+
+
+def format_email_intake_pdf_parse_review(*, gate_detail: str) -> str:
+    """Guarded parse succeeded; review detail may include ``guarded_parse`` snapshot (no auto-load)."""
+    g = str(gate_detail).strip().replace("|", "_").replace("\n", " ")[:512]
+    return f"{EMAIL_INTAKE_PDF_PARSE_REVIEW_PRIMARY}|gate_detail={g}"
 
 
 def format_intake_broker_conflicting_signals_routing() -> str:

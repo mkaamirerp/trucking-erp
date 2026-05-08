@@ -43,6 +43,10 @@ def test_post_ingest_path_microsoft_is_review_only():
     assert post_ingest_intake_path(provider="microsoft365") == "review_only"
 
 
+def test_post_ingest_path_gmail_is_pdf_intake():
+    assert post_ingest_intake_path(provider="gmail") == "email_pdf_intake"
+
+
 def test_post_ingest_path_other_provider_review():
     assert post_ingest_intake_path(provider="other") == "review_only"
 

@@ -1,0 +1,11 @@
+---
+description: Product load PDF parsing and broker-neutral email intake
+globs: app/services/email_engine/**/*.py,app/services/*intake*.py,app/services/load_document*.py,app/routers/loads.py
+---
+
+# Product load PDF parser
+
+- **Single implementation:** structured load PDF parsing MUST use `parse_pdf_bytes_to_load_document_response` from [`app/services/load_document_product_parser.py`](app/services/load_document_product_parser.py) (re-export of the guarded stack). Do not add parallel extractors in routers.
+- **Callers hydrate:** return type is `LoadDocumentParseResponse`; each flow maps fields to UI / review JSON / draft — no automatic creation of operational `Load` rows from email unless explicitly product-flagged and documented.
+- **Broker-neutral intake:** email PDF intake is not named after one broker. Booking-broker cues belong in **tenant data** (domains, aliases, known senders); avoid new `if broker == X` intake branches.
+- Load Lab may still use its own evaluation pipeline until explicitly unified.

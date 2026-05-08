@@ -29,13 +29,13 @@ from app.services.broker_intake_resolve import (
 )
 from app.services.broker_intake_unified import resolve_booking_broker_for_email_intake
 from app.constants.email_intake_routing import MANUAL_CREATE_DRAFT_FROM_REVIEW, MANUAL_LINK_EXISTING_LOAD
-from app.services.email_engine.intake_service import find_duplicate_linked_load_for_thread_pdf_content
-from app.services.email_intake_qr_extractions import link_thread_qr_extractions_to_load
-from app.services.email_intake_routing import (
-    _resolve_tql_broker,
-    apply_intake_routing_for_gmail_thread,
-    thread_indicates_tql_affinity,
+from app.services.email_engine.intake_service import (
+    find_duplicate_linked_load_for_thread_pdf_content,
+    resolve_fallback_booking_broker_for_intake,
 )
+from app.services.email_engine.message_classifier import thread_indicates_booking_broker_touchpoints
+from app.services.email_intake_qr_extractions import link_thread_qr_extractions_to_load
+from app.services.email_intake_routing import apply_intake_routing_for_email_thread
 from app.services.gmail_oauth import refresh_access_token
 from app.utils.encryption import decrypt_secret
 from app.utils.pagination import paginate
@@ -205,11 +205,11 @@ async def create_draft_load_from_review_thread(
         tier = None
         expl = None
         review_required = False
-        if thread_indicates_tql_affinity(thread):
-            bid, snap = await _resolve_tql_broker(db, tenant_id)
+        if thread_indicates_booking_broker_touchpoints(thread):
+            bid, snap = await resolve_fallback_booking_broker_for_intake(db, tenant_id)
             broker_id = bid
             broker_name_snapshot = snap
-            match_method = "fallback_tql"
+            match_method = "fallback_tenant_default"
             tier = confidence_tier_for_match_method(match_method)
             expl = explanation_for_match_method(match_method)
 
@@ -404,7 +404,7 @@ async def upload_pdf_to_intake_thread(
     thread_id: int,
     file: UploadFile,
 ) -> EmailThreadOut:
-    """Attach a PDF from the UI to a Gmail thread, store bytes, and re-run the Gmail TQL intake gate."""
+    """Attach a PDF from the UI to a Gmail thread, store bytes, and re-run email PDF intake routing."""
     from datetime import datetime, timezone
 
     from app.core.storage import get_storage
@@ -464,11 +464,11 @@ async def upload_pdf_to_intake_thread(
     thread.updated_at = now
 
     await db.commit()
-    return await recompute_gmail_intake_for_thread(db, tenant_id=tenant_id, thread_id=thread_id)
+    return await recompute_email_thread_intake(db, tenant_id=tenant_id, thread_id=thread_id)
 
 
-async def recompute_gmail_intake_for_thread(db: AsyncSession, tenant_id: int, thread_id: int) -> EmailThreadOut:
-    """Re-run apply_intake_routing_for_gmail_thread (e.g. after tightening TQL heuristics). Gmail only."""
+async def recompute_email_thread_intake(db: AsyncSession, tenant_id: int, thread_id: int) -> EmailThreadOut:
+    """Re-run email PDF intake routing (e.g. after upload). Gmail threads only until other providers get recompute."""
     thread = await get_email_thread(db, tenant_id, thread_id)
     if thread.provider != "gmail":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Gmail threads support intake recompute")
@@ -487,7 +487,7 @@ async def recompute_gmail_intake_for_thread(db: AsyncSession, tenant_id: int, th
     access_token = tok.get("access_token")
     if not access_token:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not refresh Gmail access token")
-    await apply_intake_routing_for_gmail_thread(db, tenant_id, thread_id, access_token)
+    await apply_intake_routing_for_email_thread(db, tenant_id, thread_id, access_token)
     await sync_email_intake_review_for_thread(db, tenant_id, thread_id)
     await db.commit()
     await db.refresh(thread)

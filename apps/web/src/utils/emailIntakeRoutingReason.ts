@@ -15,15 +15,22 @@ export function routingReasonBaseAndPrimary(raw: string): { base: string; primar
 export function formatRoutingReason(raw: string | null | undefined): string {
   if (!raw) return "Not yet classified.";
   const { base, primary } = routingReasonBaseAndPrimary(raw);
+  if (primary === "email_intake_pdf_parse_review") {
+    const pipe = base.match(/\|gate_detail=([^|]+)/i);
+    if (pipe) {
+      return "PDF parsed — review snapshot ready: " + pipe[1].replace(/_/g, " ");
+    }
+    return "PDF parsed — open intake review to prefill or create a load.";
+  }
   if (primary === "tql_pdf_not_high_confidence") {
     const pipe = base.match(/\|gate_detail=([^|]+)/i);
     if (pipe) {
-      return "TQL PDF did not meet auto rules: " + pipe[1].replace(/_/g, " ");
+      return "PDF did not yield a guarded parse snapshot: " + pipe[1].replace(/_/g, " ");
     }
   }
   const tqlColon = /^tql_pdf_not_high_confidence:/i;
   if (tqlColon.test(base)) {
-    return "TQL PDF did not meet auto rules: " + base.replace(tqlColon, "").replace(/_/g, " ");
+    return "PDF did not yield a guarded parse snapshot: " + base.replace(tqlColon, "").replace(/_/g, " ");
   }
   if (primary === "broker_intake_blocked") return "Broker blocked from intake (policy). Review required.";
   if (primary === "broker_resolve_ambiguous") {

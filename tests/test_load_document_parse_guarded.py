@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.core.config import settings
-from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.schemas.load_document_parse import LoadDocumentParseResponse, ParseDocumentSemanticModelOutput
 from app.services import load_document_parse_guarded
 from app.services.load_document_parse_adapter import map_lab_parse_response_to_document_contract
 from app.services.load_document_parse_guardrails import apply_guarded_load_document_repairs
@@ -116,10 +116,17 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
     assert out.context["parse_path"] == "guarded_truckerjson"
     assert calls
     assert calls[0]["model"]
-    assert "guarded, conservative extraction" in calls[0]["system"]
+    assert "document_type" in calls[0]["system"].casefold()
+    assert "two phases" in calls[0]["system"].casefold()
     assert "Filename for document.filename: input.pdf" in calls[0]["user_text"]
     assert "PRODUCT_PARSE_DIAGNOSTICS" in calls[0]["user_text"]
+    assert "STOP DETAIL" in calls[0]["user_text"]
+    assert "classification_reasoning" in calls[0]["user_text"].casefold()
+    assert "PU 05/29/25" in calls[0]["user_text"] or "05/29/25" in calls[0]["user_text"]
     assert "reference_candidates" in calls[0]["user_text"]
+    assert "[review] Stop has facility/address but appointment date was not extracted" in calls[0][
+        "user_text"
+    ]
     assert "--- BEGIN EXTRACTED PDF TEXT ---" in calls[0]["user_text"]
     assert calls[0]["schema"]["type"] == "object"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
@@ -291,8 +298,8 @@ def test_guardrails_fill_missing_broker_reference_and_clear_decimal_reference() 
 
     out = apply_guarded_load_document_repairs(base, diagnostics=diagnostics)
 
-    assert out.extracted.broker_load_reference is None
-    assert any("decimal-like broker_load_reference" in w for w in out.warnings)
+    assert out.extracted.broker_load_reference == "LOAD-123"
+    assert any("broker_load_reference" in w and "ranked" in w for w in out.warnings)
     assert any(r.value == "LOAD-123" for r in out.extracted.references)
 
 
@@ -381,6 +388,125 @@ def test_guardrails_repair_numeric_trailer_type_from_equipment_hint() -> None:
 
     assert out.extracted.trailer_type == "Van"
     assert out.extracted.trailer_size == "53"
+
+
+def test_semantic_model_json_schema_includes_document_type_enum() -> None:
+    schema = ParseDocumentSemanticModelOutput.model_json_schema()
+    props = schema["properties"]
+    assert "document_type" in props
+    assert "classification_reasoning" in props
+    enum = props["document_type"].get("anyOf") or props["document_type"].get("enum")
+    if isinstance(enum, list) and enum and isinstance(enum[0], dict):
+        # nullable optional wraps anyOf
+        inner = next((x for x in enum if x.get("type") == "string" and "enum" in x), None)
+        assert inner is not None
+        assert "rate_confirmation" in inner["enum"]
+    else:
+        assert "enum" in props["document_type"]
+        assert "rate_confirmation" in props["document_type"]["enum"]
+
+
+def test_prompt_user_text_includes_stop_detail_split_and_so_mapping() -> None:
+    text = load_document_parse_guarded._build_user_text_with_diagnostics(
+        filename="rc.pdf",
+        raw_full_text="STOP DETAIL\nPU 05/29/25\n09:00",
+        diagnostics={"version": "test"},
+    )
+    assert "STOP DETAIL" in text
+    assert "PU 05/29/25" in text or "05/29/25" in text
+    assert "classification_reasoning" in text.casefold()
+    assert "SO" in text and "delivery" in text.casefold()
+
+
+@pytest.mark.asyncio
+async def test_maps_document_type_and_reasoning_into_context() -> None:
+    async def fake_openai(**_kwargs):
+        return {
+            "document": {"filename": "c.pdf"},
+            "document_type": "rate_confirmation",
+            "classification_reasoning": "Broker→carrier load confirmation with two stops.",
+            "extracted": {"references": [], "stops": []},
+            "warnings": [],
+            "field_confidence": {},
+            "context": {},
+        }
+
+    out = await parse_pdf_bytes_to_load_document_response(
+        AsyncMock(),
+        tenant_id=1,
+        pdf_bytes=_FIXTURE_PDF.read_bytes(),
+        filename="c.pdf",
+        openai_chat_json_schema=fake_openai,
+    )
+    assert out.context.get("document_type") == "rate_confirmation"
+    assert "Broker→carrier" in str(out.context.get("classification_reasoning") or "")
+
+
+def test_guardrails_emit_review_when_rate_confirmation_stop_missing_appt_date() -> None:
+    raw = "CARRIER RATE CONFIRMATION PAGE 1\nSTOP DETAIL\n"
+    base = LoadDocumentParseResponse.model_validate(
+        {
+            "document": {"filename": "x.pdf"},
+            "extracted": {
+                "references": [],
+                "stops": [
+                    {
+                        "stop_type": "pickup",
+                        "sequence": 0,
+                        "city": "Sparta",
+                        "state_or_province": "MI",
+                    },
+                ],
+            },
+            "raw_text": raw,
+            "warnings": [],
+            "field_confidence": {},
+            "context": {"parse_path": "guarded_truckerjson", "document_type": "rate_confirmation"},
+        }
+    )
+    out = apply_guarded_load_document_repairs(base, diagnostics={})
+    assert any(
+        "verify STOP DETAIL table" in w and w.startswith("[review]") for w in out.warnings
+    )
+
+
+def test_guardrails_fill_split_stop_date_time_from_diagnostics_hints() -> None:
+    text = """
+STOP DETAIL
+PU 05/29/25
+09:00
+Old Orchard
+SO 05/30/25
+12:30
+WINDSORDC
+""".strip()
+    diag = build_load_document_parse_diagnostics(
+        raw_full_text=text,
+        page_texts=[text],
+        filename="stop.pdf",
+        extraction_method="test",
+    )
+    base = LoadDocumentParseResponse.model_validate(
+        {
+            "document": {"filename": "stop.pdf"},
+            "extracted": {
+                "references": [],
+                "stops": [
+                    {"stop_type": "pickup", "sequence": 0, "facility_name": "Old Orchard"},
+                    {"stop_type": "delivery", "sequence": 1, "facility_name": "WINDSORDC"},
+                ],
+            },
+            "raw_text": text,
+            "warnings": [],
+            "field_confidence": {},
+            "context": {"parse_path": "guarded_truckerjson"},
+        }
+    )
+    out = apply_guarded_load_document_repairs(base, diagnostics=diag)
+    assert out.extracted.stops[0].appointment_date == "2025-05-29"
+    assert out.extracted.stops[0].appointment_time_text == "09:00"
+    assert out.extracted.stops[1].appointment_date == "2025-05-30"
+    assert out.extracted.stops[1].appointment_time_text == "12:30"
 
 
 @pytest.mark.asyncio

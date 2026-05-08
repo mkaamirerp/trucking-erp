@@ -1,5 +1,9 @@
 """
-Shared intake policies after ingestion: TQL PDF auto-path (Gmail only today), review-only mailboxes.
+Shared intake policies after ingestion: email PDF attachment intake + review-only mailboxes.
+
+After a thread is stored, the email PDF path runs provider-neutral intake (PDF → product parser
+→ needs_review / review detail). Attachment bytes may still be fetched via a Gmail connector
+helper when not in tenant storage.
 
 No provider adapters call this directly — use `message_router.route_after_ingestion`.
 """
@@ -8,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import uuid
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,12 +25,15 @@ from app.models.load import Load
 from app.constants.email_intake_routing import (
     append_qr_extractions_tag,
     AUTO_NON_INTAKE_MAIL_BACKGROUND,
-    AUTO_TQL_DIGITAL_PDF_RATE_CONFIRMATION,
     BROKER_INTAKE_BLOCKED,
     DUPLICATE_PDF_SHA256,
     BROKER_RESOLVE_AMBIGUOUS,
+    EMAIL_INTAKE_PDF_LOW_CONFIDENCE_PRIMARY,
+    EMAIL_INTAKE_PDF_PARSE_REVIEW_PRIMARY,
+    EMAIL_INTAKE_TOUCHPOINTS_NO_PDF_ATTACHMENT,
     format_duplicate_pdf_sha256,
-    format_tql_pdf_not_high_confidence,
+    format_email_intake_pdf_low_confidence,
+    format_email_intake_pdf_parse_review,
     GLOBAL_BROKER_HEADER_VS_MC_DOT_DISAGREEMENT,
     GLOBAL_BROKER_MATCH_REQUIRES_WORKSPACE,
     GLOBAL_BROKER_RESOLVE_AMBIGUOUS,
@@ -34,8 +41,6 @@ from app.constants.email_intake_routing import (
     GMAIL_MISSING_TOKEN_FOR_INTAKE_GATE,
     format_intake_broker_conflicting_signals_routing,
     MAILBOX_INTAKE_REVIEW_ONLY,
-    TQL_AFFILIATED_NO_PDF_ATTACHMENT,
-    TQL_PDF_NOT_HIGH_CONFIDENCE_PREFIX,
 )
 from app.services.email_engine.attachment_extractor import download_gmail_attachment_bytes
 from app.services.broker_intake_resolve import (
@@ -44,54 +49,79 @@ from app.services.broker_intake_resolve import (
     fetch_latest_inbound_from_header,
 )
 from app.services.broker_intake_unified import resolve_booking_broker_for_email_intake
-from app.services.email_engine.message_classifier import PostIngestIntakePath, thread_indicates_tql_affinity
+from app.services.email_engine.message_classifier import (
+    PostIngestIntakePath,
+    thread_indicates_booking_broker_touchpoints,
+)
 from app.services.email_intake_review_service import (
-    auto_resolve_email_intake_review_on_thread_linked_load,
     sync_email_intake_review_for_thread,
     upsert_intake_review_from_intake_source,
 )
-from app.services.email_intake_pdf import (
-    extract_broker_mc_dot_hints,
-    extract_pdf_text_bytes,
-    extract_tql_rate_con_hints,
-    guess_broker_load_reference,
-    tql_digital_pdf_high_confidence,
-)
+from app.services.email_intake_pdf import extract_broker_mc_dot_hints, extract_pdf_text_bytes
+from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.services.load_document_product_parser import parse_pdf_bytes_to_load_document_response
 from app.services.email_intake_qr_decode import extract_qr_strings_from_pdf_bytes
 from app.services.email_intake_qr_extractions import (
     count_intake_qr_extractions_for_thread,
-    link_thread_qr_extractions_to_load,
     record_intake_qr_extraction,
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def _supplemental_mc_dot_hints_for_tql_gate(
+async def _fetch_gmail_pdf_attachment_bytes(
+    gmail_access_token: str,
+    external_message_id: str | None,
+    external_attachment_id: str | None,
+) -> bytes | None:
+    """Gmail API fetch only; not used when attachment is already in tenant object storage."""
+    if not external_message_id or not external_attachment_id:
+        return None
+    return await download_gmail_attachment_bytes(
+        gmail_access_token, external_message_id, external_attachment_id
+    )
+
+
+async def _fetch_email_pdf_attachment_bytes(
+    *,
+    msg: EmailMessage,
+    att: EmailMessageAttachment,
+    gmail_access_token: str,
+) -> bytes | None:
+    """Resolve PDF bytes from storage (any provider) or Gmail connector when not stored."""
+    if getattr(att, "storage_key", None):
+        from app.core.storage import get_storage
+
+        return get_storage().read_bytes(att.storage_key, "email_intake", None)
+    return await _fetch_gmail_pdf_attachment_bytes(
+        gmail_access_token, msg.external_message_id, att.external_attachment_id
+    )
+
+
+def _guarded_parse_detail_for_review(parse: LoadDocumentParseResponse) -> dict[str, Any]:
+    d = parse.model_dump(mode="json")
+    rt = d.get("raw_text")
+    if isinstance(rt, str) and len(rt) > 12_000:
+        d["raw_text"] = rt[:12_000] + "\n…[truncated for intake review storage]"
+    return {"guarded_parse": d}
+
+
+async def _supplemental_mc_dot_hints_from_pdf_attachments(
     db: AsyncSession,
     tenant_id: int,
     thread: EmailThread,
     rows: list,
     access_token: str,
 ) -> tuple[str | None, str | None]:
-    """MC/USDOT from thread text; if missing, first successful PDF text extraction on TQL attachments.
-
-    PDF text can be incomplete or noisy; Tier D matches are review-only by policy so weak extraction
-    does not auto-attach or auto-create workspace brokers.
-    """
+    """MC/USDOT from thread text; if missing, first successful PDF text extraction on attachments."""
     hint_mc, hint_dot = extract_broker_mc_dot_hints(f"{thread.subject or ''}\n{thread.snippet or ''}")
     if hint_mc or hint_dot:
         return hint_mc, hint_dot
     for msg, att in rows:
         try:
-            if getattr(att, "storage_key", None):
-                from app.core.storage import get_storage
-
-                raw = get_storage().read_bytes(att.storage_key, "email_intake", None)
-            else:
-                raw = await download_gmail_attachment_bytes(
-                    access_token, msg.external_message_id, att.external_attachment_id
-                )
+            raw = await _fetch_email_pdf_attachment_bytes(
+                msg=msg, att=att, gmail_access_token=access_token
+            )
         except Exception as exc:
             logger.warning("intake supplemental mc/dot pdf read failed: %s", exc)
             continue
@@ -172,7 +202,11 @@ async def find_duplicate_linked_load_for_thread_pdf_content(
     return None
 
 
-async def resolve_tql_broker_for_intake(db: AsyncSession, tenant_id: int) -> tuple[int | None, str]:
+async def resolve_fallback_booking_broker_for_intake(db: AsyncSession, tenant_id: int) -> tuple[int | None, str]:
+    """Temporary default when unified resolver leaves broker unset (ILIKE name match).
+
+    Replace with tenant intake policy / broker registry defaults when available.
+    """
     label = func.coalesce(Broker.display_name, Broker.legal_name, Broker.name)
     b = await db.scalar(
         select(Broker)
@@ -232,14 +266,17 @@ async def apply_review_only_mailbox_intake(
     thread.routing_reason = thread.routing_reason or MAILBOX_INTAKE_REVIEW_ONLY
 
 
-async def apply_gmail_tql_intake_gate(
+async def apply_email_pdf_intake(
     db: AsyncSession,
     tenant_id: int,
     thread_id: int,
     access_token: str,
 ) -> None:
     """
-    Narrow TQL digital-PDF auto path OR background for non-intake Gmail (shared engine policy for Gmail).
+    Email PDF attachment intake: product parser → needs_review / review detail — no automatic Load rows.
+
+    Broker resolution uses unified intake + optional fallback only when booking-broker touchpoints exist.
+    Gmail OAuth token is used only when attachment bytes are not yet in tenant storage.
     """
     thread = await db.scalar(
         select(EmailThread).where(EmailThread.id == thread_id, EmailThread.tenant_id == tenant_id)
@@ -251,21 +288,21 @@ async def apply_gmail_tql_intake_gate(
     if thread.intake_bucket == "new_load":
         return
 
-    tql_affinity = thread_indicates_tql_affinity(thread)
+    booking_touchpoints = thread_indicates_booking_broker_touchpoints(thread)
     rows = await _latest_pdf_attachment_rows(db, tenant_id, thread_id)
 
-    if tql_affinity and not rows:
+    if booking_touchpoints and not rows:
         thread.intake_bucket = "needs_review"
         thread.confidence_level = "low"
         thread.confidence_score = 0.25
         thread.routing_reason = await _routing_reason_with_qr_supplement(
-            db, tenant_id, thread_id, TQL_AFFILIATED_NO_PDF_ATTACHMENT
+            db, tenant_id, thread_id, EMAIL_INTAKE_TOUCHPOINTS_NO_PDF_ATTACHMENT
         )
         return
 
-    if tql_affinity and rows:
+    if rows:
         from_hdr = await fetch_latest_inbound_from_header(db, tenant_id, thread_id)
-        sup_mc, sup_dot = await _supplemental_mc_dot_hints_for_tql_gate(
+        sup_mc, sup_dot = await _supplemental_mc_dot_hints_from_pdf_attachments(
             db, tenant_id, thread, rows, access_token
         )
         async with AsyncSessionLocal() as platform_db:
@@ -348,30 +385,24 @@ async def apply_gmail_tql_intake_gate(
         broker_id = resolve_res.broker_id
         broker_snapshot = resolve_res.broker_label
         match_method: str | None = resolve_res.match_method
-        if broker_id is None:
-            broker_id, broker_snapshot = await resolve_tql_broker_for_intake(db, tenant_id)
-            match_method = "fallback_tql"
-        tier = confidence_tier_for_match_method(match_method)
-        explanation = explanation_for_match_method(match_method)
+        if broker_id is None and booking_touchpoints:
+            broker_id, broker_snapshot = await resolve_fallback_booking_broker_for_intake(db, tenant_id)
+            match_method = "fallback_tenant_default"
+        tier_note = confidence_tier_for_match_method(match_method) if match_method else None
+        expl_note = explanation_for_match_method(match_method) if match_method else None
 
-        high_ok = False
         gate_reason = "no_pdf_bytes"
-        pdf_text = ""
+        last_parse: LoadDocumentParseResponse | None = None
         thread_hashes: set[str] = set()
 
         for msg, att in rows:
             try:
-                if getattr(att, "storage_key", None):
-                    from app.core.storage import get_storage
-
-                    raw = get_storage().read_bytes(att.storage_key, "email_intake", None)
-                else:
-                    raw = await download_gmail_attachment_bytes(
-                        access_token, msg.external_message_id, att.external_attachment_id
-                    )
+                raw = await _fetch_email_pdf_attachment_bytes(
+                    msg=msg, att=att, gmail_access_token=access_token
+                )
             except Exception as exc:
-                logger.warning("intake gmail attachment download failed: %s", exc)
-                gate_reason = "gmail_attachment_download_failed"
+                logger.warning("intake email PDF attachment fetch failed: %s", exc)
+                gate_reason = "email_attachment_fetch_failed"
                 continue
             if not raw:
                 gate_reason = "empty_attachment"
@@ -423,77 +454,59 @@ async def apply_gmail_tql_intake_gate(
                 return
             thread_hashes.add(digest)
             try:
-                pdf_text = extract_pdf_text_bytes(raw)
-            except Exception as exc:
-                logger.warning("intake pdf text extract failed: %s", exc)
-                gate_reason = "pdf_text_extract_failed"
-                continue
-
-            ok, reason = tql_digital_pdf_high_confidence(pdf_text)
-            if ok:
-                high_ok = True
-                gate_reason = reason
-                break
-            gate_reason = reason
-
-        if high_ok:
-            ref = guess_broker_load_reference(pdf_text)
-            excerpt = (pdf_text or "")[:4000]
-            hints = extract_tql_rate_con_hints(pdf_text)
-            rate = hints.get("rate")
-            miles = hints.get("miles")
-            commodity = hints.get("commodity")
-            load_number = f"INT-{uuid.uuid4().hex[:12].upper()}"
-            load = Load(
-                tenant_id=tenant_id,
-                load_number=load_number,
-                broker_id=broker_id,
-                broker_name_snapshot=broker_snapshot,
-                broker_load_reference=ref,
-                broker_match_method=match_method,
-                broker_match_confidence_tier=tier,
-                broker_match_explanation=explanation,
-                review_required=False,
-                status="draft",
-                internal_notes=excerpt or None,
-                rate=float(rate) if isinstance(rate, (int, float)) else None,
-                miles=int(miles) if isinstance(miles, int) else None,
-                commodity=str(commodity)[:255] if commodity else None,
-            )
-            db.add(load)
-            await db.flush()
-            try:
-                await link_thread_qr_extractions_to_load(
+                parse_res = await parse_pdf_bytes_to_load_document_response(
                     db,
                     tenant_id=tenant_id,
-                    thread_id=thread_id,
-                    load_id=load.id,
-                    linked_broker_id=broker_id,
+                    pdf_bytes=raw,
+                    filename=(getattr(att, "filename", None) or "attachment.pdf")[:512],
                 )
             except Exception as exc:
-                logger.warning("link_thread_qr_extractions_to_load failed: %s", exc)
-            thread.linked_load_id = load.id
-            thread.intake_bucket = "new_load"
-            thread.confidence_level = "high"
-            thread.confidence_score = 0.95
+                logger.warning("intake guarded pdf parse failed: %s", exc)
+                gate_reason = "guarded_pdf_parse_failed"
+                continue
+
+            last_parse = parse_res
+            gate_reason = "guarded_parse_ok"
+            break
+
+        if last_parse is not None:
+            thread.intake_bucket = "needs_review"
+            thread.confidence_level = "medium"
+            thread.confidence_score = 0.55
+            parse_rr = format_email_intake_pdf_parse_review(gate_detail=gate_reason)
             thread.routing_reason = await _routing_reason_with_qr_supplement(
-                db, tenant_id, thread_id, AUTO_TQL_DIGITAL_PDF_RATE_CONFIRMATION
+                db, tenant_id, thread_id, parse_rr
             )
-            await auto_resolve_email_intake_review_on_thread_linked_load(
-                db, tenant_id, thread_id, linked_load_id=load.id
+            detail = {
+                **_guarded_parse_detail_for_review(last_parse),
+                "broker_resolution": {
+                    "broker_id": broker_id,
+                    "broker_label": broker_snapshot,
+                    "match_method": match_method,
+                    "confidence_tier": tier_note,
+                    "match_explanation": expl_note,
+                },
+            }
+            await upsert_intake_review_from_intake_source(
+                db,
+                tenant_id,
+                thread_id,
+                primary_code=EMAIL_INTAKE_PDF_PARSE_REVIEW_PRIMARY,
+                detail_extensions=detail,
+                routing_reason_snapshot=thread.routing_reason,
             )
             return
 
         thread.intake_bucket = "needs_review"
         thread.confidence_level = "low"
         thread.confidence_score = 0.35
-        low_conf = format_tql_pdf_not_high_confidence(gate_reason)
+        low_conf = format_email_intake_pdf_low_confidence(gate_reason)
         thread.routing_reason = await _routing_reason_with_qr_supplement(db, tenant_id, thread_id, low_conf)
         await upsert_intake_review_from_intake_source(
             db,
             tenant_id,
             thread_id,
-            primary_code=TQL_PDF_NOT_HIGH_CONFIDENCE_PREFIX,
+            primary_code=EMAIL_INTAKE_PDF_LOW_CONFIDENCE_PRIMARY,
             detail_extensions={},
             routing_reason_snapshot=thread.routing_reason,
         )
@@ -513,7 +526,7 @@ async def run_post_ingest_intake(
     *,
     gmail_access_token: str | None = None,
 ) -> None:
-    if path == "gmail_tql_gate":
+    if path == "email_pdf_intake":
         if not gmail_access_token:
             thread = await db.scalar(
                 select(EmailThread).where(EmailThread.id == thread_id, EmailThread.tenant_id == tenant_id)
@@ -528,7 +541,7 @@ async def run_post_ingest_intake(
                 thread.routing_reason = thread.routing_reason or GMAIL_MISSING_TOKEN_FOR_INTAKE_GATE
             await sync_email_intake_review_for_thread(db, tenant_id, thread_id)
             return
-        await apply_gmail_tql_intake_gate(db, tenant_id, thread_id, gmail_access_token)
+        await apply_email_pdf_intake(db, tenant_id, thread_id, gmail_access_token)
     else:
         await apply_review_only_mailbox_intake(db, tenant_id, thread_id)
     await sync_email_intake_review_for_thread(db, tenant_id, thread_id)

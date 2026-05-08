@@ -278,6 +278,91 @@ def _extract_party_mentions(text: str) -> list[dict[str, Any]]:
     return out[:80]
 
 
+def _extract_stop_detail_pu_del_hints(text: str) -> list[dict[str, Any]]:
+    """Detect STOP DETAIL-style rows: label + MM/DD/YY on one line, time on the next line."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    hints: list[dict[str, Any]] = []
+    stop_detail_row = re.compile(
+        r"^(?P<kind>PU|PICKUP|DEL|DELIVERY|SO|DROP)\s+(?P<mdy>\d{1,2}/\d{1,2}/\d{2,4})\b",
+        re.IGNORECASE,
+    )
+    time_line = re.compile(
+        r"^(?P<t>\d{1,2}:\d{2}(?::\d{2})?)(?:\s*(?P<ap>AM|PM))?\s*$",
+        re.IGNORECASE,
+    )
+    seq = -1
+    i = 0
+    while i < len(lines):
+        m = stop_detail_row.match(lines[i])
+        if m:
+            seq += 1
+            iso = _mdy_slash_to_iso(m.group("mdy"))
+            appt_time: str | None = None
+            if i + 1 < len(lines):
+                tm = time_line.match(lines[i + 1])
+                if tm:
+                    appt_time = tm.group("t").strip()
+                    if tm.group("ap"):
+                        appt_time = f"{appt_time} {tm.group('ap')}".strip()
+                    i += 1
+            hint: dict[str, Any] = {
+                "sequence": seq,
+                "stop_type": _stop_detail_label_to_type(m.group("kind")),
+            }
+            if iso:
+                hint["appointment_date"] = iso
+            if appt_time:
+                hint["appointment_time_text"] = appt_time
+            hints.append(hint)
+        i += 1
+    return hints
+
+
+def _mdy_slash_to_iso(mdy: str) -> str | None:
+    parts = mdy.strip().split("/")
+    if len(parts) != 3:
+        return None
+    try:
+        month, day, year = (int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        return None
+    if year < 100:
+        year += 2000 if year < 70 else 1900
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _stop_detail_label_to_type(label: str) -> str:
+    k = label.strip().casefold()
+    if k in {"pu", "pickup"}:
+        return "pickup"
+    if k == "drop":
+        return "drop"
+    # DEL DELIVERY SO (stop-off)
+    return "delivery"
+
+
+def _merge_route_stop_hints_by_sequence(hints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_seq: dict[int, dict[str, Any]] = {}
+    for h in hints:
+        if not isinstance(h, dict) or not isinstance(h.get("sequence"), int):
+            continue
+        seq = int(h["sequence"])
+        if seq not in by_seq:
+            by_seq[seq] = dict(h)
+            continue
+        base = by_seq[seq]
+        for k, val in h.items():
+            if k == "sequence":
+                continue
+            if val is None or val == "":
+                continue
+            if not base.get(k):
+                base[k] = val
+    return [by_seq[s] for s in sorted(by_seq.keys())]
+
+
 def _extract_stop_hints(text: str) -> list[dict[str, Any]]:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     hints: list[dict[str, Any]] = []
@@ -299,7 +384,7 @@ def _extract_stop_hints(text: str) -> list[dict[str, Any]]:
             continue
         detail = detail_re.match(lines[idx + 1]) if idx + 1 < len(lines) else None
         hint = {
-            "sequence": int(m.group("sequence")),
+            "sequence": int(m.group("sequence")) - 1,
             "stop_type": _normalize_stop_type(m.group("type")),
             "city": m.group("city").strip(),
             "state_or_province": m.group("state").strip(),
@@ -316,7 +401,9 @@ def _extract_stop_hints(text: str) -> list[dict[str, Any]]:
                 }
             )
         hints.append(hint)
-    return hints[:80]
+
+    hints.extend(_extract_stop_detail_pu_del_hints(text))
+    return _merge_route_stop_hints_by_sequence(hints)[:80]
 
 
 def _normalize_stop_type(value: str) -> str:
