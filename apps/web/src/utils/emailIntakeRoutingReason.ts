@@ -22,15 +22,15 @@ export function formatRoutingReason(raw: string | null | undefined): string {
     }
     return "PDF parsed — open intake review to prefill or create a load.";
   }
-  if (primary === "tql_pdf_not_high_confidence") {
+  if (primary === "email_pdf_not_high_confidence") {
     const pipe = base.match(/\|gate_detail=([^|]+)/i);
     if (pipe) {
       return "PDF did not yield a guarded parse snapshot: " + pipe[1].replace(/_/g, " ");
     }
   }
-  const tqlColon = /^tql_pdf_not_high_confidence:/i;
-  if (tqlColon.test(base)) {
-    return "PDF did not yield a guarded parse snapshot: " + base.replace(tqlColon, "").replace(/_/g, " ");
+  const emailPdfColon = /^email_pdf_not_high_confidence:/i;
+  if (emailPdfColon.test(base)) {
+    return "PDF did not yield a guarded parse snapshot: " + base.replace(emailPdfColon, "").replace(/_/g, " ");
   }
   if (primary === "broker_intake_blocked") return "Broker blocked from intake (policy). Review required.";
   if (primary === "broker_resolve_ambiguous") {

@@ -25,7 +25,7 @@ def test_format_duplicate_pdf_sha256() -> None:
 
 def test_format_email_intake_pdf_low_confidence_pipe_tail() -> None:
     assert format_email_intake_pdf_low_confidence("extracted_text_too_short") == (
-        "tql_pdf_not_high_confidence|gate_detail=extracted_text_too_short"
+        "email_pdf_not_high_confidence|gate_detail=extracted_text_too_short"
     )
 
 

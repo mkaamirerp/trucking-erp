@@ -62,7 +62,7 @@ def confidence_tier_for_match_method(method: str | None) -> str | None:
         return "C"
     if method in ("global_exact_mc", "global_exact_dot", "global_exact_mc_dot"):
         return "D"
-    if method in ("fallback_tql", "fallback_tenant_default"):
+    if method == "fallback_tenant_default":
         return "D"
     return None
 
@@ -114,7 +114,7 @@ def explanation_for_match_method(method: str | None) -> str | None:
         return "Matched platform global booking broker (exact USDOT digits from supplemental text)."
     if method == "global_exact_mc_dot":
         return "Matched platform global booking broker (exact MC and USDOT digits from supplemental text)."
-    if method in ("fallback_tql", "fallback_tenant_default"):
+    if method == "fallback_tenant_default":
         return "No header match; applied tenant default booking broker fallback (to be data-driven)."
     return None
 

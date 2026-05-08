@@ -54,7 +54,7 @@ async def resolve_booking_broker_for_email_intake(
     """
     Resolver order: tenant workspace (known sender → domain → alias, with intake_blocked semantics),
     then **approved** global reference (header path: known sender → domain → alias; supplemental Tier **D**: MC/DOT),
-    then caller may apply TQL name fallback if broker_id still unset.
+    then caller may apply a **tenant-configured** default broker only when explicitly supported (not hardcoded).
 
     Tenants never write global rows; global is read-only here. Materialization creates tenant ``brokers`` rows only
     for global header tiers A–C, never for Tier **D** (MC/DOT-only) in this path.

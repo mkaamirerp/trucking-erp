@@ -1,8 +1,8 @@
 """
-Shared classification heuristics (provider-agnostic signals). No DB side effects.
+Shared classification heuristics (provider-agnostic). No DB side effects.
 
-Booking-broker touchpoint patterns (e.g. known broker domains / keywords) are **hints only**.
-Long-term they should come from tenant broker reference data, not hardcoded string lists here.
+Stage 1 (intake / filter): broker-neutral cues that an email thread may be load or PDF related.
+Broker identity stays in ``resolve_booking_broker_for_email_intake`` / registry — not hardcoded domains here.
 """
 
 from __future__ import annotations
@@ -12,36 +12,39 @@ from typing import Literal
 
 from app.models.email_ingestion import EmailThread
 
-# TODO(data): move to tenant broker intake config (domains, aliases, known senders).
-_BOOKING_BROKER_EMAIL_MARKERS = ("@tql.com", "@tqltrucks.com", "@tql.net")
-_BOOKING_BROKER_SUBJECT_SNIPPET_RE = re.compile(
-    r"\btql\b|total\s+quality\s+logistics", re.IGNORECASE
-)
-
 PostIngestIntakePath = Literal["email_pdf_intake", "review_only"]
+
+# Generic document / ops language common to brokerage freight email (not carrier-specific).
+_LOAD_INTAKE_TEXT_CUE_RE = re.compile(
+    r"\b(?:"
+    r"rate\s+confirmation|rate\s*con(?:firmation)?|ratecon|"
+    r"bill\s+of\s+lading|\bbol\b|"
+    r"load\s+(?:tender|assignment|confirmation|offer)|"
+    r"freight\s+(?:tender|quote|confirmation)|"
+    r"(?:carrier|line)\s*haul|"
+    r"dispatch\s+(?:notice|confirmation)|"
+    r"\bmc\s*[#:.-]?\s*\d{4,8}\b|\b(?:us\s*)?dot\s*[#:.-]?\s*\d{4,10}\b"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def participants_indicate_booking_broker_touchpoints(participants_json: dict | list | None) -> bool:
-    if not participants_json or not isinstance(participants_json, list):
-        return False
-    for p in participants_json:
-        if not isinstance(p, dict):
-            continue
-        email = str(p.get("email") or "").strip().lower()
-        if any(m in email for m in _BOOKING_BROKER_EMAIL_MARKERS):
-            return True
+    """No per-carrier participant heuristics without tenant broker registry data."""
     return False
 
 
 def subject_or_snippet_indicates_booking_broker_touchpoints(subject: str | None, snippet: str | None) -> bool:
+    """True when subject/snippet suggests rate con / load doc / MC-DOT style freight email (broker-neutral)."""
     blob = f"{subject or ''}\n{snippet or ''}"
-    return bool(_BOOKING_BROKER_SUBJECT_SNIPPET_RE.search(blob))
+    if not blob.strip():
+        return False
+    return bool(_LOAD_INTAKE_TEXT_CUE_RE.search(blob))
 
 
 def thread_indicates_booking_broker_touchpoints(thread: EmailThread) -> bool:
-    return participants_indicate_booking_broker_touchpoints(
-        thread.participants_json
-    ) or subject_or_snippet_indicates_booking_broker_touchpoints(thread.subject, thread.snippet)
+    """Thread-level load-intake text cues (subject + snippet only at classify time)."""
+    return subject_or_snippet_indicates_booking_broker_touchpoints(thread.subject, thread.snippet)
 
 
 def post_ingest_intake_path(*, provider: str) -> PostIngestIntakePath:

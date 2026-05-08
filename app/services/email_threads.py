@@ -20,7 +20,7 @@ from app.services.email_intake_review_service import (
     load_review_summary_for_thread,
     sync_email_intake_review_for_thread,
 )
-from app.services.email_intake_pdf import extract_broker_mc_dot_hints, guess_broker_load_reference
+from app.services.email_intake_pdf import extract_broker_mc_dot_hints
 from app.core.database import AsyncSessionLocal
 from app.services.broker_intake_resolve import (
     confidence_tier_for_match_method,
@@ -29,11 +29,7 @@ from app.services.broker_intake_resolve import (
 )
 from app.services.broker_intake_unified import resolve_booking_broker_for_email_intake
 from app.constants.email_intake_routing import MANUAL_CREATE_DRAFT_FROM_REVIEW, MANUAL_LINK_EXISTING_LOAD
-from app.services.email_engine.intake_service import (
-    find_duplicate_linked_load_for_thread_pdf_content,
-    resolve_fallback_booking_broker_for_intake,
-)
-from app.services.email_engine.message_classifier import thread_indicates_booking_broker_touchpoints
+from app.services.email_engine.intake_service import find_duplicate_linked_load_for_thread_pdf_content
 from app.services.email_intake_qr_extractions import link_thread_qr_extractions_to_load
 from app.services.email_intake_routing import apply_intake_routing_for_email_thread
 from app.services.gmail_oauth import refresh_access_token
@@ -205,18 +201,22 @@ async def create_draft_load_from_review_thread(
         tier = None
         expl = None
         review_required = False
-        if thread_indicates_booking_broker_touchpoints(thread):
-            bid, snap = await resolve_fallback_booking_broker_for_intake(db, tenant_id)
-            broker_id = bid
-            broker_name_snapshot = snap
-            match_method = "fallback_tenant_default"
-            tier = confidence_tier_for_match_method(match_method)
-            expl = explanation_for_match_method(match_method)
 
     if dup_of is not None:
         review_required = True
 
-    ref = guess_broker_load_reference(f"{thread.subject or ''}\n{thread.snippet or ''}")
+    ref: str | None = None
+    rev = await load_review_summary_for_thread(db, tenant_id, thread.id)
+    if rev and rev.detail_json:
+        gp = rev.detail_json.get("guarded_parse")
+        if isinstance(gp, dict):
+            ext = gp.get("extracted")
+            if isinstance(ext, dict):
+                raw_ref = ext.get("broker_load_reference")
+                if raw_ref is not None:
+                    s = str(raw_ref).strip()
+                    if s:
+                        ref = s[:120]
     body_excerpt = await _latest_inbound_message_body_excerpt(db, tenant_id, thread.id)
     notes = _compose_internal_notes_from_thread(thread, body_excerpt)
 

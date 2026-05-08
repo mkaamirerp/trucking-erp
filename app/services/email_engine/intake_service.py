@@ -14,11 +14,10 @@ import hashlib
 import logging
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.models.broker import Broker
 from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_ingestion import EmailMessage, EmailThread
 from app.models.load import Load
@@ -202,25 +201,6 @@ async def find_duplicate_linked_load_for_thread_pdf_content(
     return None
 
 
-async def resolve_fallback_booking_broker_for_intake(db: AsyncSession, tenant_id: int) -> tuple[int | None, str]:
-    """Temporary default when unified resolver leaves broker unset (ILIKE name match).
-
-    Replace with tenant intake policy / broker registry defaults when available.
-    """
-    label = func.coalesce(Broker.display_name, Broker.legal_name, Broker.name)
-    b = await db.scalar(
-        select(Broker)
-        .where(Broker.tenant_id == tenant_id)
-        .where(Broker.is_active.is_(True))
-        .where(label.ilike("%tql%"))
-        .limit(1)
-    )
-    if b:
-        disp = (b.display_name or b.legal_name or b.name or "").strip()
-        return b.id, disp or b.name
-    return None, "Total Quality Logistics"
-
-
 async def _latest_pdf_attachment_rows(
     db: AsyncSession, tenant_id: int, thread_id: int
 ) -> list[tuple[EmailMessage, EmailMessageAttachment]]:
@@ -273,10 +253,10 @@ async def apply_email_pdf_intake(
     access_token: str,
 ) -> None:
     """
-    Email PDF attachment intake: product parser → needs_review / review detail — no automatic Load rows.
+    Email PDF intake (stage 2): when PDF rows exist, call product parser; snapshot → review — no auto Load.
 
-    Broker resolution uses unified intake + optional fallback only when booking-broker touchpoints exist.
-    Gmail OAuth token is used only when attachment bytes are not yet in tenant storage.
+    Stage 1 cues: generic load-language in subject/snippet but no PDF → needs_review (email_touchpoints_no_pdf_attachment).
+    Broker resolution uses unified intake only (no default broker). Gmail OAuth fetch only when bytes not in storage.
     """
     thread = await db.scalar(
         select(EmailThread).where(EmailThread.id == thread_id, EmailThread.tenant_id == tenant_id)
@@ -288,10 +268,10 @@ async def apply_email_pdf_intake(
     if thread.intake_bucket == "new_load":
         return
 
-    booking_touchpoints = thread_indicates_booking_broker_touchpoints(thread)
     rows = await _latest_pdf_attachment_rows(db, tenant_id, thread_id)
+    load_intake_text_cues = thread_indicates_booking_broker_touchpoints(thread)
 
-    if booking_touchpoints and not rows:
+    if load_intake_text_cues and not rows:
         thread.intake_bucket = "needs_review"
         thread.confidence_level = "low"
         thread.confidence_score = 0.25
@@ -385,9 +365,6 @@ async def apply_email_pdf_intake(
         broker_id = resolve_res.broker_id
         broker_snapshot = resolve_res.broker_label
         match_method: str | None = resolve_res.match_method
-        if broker_id is None and booking_touchpoints:
-            broker_id, broker_snapshot = await resolve_fallback_booking_broker_for_intake(db, tenant_id)
-            match_method = "fallback_tenant_default"
         tier_note = confidence_tier_for_match_method(match_method) if match_method else None
         expl_note = explanation_for_match_method(match_method) if match_method else None
 
