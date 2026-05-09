@@ -1,4 +1,10 @@
-"""Thin re-exports for email intake routing. Logic lives in `email_engine.intake_service`."""
+"""Thin re-exports for email intake routing.
+
+CRITICAL (Cursor / maintainers):
+- Do not add business logic, DB calls, parsing, or policy here.
+- All intake policy lives in ``app.services.email_engine.intake_service`` (and its helpers).
+- This module exists only to preserve a stable import path for callers.
+"""
 
 from __future__ import annotations
 

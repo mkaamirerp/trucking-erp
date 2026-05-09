@@ -132,6 +132,12 @@ async def create_draft_load_from_review_thread(
     thread = await get_email_thread(db, tenant_id, thread_id)
     _require_thread_eligible_for_manual_intake(thread)
 
+    # Manual draft creation (operator action):
+    # - Broker resolution uses header + subject/snippet MC/DOT hints via
+    #   ``resolve_booking_broker_for_email_intake`` — this is NOT full PDF hydration.
+    # - ``broker_load_reference`` is taken only from review ``detail_json.guarded_parse.extracted``
+    #   when present; other extracted fields are not auto-mapped onto Load here unless product
+    #   explicitly adds mapping.
     from_hdr = await fetch_latest_inbound_from_header(db, tenant_id, thread_id)
     hint_mc, hint_dot = extract_broker_mc_dot_hints(f"{thread.subject or ''}\n{thread.snippet or ''}")
     async with AsyncSessionLocal() as platform_db:

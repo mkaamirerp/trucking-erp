@@ -1,7 +1,13 @@
-"""Canonical product entrypoint for load-related PDF parsing.
+"""Canonical **public** import target for product PDF → ``LoadDocumentParseResponse``.
 
-Import ``parse_pdf_bytes_to_load_document_response`` from here (or from
-``load_document_parse_guarded``) so feature code converges on one implementation.
+CRITICAL (Cursor / maintainers):
+- Feature code (email intake, workspace parse, jobs) MUST import
+  ``parse_pdf_bytes_to_load_document_response`` from **this module** (or the orchestrator
+  that forwards here).
+- Do not add a parallel public parser entrypoint in `app/services/` without an explicit
+  architecture decision and tests.
+- Implementation is delegated to ``load_document_parse_guarded`` — edits to behavior belong
+  there (or its internal helpers), not duplicate entrypoints here.
 """
 
 from __future__ import annotations
