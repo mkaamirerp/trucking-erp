@@ -6,6 +6,7 @@ For the **approved target** pipeline (fingerprinting, classification, canonical 
 
 **Related:**
 
+- [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](./load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md) — proposed async job + polling for **Load Page** `POST /loads/parse-document` (future; not implemented in this doc’s “current reality” table).
 - [`MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md`](./MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md) — multi-document load candidate, grouping, and merge design contract (not implemented yet; applies beyond current single-document Lab/workspace paths).
 - [`LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md`](./LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md) — design + **as-implemented** Load Lab notes.
 - [`LoadLabCleaner.md`](./LoadLabCleaner.md) — temporary bridges and cleanup ledger.
