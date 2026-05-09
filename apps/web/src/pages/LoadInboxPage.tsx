@@ -136,7 +136,10 @@ function ThreadMessageList({
 
 function threadIntakePrimaryLabel(t: InboxThreadListItem): string {
   const s = (t.subject || "").toLowerCase();
-  if (/rate\s*con|rate\s*confirmation|\brc\b|^fw:/i.test(s) || /tql/i.test(s)) return "Rate confirmation";
+  if (/rate\s*con|rate\s*confirmation|\brc\b|^fw:/i.test(s)) return "Rate confirmation";
+  if (/\bbol\b|bill\s+of\s+lading|load\s+(?:tender|assignment)|dispatch\s+(?:notice|confirmation)/i.test(s)) {
+    return "Load document";
+  }
   return t.subject || "(No subject)";
 }
 

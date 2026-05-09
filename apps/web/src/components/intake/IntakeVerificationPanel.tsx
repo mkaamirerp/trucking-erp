@@ -139,11 +139,9 @@ export function IntakeVerificationPanel({
   const pdf = useMemo(() => findFirstPdf(messages), [messages]);
   const ocrComplete = Boolean(pdf);
 
-  const tagLine = (threadSubject || "").toLowerCase().includes("tql") ? "TQL" : null;
-
   const intakeTags = useMemo(() => {
     const tags: string[] = [];
-    if (tagLine) tags.push(tagLine);
+    if (ocrComplete) tags.push("Load document");
     const l = linkedLoad;
     if (!l) return tags;
     if (l.mode) tags.push(l.mode);
@@ -154,7 +152,7 @@ export function IntakeVerificationPanel({
     if (l.hazmat_flag === false) tags.push("Non-hazmat");
     else if (l.hazmat_flag === true) tags.push("Hazardous");
     return tags;
-  }, [tagLine, linkedLoad]);
+  }, [ocrComplete, linkedLoad]);
 
   const duplicateReviewUi = useMemo(() => {
     const rev = reviewDetail?.review;

@@ -5,8 +5,8 @@ import re
 
 from app.services.email_intake_pdf import extract_broker_mc_dot_hints, extract_pdf_text_bytes
 from app.services.email_engine.message_classifier import (
-    participants_indicate_booking_broker_touchpoints,
-    subject_or_snippet_indicates_booking_broker_touchpoints,
+    participants_indicate_load_intake_text_cues,
+    subject_or_snippet_indicates_load_intake_text_cues,
 )
 
 
@@ -80,15 +80,15 @@ def test_extract_rate_con_hints_from_plain_text() -> None:
     assert "Paper" in str(h.get("commodity", ""))
 
 
-def test_participants_indicate_booking_broker_touchpoints() -> None:
-    assert participants_indicate_booking_broker_touchpoints([{"email": "ops@example-broker.com"}]) is False
-    assert participants_indicate_booking_broker_touchpoints(None) is False
+def test_participants_indicate_load_intake_text_cues() -> None:
+    assert participants_indicate_load_intake_text_cues([{"email": "ops@example-broker.com"}]) is False
+    assert participants_indicate_load_intake_text_cues(None) is False
 
 
 def test_subject_snippet_generic_load_intake_cues() -> None:
-    assert subject_or_snippet_indicates_booking_broker_touchpoints("RE: Rate confirmation — ORD456", None) is True
-    assert subject_or_snippet_indicates_booking_broker_touchpoints(None, "See BOL attached MC 123456") is True
-    assert subject_or_snippet_indicates_booking_broker_touchpoints("Weekend plans", None) is False
+    assert subject_or_snippet_indicates_load_intake_text_cues("RE: Rate confirmation — ORD456", None) is True
+    assert subject_or_snippet_indicates_load_intake_text_cues(None, "See BOL attached MC 123456") is True
+    assert subject_or_snippet_indicates_load_intake_text_cues("Weekend plans", None) is False
 
 
 def test_extract_broker_mc_dot_hints() -> None:

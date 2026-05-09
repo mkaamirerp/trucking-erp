@@ -73,7 +73,7 @@ class LoadDocumentParseResponse(BaseModel):
 
 
 class ParseDocumentSemanticModelOutput(BaseModel):
-    """B4: OpenAI `json_schema` output for parse-document semantic path.
+    """OpenAI ``json_schema`` output contract for the product guarded PDF parser.
 
     Excludes ``raw_text`` and ``context`` — the server attaches PDF text and allowlisted context.
     Extra root keys from the model are ignored (forward tolerance).

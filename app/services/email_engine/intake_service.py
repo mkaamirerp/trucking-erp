@@ -50,7 +50,7 @@ from app.services.broker_intake_resolve import (
 from app.services.broker_intake_unified import resolve_booking_broker_for_email_intake
 from app.services.email_engine.message_classifier import (
     PostIngestIntakePath,
-    thread_indicates_booking_broker_touchpoints,
+    thread_indicates_load_intake_text_cues,
 )
 from app.services.email_intake_review_service import (
     sync_email_intake_review_for_thread,
@@ -269,7 +269,7 @@ async def apply_email_pdf_intake(
         return
 
     rows = await _latest_pdf_attachment_rows(db, tenant_id, thread_id)
-    load_intake_text_cues = thread_indicates_booking_broker_touchpoints(thread)
+    load_intake_text_cues = thread_indicates_load_intake_text_cues(thread)
 
     if load_intake_text_cues and not rows:
         thread.intake_bucket = "needs_review"

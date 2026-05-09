@@ -2,7 +2,10 @@
 Shared classification heuristics (provider-agnostic). No DB side effects.
 
 Stage 1 (intake / filter): broker-neutral cues that an email thread may be load or PDF related.
-Broker identity stays in ``resolve_booking_broker_for_email_intake`` / registry — not hardcoded domains here.
+
+``*_load_intake_text_cues`` helpers only match **generic** load-document / rate-con / BOL / MC-DOT
+language in subject+snippet — never broker brands or domains. Tenant/broker-specific routing belongs
+in broker registry + ``resolve_booking_broker_for_email_intake``.
 """
 
 from __future__ import annotations
@@ -29,12 +32,15 @@ _LOAD_INTAKE_TEXT_CUE_RE = re.compile(
 )
 
 
-def participants_indicate_booking_broker_touchpoints(participants_json: dict | list | None) -> bool:
-    """No per-carrier participant heuristics without tenant broker registry data."""
+def participants_indicate_load_intake_text_cues(participants_json: dict | list | None) -> bool:
+    """No per-carrier participant heuristics without tenant broker registry data.
+
+    Do not hardcode broker domains or brand markers here.
+    """
     return False
 
 
-def subject_or_snippet_indicates_booking_broker_touchpoints(subject: str | None, snippet: str | None) -> bool:
+def subject_or_snippet_indicates_load_intake_text_cues(subject: str | None, snippet: str | None) -> bool:
     """True when subject/snippet suggests rate con / load doc / MC-DOT style freight email (broker-neutral)."""
     blob = f"{subject or ''}\n{snippet or ''}"
     if not blob.strip():
@@ -42,9 +48,12 @@ def subject_or_snippet_indicates_booking_broker_touchpoints(subject: str | None,
     return bool(_LOAD_INTAKE_TEXT_CUE_RE.search(blob))
 
 
-def thread_indicates_booking_broker_touchpoints(thread: EmailThread) -> bool:
-    """Thread-level load-intake text cues (subject + snippet only at classify time)."""
-    return subject_or_snippet_indicates_booking_broker_touchpoints(thread.subject, thread.snippet)
+def thread_indicates_load_intake_text_cues(thread: EmailThread) -> bool:
+    """Thread-level load-intake text cues (subject + snippet only at classify time).
+
+    No attachment scanning and no broker registry lookups happen in this classifier.
+    """
+    return subject_or_snippet_indicates_load_intake_text_cues(thread.subject, thread.snippet)
 
 
 def post_ingest_intake_path(*, provider: str) -> PostIngestIntakePath:
