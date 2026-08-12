@@ -11,6 +11,7 @@ import {
   listLoads,
   listTrailers,
   listTrucks,
+  postTripExecutionSignal,
   removeLoadFromTrip,
   updateTripAssignment,
   type Driver,
@@ -144,6 +145,42 @@ function formatCancelTripError(err: unknown): string {
   return "Could not cancel trip.";
 }
 
+function formatExecutionSignalError(err: unknown): string {
+  if (!(err instanceof Error)) return "Could not start execution.";
+  const raw = err.message?.trim() || "";
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const detail = parsed.detail;
+    if (typeof detail === "string") {
+      if (/^trip not found$/i.test(detail.trim())) return "Trip not found.";
+    }
+    if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+      const code = (detail as { code?: string }).code;
+      switch (code) {
+        case "TRIP_NOT_ASSIGNED":
+          return "Trip must be assigned before starting execution.";
+        case "TRIP_CANCELLED":
+          return "This trip is cancelled. Execution cannot be started.";
+        case "TRIP_ALREADY_COMPLETED":
+          return "This trip is completed. Execution cannot be started.";
+        case "EXECUTION_SIGNAL_SOURCE_RESERVED":
+          return "This execution signal source is reserved for future implementation.";
+        default:
+          break;
+      }
+      const msg =
+        typeof (detail as { detail?: unknown }).detail === "string"
+          ? (detail as { detail: string }).detail
+          : null;
+      if (msg) return msg;
+    }
+  } catch {
+    /* use raw */
+  }
+  if (raw.length > 0 && raw.length < 400) return raw;
+  return "Could not start execution.";
+}
+
 /** Planned trip and not cancelled — same gate for Add load and Remove (3G/3H). */
 function isPlannedTripOpenForMembershipActions(trip: TripDetail): boolean {
   return (trip.status || "").toLowerCase() === "planned" && trip.cancelled_at == null;
@@ -188,6 +225,8 @@ export default function TripWorkspacePage() {
   const [draftDriverId, setDraftDriverId] = useState("");
   const [draftTruckId, setDraftTruckId] = useState("");
   const [draftTrailerId, setDraftTrailerId] = useState("");
+  const [startExecBusy, setStartExecBusy] = useState(false);
+  const [startExecError, setStartExecError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(tripId)) {
@@ -231,9 +270,15 @@ export default function TripWorkspacePage() {
     setDraftDriverId("");
     setDraftTruckId("");
     setDraftTrailerId("");
+    setStartExecBusy(false);
+    setStartExecError(null);
   }, [tripId]);
 
-  const assignmentEditable = Boolean(trip && trip.cancelled_at == null);
+  const assignmentEditable = Boolean(trip && trip.cancelled_at == null && (trip.status || "").toLowerCase() !== "in_progress");
+
+  const startExecutionVisible = Boolean(
+    trip && trip.cancelled_at == null && (trip.status || "").toLowerCase() === "assigned",
+  );
 
   useEffect(() => {
     if (!trip) return;
@@ -411,6 +456,28 @@ export default function TripWorkspacePage() {
     }
   }, [tripId]);
 
+  const onStartExecution = useCallback(async () => {
+    if (!Number.isFinite(tripId) || !trip) return;
+    if (!startExecutionVisible) return;
+    setStartExecError(null);
+    const ok = window.confirm(
+      "Start execution for this trip?\n\nStarting execution marks this trip as in progress. This does not change Load.status, does not create custody or terminal events, and does not start payroll.\n\nContinue?",
+    );
+    if (!ok) return;
+    setStartExecBusy(true);
+    try {
+      const updated = await postTripExecutionSignal(tripId, {
+        source: "dispatcher_manual",
+        reason_note: "Started manually from Trip Workspace",
+      });
+      setTrip(updated);
+    } catch (e: unknown) {
+      setStartExecError(formatExecutionSignalError(e));
+    } finally {
+      setStartExecBusy(false);
+    }
+  }, [tripId, trip, startExecutionVisible]);
+
   const toolBtn =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
 
@@ -443,16 +510,29 @@ export default function TripWorkspacePage() {
               ) : null}
             </div>
           </div>
-          {!loading && trip && isPlannedTripOpenForCancel(trip) ? (
+          {!loading && trip ? (
             <div className="flex flex-col items-end gap-1">
-              <button
-                type="button"
-                disabled={cancelTripBusy}
-                onClick={() => void onCancelPlannedTrip()}
-                className="rounded-md border border-red-300/80 bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {cancelTripBusy ? "Cancelling…" : "Cancel Trip"}
-              </button>
+              {startExecutionVisible ? (
+                <button
+                  type="button"
+                  disabled={startExecBusy}
+                  onClick={() => void onStartExecution()}
+                  className="rounded-md border border-emerald-300/80 bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {startExecBusy ? "Starting…" : "Start Execution"}
+                </button>
+              ) : null}
+              {startExecError ? <p className="max-w-xs text-right text-[10px] text-red-700">{startExecError}</p> : null}
+              {isPlannedTripOpenForCancel(trip) ? (
+                <button
+                  type="button"
+                  disabled={cancelTripBusy}
+                  onClick={() => void onCancelPlannedTrip()}
+                  className="rounded-md border border-red-300/80 bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {cancelTripBusy ? "Cancelling…" : "Cancel Trip"}
+                </button>
+              ) : null}
               {cancelTripError ? <p className="max-w-xs text-right text-[10px] text-red-700">{cancelTripError}</p> : null}
             </div>
           ) : null}
