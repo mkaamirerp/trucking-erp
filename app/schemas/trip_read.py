@@ -103,9 +103,17 @@ class TripDetailResponse(BaseModel):
 
 
 class CreatePlannedTripBody(BaseModel):
-    """Phase 3D: create Trip container; trip number minted server-side."""
+    """Phase 3D: create Trip container; trip number minted server-side.
 
-    status: Optional[str] = Field(default=None, max_length=32, description="Default planned")
+    status: omit/null/blank/'planned' only (server stores planned). Other values → 400 INVALID_TRIP_STATUS.
+    Optional driver/truck/trailer prefill does not promote to assigned (use PUT …/assignment).
+    """
+
+    status: Optional[str] = Field(
+        default=None,
+        max_length=32,
+        description="Only 'planned' (or omit/null/blank); other values rejected",
+    )
     job_type: Optional[str] = Field(default=None, max_length=32, description="Default freight_load")
     driver_id: Optional[int] = None
     truck_id: Optional[int] = None

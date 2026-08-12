@@ -537,11 +537,15 @@ async def create_planned_trip(
     trailer_id: int | None = None,
     load_ids: list[int] | None = None,
 ) -> TripDetailResponse:
+    # POST /trips creates planned Trips only; promotion is PUT …/assignment (Decision 14).
     st = (status or TRIP_CONTAINER_STATUS_PLANNED).strip() or TRIP_CONTAINER_STATUS_PLANNED
-    if st == TRIP_CONTAINER_STATUS_CANCELLED:
+    if st != TRIP_CONTAINER_STATUS_PLANNED:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"detail": "Cannot create a trip in cancelled status", "code": "INVALID_TRIP_STATUS"},
+            status_code=400,
+            detail={
+                "detail": "Trip create only allows status 'planned' (or omit)",
+                "code": "INVALID_TRIP_STATUS",
+            },
         )
     jt = (job_type or JOB_TYPE_FREIGHT_LOAD).strip() or JOB_TYPE_FREIGHT_LOAD
     if len(jt) > 32 or len(st) > 32:

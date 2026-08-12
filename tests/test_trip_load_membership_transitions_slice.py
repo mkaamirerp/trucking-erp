@@ -169,6 +169,32 @@ async def _membership_row(load_id: int, trip_id: int) -> dict | None:
         await engine.dispose()
 
 
+async def _force_incomplete_assigned(
+    trip_id: int,
+    *,
+    driver_id: int | None,
+    truck_id: int | None,
+    trailer_id: int | None,
+) -> None:
+    """Test-only: set trips.status=assigned with partial resources (does not use production APIs)."""
+    url = _tenant_async_url()
+    assert url
+    engine = create_async_engine(url, pool_pre_ping=True)
+    Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    try:
+        async with Session() as session:
+            await session.execute(
+                text(
+                    "UPDATE trips SET status = 'assigned', driver_id = :d, truck_id = :t, "
+                    "trailer_id = :r, assigned_at = NULL WHERE id = :tid"
+                ),
+                {"tid": trip_id, "d": driver_id, "t": truck_id, "r": trailer_id},
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
 async def _assign_trip(client: AsyncClient, trip_id: int) -> None:
     ids = await _first_driver_truck_trailer(client)
     if ids is None:
@@ -573,29 +599,17 @@ class TestTripLoadMembershipTransitions:
         assert await _load_active_trip_id(load_id) == trip_ok
         await _clear_open_memberships(load_id)
 
-        # B/C/D. hollow assigned via POST /trips status=assigned missing one resource
-        for missing, body in (
-            (
-                "driver",
-                {"status": "assigned", "job_type": "freight_load", "load_ids": [load_id],
-                 "driver_id": None, "truck_id": t_id, "trailer_id": r_id},
-            ),
-            (
-                "truck",
-                {"status": "assigned", "job_type": "freight_load", "load_ids": [load_id],
-                 "driver_id": d_id, "truck_id": None, "trailer_id": r_id},
-            ),
-            (
-                "trailer",
-                {"status": "assigned", "job_type": "freight_load", "load_ids": [load_id],
-                 "driver_id": d_id, "truck_id": t_id, "trailer_id": None},
-            ),
+        # B/C/D. incomplete assigned via planned create + test-only SQL (POST /trips is planned-only)
+        for missing, d, t, r in (
+            ("driver", None, t_id, r_id),
+            ("truck", d_id, None, r_id),
+            ("trailer", d_id, t_id, None),
         ):
             await _clear_open_memberships(load_id)
-            r_create = await client.post("/api/v1/trips", headers=AUTH_HEADERS, json=body)
-            assert r_create.status_code == 201, f"{missing}: {r_create.text}"
-            trip_id = int(r_create.json()["id"])
-            assert r_create.json()["status"] == "assigned"
+            trip_id = await _create_planned()
+            await _force_incomplete_assigned(
+                trip_id, driver_id=d, truck_id=t, trailer_id=r
+            )
             r_act = await client.post(
                 f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
                 headers=AUTH_HEADERS,
