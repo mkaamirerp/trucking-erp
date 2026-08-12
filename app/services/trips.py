@@ -16,7 +16,9 @@ from app.constants.trip_dispatch import (
     TRIP_CONTAINER_STATUS_COMPLETED,
     TRIP_CONTAINER_STATUS_IN_PROGRESS,
     TRIP_CONTAINER_STATUS_PLANNED,
+    TRIP_LOAD_STATUS_WITHIN_ACTIVE,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
+    TRIP_LOAD_STATUS_WITHIN_REMOVED,
 )
 from app.models.driver import Driver
 from app.models.load import Load, LoadStop
@@ -33,7 +35,7 @@ from app.schemas.trip_read import (
     TripScheduleBody,
 )
 from app.utils.pagination import paginate
-from app.services.dispatch_trips import TRIP_LOAD_STATUS_WITHIN_REMOVED, mint_next_trip_number
+from app.services.dispatch_trips import mint_next_trip_number
 
 
 def _num(v: Any) -> float | None:
@@ -360,17 +362,33 @@ async def _validate_assignment_targets(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trailer not found")
 
 
+async def _lock_load_for_membership(db: AsyncSession, tenant_id: int, load_id: int) -> Load:
+    """Lock the Load row so concurrent membership writes serialize per Load."""
+    load = await db.scalar(
+        select(Load)
+        .where(Load.tenant_id == tenant_id, Load.id == load_id)
+        .with_for_update()
+    )
+    if load is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    return load
+
+
 async def _sync_load_active_trip_pointer(db: AsyncSession, tenant_id: int, load_id: int) -> None:
-    """Set loads.active_trip_id from remaining active trip_loads rows (convenience only)."""
+    """Set loads.active_trip_id from the open ACTIVE trip_loads row only (compatibility mirror)."""
     load = await db.scalar(select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id))
     if load is None:
         return
     other = await db.scalar(
-        select(TripLoad).where(
+        select(TripLoad)
+        .where(
             TripLoad.tenant_id == tenant_id,
             TripLoad.load_id == load_id,
             TripLoad.removed_at.is_(None),
+            TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
         )
+        .order_by(TripLoad.id.asc())
+        .limit(1)
     )
     if other is not None:
         load.active_trip_id = int(other.trip_id)
@@ -396,9 +414,7 @@ async def _insert_trip_load_row(
             detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
 
-    load = await db.scalar(select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id))
-    if load is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    load = await _lock_load_for_membership(db, tenant_id, load_id)
 
     same = await db.scalar(
         select(TripLoad).where(
@@ -414,18 +430,43 @@ async def _insert_trip_load_row(
             detail={"detail": "Load already on this trip", "code": "DUPLICATE_TRIP_LOAD_MEMBERSHIP"},
         )
 
-    other_trip = await db.scalar(
-        select(TripLoad).where(
-            TripLoad.tenant_id == tenant_id,
-            TripLoad.load_id == load_id,
-            TripLoad.removed_at.is_(None),
-            TripLoad.trip_id != trip_id,
+    if status_within == TRIP_LOAD_STATUS_WITHIN_PLANNED:
+        other_planned = await db.scalar(
+            select(TripLoad).where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.load_id == load_id,
+                TripLoad.removed_at.is_(None),
+                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_PLANNED,
+                TripLoad.trip_id != trip_id,
+            )
         )
-    )
-    if other_trip is not None:
+        if other_planned is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Load already has an open planned membership on another trip",
+                    "code": "LOAD_PLANNED_ON_OTHER_TRIP",
+                },
+            )
+    elif status_within == TRIP_LOAD_STATUS_WITHIN_ACTIVE:
+        other_active = await db.scalar(
+            select(TripLoad).where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.load_id == load_id,
+                TripLoad.removed_at.is_(None),
+                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+                TripLoad.trip_id != trip_id,
+            )
+        )
+        if other_active is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"detail": "Load already active on another trip", "code": "LOAD_ACTIVE_ON_OTHER_TRIP"},
+            )
+    else:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"detail": "Load already active on another trip", "code": "LOAD_ACTIVE_ON_OTHER_TRIP"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"detail": "Unsupported trip_load status for insert", "code": "INVALID_TRIP_LOAD_STATUS"},
         )
 
     now = datetime.now(timezone.utc)
@@ -442,8 +483,9 @@ async def _insert_trip_load_row(
     )
     await db.flush()
 
-    if load.active_trip_id is None:
-        load.active_trip_id = trip_id
+    if status_within == TRIP_LOAD_STATUS_WITHIN_ACTIVE:
+        await _sync_load_active_trip_pointer(db, tenant_id, load_id)
+    # PLANNED: never set or sync active_trip_id to the planned trip.
 
 
 async def create_planned_trip(

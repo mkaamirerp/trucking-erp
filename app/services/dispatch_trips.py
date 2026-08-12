@@ -16,6 +16,8 @@ from app.constants.trip_dispatch import (
     DISPATCH_TRIP_STATUS_ACTIVE,
     DISPATCH_TRIP_STATUS_CANCELLED,
     JOB_TYPE_FREIGHT_LOAD,
+    TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+    TRIP_LOAD_STATUS_WITHIN_REMOVED,
     TRIP_NUMERIC_WIDTH,
     TRIP_NUMBER_PREFIX_MAX_LEN,
     TRIP_NUMBER_PREFIX_MIN_LEN,
@@ -24,11 +26,6 @@ from app.constants.trip_dispatch import (
 from app.models.dispatch_trip import DispatchTrip, TenantDispatchNumbering
 from app.models.load import Load
 from app.models.trip import Trip, TripLoad
-
-
-# Matches Phase 1 backfill: trip_loads.status_within_trip for active membership vs soft-removed.
-TRIP_LOAD_STATUS_WITHIN_ACTIVE = "active"
-TRIP_LOAD_STATUS_WITHIN_REMOVED = "removed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +136,14 @@ async def _upsert_trip_and_membership(
     db: AsyncSession, tenant_id: int, load_id: int, d_trip: DispatchTrip, load: Load
 ) -> int:
     """Create or update `trips` + ensure one active `trip_loads` row for this freight dispatch. Returns trips.id."""
+    # Serialize membership cardinality checks with Trip API planned/active writes.
+    locked = await db.scalar(
+        select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id).with_for_update()
+    )
+    if locked is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    load = locked
+
     container = await db.scalar(
         select(Trip).where(
             Trip.tenant_id == tenant_id,
@@ -182,6 +187,21 @@ async def _upsert_trip_and_membership(
         )
     )
     if active_tl is None:
+        other_active = await db.scalar(
+            select(TripLoad).where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.load_id == load_id,
+                TripLoad.removed_at.is_(None),
+                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+                TripLoad.trip_id != container.id,
+            )
+        )
+        if other_active is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"detail": "Load already active on another trip", "code": "LOAD_ACTIVE_ON_OTHER_TRIP"},
+            )
+        # Open PLANNED on another trip is allowed (ACTIVE A + PLANNED B).
         add_ref = d_trip.assigned_at or d_trip.created_at
         db.add(
             TripLoad(
