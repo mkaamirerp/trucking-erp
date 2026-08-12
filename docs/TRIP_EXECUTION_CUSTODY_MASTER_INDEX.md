@@ -103,7 +103,9 @@ The following are **locked** for V1-oriented execution/custody work as of **3L-A
 
 - **Trip** is the **operational execution container** (movement, equipment assignment at trip level for active membership).
 - **Load** is the **commercial / broker / customer** truth (stops, docs, rates); **`Load.status`** **target** for **new writes** is **commercial/readiness** only — **`draft`**, **`ready`**, **`cancelled`** (**Decision 11**) — **not** trip execution state.
-- **TripLoad** (`trip_loads`) is **explicit membership** between trip and load.
+- **Three parallel truths (LOCKED):** **Load** = commercial/revenue truth; **Trip** = operational/payable truth; **Audit/Custody** = continuity truth — **separate but reconcilable**; **no silent disappearance**. Detail: [`trip-foundation.md`](./trip-foundation.md) §1A; operational framing: [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) §2.
+- **Future reservation ≠ current custody ≠ execution eligibility** (cross-check Decisions 7, 9, 10, 12; full lock in [`trip-foundation.md`](./trip-foundation.md) §1A).
+- **TripLoad** (`trip_loads`) is **explicit membership** between trip and load (membership bridge — **not** the complete custody/audit timeline).
 - **Active membership** = `trip_loads` row with **`removed_at IS NULL`** — **source of truth** for “load on trip.”
 - **`loads.active_trip_id`** is a **backend mirror only**; **UI must not “repair” drift** (membership APIs own consistency).
 - **Trip completion ≠ load delivery** (trip can end with handoff; loads may remain active).

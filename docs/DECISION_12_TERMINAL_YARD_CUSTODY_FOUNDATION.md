@@ -48,6 +48,7 @@ The following are **LOCKED** for product and documentation alignment:
 13. A **driver** must **not** unilaterally **complete** a trip with **active undelivered freight** unless **required** handoff/custody **workflow** is satisfied (product/RBAC details TBD).
 14. **Trip-to-trip continuation** uses **explicit** remaining-stop / carry logic — **not** silent automatic inheritance of operational state.
 15. **Schema direction** leaves room for **future quantity-based** transfers, even if **V1** is **full-load** transfer only.
+16. **Load**, **Trip**, and **custody/audit** timelines are **separate** but must remain **reconcilable** (no silent disappearance) — architecture home: [`trip-foundation.md`](./trip-foundation.md) §1A; Decision 12 stays focused on terminal/custody enforcement of that continuity.
 
 ---
 

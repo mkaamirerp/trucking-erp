@@ -59,7 +59,9 @@ to
 
 ## 2) Foundational separation of concepts
 
-### 2.1 Load
+Aligned with **Three Parallel Truths** in [`trip-foundation.md`](./trip-foundation.md) §1A: Load = commercial/revenue; Trip = operational/payable; Audit/Custody = continuity. Separate but reconcilable; no silent disappearance. Detail and invalid/valid examples live there; this section keeps the operational framing used by terminal/yard/handoff rules below.
+
+### 2.1 Load (commercial / revenue truth)
 
 A Load is the commercial/broker/customer record.
 It owns:
@@ -75,7 +77,7 @@ It owns:
 
 A load can exist before dispatch, during movement, at yard, through handoff, across multiple trips, and until final delivery/close.
 
-### 2.2 Trip
+### 2.2 Trip (operational / payable work truth)
 
 A Trip is the operational assignment/execution container.
 It owns:
@@ -90,11 +92,11 @@ It owns:
 * responsibility window
 * terminal/yard routing context
 
-A trip may contain one or more loads.
+A trip may contain one or more loads through explicit TripLoad membership. TripLoad is the membership bridge — **not** the complete custody/audit timeline.
 
-### 2.3 Freight custody / operational location
+### 2.3 Audit / Custody Timeline (continuity truth)
 
-This is separate from Trip and separate from final load delivery.
+Freight custody / operational location is separate from Trip and separate from final commercial load delivery.
 At any point freight may be:
 
 * on assigned road trailer
@@ -106,6 +108,10 @@ At any point freight may be:
 * delivered
 
 This custody/location layer is required. Without it, the system will fake reality.
+
+**Locked distinction (see trip-foundation §1A):** future reservation ≠ current custody ≠ execution eligibility. Planning a next Trip does not transfer custody or start execution.
+
+**Concise valid pattern (Acme → Yard → XYZ):** commercial Load Acme Brick → XYZ Bricks; Trip A (night) moves to company yard on Trailer 13006 and may complete operationally while Load stays commercially active; custody records yard arrival explicitly; Trip B (day) may be planned before Trip A arrives and later runs yard → XYZ on the same or a different trailer. Full wording: [`trip-foundation.md`](./trip-foundation.md) §1A.
 
 ---
 

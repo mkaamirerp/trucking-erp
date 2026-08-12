@@ -52,6 +52,97 @@ This means one commercial Load can be moved by one Trip or by multiple Trips ove
 
 ---
 
+## 1A. Three Parallel Truths (LOCKED)
+
+TruckERP keeps **three separate truths**. They must stay **reconcilable**. This section fails-proofs the existing Load / Trip model; it does **not** replace it.
+
+### A. Load = Commercial / Revenue Truth
+
+- broker/customer contract
+- rate/revenue
+- contractual pickup/delivery obligation
+- documents and billing
+- remains alive across one or multiple Trips until final commercial completion
+
+### B. Trip = Operational / Payable Work Truth
+
+- driver/team
+- truck
+- trailer
+- operational movement segment
+- execution lifecycle
+- creates the work that settlement/payroll will eventually pay
+
+### C. Audit / Custody Timeline = Continuity Truth
+
+- where freight was
+- which Trip had responsibility
+- which driver/equipment handled it
+- pickup
+- handoff
+- yard/terminal state
+- trailer transfer
+- next Trip
+- final delivery
+- correction / void history
+
+### Locked principle
+
+Load, Trip, and Audit/Custody are separate truths but must remain reconcilable.
+
+A commercial Load must have an unbroken operational and custody/audit history from booking through final delivery/close.
+
+Every Trip performing work must remain traceable to the Load(s) it moved and to the custody events caused by that work.
+
+**No line may silently disappear.**
+
+### Invalid continuity examples
+
+- Load remains active with no known Trip and no known custody/location state.
+- Trip moves freight without auditable TripLoad membership.
+- Trip completes with undelivered freight and no handoff/custody event.
+- Load becomes final_delivered without a final-delivery event.
+- Load revenue exists but payable Trip work becomes untraceable.
+- Driver/truck/trailer responsibility changes without an auditable transition.
+- Trailer identity changes through silent overwrite instead of transfer/history.
+
+### Valid operational example
+
+**Commercial Load:** Acme Brick → XYZ Bricks
+
+**Trip A:** US/night driver; Acme Brick → company yard; Trailer 13006.
+
+Trip A may complete its **operational** responsibility at the yard. The Load remains **commercially** active.
+
+**Audit/Custody:** Load/trailer arrives at company yard. Custody/location is recorded explicitly. Load is **not** final delivered.
+
+**Trip B:** local/day driver; company yard → XYZ Bricks; same Trailer 13006 **or** a different trailer.
+
+Trip B may be **PLANNED** before Trip A physically arrives.
+
+### Locked distinction
+
+**Future reservation ≠ current custody ≠ execution eligibility.**
+
+Planning Trip B does **not** mean Trip B currently possesses the freight. Current custody may still belong to Trip A. Execution of Trip B must occur only when the required operational handoff/release conditions are satisfied.
+
+### TripLoad clarification (membership vs continuity)
+
+**TripLoad** is the **membership / relationship bridge** between Load and Trip.
+
+**TripLoad is NOT the complete custody/audit timeline.** Custody events provide continuity/history.
+
+Preserve the intended TripLoad statuses (documentation meaning only; no code change implied here):
+
+| Status | Conceptual meaning |
+|--------|--------------------|
+| `planned` | Future membership / reservation |
+| `active` | Current movement responsibility |
+| `completed` | That Load’s responsibility within that Trip is finished |
+| `removed` | Planned/active membership was removed or cancelled from that Trip |
+
+---
+
 ## 2. Five pillars
 
 All future implementation must follow these five pillars.
@@ -150,15 +241,27 @@ Load owns:
 - broker revenue
 - commercial cancellation/final delivery state
 
-### TripLoad owns relationship truth
+### TripLoad owns relationship / membership truth
 
 TripLoad owns:
 
 - this Load is on this Trip
-- the status of that relationship
+- the status of that relationship (`planned` / `active` / `completed` / `removed`)
 - added/removed/completed timestamps
 - sequence/order hint
 - future reason/audit metadata
+
+**Do not collapse TripLoad into Audit/Custody.** TripLoad is the membership bridge. Continuity history (pickup, handoff, yard/terminal, trailer transfer, final delivery, void/correct) belongs to the **Audit / Custody Timeline** (see §1A). Membership rows are necessary for reconcilability; they are not a substitute for custody events.
+
+### Audit / Custody owns continuity truth
+
+Audit/Custody owns (conceptually; schema/API timing is separate):
+
+- where freight was and is
+- which Trip had responsibility
+- which driver/equipment handled it
+- handoff / yard / terminal / trailer-transfer events
+- final-delivery continuity and correction/void history
 
 ---
 
@@ -359,10 +462,12 @@ Recommended `trip_loads.status_within_trip` values:
 
 | Status | Meaning |
 |--------|---------|
-| `planned` | Load is planned to be on this Trip. |
-| `active` | Load is currently active on this Trip. |
-| `completed` | This Load’s role in this Trip is complete. This may be terminal drop, handoff, or final delivery depending on Trip purpose. |
-| `removed` | Load is no longer on this Trip. Commercial Load may or may not be cancelled. |
+| `planned` | Future membership / reservation — Load is planned to be on this Trip. |
+| `active` | Current movement responsibility — Load is currently active on this Trip. |
+| `completed` | That Load’s responsibility within that Trip is finished (terminal drop, handoff, or final delivery depending on Trip purpose). |
+| `removed` | Planned/active membership was removed or cancelled from that Trip. Commercial Load may or may not be cancelled. |
+
+These are **membership** statuses on TripLoad, not the full custody/audit timeline (see §1A).
 
 Do not confuse `trip_loads.status_within_trip = removed` with `loads.status = cancelled`.
 
@@ -688,7 +793,7 @@ Do not immediately:
 2. Load is the commercial broker/customer contract record.
 3. Trip may contain one or more Loads.
 4. A Load may move through multiple Trips before final delivery.
-5. TripLoad is the explicit relationship and audit bridge between Trip and Load.
+5. TripLoad is the explicit membership/relationship bridge between Trip and Load (not the complete custody/audit timeline).
 6. Trip number belongs to Trip, not Load.
 7. Trip number may be minted when a planned Trip is created.
 8. Trip numbers are never reused.
@@ -704,6 +809,10 @@ Do not immediately:
 18. `LoadWorkspacePage` stays as load preparation/commercial confirmation.
 19. `TripWorkspacePage` becomes the operational assignment/dispatch root.
 20. Dispatch board eventually pivots from Loads to Trips.
+21. Three parallel truths: Load = commercial/revenue; Trip = operational/payable; Audit/Custody timeline = continuity — separate but reconcilable (§1A).
+22. No line may silently disappear: unbroken operational and custody/audit history from booking through final delivery/close; every Trip’s work remains traceable to Load(s) and custody events.
+23. TripLoad is membership/relationship only — not the complete custody/audit timeline.
+24. Future reservation ≠ current custody ≠ execution eligibility.
 
 ---
 
@@ -721,6 +830,9 @@ Before coding any future Trip/Load/dispatch feature, Cursor must check the work 
 8. Does this preserve `LoadWorkspacePage` as preparation/commercial confirmation?
 9. Does this move operational assignment toward `TripWorkspacePage`?
 10. Does this support future relationship/accounting/profit reporting?
+11. Does this keep Load, Trip, and Audit/Custody reconcilable (no silent gaps or silent overwrites)?
+12. Does this keep TripLoad as membership only and custody events as continuity history?
+13. Does this respect future reservation ≠ current custody ≠ execution eligibility?
 
 If the answer is no, the implementation is drifting.
 
@@ -755,4 +867,4 @@ After docs are updated, produce a short Phase 3C implementation proposal for pla
 
 ## 25. Short canonical wording
 
-> A Load is the broker/customer contract. A Trip is the operational/payable movement. A Load may be moved by one Trip or multiple Trips. City pickup is a Trip segment for the same Load, not a second Load. Trip numbers belong to Trips, can be created during planning, and are never reused. Trip completion means dispatch file closeout and payroll eligibility; Load final delivery means the commercial freight reached the broker/customer receiver. TruckERP must relate Load revenue to all connected Trips, settlements, and expenses to show true profit.
+> A Load is the commercial/revenue truth. A Trip is the operational/payable work truth. Audit/Custody is the continuity truth. The three are separate but must remain reconcilable — no line may silently disappear. TripLoad is membership only, not the full custody timeline. A Load may be moved by one Trip or multiple Trips. Future reservation ≠ current custody ≠ execution eligibility. City pickup is a Trip segment for the same Load, not a second Load. Trip numbers belong to Trips, can be created during planning, and are never reused. Trip completion means dispatch file closeout and payroll eligibility; Load final delivery means the commercial freight reached the broker/customer receiver. TruckERP must relate Load revenue to all connected Trips, settlements, and expenses to show true profit.

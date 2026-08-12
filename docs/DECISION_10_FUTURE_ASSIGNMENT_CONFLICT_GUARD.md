@@ -150,6 +150,7 @@ Real operations need slack; the system may **not** have perfect data:
 - **Decision 10** only guards whether a **future assignment’s schedule** is **possible** relative to **current active execution**.
 - **Decision 9** remains the source for **Save Ready** / **planning queue** behavior — **not** scheduling conflict between **two committed** trips on the **same resource**.
 - **Decision 8** **package send** (**Assign & Send**) **does not** bypass this guard when both apply — **commitment** and **dates** must remain **consistent** with product rules once implemented.
+- **Architecture (not Decision 10’s home):** Decision 10 guards **schedule feasibility** only. It does **not** transfer custody or start execution. **Future reservation ≠ current custody ≠ execution eligibility** — see [`trip-foundation.md`](./trip-foundation.md) §1A Three Parallel Truths.
 
 ---
 
