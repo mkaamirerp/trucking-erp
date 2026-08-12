@@ -142,21 +142,21 @@ Planning Trip B does **not** mean Trip B currently possesses the freight. Curren
 
 | Term | Definition |
 |------|------------|
-| **Open membership** | `trip_loads.removed_at IS NULL` — the row is still open / still relevant. |
-| **Active membership** | `status_within_trip = 'active'` **AND** `removed_at IS NULL` — current operational movement responsibility for that Load. |
+| **Open membership** | `status_within_trip IN ('planned', 'active')` **AND** `completed_at IS NULL` **AND** `removed_at IS NULL`. |
+| **Active membership** | `status_within_trip = 'active'` **AND** open (both terminal timestamps NULL) — current operational movement responsibility for that Load. |
 
-**`removed_at IS NULL` alone does NOT mean:** current custody, current movement responsibility, or that Trip is the Load’s current/active Trip. An open **`planned`** row is a future reservation only.
+**`removed_at IS NULL` alone does NOT mean open.** Completed memberships keep `removed_at IS NULL` and set `completed_at`. An open **`planned`** row is a future reservation only.
 
-Older docs that said **“active membership = `removed_at IS NULL`”** meant **open** membership in today’s vocabulary. Those phrases are **superseded** by this section.
+Older docs that said **“open = `removed_at IS NULL`”** or **“active membership = `removed_at IS NULL`”** are **superseded** by this section.
 
 #### Status meanings
 
 | Status | Meaning |
 |--------|---------|
-| `planned` | Future membership / reservation. **No custody. No execution.** Does **not** make that Trip the Load’s active/current Trip. |
-| `active` | Current operational movement responsibility. |
-| `completed` | This Trip’s responsibility for the Load finished **normally**. Historical membership preserved. Load may still remain **commercially** active. |
-| `removed` | Membership cancelled / removed / replanned. Historical membership preserved. |
+| `planned` | Future membership / reservation. **No custody. No execution.** Does **not** make that Trip the Load’s active/current Trip. `completed_at`/`removed_at` NULL. |
+| `active` | Current operational movement responsibility. `completed_at`/`removed_at` NULL. |
+| `completed` | This Trip’s responsibility for the Load finished **normally**. `completed_at` set; **`removed_at` remains NULL**. Historical membership preserved. Load may still remain **commercially** active. |
+| `removed` | Membership cancelled / removed / replanned. `removed_at` set; `completed_at` NULL. Historical membership preserved. |
 
 #### V1 cardinality (one Load)
 
@@ -368,7 +368,7 @@ TripLoad owns:
 
 **Do not collapse TripLoad into Audit/Custody.** TripLoad is the membership bridge. Continuity history (pickup, handoff, yard/terminal, trailer transfer, final delivery, void/correct) belongs to the **Audit / Custody Timeline** (see §1A). Membership rows are necessary for reconcilability; they are not a substitute for custody events.
 
-**Open ≠ active:** see §1A TripLoad membership semantics. `removed_at IS NULL` = **open**; current movement owner = **`status_within_trip = active` AND `removed_at IS NULL`**.
+**Open ≠ active:** see §1A TripLoad membership semantics. Open = planned|active with both terminal timestamps NULL; current movement owner = open **`active`**.
 
 ### Audit / Custody owns continuity truth
 
@@ -584,8 +584,9 @@ Recommended `trip_loads.status_within_trip` values (meanings locked in §1A):
 | `completed` | That Load’s responsibility within that Trip finished normally; historical; Load may stay commercially active. |
 | `removed` | Membership cancelled / removed / replanned; historical. |
 
-**Open membership** = `removed_at IS NULL` (may be `planned` or `active`).  
-**Active membership** = `status_within_trip = 'active'` AND `removed_at IS NULL`.
+**Open membership** = `status_within_trip IN ('planned', 'active')` AND `completed_at IS NULL` AND `removed_at IS NULL`.  
+**Active membership** = `status_within_trip = 'active'` AND open.  
+`completed_at` = normal completion timestamp; `removed_at` = removed/cancelled/replanned only (not a generic closed stamp).
 
 V1: max one open `planned` and max one open `active` per Load; unlimited `completed` / `removed` history. Valid: active A + planned B. Invalid: two open actives, or two open planneds, until future sequencing exists.
 

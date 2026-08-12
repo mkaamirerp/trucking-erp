@@ -20,6 +20,7 @@ import {
   type TripDetail,
   type TripMemberLoad,
   type Truck,
+  isOpenTripMembership,
 } from "@/api";
 import { OPS } from "@/routes";
 
@@ -375,15 +376,23 @@ export default function TripWorkspacePage() {
   }, [tripId, addLoadIdInput, clearPickerSearch]);
 
   const activeMemberLoads = useMemo(
-    () => (trip?.member_loads ?? []).filter((m: TripMemberLoad) => m.removed_at == null),
+    () => (trip?.member_loads ?? []).filter((m: TripMemberLoad) => isOpenTripMembership(m)),
     [trip?.member_loads],
   );
 
   const historicalMemberLoads = useMemo(() => {
-    const rows = (trip?.member_loads ?? []).filter((m: TripMemberLoad) => m.removed_at != null);
+    const rows = (trip?.member_loads ?? []).filter((m: TripMemberLoad) => !isOpenTripMembership(m));
     return [...rows].sort((a, b) => {
-      const ta = a.removed_at ? new Date(a.removed_at).getTime() : 0;
-      const tb = b.removed_at ? new Date(b.removed_at).getTime() : 0;
+      const ta = a.completed_at
+        ? new Date(a.completed_at).getTime()
+        : a.removed_at
+          ? new Date(a.removed_at).getTime()
+          : 0;
+      const tb = b.completed_at
+        ? new Date(b.completed_at).getTime()
+        : b.removed_at
+          ? new Date(b.removed_at).getTime()
+          : 0;
       return tb - ta;
     });
   }, [trip?.member_loads]);

@@ -90,12 +90,33 @@ class TripLoad(Base):
         Index("ix_trip_loads_tenant_load_id", "tenant_id", "load_id"),
         Index("ix_trip_loads_tenant_status_within", "tenant_id", "status_within_trip"),
         Index(
-            "uq_trip_loads_active_membership",
+            "uq_trip_loads_open_membership",
             "tenant_id",
             "trip_id",
             "load_id",
             unique=True,
-            postgresql_where=text("removed_at IS NULL"),
+            postgresql_where=text(
+                "status_within_trip IN ('planned', 'active') "
+                "AND completed_at IS NULL AND removed_at IS NULL"
+            ),
+        ),
+        Index(
+            "uq_trip_loads_one_open_active_per_load",
+            "tenant_id",
+            "load_id",
+            unique=True,
+            postgresql_where=text(
+                "status_within_trip = 'active' AND completed_at IS NULL AND removed_at IS NULL"
+            ),
+        ),
+        Index(
+            "uq_trip_loads_one_open_planned_per_load",
+            "tenant_id",
+            "load_id",
+            unique=True,
+            postgresql_where=text(
+                "status_within_trip = 'planned' AND completed_at IS NULL AND removed_at IS NULL"
+            ),
         ),
     )
 
@@ -110,6 +131,7 @@ class TripLoad(Base):
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

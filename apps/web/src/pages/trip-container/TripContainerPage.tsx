@@ -27,6 +27,7 @@ import {
   type TripListItem,
   type TripMemberLoad,
   type Truck,
+  isOpenTripMembership,
 } from "@/api";
 import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops, formatStopCityState } from "@/utils/loadStops";
@@ -287,7 +288,7 @@ function routeSummaryLine(t: TripListItem): string {
 
 /** Route hint from trip detail first member snapshot. */
 function routeSummaryFromDetail(d: TripDetail | null): string | null {
-  const m = d?.member_loads?.find((x) => x.removed_at == null);
+  const m = d?.member_loads?.find((x) => isOpenTripMembership(x));
   const r = m?.stop_route_summary?.trim();
   return r || null;
 }
@@ -1673,7 +1674,7 @@ export default function TripContainerPage() {
       : "—";
 
   const activeMembers = useMemo(
-    () => (focusedDetail?.member_loads ?? []).filter((m) => m.removed_at == null),
+    () => (focusedDetail?.member_loads ?? []).filter((m) => isOpenTripMembership(m)),
     [focusedDetail],
   );
   const warningsOnSelected = useMemo(() => {
@@ -1927,7 +1928,7 @@ export default function TripContainerPage() {
                         </div>
                         <div className="mt-1 text-[9px] text-[var(--trk-text-muted)]">
                           {(focusedListItem?.member_load_count ??
-                            focusedDetail?.member_loads?.filter((x) => x.removed_at == null).length ??
+                            focusedDetail?.member_loads?.filter((x) => isOpenTripMembership(x)).length ??
                             0) || 0}{" "}
                           loads · <span className="text-[var(--trk-text)]">{routeStrip}</span>
                         </div>

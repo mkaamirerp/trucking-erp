@@ -843,6 +843,7 @@ export type TripMemberLoad = {
   status_within_trip: string;
   sequence_hint: number | null;
   added_at: string;
+  completed_at?: string | null;
   removed_at: string | null;
   load_number: string;
   broker_name_snapshot?: string | null;
@@ -852,6 +853,20 @@ export type TripMemberLoad = {
   customer_rate?: number | null;
   stop_route_summary?: string | null;
 };
+
+/** OPEN membership: planned|active and both terminal timestamps null. */
+export function isOpenTripMembership(m: {
+  status_within_trip?: string | null;
+  completed_at?: string | null;
+  removed_at?: string | null;
+}): boolean {
+  const st = (m.status_within_trip || "").toLowerCase();
+  return (
+    (st === "planned" || st === "active") &&
+    m.completed_at == null &&
+    m.removed_at == null
+  );
+}
 
 export type TripDetail = {
   id: number;

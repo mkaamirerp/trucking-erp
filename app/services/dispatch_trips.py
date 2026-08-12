@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.trip_dispatch import (
@@ -16,6 +16,7 @@ from app.constants.trip_dispatch import (
     DISPATCH_TRIP_STATUS_ACTIVE,
     DISPATCH_TRIP_STATUS_CANCELLED,
     JOB_TYPE_FREIGHT_LOAD,
+    TRIP_LOAD_OPEN_STATUSES,
     TRIP_LOAD_STATUS_WITHIN_ACTIVE,
     TRIP_LOAD_STATUS_WITHIN_REMOVED,
     TRIP_NUMERIC_WIDTH,
@@ -26,6 +27,22 @@ from app.constants.trip_dispatch import (
 from app.models.dispatch_trip import DispatchTrip, TenantDispatchNumbering
 from app.models.load import Load
 from app.models.trip import Trip, TripLoad
+
+
+def _trip_load_is_open_clause():
+    return and_(
+        TripLoad.status_within_trip.in_(TRIP_LOAD_OPEN_STATUSES),
+        TripLoad.completed_at.is_(None),
+        TripLoad.removed_at.is_(None),
+    )
+
+
+def _trip_load_is_open_active_clause():
+    return and_(
+        TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+        TripLoad.completed_at.is_(None),
+        TripLoad.removed_at.is_(None),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +200,7 @@ async def _upsert_trip_and_membership(
             TripLoad.tenant_id == tenant_id,
             TripLoad.trip_id == container.id,
             TripLoad.load_id == load_id,
-            TripLoad.removed_at.is_(None),
+            _trip_load_is_open_clause(),
         )
     )
     if active_tl is None:
@@ -191,8 +208,7 @@ async def _upsert_trip_and_membership(
             select(TripLoad).where(
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.load_id == load_id,
-                TripLoad.removed_at.is_(None),
-                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+                _trip_load_is_open_active_clause(),
                 TripLoad.trip_id != container.id,
             )
         )
@@ -211,6 +227,7 @@ async def _upsert_trip_and_membership(
                 status_within_trip=TRIP_LOAD_STATUS_WITHIN_ACTIVE,
                 sequence_hint=0,
                 added_at=add_ref,
+                completed_at=None,
                 removed_at=None,
             )
         )
@@ -285,12 +302,13 @@ async def cancel_active_trip_for_load(db: AsyncSession, tenant_id: int, load_id:
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.trip_id == mirror.id,
                 TripLoad.load_id == load_id,
-                TripLoad.removed_at.is_(None),
+                _trip_load_is_open_clause(),
             )
         )
         if active_tl is not None:
             active_tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_REMOVED
             active_tl.removed_at = now
+            active_tl.completed_at = None
 
     if load is not None:
         await _sync_load_read_model(db, load, None)

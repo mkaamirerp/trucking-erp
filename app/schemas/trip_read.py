@@ -17,6 +17,7 @@ class TripMemberLoadSummary(BaseModel):
     status_within_trip: str
     sequence_hint: Optional[int] = None
     added_at: datetime
+    completed_at: Optional[datetime] = None
     removed_at: Optional[datetime] = None
     load_number: str
     broker_name_snapshot: Optional[str] = None
@@ -57,7 +58,10 @@ class TripListItemResponse(BaseModel):
     expected_completion_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-    member_load_count: int = Field(0, description="Active memberships in trip_loads (removed_at IS NULL).")
+    member_load_count: int = Field(
+        0,
+        description="Open memberships in trip_loads (planned|active, completed_at/removed_at NULL).",
+    )
     first_member: Optional[TripFirstMemberSummary] = None
     model_config = ConfigDict(from_attributes=True)
 

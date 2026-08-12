@@ -143,14 +143,16 @@ class TestTripFoundationTables:
                     """
                     SELECT trip_id, load_id, tenant_id
                     FROM trip_loads
-                    WHERE removed_at IS NULL
+                    WHERE status_within_trip IN ('planned', 'active')
+                      AND completed_at IS NULL
+                      AND removed_at IS NULL
                     LIMIT 1
                     """
                 )
             )
         ).first()
         if row is None:
-            pytest.skip("No active trip_loads row in DB")
+            pytest.skip("No open trip_loads row in DB")
         trip_id, load_id, tenant_id = int(row[0]), int(row[1]), int(row[2])
         err: Exception | None = None
         try:
@@ -158,9 +160,10 @@ class TestTripFoundationTables:
                 text(
                     """
                     INSERT INTO trip_loads
-                    (tenant_id, trip_id, load_id, status_within_trip, sequence_hint, added_at, removed_at, created_at, updated_at)
+                    (tenant_id, trip_id, load_id, status_within_trip, sequence_hint, added_at,
+                     completed_at, removed_at, created_at, updated_at)
                     VALUES
-                    (:tid, :trid, :lid, 'active', 0, now(), NULL, now(), now())
+                    (:tid, :trid, :lid, 'active', 0, now(), NULL, NULL, now(), now())
                     """
                 ),
                 {"tid": tenant_id, "trid": trip_id, "lid": load_id},
@@ -169,5 +172,9 @@ class TestTripFoundationTables:
         except Exception as e:  # noqa: BLE001 — accept SQLAlchemy/asyncpg IntegrityError
             err = e
         assert err is not None
-        assert "uq_trip_loads_active_membership" in str(err) or "duplicate" in str(err).lower()
+        assert (
+            "uq_trip_loads_open_membership" in str(err)
+            or "uq_trip_loads_one_open_active_per_load" in str(err)
+            or "duplicate" in str(err).lower()
+        )
         await tenant_session.rollback()

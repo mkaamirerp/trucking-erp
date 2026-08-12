@@ -105,8 +105,10 @@ async def _clear_open_memberships(load_id: int) -> None:
         async with Session() as session:
             await session.execute(
                 text(
-                    "UPDATE trip_loads SET removed_at = NOW(), status_within_trip = 'removed' "
-                    "WHERE load_id = :lid AND removed_at IS NULL"
+                    "UPDATE trip_loads SET removed_at = NOW(), status_within_trip = 'removed', "
+                    "completed_at = NULL "
+                    "WHERE load_id = :lid AND removed_at IS NULL AND completed_at IS NULL "
+                    "AND status_within_trip IN ('planned', 'active')"
                 ),
                 {"lid": load_id},
             )
@@ -153,7 +155,9 @@ async def _membership_rows(load_id: int) -> list[dict]:
             rows = (
                 await session.execute(
                     text(
-                        "SELECT trip_id, status_within_trip, removed_at IS NULL AS is_open "
+                        "SELECT trip_id, status_within_trip, "
+                        "removed_at IS NULL AND completed_at IS NULL "
+                        "AND status_within_trip IN ('planned','active') AS is_open "
                         "FROM trip_loads WHERE load_id = :lid ORDER BY id"
                     ),
                     {"lid": load_id},

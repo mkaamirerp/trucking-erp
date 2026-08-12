@@ -81,6 +81,34 @@ async def remove_load_from_trip(
     return detail
 
 
+@router.post("/{trip_id}/loads/{load_id}/activate", response_model=TripDetailResponse)
+async def activate_trip_load(
+    trip_id: int,
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> TripDetailResponse:
+    """Explicit planned → active membership transition (not Decision 7 execution start)."""
+    detail = await trips_service.activate_trip_load_membership(db, tenant_id, trip_id, load_id)
+    await db.commit()
+    return detail
+
+
+@router.post("/{trip_id}/loads/{load_id}/complete", response_model=TripDetailResponse)
+async def complete_trip_load(
+    trip_id: int,
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> TripDetailResponse:
+    """Explicit active → completed membership transition (no auto-activate next Trip)."""
+    detail = await trips_service.complete_trip_load_membership(db, tenant_id, trip_id, load_id)
+    await db.commit()
+    return detail
+
+
 @router.get("", response_model=TripListPageResponse)
 async def list_trips(
     tenant_id: int = Depends(require_tenant),

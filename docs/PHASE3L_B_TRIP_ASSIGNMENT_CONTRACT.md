@@ -21,14 +21,14 @@ This document locks **who owns movement assignment** and **how reads/syncs must 
 | Term | Meaning |
 |------|--------|
 | **Movement assignment** | The **driver**, **truck**, and **trailer** (equipment set) that **physically perform** or are **booked to perform** the trip’s operational movement. |
-| **Open trip membership** | A `trip_loads` row with **`removed_at IS NULL`** for the tenant-scoped load (may be `planned` or `active`). |
-| **Active trip membership** | A `trip_loads` row with **`status_within_trip = 'active'`** **AND** **`removed_at IS NULL`**. Current movement responsibility only — **not** a planned reservation. |
+| **Open trip membership** | A `trip_loads` row with **`status_within_trip IN ('planned','active')`** **AND** **`completed_at IS NULL`** **AND** **`removed_at IS NULL`**. |
+| **Active trip membership** | A `trip_loads` row with **`status_within_trip = 'active'`** **AND** open (both terminal timestamps NULL). Current movement responsibility only — **not** a planned reservation. |
 | **Planned trip membership** | Open row with **`status_within_trip = 'planned'`** — future reservation; **no custody**; does **not** own current movement. |
 | **Planned trip container** | A `trips` row with `status` in **`planned`** / **`cancelled`** in the **current** product module (`TRIP_CONTAINER_STATUS_*`; execution statuses are **future** per 3L-A). |
 | **Load assignment fields** | **`loads.driver_id`**, **`loads.truck_id`**, **`loads.trailer_id`** (and nested read models on `LoadResponse`). |
 | **Trip assignment fields** | **`trips.driver_id`**, **`trips.truck_id`**, **`trips.trailer_id`**, optional timestamp **`trips.assigned_at`** (execution phases may define when it is set). |
 
-**Supersession:** Older wording that defined **“Active trip membership”** as only **`removed_at IS NULL`** is **superseded**. That predicate means **open** membership. Full V1 cardinality (max one open active + max one open planned; active A + planned B valid) is locked in [`trip-foundation.md`](./trip-foundation.md) §1A.
+**Supersession:** Older wording that defined **open/active** as only **`removed_at IS NULL`** is **superseded**. Completed rows keep `removed_at` NULL. Full V1 cardinality (max one open active + max one open planned; active A + planned B valid) is locked in [`trip-foundation.md`](./trip-foundation.md) §1A.
 
 ---
 

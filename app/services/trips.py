@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.trip_dispatch import (
@@ -16,7 +17,9 @@ from app.constants.trip_dispatch import (
     TRIP_CONTAINER_STATUS_COMPLETED,
     TRIP_CONTAINER_STATUS_IN_PROGRESS,
     TRIP_CONTAINER_STATUS_PLANNED,
+    TRIP_LOAD_OPEN_STATUSES,
     TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+    TRIP_LOAD_STATUS_WITHIN_COMPLETED,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_REMOVED,
 )
@@ -36,6 +39,31 @@ from app.schemas.trip_read import (
 )
 from app.utils.pagination import paginate
 from app.services.dispatch_trips import mint_next_trip_number
+
+
+def _trip_load_is_open_clause():
+    """OPEN = planned|active AND completed_at IS NULL AND removed_at IS NULL."""
+    return and_(
+        TripLoad.status_within_trip.in_(TRIP_LOAD_OPEN_STATUSES),
+        TripLoad.completed_at.is_(None),
+        TripLoad.removed_at.is_(None),
+    )
+
+
+def _trip_load_is_open_active_clause():
+    return and_(
+        TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+        TripLoad.completed_at.is_(None),
+        TripLoad.removed_at.is_(None),
+    )
+
+
+def _trip_load_is_open_planned_clause():
+    return and_(
+        TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_PLANNED,
+        TripLoad.completed_at.is_(None),
+        TripLoad.removed_at.is_(None),
+    )
 
 
 def _num(v: Any) -> float | None:
@@ -148,7 +176,7 @@ async def list_trips(
         .where(
             TripLoad.tenant_id == tenant_id,
             TripLoad.trip_id.in_(tids),
-            TripLoad.removed_at.is_(None),
+            _trip_load_is_open_clause(),
         )
         .group_by(TripLoad.trip_id)
     )
@@ -164,7 +192,7 @@ async def list_trips(
             .where(
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.trip_id.in_(tids),
-                TripLoad.removed_at.is_(None),
+                _trip_load_is_open_clause(),
             )
         )
     ).all()
@@ -282,6 +310,7 @@ async def get_trip_detail(db: AsyncSession, tenant_id: int, trip_id: int) -> Tri
                 status_within_trip=tl.status_within_trip,
                 sequence_hint=tl.sequence_hint,
                 added_at=tl.added_at,
+                completed_at=tl.completed_at,
                 removed_at=tl.removed_at,
                 load_number=lo.load_number,
                 broker_name_snapshot=lo.broker_name_snapshot,
@@ -384,8 +413,7 @@ async def _sync_load_active_trip_pointer(db: AsyncSession, tenant_id: int, load_
         .where(
             TripLoad.tenant_id == tenant_id,
             TripLoad.load_id == load_id,
-            TripLoad.removed_at.is_(None),
-            TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+            _trip_load_is_open_active_clause(),
         )
         .order_by(TripLoad.id.asc())
         .limit(1)
@@ -421,7 +449,7 @@ async def _insert_trip_load_row(
             TripLoad.tenant_id == tenant_id,
             TripLoad.trip_id == trip_id,
             TripLoad.load_id == load_id,
-            TripLoad.removed_at.is_(None),
+            _trip_load_is_open_clause(),
         )
     )
     if same is not None:
@@ -435,8 +463,7 @@ async def _insert_trip_load_row(
             select(TripLoad).where(
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.load_id == load_id,
-                TripLoad.removed_at.is_(None),
-                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_PLANNED,
+                _trip_load_is_open_planned_clause(),
                 TripLoad.trip_id != trip_id,
             )
         )
@@ -453,8 +480,7 @@ async def _insert_trip_load_row(
             select(TripLoad).where(
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.load_id == load_id,
-                TripLoad.removed_at.is_(None),
-                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+                _trip_load_is_open_active_clause(),
                 TripLoad.trip_id != trip_id,
             )
         )
@@ -478,10 +504,22 @@ async def _insert_trip_load_row(
             status_within_trip=status_within,
             sequence_hint=sequence_hint,
             added_at=now,
+            completed_at=None,
             removed_at=None,
         )
     )
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Open TripLoad membership uniqueness violated",
+                "code": "LOAD_ACTIVE_ON_OTHER_TRIP"
+                if status_within == TRIP_LOAD_STATUS_WITHIN_ACTIVE
+                else "LOAD_PLANNED_ON_OTHER_TRIP",
+            },
+        ) from exc
 
     if status_within == TRIP_LOAD_STATUS_WITHIN_ACTIVE:
         await _sync_load_active_trip_pointer(db, tenant_id, load_id)
@@ -570,7 +608,7 @@ async def remove_load_from_trip(
             TripLoad.tenant_id == tenant_id,
             TripLoad.trip_id == trip_id,
             TripLoad.load_id == load_id,
-            TripLoad.removed_at.is_(None),
+            _trip_load_is_open_clause(),
         )
     )
     if tl is None:
@@ -582,6 +620,194 @@ async def remove_load_from_trip(
     now = datetime.now(timezone.utc)
     tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_REMOVED
     tl.removed_at = now
+    tl.completed_at = None
+    await db.flush()
+
+    await _sync_load_active_trip_pointer(db, tenant_id, load_id)
+
+    detail = await get_trip_detail(db, tenant_id, trip_id)
+    assert detail is not None
+    return detail
+
+
+async def activate_trip_load_membership(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+) -> TripDetailResponse:
+    """Explicit planned → active. Does not start Trip execution or mutate Load commercial status."""
+    trip = await db.get(Trip, trip_id)
+    if trip is None or trip.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+
+    await _lock_load_for_membership(db, tenant_id, load_id)
+
+    tl = await db.scalar(
+        select(TripLoad).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.trip_id == trip_id,
+            TripLoad.load_id == load_id,
+        )
+    )
+    if tl is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
+        )
+
+    # Idempotent: already open ACTIVE on this membership.
+    if (
+        tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE
+        and tl.completed_at is None
+        and tl.removed_at is None
+    ):
+        detail = await get_trip_detail(db, tenant_id, trip_id)
+        assert detail is not None
+        return detail
+
+    if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_COMPLETED or tl.completed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Completed membership cannot be activated",
+                "code": "MEMBERSHIP_ALREADY_COMPLETED",
+            },
+        )
+    if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_REMOVED or tl.removed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Removed membership cannot be activated",
+                "code": "MEMBERSHIP_ALREADY_REMOVED",
+            },
+        )
+    if tl.status_within_trip != TRIP_LOAD_STATUS_WITHIN_PLANNED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Membership is not planned",
+                "code": "MEMBERSHIP_NOT_PLANNED",
+            },
+        )
+
+    if trip.status not in (TRIP_CONTAINER_STATUS_ASSIGNED, TRIP_CONTAINER_STATUS_IN_PROGRESS):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": f"Trip status '{trip.status}' cannot activate membership",
+                "code": "INVALID_TRIP_STATUS_FOR_ACTIVATE",
+            },
+        )
+
+    if trip.status == TRIP_CONTAINER_STATUS_ASSIGNED and (
+        trip.driver_id is None or trip.truck_id is None or trip.trailer_id is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Driver, truck, and trailer must be assigned before activating a Load membership",
+                "code": "TRIP_ASSIGNMENT_INCOMPLETE",
+            },
+        )
+
+    other_active = await db.scalar(
+        select(TripLoad).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.load_id == load_id,
+            _trip_load_is_open_active_clause(),
+            TripLoad.id != tl.id,
+        )
+    )
+    if other_active is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Load already active on another trip", "code": "LOAD_ACTIVE_ON_OTHER_TRIP"},
+        )
+
+    tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_ACTIVE
+    tl.completed_at = None
+    tl.removed_at = None
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Load already active on another trip", "code": "LOAD_ACTIVE_ON_OTHER_TRIP"},
+        ) from exc
+
+    await _sync_load_active_trip_pointer(db, tenant_id, load_id)
+
+    detail = await get_trip_detail(db, tenant_id, trip_id)
+    assert detail is not None
+    return detail
+
+
+async def complete_trip_load_membership(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+) -> TripDetailResponse:
+    """Explicit active → completed. Does not auto-activate planned next Trips."""
+    trip = await db.get(Trip, trip_id)
+    if trip is None or trip.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+
+    await _lock_load_for_membership(db, tenant_id, load_id)
+
+    tl = await db.scalar(
+        select(TripLoad).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.trip_id == trip_id,
+            TripLoad.load_id == load_id,
+        )
+    )
+    if tl is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
+        )
+
+    # Idempotent: already completed on this membership.
+    if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_COMPLETED and tl.completed_at is not None:
+        detail = await get_trip_detail(db, tenant_id, trip_id)
+        assert detail is not None
+        return detail
+
+    if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_REMOVED or tl.removed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Removed membership cannot be completed",
+                "code": "MEMBERSHIP_ALREADY_REMOVED",
+            },
+        )
+    if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_PLANNED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Planned membership cannot be completed",
+                "code": "MEMBERSHIP_NOT_ACTIVE",
+            },
+        )
+    if not (
+        tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE
+        and tl.completed_at is None
+        and tl.removed_at is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Membership is not active",
+                "code": "MEMBERSHIP_NOT_ACTIVE",
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_COMPLETED
+    tl.completed_at = now
+    # removed_at remains NULL for normal completion.
     await db.flush()
 
     await _sync_load_active_trip_pointer(db, tenant_id, load_id)
@@ -726,7 +952,7 @@ async def cancel_trip_manual(db: AsyncSession, tenant_id: int, trip_id: int) -> 
             select(TripLoad).where(
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.trip_id == trip_id,
-                TripLoad.removed_at.is_(None),
+                _trip_load_is_open_clause(),
             )
         )
     ).all()
@@ -736,6 +962,7 @@ async def cancel_trip_manual(db: AsyncSession, tenant_id: int, trip_id: int) -> 
         affected.add(int(tl.load_id))
         tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_REMOVED
         tl.removed_at = now
+        tl.completed_at = None
 
     await db.flush()
 
