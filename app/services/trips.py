@@ -13,6 +13,8 @@ from app.constants.trip_dispatch import (
     JOB_TYPE_FREIGHT_LOAD,
     TRIP_CONTAINER_STATUS_ASSIGNED,
     TRIP_CONTAINER_STATUS_CANCELLED,
+    TRIP_CONTAINER_STATUS_COMPLETED,
+    TRIP_CONTAINER_STATUS_IN_PROGRESS,
     TRIP_CONTAINER_STATUS_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
 )
@@ -671,6 +673,128 @@ async def cancel_trip_manual(db: AsyncSession, tenant_id: int, trip_id: int) -> 
     ).all()
     for load in drift:
         await _sync_load_active_trip_pointer(db, tenant_id, int(load.id))
+
+    detail = await get_trip_detail(db, tenant_id, trip_id)
+    assert detail is not None
+    return detail
+
+
+def _validate_execution_signal_source(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"detail": "source is required", "code": "EXECUTION_SIGNAL_SOURCE_REQUIRED"},
+        )
+    if s == "future_geofence":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "detail": "source 'future_geofence' is reserved for a future implementation",
+                "code": "EXECUTION_SIGNAL_SOURCE_RESERVED",
+            },
+        )
+    if s not in {"dispatcher_manual", "driver_app"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "detail": "Invalid source. Allowed: dispatcher_manual, driver_app",
+                "code": "EXECUTION_SIGNAL_SOURCE_INVALID",
+            },
+        )
+    return s
+
+
+async def start_trip_execution_from_signal(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    *,
+    signal_source: str,
+    reason_note: str | None,
+    signal_at: datetime | None,
+    actor_user_id: int | None,
+    actor_label: str | None,
+    request_id: str | None = None,
+) -> TripDetailResponse:
+    """Decision 7 slice: move Trip.status assigned→in_progress from an accepted real signal.
+
+    Guardrails (explicit):
+    - No Load.status writes
+    - No dispatch_trips writes
+    - No custody/terminal/payroll/board side effects
+    """
+    trip = await db.get(Trip, trip_id)
+    if trip is None or trip.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+
+    if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
+        )
+    if trip.status == TRIP_CONTAINER_STATUS_COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is already completed", "code": "TRIP_ALREADY_COMPLETED"},
+        )
+    if trip.status == TRIP_CONTAINER_STATUS_PLANNED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip must be assigned before starting execution", "code": "TRIP_NOT_ASSIGNED"},
+        )
+
+    src = _validate_execution_signal_source(signal_source)
+    accepted_at = signal_at or datetime.now(timezone.utc)
+
+    # Idempotency: already in_progress returns current detail without duplicate audit row.
+    if trip.status == TRIP_CONTAINER_STATUS_IN_PROGRESS:
+        detail = await get_trip_detail(db, tenant_id, trip_id)
+        assert detail is not None
+        return detail
+
+    if trip.status != TRIP_CONTAINER_STATUS_ASSIGNED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": f"Trip status '{trip.status}' cannot start execution",
+                "code": "TRIP_INVALID_STATUS_FOR_EXECUTION_START",
+            },
+        )
+
+    before = _assignment_snapshot(trip)
+
+    trip.status = TRIP_CONTAINER_STATUS_IN_PROGRESS
+    trip.updated_at = accepted_at
+    await db.flush()
+
+    after = _assignment_snapshot(trip)
+    if before != after:
+        from app.services.audit_events import write_audit_event
+
+        await write_audit_event(
+            db,
+            tenant_id=int(tenant_id),
+            module="trips",
+            entity_type="trip",
+            entity_id=str(int(trip.id)),
+            entity_label=str(trip.trip_number),
+            action="trip_execution_started",
+            source="api",
+            actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            request_id=request_id,
+            correlation_id=request_id,
+            snapshot_before=dict(before),
+            snapshot_after=dict(after),
+            context_json={
+                "signal_source": src,
+                "reason_note": (reason_note or None),
+                "signal_at": accepted_at.isoformat(),
+            },
+            event_at=accepted_at,
+            best_effort=True,
+        )
 
     detail = await get_trip_detail(db, tenant_id, trip_id)
     assert detail is not None

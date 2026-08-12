@@ -19,6 +19,8 @@ export const OPS = {
   DISPATCH: "/dispatch",
   /** Trip (operational container) — read-only shell; member loads link to /loads/:id. */
   TRIPS: "/trips",
+  /** Trip Container = Dispatch Control Center — accordion operational home (first slice). */
+  TRIP_CONTAINER: "/trips/container",
   TRIP_DETAIL: (id: number | string) => `/trips/${id}`,
   FLEET: "/fleet",
   /** Freight brokers (MC / intake identity), not customs brokers. */

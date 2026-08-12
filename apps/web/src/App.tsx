@@ -21,6 +21,7 @@ import DispatchPage from "./pages/DispatchPage";
 import LoadInboxPage from "./pages/LoadInboxPage";
 import LoadWorkspacePage from "./pages/LoadWorkspacePage";
 import TripWorkspacePage from "./pages/TripWorkspacePage";
+import TripContainerPage from "./pages/trip-container/TripContainerPage";
 import TripsListPage from "./pages/TripsListPage";
 import LoadLabPage from "./pages/LoadLabPage";
 import DriverOnboardingPage from "./pages/DriverOnboardingPage";
@@ -230,6 +231,14 @@ function App() {
         element={
           <Layout>
             <TripsListPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/trips/container"
+        element={
+          <Layout>
+            <TripContainerPage />
           </Layout>
         }
       />

@@ -118,3 +118,17 @@ class TripAssignmentBody(BaseModel):
     driver_id: int | None
     truck_id: int | None
     trailer_id: int | None
+
+
+class TripExecutionSignalBody(BaseModel):
+    """Decision 7 (slice): record first accepted execution signal (API-only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(
+        ...,
+        max_length=64,
+        description="Execution signal source. Allowed now: dispatcher_manual, driver_app. future_geofence is reserved.",
+    )
+    reason_note: str | None = Field(default=None, max_length=1000)
+    signal_at: datetime | None = Field(default=None, description="RFC3339 timestamp; default server now.")

@@ -968,6 +968,23 @@ export async function cancelTrip(tripId: number): Promise<TripDetail> {
   return handle<TripDetail>(res);
 }
 
+
+/** POST /api/v1/trips/{id}/execution-signal — Decision 7: start execution from accepted signal. */
+export type TripExecutionSignalBody = {
+  source: "dispatcher_manual" | "driver_app";
+  reason_note?: string | null;
+  signal_at?: string | null;
+};
+
+export async function postTripExecutionSignal(tripId: number, body: TripExecutionSignalBody): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/execution-signal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<TripDetail>(res);
+}
+
 /** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
 export type TripAssignmentPayload = {
   driver_id: number | null;
@@ -3699,6 +3716,8 @@ export type Driver = {
   phone?: string | null;
   email?: string | null;
   is_active: boolean;
+  /** Present on list responses when tenant schema includes license fields. */
+  license_expiry_date?: string | null;
 };
 
 export type DriverOnboardingSubmission = {
