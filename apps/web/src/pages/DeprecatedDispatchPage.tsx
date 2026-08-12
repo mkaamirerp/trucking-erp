@@ -1,5 +1,6 @@
 /**
- * Dispatch Workspace — Layout C (table default) + Layout B (board optional)
+ * DeprecatedDispatchPage — legacy load-status dispatch board (`GET /dispatch/board`).
+ * Layout C (table default) + Layout B (board optional). Trip Container / future Dispatch command center is separate.
  * Ribbon + table/board; unassigned loads open `/loads/:id?dispatchAssign=1` (canonical workspace + assignment strip).
  * Other statuses open the quick summary modal with a link to the full workspace.
  * Primary fields in rows/cards: Load #, Trip # (read-only), Route, Status.
@@ -525,7 +526,7 @@ function DriverColumn({
   );
 }
 
-export default function DispatchPage() {
+export default function DeprecatedDispatchPage() {
   // React-router paths are tenant-agnostic; tenant selection is via host + cookie.
   const slug = "";
   const navigate = useNavigate();

@@ -17,7 +17,7 @@ import FleetPage from "./pages/FleetPage";
 import BrokersPage from "./pages/BrokersPage";
 import BrokerDetailPage from "./pages/BrokerDetailPage";
 import LoadsListPage from "./pages/LoadsListPage";
-import DispatchPage from "./pages/DispatchPage";
+import DeprecatedDispatchPage from "./pages/DeprecatedDispatchPage";
 import LoadInboxPage from "./pages/LoadInboxPage";
 import LoadWorkspacePage from "./pages/LoadWorkspacePage";
 import TripWorkspacePage from "./pages/TripWorkspacePage";
@@ -164,7 +164,7 @@ function App() {
         path="/dispatch"
         element={
           <Layout>
-            <DispatchPage />
+            <DeprecatedDispatchPage />
           </Layout>
         }
       />
