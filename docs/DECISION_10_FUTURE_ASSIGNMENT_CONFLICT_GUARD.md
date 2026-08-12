@@ -1,6 +1,6 @@
 # TruckERP — Decision 10 / Future assignment and active execution conflict guard
 
-**Status:** **LOCKED** (design direction for **future** implementation — **do not** implement schema, API, or UI yet).  
+**Status:** **LOCKED** (design + trip schedule field names). **Code deferred** — see **Implementation note — deferred (why not today)** (updated **2026-08-12**).  
 **Related:** `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`, `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md`, `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` (draft), `DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`, `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`, `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`.
 
 **Anchors:**
@@ -52,26 +52,32 @@ A **driver** / **truck** / **trailer** may have a **future assigned** trip while
 
 ---
 
-## Recommended comparison rule (design)
+## Recommended comparison rule (design) — **locked field names (2026-08-12)**
 
-Compare:
+**Authoritative trip-level bounds** (nullable timestamptz on **`trips`** when implemented):
 
-- **Current active trip:** `final_delivery_or_expected_completion_at` (or equivalent operational end expectation).
-- **Next trip:** `first_pickup_or_planned_start_at`.
+| Field | Meaning |
+|-------|---------|
+| **`planned_start_at`** | Next / candidate trip’s planned operational start (first pickup / planned start). |
+| **`expected_completion_at`** | Active (`in_progress`) trip’s expected finish (final delivery / expected completion). |
 
-**If**
+**Do not** infer the conflict guard from **load-stop** appointments (`LoadStop.appointment_date` / `scheduled_at`) or other stop-level dates. Stops may later **prefill** these trip fields in the UI; the **guard** reads **trip** columns only.
 
-```text
-next_trip.first_pickup_or_planned_start_at < current_trip.final_delivery_or_expected_completion_at
-```
-
-**then**
+**If both bounds exist:**
 
 ```text
-scheduling_conflict = true
+next.planned_start_at < active.expected_completion_at
+  → scheduling_conflict = true
 ```
 
-**Default behavior (when implemented):**
+where **`active`** is another trip on the **same** driver / truck / trailer with **`Trip.status = in_progress`** (exclude the trip being updated).
+
+**Missing scheduling bounds (locked policy for first implementation):**
+
+- If **`planned_start_at`** and/or the active trip’s **`expected_completion_at`** is missing → **do not silently block** assignment.
+- Surface scheduling data as **incomplete** (allow assignment; optional soft warning later) until a separate product policy locks warn-vs-require.
+
+**Default behavior when both bounds exist and conflict:**
 
 - **Block** the assignment, **or** at minimum show a **hard conflict warning** (phasing TBD).
 - **Do not** **silently** allow impossible schedules.
@@ -147,10 +153,26 @@ Real operations need slack; the system may **not** have perfect data:
 
 ---
 
-## Implementation note
+## Implementation note — deferred (why not today)
 
-- **Do not implement** comparison logic, override UX, or persistence **yet**.
-- This document is a **locked product/design** decision for a **later** slice.
+**Status (2026-08-12):** Design + field names are **locked**; **code is deferred**.
+
+### Why we are **not** implementing today
+
+1. **Priority / sequencing:** Trip Container shell, driver-card cleanup, legacy dispatch deprecation, and Start Execution UI shipped first (COMMITs 1–3). Decision 10 is the **next** scheduling slice, not a same-day cut.
+2. **Schema prerequisite not shipped yet:** `trips.planned_start_at` and `trips.expected_completion_at` do not exist in the tenant DB. Implementing the guard without those columns would force a forbidden shortcut (inferring from load stops).
+3. **Still deferred from original lock:** Supervisor **override** UX, exact **timezone** handling, and hard-block vs hard-warning phasing remain later product choices once fields + guard exist.
+4. **Avoid half-shipped safety:** A guard that blocks on missing dates or invents bounds from stops would **mis-fire** on real messy dispatch data and fight the locked “missing bounds → do not silently block” rule.
+
+### When we do it later — suggested order
+
+| Step | Work |
+|------|------|
+| **4a** | Tenant Alembic: add nullable `planned_start_at`, `expected_completion_at` on `trips`; SQLAlchemy model + trip read/write schemas as needed. |
+| **4b** | In `update_trip_assignment` (`PUT /api/v1/trips/{id}/assignment`): per-resource check vs other `in_progress` trips using the comparison above; **409** with clear codes when both bounds exist and conflict; **allow** when bounds incomplete. |
+| **Later** | Supervisor override + audit; UI to edit/display trip schedule bounds; soft incomplete-data warning if desired. |
+
+**Hook point (unchanged):** `app/services/trips.py` :: `update_trip_assignment` (after `_validate_assignment_targets`, before mutating assignment columns).
 
 ---
 
