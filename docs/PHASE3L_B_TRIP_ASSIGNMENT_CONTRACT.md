@@ -21,10 +21,14 @@ This document locks **who owns movement assignment** and **how reads/syncs must 
 | Term | Meaning |
 |------|--------|
 | **Movement assignment** | The **driver**, **truck**, and **trailer** (equipment set) that **physically perform** or are **booked to perform** the trip’s operational movement. |
-| **Active trip membership** | A `trip_loads` row with **`removed_at IS NULL`** for the tenant-scoped load. |
+| **Open trip membership** | A `trip_loads` row with **`removed_at IS NULL`** for the tenant-scoped load (may be `planned` or `active`). |
+| **Active trip membership** | A `trip_loads` row with **`status_within_trip = 'active'`** **AND** **`removed_at IS NULL`**. Current movement responsibility only — **not** a planned reservation. |
+| **Planned trip membership** | Open row with **`status_within_trip = 'planned'`** — future reservation; **no custody**; does **not** own current movement. |
 | **Planned trip container** | A `trips` row with `status` in **`planned`** / **`cancelled`** in the **current** product module (`TRIP_CONTAINER_STATUS_*`; execution statuses are **future** per 3L-A). |
 | **Load assignment fields** | **`loads.driver_id`**, **`loads.truck_id`**, **`loads.trailer_id`** (and nested read models on `LoadResponse`). |
 | **Trip assignment fields** | **`trips.driver_id`**, **`trips.truck_id`**, **`trips.trailer_id`**, optional timestamp **`trips.assigned_at`** (execution phases may define when it is set). |
+
+**Supersession:** Older wording that defined **“Active trip membership”** as only **`removed_at IS NULL`** is **superseded**. That predicate means **open** membership. Full V1 cardinality (max one open active + max one open planned; active A + planned B valid) is locked in [`trip-foundation.md`](./trip-foundation.md) §1A.
 
 ---
 
@@ -32,18 +36,20 @@ This document locks **who owns movement assignment** and **how reads/syncs must 
 
 ### 3.1 Single movement owner during active membership
 
-**While a load has active membership on a non-cancelled trip container:**
+**While a load has active membership** (`status_within_trip = 'active'` AND `removed_at IS NULL`) **on a non-cancelled trip container:**
 
 - **Trip assignment fields are authoritative for “who is moving this load on this trip.”**
 - **Load assignment fields** remain **stored** and may differ historically; they are **not** overridden by the client and must **not** be interpreted as **current movement truth** without applying §3.3 **effective assignment** rules.
+- A concurrent **open planned** membership on another trip (future reservation) does **not** change movement ownership — see [`trip-foundation.md`](./trip-foundation.md) §1A.
 
 **Rationale:** Matches 3L-A §7 and avoids the dispatch board (still load-keyed) showing a driver that contradicts the trip the load is on.
 
 ### 3.2 Pre-membership and pool loads
 
-**When a load has no active trip membership** (including `active_trip_id` **NULL** and no active `trip_loads`):
+**When a load has no active trip membership** (`status_within_trip = 'active'` AND open) — including when it has only an open **planned** membership, `active_trip_id` **NULL**, or no open `trip_loads`:
 
 - **Load assignment fields are authoritative** for movement intent in the **unassigned / assigned / dispatch-pool** workflows that exist today (board, load workspace assignment strip).
+- An open **planned** membership alone does **not** make Trip assignment the current movement owner.
 
 ### 3.3 Effective assignment (read model)
 
@@ -58,7 +64,7 @@ Implementations that need a **single display triple** (driver, truck, trailer) *
 
 ### 3.4 No client-side repair of `active_trip_id`
 
-**Locked:** The UI **must not** write or “fix” **`loads.active_trip_id`**. It is a **backend mirror** of active membership (see `PLANNED_TRIP_LIFECYCLE_MODULE_CLOSE.md`).
+**Locked:** The UI **must not** write or “fix” **`loads.active_trip_id`**. It is a **backend compatibility mirror** of the Load’s current **ACTIVE** Trip only (not planned; not an arbitrary open TripLoad). See [`trip-foundation.md`](./trip-foundation.md) §1A and `PLANNED_TRIP_LIFECYCLE_MODULE_CLOSE.md` (historical “any open row” sync wording is superseded for **intended** meaning).
 
 ### 3.5 Multi-load trips
 
@@ -89,8 +95,8 @@ Implementations that need a **single display triple** (driver, truck, trailer) *
 
 ### 3.9 Remove load from trip
 
-- Backend ends active membership (`removed_at`, `status_within_trip` → removed pattern) and **refreshes** `loads.active_trip_id`.
-- After removal: **effective assignment** for that load returns to **Load** fields unless it joins **another** trip.
+- Backend ends the **open** membership on that trip (`removed_at`, `status_within_trip` → `removed` pattern) and **refreshes** `loads.active_trip_id` to the remaining **active** membership Trip if any (must **not** point at planned-only).
+- After removal: **effective assignment** for that load returns to **Load** fields unless it has **another active** membership.
 
 ---
 

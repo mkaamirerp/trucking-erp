@@ -132,14 +132,129 @@ Planning Trip B does **not** mean Trip B currently possesses the freight. Curren
 
 **TripLoad is NOT the complete custody/audit timeline.** Custody events provide continuity/history.
 
-Preserve the intended TripLoad statuses (documentation meaning only; no code change implied here):
+---
 
-| Status | Conceptual meaning |
-|--------|--------------------|
-| `planned` | Future membership / reservation |
-| `active` | Current movement responsibility |
-| `completed` | That Load’s responsibility within that Trip is finished |
-| `removed` | Planned/active membership was removed or cancelled from that Trip |
+### TripLoad membership semantics (LOCKED — V1)
+
+**Authoritative home for open vs active, cardinality, and transitions.** Implementation may lag; code that still treats any `removed_at IS NULL` row as “the” current trip is **legacy behavior to be corrected**, not the product lock.
+
+#### Open ≠ active
+
+| Term | Definition |
+|------|------------|
+| **Open membership** | `trip_loads.removed_at IS NULL` — the row is still open / still relevant. |
+| **Active membership** | `status_within_trip = 'active'` **AND** `removed_at IS NULL` — current operational movement responsibility for that Load. |
+
+**`removed_at IS NULL` alone does NOT mean:** current custody, current movement responsibility, or that Trip is the Load’s current/active Trip. An open **`planned`** row is a future reservation only.
+
+Older docs that said **“active membership = `removed_at IS NULL`”** meant **open** membership in today’s vocabulary. Those phrases are **superseded** by this section.
+
+#### Status meanings
+
+| Status | Meaning |
+|--------|---------|
+| `planned` | Future membership / reservation. **No custody. No execution.** Does **not** make that Trip the Load’s active/current Trip. |
+| `active` | Current operational movement responsibility. |
+| `completed` | This Trip’s responsibility for the Load finished **normally**. Historical membership preserved. Load may still remain **commercially** active. |
+| `removed` | Membership cancelled / removed / replanned. Historical membership preserved. |
+
+#### V1 cardinality (one Load)
+
+- Maximum **ONE** open **`active`** membership.
+- Maximum **ONE** open **`planned`** membership (the next future reservation).
+- Unlimited **`completed`** history.
+- Unlimited **`removed`** history.
+
+**Reason:** Until an explicit trip-chain / future-sequence model exists, multiple open planned memberships would create ambiguous competing next Trips.
+
+#### Valid overlap (required)
+
+Trip A / Load 123 = **`active`**  
+Trip B / Load 123 = **`planned`**
+
+Required for the yard handoff scenario (Acme → Yard → XYZ).
+
+#### Invalid overlap (V1)
+
+- Two open **`active`** memberships for the same Load — never two current movement owners.
+- Two open **`planned`** memberships for the same Load — invalid until explicit future-trip sequencing exists.
+
+#### `loads.active_trip_id` (intended meaning)
+
+Compatibility / read-model pointer to the Load’s current **ACTIVE** Trip only.
+
+It must **NOT**:
+
+- point to a **PLANNED** Trip
+- select an arbitrary open TripLoad
+- represent future reservation
+
+**TripLoad remains source of truth** for membership. `active_trip_id` is a mirror, not authority.
+
+#### Explicit transitions
+
+| From → To | Rule |
+|-----------|------|
+| `planned` → `active` | Explicit activation only. |
+| `active` → `completed` | Normal end of this Trip’s responsibility for the Load. |
+| `planned` → `removed` | Cancel / replan reservation. |
+| `active` → `removed` | Explicit exception / cancellation workflows only. |
+
+**No automatic transition:** completing active membership A must **NOT** automatically activate planned membership B. Activation of B is **explicit**.
+
+At yard (reference): Trip A → **`completed`**; custody/handoff recorded **separately**; Trip B remains **`planned`** until later explicit activation → **`active`**.
+
+#### Reference scenario (LOCKED)
+
+**Commercial Load:** Acme Brick → XYZ Bricks
+
+- **Trip A:** US/night driver; Acme → Yard; TripLoad **`active`**
+- **Trip B:** local/day driver; Yard → XYZ; TripLoad **`planned`** while Trip A is still **`active`**
+- **At yard:** Trip A → **`completed`**; custody/handoff recorded separately; Trip B stays **`planned`**
+- **Later:** explicit Trip B activation → **`active`**
+
+Same Trailer 13006 or a different trailer both remain valid for Trip B.
+
+Preserve: **future reservation ≠ current custody ≠ execution eligibility**; TripLoad ≠ full custody timeline; Load / Trip / TripLoad / Audit-Custody remain four distinct truths (§1A A–C + membership).
+
+#### Reference scenario — many-to-many Trip/Load continuity (LOCKED)
+
+TruckERP must preserve a **true many-to-many** relationship:
+
+- One Trip can carry **multiple Loads**.
+- One Load can move through **multiple Trips**.
+- **TripLoad** is the membership bridge between them.
+- **Audit/Custody** history explains what physically happened between and during Trips.
+
+**Example — two Loads, one inbound Trip, split outbound:**
+
+| Commercial Loads | |
+|------------------|---|
+| **Load A** | Boston → Brampton |
+| **Load B** | Albany → Toronto |
+
+**Inbound Trip 10001** (long-haul / US driver; one truck/trailer):
+
+- Picks up Load A in Boston
+- Picks up Load B in Albany
+- Brings both Loads to the company yard
+
+**At the yard:**
+
+- Trip 10001 may **complete** its operational responsibility
+- Load A and Load B remain **commercially active**
+- Both Loads are unloaded/staged at the yard
+- Custody/audit history must record the yard state
+
+**Outbound split:**
+
+- **Trip 10002:** House Driver A takes one Load from yard → final destination
+- **Trip 10003:** House Driver B takes the other Load from yard → final destination
+- Each outbound Trip may use the **same** trailer or a **different** trailer as operationally required
+
+**Architecture reminder:** Load = commercial/revenue; Trip = operational/payable; TripLoad = which Loads participated in which Trips; Audit/Custody = continuity (pickup, movement, yard handoff/staging, trailer transfer if any, next Trip, final delivery). Do **not** duplicate a commercial Load merely because it moves through multiple Trips. Every Trip that performs work must remain traceable to the Load(s) it moved.
+
+**Fail-proof acceptance (eventual):** 2 Loads → 1 inbound Trip → both staged at yard → 2 separate outbound Trips → 2 different drivers → same or different trailers → each Load keeps its own commercial revenue → every Trip remains separately traceable for driver/pay → complete custody/audit history for both Loads.
 
 ---
 
@@ -252,6 +367,8 @@ TripLoad owns:
 - future reason/audit metadata
 
 **Do not collapse TripLoad into Audit/Custody.** TripLoad is the membership bridge. Continuity history (pickup, handoff, yard/terminal, trailer transfer, final delivery, void/correct) belongs to the **Audit / Custody Timeline** (see §1A). Membership rows are necessary for reconcilability; they are not a substitute for custody events.
+
+**Open ≠ active:** see §1A TripLoad membership semantics. `removed_at IS NULL` = **open**; current movement owner = **`status_within_trip = active` AND `removed_at IS NULL`**.
 
 ### Audit / Custody owns continuity truth
 
@@ -458,14 +575,19 @@ This protects future TONU, deadhead, driver pay, and audit logic.
 
 ## 10. TripLoad statuses
 
-Recommended `trip_loads.status_within_trip` values:
+Recommended `trip_loads.status_within_trip` values (meanings locked in §1A):
 
 | Status | Meaning |
 |--------|---------|
-| `planned` | Future membership / reservation — Load is planned to be on this Trip. |
-| `active` | Current movement responsibility — Load is currently active on this Trip. |
-| `completed` | That Load’s responsibility within that Trip is finished (terminal drop, handoff, or final delivery depending on Trip purpose). |
-| `removed` | Planned/active membership was removed or cancelled from that Trip. Commercial Load may or may not be cancelled. |
+| `planned` | Future membership / reservation — no custody, no execution; does not set current Trip. |
+| `active` | Current movement responsibility — max **one** open `active` per Load (V1). |
+| `completed` | That Load’s responsibility within that Trip finished normally; historical; Load may stay commercially active. |
+| `removed` | Membership cancelled / removed / replanned; historical. |
+
+**Open membership** = `removed_at IS NULL` (may be `planned` or `active`).  
+**Active membership** = `status_within_trip = 'active'` AND `removed_at IS NULL`.
+
+V1: max one open `planned` and max one open `active` per Load; unlimited `completed` / `removed` history. Valid: active A + planned B. Invalid: two open actives, or two open planneds, until future sequencing exists.
 
 These are **membership** statuses on TripLoad, not the full custody/audit timeline (see §1A).
 
@@ -813,6 +935,10 @@ Do not immediately:
 22. No line may silently disappear: unbroken operational and custody/audit history from booking through final delivery/close; every Trip’s work remains traceable to Load(s) and custody events.
 23. TripLoad is membership/relationship only — not the complete custody/audit timeline.
 24. Future reservation ≠ current custody ≠ execution eligibility.
+25. Open ≠ active: `removed_at IS NULL` means open membership; active membership requires `status_within_trip = active` AND `removed_at IS NULL` (§1A).
+26. V1 per Load: max one open active + max one open planned; unlimited completed/removed history; active A + planned B is valid; two open actives or two open planneds are invalid.
+27. `loads.active_trip_id` points only to the current ACTIVE Trip (compatibility mirror); must not point at planned or arbitrary open membership.
+28. Completing active A must not auto-activate planned B; activation is explicit.
 
 ---
 
@@ -833,6 +959,9 @@ Before coding any future Trip/Load/dispatch feature, Cursor must check the work 
 11. Does this keep Load, Trip, and Audit/Custody reconcilable (no silent gaps or silent overwrites)?
 12. Does this keep TripLoad as membership only and custody events as continuity history?
 13. Does this respect future reservation ≠ current custody ≠ execution eligibility?
+14. Does this treat open (`removed_at IS NULL`) as distinct from active (`status_within_trip = active`)?
+15. Does this enforce V1 max one open active and max one open planned per Load?
+16. Does completing a membership avoid auto-activating the next planned membership?
 
 If the answer is no, the implementation is drifting.
 
@@ -867,4 +996,4 @@ After docs are updated, produce a short Phase 3C implementation proposal for pla
 
 ## 25. Short canonical wording
 
-> A Load is the commercial/revenue truth. A Trip is the operational/payable work truth. Audit/Custody is the continuity truth. The three are separate but must remain reconcilable — no line may silently disappear. TripLoad is membership only, not the full custody timeline. A Load may be moved by one Trip or multiple Trips. Future reservation ≠ current custody ≠ execution eligibility. City pickup is a Trip segment for the same Load, not a second Load. Trip numbers belong to Trips, can be created during planning, and are never reused. Trip completion means dispatch file closeout and payroll eligibility; Load final delivery means the commercial freight reached the broker/customer receiver. TruckERP must relate Load revenue to all connected Trips, settlements, and expenses to show true profit.
+> A Load is the commercial/revenue truth. A Trip is the operational/payable work truth. Audit/Custody is the continuity truth. TripLoad is membership only. Open (`removed_at IS NULL`) ≠ active (`status_within_trip = active` AND open). V1: at most one open active and one open planned per Load; active A + planned B is valid for yard handoff; completing A does not auto-activate B. `active_trip_id` mirrors the active Trip only. The three continuity truths plus membership must remain reconcilable — no line may silently disappear. Future reservation ≠ current custody ≠ execution eligibility. City pickup is a Trip segment for the same Load, not a second Load. Trip numbers belong to Trips, can be created during planning, and are never reused. Trip completion means dispatch file closeout and payroll eligibility; Load final delivery means the commercial freight reached the broker/customer receiver. TruckERP must relate Load revenue to all connected Trips, settlements, and expenses to show true profit.
