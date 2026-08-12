@@ -873,6 +873,8 @@ export type TripDetail = {
   trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
   assigned_at?: string | null;
   cancelled_at?: string | null;
+  planned_start_at?: string | null;
+  expected_completion_at?: string | null;
   created_at: string;
   updated_at: string;
   legacy_dispatch_trip_id?: number | null;
@@ -897,6 +899,8 @@ export type TripListItem = {
   trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
   assigned_at?: string | null;
   cancelled_at?: string | null;
+  planned_start_at?: string | null;
+  expected_completion_at?: string | null;
   created_at: string;
   updated_at: string;
   member_load_count: number;
@@ -994,6 +998,21 @@ export type TripAssignmentPayload = {
 
 export async function updateTripAssignment(tripId: number, body: TripAssignmentPayload): Promise<TripDetail> {
   const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/assignment`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<TripDetail>(res);
+}
+
+/** PUT /api/v1/trips/{id}/schedule — COMMIT 4a: scheduling bounds only (both keys required; null clears). */
+export type TripSchedulePayload = {
+  planned_start_at: string | null;
+  expected_completion_at: string | null;
+};
+
+export async function updateTripSchedule(tripId: number, body: TripSchedulePayload): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/schedule`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

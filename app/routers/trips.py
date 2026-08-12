@@ -13,6 +13,7 @@ from app.schemas.trip_read import (
     TripExecutionSignalBody,
     TripDetailResponse,
     TripListPageResponse,
+    TripScheduleBody,
 )
 from app.services import trips as trips_service
 
@@ -140,6 +141,20 @@ async def put_trip_assignment(
         actor_label=actor_label,
         request_id=str(rid) if rid else None,
     )
+    await db.commit()
+    return detail
+
+
+@router.put("/{trip_id}/schedule", response_model=TripDetailResponse)
+async def put_trip_schedule(
+    trip_id: int,
+    body: TripScheduleBody,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> TripDetailResponse:
+    """COMMIT 4a: update planned_start_at / expected_completion_at only."""
+    detail = await trips_service.update_trip_schedule(db, tenant_id, trip_id, body)
     await db.commit()
     return detail
 

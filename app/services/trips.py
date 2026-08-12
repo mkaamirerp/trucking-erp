@@ -30,6 +30,7 @@ from app.schemas.trip_read import (
     TripFirstMemberSummary,
     TripListItemResponse,
     TripMemberLoadSummary,
+    TripScheduleBody,
 )
 from app.utils.pagination import paginate
 from app.services.dispatch_trips import TRIP_LOAD_STATUS_WITHIN_REMOVED, mint_next_trip_number
@@ -235,6 +236,8 @@ async def list_trips(
                 trailer=ntr,
                 assigned_at=tr.assigned_at,
                 cancelled_at=tr.cancelled_at,
+                planned_start_at=tr.planned_start_at,
+                expected_completion_at=tr.expected_completion_at,
                 created_at=tr.created_at,
                 updated_at=tr.updated_at,
                 member_load_count=count_map.get(tid, 0),
@@ -326,6 +329,8 @@ async def get_trip_detail(db: AsyncSession, tenant_id: int, trip_id: int) -> Tri
         trailer=ntr,
         assigned_at=tr.assigned_at,
         cancelled_at=tr.cancelled_at,
+        planned_start_at=tr.planned_start_at,
+        expected_completion_at=tr.expected_completion_at,
         created_at=tr.created_at,
         updated_at=tr.updated_at,
         legacy_dispatch_trip_id=tr.legacy_dispatch_trip_id,
@@ -626,6 +631,33 @@ async def update_trip_assignment(
             context_json={"trip_number": trip.trip_number},
             best_effort=True,
         )
+
+    detail = await get_trip_detail(db, tenant_id, trip_id)
+    assert detail is not None
+    return detail
+
+
+async def update_trip_schedule(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    body: TripScheduleBody,
+) -> TripDetailResponse:
+    """COMMIT 4a: update planned_start_at / expected_completion_at only (no assignment/status/LoadStop)."""
+    trip = await db.get(Trip, trip_id)
+    if trip is None or trip.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
+        )
+
+    now = datetime.now(timezone.utc)
+    trip.planned_start_at = body.planned_start_at
+    trip.expected_completion_at = body.expected_completion_at
+    trip.updated_at = now
+    await db.flush()
 
     detail = await get_trip_detail(db, tenant_id, trip_id)
     assert detail is not None

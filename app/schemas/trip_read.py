@@ -53,6 +53,8 @@ class TripListItemResponse(BaseModel):
     trailer: Optional[NestedTrailer] = None
     assigned_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
+    planned_start_at: Optional[datetime] = None
+    expected_completion_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     member_load_count: int = Field(0, description="Active memberships in trip_loads (removed_at IS NULL).")
@@ -84,6 +86,8 @@ class TripDetailResponse(BaseModel):
     trailer: Optional[NestedTrailer] = None
     assigned_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
+    planned_start_at: Optional[datetime] = None
+    expected_completion_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     legacy_dispatch_trip_id: Optional[int] = Field(
@@ -118,6 +122,15 @@ class TripAssignmentBody(BaseModel):
     driver_id: int | None
     truck_id: int | None
     trailer_id: int | None
+
+
+class TripScheduleBody(BaseModel):
+    """COMMIT 4a: set trip scheduling bounds; both keys required in JSON; null clears."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    planned_start_at: datetime | None
+    expected_completion_at: datetime | None
 
 
 class TripExecutionSignalBody(BaseModel):
