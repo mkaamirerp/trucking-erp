@@ -444,6 +444,7 @@ async def _sync_load_active_trip_pointer(db: AsyncSession, tenant_id: int, load_
         load.active_trip_id = int(other.trip_id)
     else:
         load.active_trip_id = None
+    await db.flush()
 
 
 async def _insert_trip_load_row(
@@ -657,25 +658,51 @@ async def remove_load_from_trip(
     return detail
 
 
-async def activate_trip_load_membership(
-    db: AsyncSession,
-    tenant_id: int,
-    trip_id: int,
-    load_id: int,
-) -> TripDetailResponse:
-    """Explicit planned → active. Does not start Trip execution or mutate Load commercial status."""
-    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
-    _raise_if_trip_already_completed(trip)
+def raise_membership_transition_requires_custody(*, action: str) -> None:
+    """Public bare /activate and /complete are closed after Custody Slice 2."""
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "detail": (
+                f"Bare membership {action} is closed. Use the custody transition endpoint "
+                f"(accept-custody, yard-handoff, or take-custody) instead."
+            ),
+            "code": "MEMBERSHIP_TRANSITION_REQUIRES_CUSTODY",
+        },
+    )
 
-    await _lock_load_for_membership(db, tenant_id, load_id)
 
-    tl = await db.scalar(
+async def _get_trip_load_row(
+    db: AsyncSession, tenant_id: int, trip_id: int, load_id: int
+) -> TripLoad | None:
+    return await db.scalar(
         select(TripLoad).where(
             TripLoad.tenant_id == tenant_id,
             TripLoad.trip_id == trip_id,
             TripLoad.load_id == load_id,
         )
     )
+
+
+async def _activate_trip_load_membership_locked(
+    db: AsyncSession,
+    tenant_id: int,
+    trip: Trip,
+    load: Load,
+    *,
+    require_trailer: bool = False,
+) -> TripLoad:
+    """planned → active. Assumes Trip and Load rows are already locked (Trip then Load)."""
+    trip_id = int(trip.id)
+    load_id = int(load.id)
+    _raise_if_trip_already_completed(trip)
+    if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
+        )
+
+    tl = await _get_trip_load_row(db, tenant_id, trip_id, load_id)
     if tl is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -688,9 +715,7 @@ async def activate_trip_load_membership(
         and tl.completed_at is None
         and tl.removed_at is None
     ):
-        detail = await get_trip_detail(db, tenant_id, trip_id)
-        assert detail is not None
-        return detail
+        return tl
 
     if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_COMPLETED or tl.completed_at is not None:
         raise HTTPException(
@@ -737,6 +762,15 @@ async def activate_trip_load_membership(
             },
         )
 
+    if require_trailer and trip.trailer_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Trip trailer is required for custody transitions",
+                "code": "TRIP_TRAILER_REQUIRED",
+            },
+        )
+
     other_active = await db.scalar(
         select(TripLoad).where(
             TripLoad.tenant_id == tenant_id,
@@ -763,30 +797,20 @@ async def activate_trip_load_membership(
         ) from exc
 
     await _sync_load_active_trip_pointer(db, tenant_id, load_id)
-
-    detail = await get_trip_detail(db, tenant_id, trip_id)
-    assert detail is not None
-    return detail
+    return tl
 
 
-async def complete_trip_load_membership(
+async def _complete_trip_load_membership_locked(
     db: AsyncSession,
     tenant_id: int,
-    trip_id: int,
-    load_id: int,
-) -> TripDetailResponse:
-    """Explicit active → completed. Does not auto-activate planned next Trips."""
-    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
+    trip: Trip,
+    load: Load,
+) -> TripLoad:
+    """active → completed. Assumes Trip and Load rows are already locked (Trip then Load)."""
+    trip_id = int(trip.id)
+    load_id = int(load.id)
 
-    await _lock_load_for_membership(db, tenant_id, load_id)
-
-    tl = await db.scalar(
-        select(TripLoad).where(
-            TripLoad.tenant_id == tenant_id,
-            TripLoad.trip_id == trip_id,
-            TripLoad.load_id == load_id,
-        )
-    )
+    tl = await _get_trip_load_row(db, tenant_id, trip_id, load_id)
     if tl is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -795,9 +819,7 @@ async def complete_trip_load_membership(
 
     # Idempotent: already completed on this membership (allowed even if Trip is completed).
     if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_COMPLETED and tl.completed_at is not None:
-        detail = await get_trip_detail(db, tenant_id, trip_id)
-        assert detail is not None
-        return detail
+        return tl
 
     # Parent Trip already completed: do not mutate remaining memberships via product API.
     if trip.status == TRIP_CONTAINER_STATUS_COMPLETED:
@@ -829,6 +851,12 @@ async def complete_trip_load_membership(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"detail": "Trip is already completed", "code": "TRIP_ALREADY_COMPLETED"},
+        )
+
+    if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
 
     if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_REMOVED or tl.removed_at is not None:
@@ -867,10 +895,29 @@ async def complete_trip_load_membership(
     await db.flush()
 
     await _sync_load_active_trip_pointer(db, tenant_id, load_id)
+    return tl
 
-    detail = await get_trip_detail(db, tenant_id, trip_id)
-    assert detail is not None
-    return detail
+
+async def activate_trip_load_membership(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+) -> TripDetailResponse:
+    """Public bare activate is closed (Custody Slice 2). Use accept-custody / take-custody."""
+    raise_membership_transition_requires_custody(action="activate")
+    raise AssertionError("unreachable")
+
+
+async def complete_trip_load_membership(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+) -> TripDetailResponse:
+    """Public bare complete is closed (Custody Slice 2). Use yard-handoff."""
+    raise_membership_transition_requires_custody(action="complete")
+    raise AssertionError("unreachable")
 
 
 def _assignment_snapshot(trip: Trip) -> dict[str, object | None]:

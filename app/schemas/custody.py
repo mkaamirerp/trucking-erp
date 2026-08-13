@@ -88,3 +88,40 @@ class TerminalUpdate(BaseModel):
     country: Optional[str] = Field(default=None, max_length=50)
     is_active: Optional[bool] = None
     model_config = ConfigDict(extra="forbid")
+
+
+class AcceptCustodyBody(BaseModel):
+    occurred_at: Optional[datetime] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+
+
+class YardHandoffBody(BaseModel):
+    terminal_id: int
+    placement: str = Field(description="on_trailer | staged")
+    trailer_id: Optional[int] = None
+    occurred_at: Optional[datetime] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+
+
+class TakeCustodyBody(BaseModel):
+    occurred_at: Optional[datetime] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+
+
+class CustodyTransitionResponse(BaseModel):
+    load_id: int
+    trip_id: int
+    trip_status: str
+    load_status: str
+    membership_status_within_trip: str
+    active_trip_id: Optional[int] = None
+    snapshot: LoadCustodySnapshotResponse
+    event: LoadCustodyEventResponse
+    replayed: bool = False
+    model_config = ConfigDict(from_attributes=True)

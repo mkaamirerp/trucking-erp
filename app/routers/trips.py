@@ -6,6 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
+from app.schemas.custody import (
+    AcceptCustodyBody,
+    CustodyTransitionResponse,
+    TakeCustodyBody,
+    YardHandoffBody,
+)
 from app.schemas.trip_read import (
     AddTripLoadBody,
     CreatePlannedTripBody,
@@ -16,6 +22,7 @@ from app.schemas.trip_read import (
     TripScheduleBody,
 )
 from app.services import trips as trips_service
+from app.services import load_custody_transitions as custody_transitions
 
 router = APIRouter(prefix="/trips", tags=["trips"])
 
@@ -113,7 +120,7 @@ async def activate_trip_load(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> TripDetailResponse:
-    """Explicit planned → active membership transition (not Decision 7 execution start)."""
+    """Closed after Custody Slice 2 — use accept-custody / take-custody."""
     detail = await trips_service.activate_trip_load_membership(db, tenant_id, trip_id, load_id)
     await db.commit()
     return detail
@@ -127,10 +134,85 @@ async def complete_trip_load(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> TripDetailResponse:
-    """Explicit active → completed membership transition (no auto-activate next Trip)."""
+    """Closed after Custody Slice 2 — use yard-handoff."""
     detail = await trips_service.complete_trip_load_membership(db, tenant_id, trip_id, load_id)
     await db.commit()
     return detail
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/accept-custody",
+    response_model=CustodyTransitionResponse,
+)
+async def accept_load_custody(
+    trip_id: int,
+    load_id: int,
+    body: AcceptCustodyBody | None = None,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> CustodyTransitionResponse:
+    """Initial pickup: unknown custody → Trip custody + planned→active."""
+    out = await custody_transitions.accept_load_custody(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        body,
+        actor_user_id=int(user.tenant_user.id) if user.tenant_user else None,
+    )
+    await db.commit()
+    return out
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/yard-handoff",
+    response_model=CustodyTransitionResponse,
+)
+async def yard_handoff_load_custody(
+    trip_id: int,
+    load_id: int,
+    body: YardHandoffBody,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> CustodyTransitionResponse:
+    """Yard handoff: trip custody → terminal custody + active→completed."""
+    out = await custody_transitions.yard_handoff_load_custody(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        body,
+        actor_user_id=int(user.tenant_user.id) if user.tenant_user else None,
+    )
+    await db.commit()
+    return out
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/take-custody",
+    response_model=CustodyTransitionResponse,
+)
+async def take_load_custody(
+    trip_id: int,
+    load_id: int,
+    body: TakeCustodyBody | None = None,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> CustodyTransitionResponse:
+    """Terminal takeover: terminal custody → outbound Trip custody + planned→active."""
+    out = await custody_transitions.take_load_custody(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        body,
+        actor_user_id=int(user.tenant_user.id) if user.tenant_user else None,
+    )
+    await db.commit()
+    return out
 
 
 @router.get("", response_model=TripListPageResponse)

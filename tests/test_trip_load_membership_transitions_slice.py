@@ -26,10 +26,36 @@ from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
+from tests.support.custody_http import (
+    activate_via_custody,
+    complete_via_custody,
+    accept_custody,
+    ensure_active_terminal,
+)
+
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
 AUTH_HEADERS = {"host": "demo.truckerp.me"}
+_SLICE2_TERMINAL: int | None = None
+
+
+async def _terminal(client: AsyncClient) -> int:
+    global _SLICE2_TERMINAL
+    if _SLICE2_TERMINAL is None:
+        _SLICE2_TERMINAL = await ensure_active_terminal(client, AUTH_HEADERS)
+    return _SLICE2_TERMINAL
+
+
+async def _activate(client: AsyncClient, trip_id: int, load_id: int):
+    return await activate_via_custody(client, AUTH_HEADERS, trip_id, load_id)
+
+
+async def _complete(client: AsyncClient, trip_id: int, load_id: int):
+    return await complete_via_custody(
+        client, AUTH_HEADERS, trip_id, load_id, terminal_id=await _terminal(client)
+    )
+
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 
 
@@ -121,8 +147,15 @@ async def _clear_open_memberships(load_id: int) -> None:
                 ),
                 {"lid": load_id},
             )
+
             await session.execute(
-                text("UPDATE loads SET active_trip_id = NULL WHERE id = :lid"),
+                text(
+                    "UPDATE loads SET active_trip_id = NULL, custody_owner = 'unknown', "
+                    "custody_trip_id = NULL, custody_terminal_id = NULL, "
+                    "custody_placement = 'unknown', custody_trailer_id = NULL, "
+                    "custody_since_at = NULL, last_custody_event_id = NULL "
+                    "WHERE id = :lid"
+                ),
                 {"lid": load_id},
             )
             await session.commit()
@@ -231,21 +264,15 @@ class TestTripLoadMembershipTransitions:
         trip_a = int(r_a.json()["id"])
 
         # activate while Trip planned => blocked
-        r_bad = await client.post(
-            f"/api/v1/trips/{trip_a}/loads/{load_a}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_bad = await _activate(client, trip_a, load_a)
         assert r_bad.status_code == 409, r_bad.text
         assert r_bad.json()["detail"]["code"] == "INVALID_TRIP_STATUS_FOR_ACTIVATE"
 
         await _assign_trip(client, trip_a)
-        r_act_a = await client.post(
-            f"/api/v1/trips/{trip_a}/loads/{load_a}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_act_a = await _activate(client, trip_a, load_a)
         assert r_act_a.status_code == 200, r_act_a.text
         assert await _load_active_trip_id(load_a) == trip_a
-        assert r_act_a.json()["status"] == "assigned"  # activation does not start execution
+        assert r_act_a.json()["trip_status"] == "assigned"  # activation does not start execution
 
         # Trip B planned while A active
         r_b = await client.post(
@@ -258,18 +285,12 @@ class TestTripLoadMembershipTransitions:
         await _assign_trip(client, trip_b)
 
         # activate B while A active => 409
-        r_block = await client.post(
-            f"/api/v1/trips/{trip_b}/loads/{load_a}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_block = await _activate(client, trip_b, load_a)
         assert r_block.status_code == 409
         assert r_block.json()["detail"]["code"] == "LOAD_ACTIVE_ON_OTHER_TRIP"
 
         # complete A
-        r_c = await client.post(
-            f"/api/v1/trips/{trip_a}/loads/{load_a}/complete",
-            headers=AUTH_HEADERS,
-        )
+        r_c = await _complete(client, trip_a, load_a)
         assert r_c.status_code == 200, r_c.text
         row_a = await _membership_row(load_a, trip_a)
         assert row_a is not None
@@ -283,43 +304,28 @@ class TestTripLoadMembershipTransitions:
         assert row_b["status_within_trip"] == TRIP_LOAD_STATUS_WITHIN_PLANNED
 
         # activate B after A completed
-        r_act_b = await client.post(
-            f"/api/v1/trips/{trip_b}/loads/{load_a}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_act_b = await _activate(client, trip_b, load_a)
         assert r_act_b.status_code == 200, r_act_b.text
         assert await _load_active_trip_id(load_a) == trip_b
-        assert r_act_b.json()["status"] == "assigned"
+        assert r_act_b.json()["trip_status"] == "assigned"
 
         # in_progress activate path: create trip C planned, assign, start execution, attach planned then activate
         # (use second load if available for isolation)
         # Idempotent activate / complete
-        r_act_b2 = await client.post(
-            f"/api/v1/trips/{trip_b}/loads/{load_a}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_act_b2 = await _activate(client, trip_b, load_a)
         assert r_act_b2.status_code == 200
         assert await _load_active_trip_id(load_a) == trip_b
 
-        r_comp_b = await client.post(
-            f"/api/v1/trips/{trip_b}/loads/{load_a}/complete",
-            headers=AUTH_HEADERS,
-        )
+        r_comp_b = await _complete(client, trip_b, load_a)
         assert r_comp_b.status_code == 200
-        r_comp_b2 = await client.post(
-            f"/api/v1/trips/{trip_b}/loads/{load_a}/complete",
-            headers=AUTH_HEADERS,
-        )
+        r_comp_b2 = await _complete(client, trip_b, load_a)
         assert r_comp_b2.status_code == 200
         row_b2 = await _membership_row(load_a, trip_b)
         assert row_b2["status_within_trip"] == TRIP_LOAD_STATUS_WITHIN_COMPLETED
         assert row_b2["removed_at"] is None
 
         # completed -> activate => 409
-        r_ca = await client.post(
-            f"/api/v1/trips/{trip_b}/loads/{load_a}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_ca = await _activate(client, trip_b, load_a)
         assert r_ca.status_code == 409
         assert r_ca.json()["detail"]["code"] == "MEMBERSHIP_ALREADY_COMPLETED"
 
@@ -340,10 +346,7 @@ class TestTripLoadMembershipTransitions:
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
 
-        r_pc = await client.post(
-            f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
-            headers=AUTH_HEADERS,
-        )
+        r_pc = await _complete(client, trip_id, load_id)
         assert r_pc.status_code == 409
         assert r_pc.json()["detail"]["code"] == "MEMBERSHIP_NOT_ACTIVE"
 
@@ -356,12 +359,9 @@ class TestTripLoadMembershipTransitions:
         assert r_sig.status_code == 200, r_sig.text
         assert r_sig.json()["status"] == "in_progress"
 
-        r_act = await client.post(
-            f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_act = await _activate(client, trip_id, load_id)
         assert r_act.status_code == 200, r_act.text
-        assert r_act.json()["status"] == "in_progress"  # unchanged by activate
+        assert r_act.json()["trip_status"] == "in_progress"  # unchanged by activate
         assert await _load_active_trip_id(load_id) == trip_id
 
     async def test_removed_transitions_blocked_and_cancel_skips_completed(
@@ -382,16 +382,10 @@ class TestTripLoadMembershipTransitions:
         trip_id = int(r.json()["id"])
         await _assign_trip(client, trip_id)
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
-                headers=AUTH_HEADERS,
-            )
+            await _activate(client, trip_id, load_id)
         ).status_code == 200
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
-                headers=AUTH_HEADERS,
-            )
+            await _complete(client, trip_id, load_id)
         ).status_code == 200
 
         # cancel trip must not rewrite completed membership
@@ -417,16 +411,10 @@ class TestTripLoadMembershipTransitions:
                 headers=AUTH_HEADERS,
             )
         ).status_code == 200
-        r_ra = await client.post(
-            f"/api/v1/trips/{trip2}/loads/{load_id}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_ra = await _activate(client, trip2, load_id)
         assert r_ra.status_code == 409
         assert r_ra.json()["detail"]["code"] == "MEMBERSHIP_ALREADY_REMOVED"
-        r_rc = await client.post(
-            f"/api/v1/trips/{trip2}/loads/{load_id}/complete",
-            headers=AUTH_HEADERS,
-        )
+        r_rc = await _complete(client, trip2, load_id)
         assert r_rc.status_code == 409
         assert r_rc.json()["detail"]["code"] == "MEMBERSHIP_ALREADY_REMOVED"
 
@@ -450,17 +438,11 @@ class TestTripLoadMembershipTransitions:
         await _assign_trip(client, trip_id)
         for lid in (load_a, load_b):
             assert (
-                await client.post(
-                    f"/api/v1/trips/{trip_id}/loads/{lid}/activate",
-                    headers=AUTH_HEADERS,
-                )
+                await _activate(client, trip_id, lid)
             ).status_code == 200
 
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_a}/complete",
-                headers=AUTH_HEADERS,
-            )
+            await _complete(client, trip_id, load_a)
         ).status_code == 200
         row_a = await _membership_row(load_a, trip_id)
         row_b = await _membership_row(load_b, trip_id)
@@ -585,16 +567,10 @@ class TestTripLoadMembershipTransitions:
         # A. full assignment -> activate succeeds
         trip_ok = await _create_planned()
         await _assign_trip(client, trip_ok)
-        r_ok = await client.post(
-            f"/api/v1/trips/{trip_ok}/loads/{load_id}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_ok = await _activate(client, trip_ok, load_id)
         assert r_ok.status_code == 200, r_ok.text
         # F. idempotent activate
-        r_idem = await client.post(
-            f"/api/v1/trips/{trip_ok}/loads/{load_id}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_idem = await _activate(client, trip_ok, load_id)
         assert r_idem.status_code == 200
         assert await _load_active_trip_id(load_id) == trip_ok
         await _clear_open_memberships(load_id)
@@ -610,10 +586,7 @@ class TestTripLoadMembershipTransitions:
             await _force_incomplete_assigned(
                 trip_id, driver_id=d, truck_id=t, trailer_id=r
             )
-            r_act = await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
-                headers=AUTH_HEADERS,
-            )
+            r_act = await _activate(client, trip_id, load_id)
             assert r_act.status_code == 409, f"{missing}: {r_act.text}"
             assert r_act.json()["detail"]["code"] == "TRIP_ASSIGNMENT_INCOMPLETE"
             assert "driver" in r_act.json()["detail"]["detail"].lower()
@@ -629,10 +602,7 @@ class TestTripLoadMembershipTransitions:
         )
         assert r_sig.status_code == 200, r_sig.text
         assert r_sig.json()["status"] == "in_progress"
-        r_act_ip = await client.post(
-            f"/api/v1/trips/{trip_ip}/loads/{load_id}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_act_ip = await _activate(client, trip_ip, load_id)
         assert r_act_ip.status_code == 200, r_act_ip.text
-        assert r_act_ip.json()["status"] == "in_progress"
+        assert r_act_ip.json()["trip_status"] == "in_progress"
         assert await _load_active_trip_id(load_id) == trip_ip

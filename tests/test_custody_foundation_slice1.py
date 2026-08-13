@@ -262,14 +262,17 @@ async def _make_active_membership(
             json=assign,
         )
     ).status_code == 200
+    await _reset_custody_snapshot(load_id)
+    # Slice 2: membership activation requires accept-custody
     assert (
         await client.post(
-            f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/accept-custody",
             headers=AUTH_HEADERS,
+            json={},
         )
     ).status_code == 200
     if not with_trailer:
-        # Activate requires trailer; clear after for placement=unknown bootstrap case.
+        # Accept requires trailer; clear after for placement=unknown bootstrap case.
         engine, Session = await _session()
         try:
             async with Session() as session:
@@ -760,7 +763,7 @@ class TestCustodyFoundationSlice1:
         finally:
             await engine.dispose()
 
-    async def test_bare_activate_still_public_slice1(
+    async def test_bare_activate_closed_after_slice2(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
         loads = await _pick_load_ids(client, 1)
@@ -790,9 +793,10 @@ class TestCustodyFoundationSlice1:
             f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
             headers=AUTH_HEADERS,
         )
-        assert act.status_code == 200, act.text
+        assert act.status_code == 409
+        assert act.json()["detail"]["code"] == "MEMBERSHIP_TRANSITION_REQUIRES_CUSTODY"
 
-    async def test_bare_complete_still_public_slice1(
+    async def test_bare_complete_closed_after_slice2(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
         loads = await _pick_load_ids(client, 1)
@@ -804,4 +808,5 @@ class TestCustodyFoundationSlice1:
             f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
             headers=AUTH_HEADERS,
         )
-        assert done.status_code == 200, done.text
+        assert done.status_code == 409
+        assert done.json()["detail"]["code"] == "MEMBERSHIP_TRANSITION_REQUIRES_CUSTODY"

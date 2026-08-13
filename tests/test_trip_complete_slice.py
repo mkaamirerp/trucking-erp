@@ -21,10 +21,26 @@ from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
+from tests.support.custody_http import activate_via_custody, complete_via_custody, ensure_active_terminal
+
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
 AUTH_HEADERS = {"host": "demo.truckerp.me"}
+_SLICE2_TERMINAL: int | None = None
+
+async def _terminal(client):
+    global _SLICE2_TERMINAL
+    if _SLICE2_TERMINAL is None:
+        _SLICE2_TERMINAL = await ensure_active_terminal(client, AUTH_HEADERS)
+    return _SLICE2_TERMINAL
+
+async def _activate(client, trip_id, load_id):
+    return await activate_via_custody(client, AUTH_HEADERS, trip_id, load_id)
+
+async def _complete_mem(client, trip_id, load_id):
+    return await complete_via_custody(client, AUTH_HEADERS, trip_id, load_id, terminal_id=await _terminal(client))
+
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 
 
@@ -116,8 +132,15 @@ async def _clear_open_memberships(load_id: int) -> None:
                 ),
                 {"lid": load_id},
             )
+
             await session.execute(
-                text("UPDATE loads SET active_trip_id = NULL WHERE id = :lid"),
+                text(
+                    "UPDATE loads SET active_trip_id = NULL, custody_owner = 'unknown', "
+                    "custody_trip_id = NULL, custody_terminal_id = NULL, "
+                    "custody_placement = 'unknown', custody_trailer_id = NULL, "
+                    "custody_since_at = NULL, last_custody_event_id = NULL "
+                    "WHERE id = :lid"
+                ),
                 {"lid": load_id},
             )
             await session.commit()
@@ -317,10 +340,7 @@ class TestTripCompleteSlice:
         trip_id = int(r.json()["id"])
         await _assign_and_start(client, trip_id)
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
-                headers=AUTH_HEADERS,
-            )
+            await _activate(client, trip_id, load_id)
         ).status_code == 200
 
         r_block = await client.post(f"/api/v1/trips/{trip_id}/complete", headers=AUTH_HEADERS)
@@ -328,10 +348,7 @@ class TestTripCompleteSlice:
         assert r_block.json()["detail"]["code"] == "OPEN_ACTIVE_MEMBERSHIP_REMAINS"
 
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
-                headers=AUTH_HEADERS,
-            )
+            await _complete_mem(client, trip_id, load_id)
         ).status_code == 200
 
         loads2 = await _pick_load_ids(client, 2)
@@ -381,20 +398,14 @@ class TestTripCompleteSlice:
         await _assign_and_start(client, trip_id)
         for lid in (load_a, load_b):
             assert (
-                await client.post(
-                    f"/api/v1/trips/{trip_id}/loads/{lid}/activate",
-                    headers=AUTH_HEADERS,
-                )
+                await _activate(client, trip_id, lid)
             ).status_code == 200
 
         status_a0 = (await _load_row(load_a))["status"]
         status_b0 = (await _load_row(load_b))["status"]
 
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_a}/complete",
-                headers=AUTH_HEADERS,
-            )
+            await _complete_mem(client, trip_id, load_a)
         ).status_code == 200
         assert (await _load_row(load_a))["active_trip_id"] is None
         assert (await _load_row(load_b))["active_trip_id"] == trip_id
@@ -412,10 +423,7 @@ class TestTripCompleteSlice:
         outbound = int(r_out.json()["id"])
 
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_b}/complete",
-                headers=AUTH_HEADERS,
-            )
+            await _complete_mem(client, trip_id, load_b)
         ).status_code == 200
         ptr_b = (await _load_row(load_b))["active_trip_id"]
         ptr_a = (await _load_row(load_a))["active_trip_id"]
@@ -510,10 +518,7 @@ class TestTripCompleteSlice:
         assert r_rm.status_code == 409
         assert r_rm.json()["detail"]["code"] == "TRIP_ALREADY_COMPLETED"
 
-        r_act = await client.post(
-            f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
-            headers=AUTH_HEADERS,
-        )
+        r_act = await _activate(client, trip_id, load_id)
         assert r_act.status_code == 409
         assert r_act.json()["detail"]["code"] == "TRIP_ALREADY_COMPLETED"
 
@@ -565,32 +570,21 @@ class TestTripCompleteSlice:
         trip_id = int(r.json()["id"])
         await _assign_and_start(client, trip_id)
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/activate",
-                headers=AUTH_HEADERS,
-            )
+            await _activate(client, trip_id, load_id)
         ).status_code == 200
         assert (
-            await client.post(
-                f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
-                headers=AUTH_HEADERS,
-            )
+            await _complete_mem(client, trip_id, load_id)
         ).status_code == 200
         assert (
             await client.post(f"/api/v1/trips/{trip_id}/complete", headers=AUTH_HEADERS)
         ).status_code == 200
 
-        r_idem = await client.post(
-            f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
-            headers=AUTH_HEADERS,
-        )
-        assert r_idem.status_code == 200, r_idem.text
+        r_idem = await _complete_mem(client, trip_id, load_id)
+        assert r_idem.status_code == 409
+        assert r_idem.json()["detail"]["code"] == "TRIP_ALREADY_COMPLETED"
 
         await _force_open_active_on_completed(trip_id, load_id)
-        r_rep = await client.post(
-            f"/api/v1/trips/{trip_id}/loads/{load_id}/complete",
-            headers=AUTH_HEADERS,
-        )
+        r_rep = await _complete_mem(client, trip_id, load_id)
         assert r_rep.status_code == 409
         assert r_rep.json()["detail"]["code"] == "TRIP_ALREADY_COMPLETED"
 
@@ -632,7 +626,9 @@ class TestTripCompleteSlice:
         """Source-level: membership insert locks Trip before Load; complete locks Trip."""
         from pathlib import Path
 
-        src = Path("/home/admin/trucking_erp/app/services/trips.py").read_text()
+        from app.services import trips as trips_mod
+
+        src = Path(trips_mod.__file__).read_text()
         insert_start = src.index("async def _insert_trip_load_row")
         insert_chunk = src[insert_start : insert_start + 1200]
         assert "_lock_trip_for_mutation" in insert_chunk
