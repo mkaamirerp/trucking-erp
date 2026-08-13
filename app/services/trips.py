@@ -265,6 +265,7 @@ async def list_trips(
                 trailer_id=tr.trailer_id,
                 trailer=ntr,
                 assigned_at=tr.assigned_at,
+                completed_at=tr.completed_at,
                 cancelled_at=tr.cancelled_at,
                 planned_start_at=tr.planned_start_at,
                 expected_completion_at=tr.expected_completion_at,
@@ -359,6 +360,7 @@ async def get_trip_detail(db: AsyncSession, tenant_id: int, trip_id: int) -> Tri
         trailer_id=tr.trailer_id,
         trailer=ntr,
         assigned_at=tr.assigned_at,
+        completed_at=tr.completed_at,
         cancelled_at=tr.cancelled_at,
         planned_start_at=tr.planned_start_at,
         expected_completion_at=tr.expected_completion_at,
@@ -403,6 +405,26 @@ async def _lock_load_for_membership(db: AsyncSession, tenant_id: int, load_id: i
     return load
 
 
+async def _lock_trip_for_mutation(db: AsyncSession, tenant_id: int, trip_id: int) -> Trip:
+    """Lock Trip row (FOR UPDATE). Call before status checks / membership insert on this trip."""
+    trip = await db.scalar(
+        select(Trip)
+        .where(Trip.tenant_id == tenant_id, Trip.id == trip_id)
+        .with_for_update()
+    )
+    if trip is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    return trip
+
+
+def _raise_if_trip_already_completed(trip: Trip) -> None:
+    if trip.status == TRIP_CONTAINER_STATUS_COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is already completed", "code": "TRIP_ALREADY_COMPLETED"},
+        )
+
+
 async def _sync_load_active_trip_pointer(db: AsyncSession, tenant_id: int, load_id: int) -> None:
     """Set loads.active_trip_id from the open ACTIVE trip_loads row only (compatibility mirror)."""
     load = await db.scalar(select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id))
@@ -433,14 +455,14 @@ async def _insert_trip_load_row(
     sequence_hint: int | None,
     status_within: str = TRIP_LOAD_STATUS_WITHIN_PLANNED,
 ) -> None:
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    # Lock order: Trip then Load (serialize vs Trip /complete).
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
+    _raise_if_trip_already_completed(trip)
 
     load = await _lock_load_for_membership(db, tenant_id, load_id)
 
@@ -598,14 +620,15 @@ async def remove_load_from_trip(
     trip_id: int,
     load_id: int,
 ) -> TripDetailResponse:
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
+    _raise_if_trip_already_completed(trip)
+
+    await _lock_load_for_membership(db, tenant_id, load_id)
 
     tl = await db.scalar(
         select(TripLoad).where(
@@ -641,9 +664,8 @@ async def activate_trip_load_membership(
     load_id: int,
 ) -> TripDetailResponse:
     """Explicit planned → active. Does not start Trip execution or mutate Load commercial status."""
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
+    _raise_if_trip_already_completed(trip)
 
     await _lock_load_for_membership(db, tenant_id, load_id)
 
@@ -754,9 +776,7 @@ async def complete_trip_load_membership(
     load_id: int,
 ) -> TripDetailResponse:
     """Explicit active → completed. Does not auto-activate planned next Trips."""
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
 
     await _lock_load_for_membership(db, tenant_id, load_id)
 
@@ -773,11 +793,43 @@ async def complete_trip_load_membership(
             detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
         )
 
-    # Idempotent: already completed on this membership.
+    # Idempotent: already completed on this membership (allowed even if Trip is completed).
     if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_COMPLETED and tl.completed_at is not None:
         detail = await get_trip_detail(db, tenant_id, trip_id)
         assert detail is not None
         return detail
+
+    # Parent Trip already completed: do not mutate remaining memberships via product API.
+    if trip.status == TRIP_CONTAINER_STATUS_COMPLETED:
+        if (
+            tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE
+            and tl.completed_at is None
+            and tl.removed_at is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"detail": "Trip is already completed", "code": "TRIP_ALREADY_COMPLETED"},
+            )
+        if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_REMOVED or tl.removed_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Removed membership cannot be completed",
+                    "code": "MEMBERSHIP_ALREADY_REMOVED",
+                },
+            )
+        if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_PLANNED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Planned membership cannot be completed",
+                    "code": "MEMBERSHIP_NOT_ACTIVE",
+                },
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is already completed", "code": "TRIP_ALREADY_COMPLETED"},
+        )
 
     if tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_REMOVED or tl.removed_at is not None:
         raise HTTPException(
@@ -842,14 +894,13 @@ async def update_trip_assignment(
     request_id: str | None = None,
 ) -> TripDetailResponse:
     """Decision 14A: update trip driver/truck/trailer; optional planned→assigned; audit only (no loads/dispatch_trips)."""
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
+    _raise_if_trip_already_completed(trip)
 
     await _validate_assignment_targets(
         db,
@@ -916,14 +967,13 @@ async def update_trip_schedule(
     body: TripScheduleBody,
 ) -> TripDetailResponse:
     """COMMIT 4a: update planned_start_at / expected_completion_at only (no assignment/status/LoadStop)."""
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
+    _raise_if_trip_already_completed(trip)
 
     now = datetime.now(timezone.utc)
     trip.planned_start_at = body.planned_start_at
@@ -937,9 +987,8 @@ async def update_trip_schedule(
 
 
 async def cancel_trip_manual(db: AsyncSession, tenant_id: int, trip_id: int) -> TripDetailResponse:
-    trip = await db.get(Trip, trip_id)
-    if trip is None or trip.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trip not found")
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
+    _raise_if_trip_already_completed(trip)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -949,6 +998,7 @@ async def cancel_trip_manual(db: AsyncSession, tenant_id: int, trip_id: int) -> 
     now = datetime.now(timezone.utc)
     trip.status = TRIP_CONTAINER_STATUS_CANCELLED
     trip.cancelled_at = now
+    # completed_at must remain NULL on cancel path.
     trip.updated_at = now
 
     trows = (
@@ -978,6 +1028,109 @@ async def cancel_trip_manual(db: AsyncSession, tenant_id: int, trip_id: int) -> 
     ).all()
     for load in drift:
         await _sync_load_active_trip_pointer(db, tenant_id, int(load.id))
+
+    detail = await get_trip_detail(db, tenant_id, trip_id)
+    assert detail is not None
+    return detail
+
+
+async def complete_trip_container(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    *,
+    actor_user_id: int | None,
+    actor_label: str | None,
+    request_id: str | None = None,
+) -> TripDetailResponse:
+    """Close Trip container: in_progress → completed when zero OPEN TripLoads remain.
+
+    Does not mutate TripLoads, Load.status, active_trip_id, custody, payroll, or dispatch_trips.
+    """
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
+
+    # Idempotent: already completed — do not rewrite completed_at / updated_at / audit.
+    if trip.status == TRIP_CONTAINER_STATUS_COMPLETED:
+        detail = await get_trip_detail(db, tenant_id, trip_id)
+        assert detail is not None
+        return detail
+
+    if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
+        )
+
+    if trip.status != TRIP_CONTAINER_STATUS_IN_PROGRESS:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": f"Trip status '{trip.status}' cannot be completed",
+                "code": "INVALID_TRIP_STATUS_FOR_COMPLETE",
+            },
+        )
+
+    open_rows = (
+        await db.scalars(
+            select(TripLoad).where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.trip_id == trip_id,
+                _trip_load_is_open_clause(),
+            )
+        )
+    ).all()
+
+    if open_rows:
+        has_active = any(
+            tl.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE for tl in open_rows
+        )
+        if has_active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Trip still has open active Load membership(s)",
+                    "code": "OPEN_ACTIVE_MEMBERSHIP_REMAINS",
+                },
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Trip still has open planned Load membership(s)",
+                "code": "OPEN_PLANNED_MEMBERSHIP_REMAINS",
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    before_status = trip.status
+    trip.status = TRIP_CONTAINER_STATUS_COMPLETED
+    trip.completed_at = now
+    trip.updated_at = now
+    await db.flush()
+
+    from app.services.audit_events import write_audit_event
+
+    await write_audit_event(
+        db,
+        tenant_id=int(tenant_id),
+        module="trips",
+        entity_type="trip",
+        entity_id=str(int(trip.id)),
+        entity_label=str(trip.trip_number),
+        action="trip_completed",
+        source="api",
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=request_id,
+        correlation_id=request_id,
+        snapshot_before={"status": before_status, "completed_at": None},
+        snapshot_after={
+            "status": TRIP_CONTAINER_STATUS_COMPLETED,
+            "completed_at": now.isoformat(),
+            "trip_number": trip.trip_number,
+        },
+        context_json={"trip_number": trip.trip_number},
+        best_effort=True,
+    )
 
     detail = await get_trip_detail(db, tenant_id, trip_id)
     assert detail is not None

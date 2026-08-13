@@ -53,6 +53,7 @@ class TripListItemResponse(BaseModel):
     trailer_id: Optional[int] = None
     trailer: Optional[NestedTrailer] = None
     assigned_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     planned_start_at: Optional[datetime] = None
     expected_completion_at: Optional[datetime] = None
@@ -89,6 +90,7 @@ class TripDetailResponse(BaseModel):
     trailer_id: Optional[int] = None
     trailer: Optional[NestedTrailer] = None
     assigned_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     planned_start_at: Optional[datetime] = None
     expected_completion_at: Optional[datetime] = None

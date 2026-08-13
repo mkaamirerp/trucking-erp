@@ -59,6 +59,7 @@ class Trip(Base):
         Integer, ForeignKey("trailers.id", ondelete="SET NULL"), nullable=True, index=True
     )
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     planned_start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expected_completion_at: Mapped[datetime | None] = mapped_column(

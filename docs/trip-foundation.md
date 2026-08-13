@@ -478,17 +478,16 @@ Examples:
 
 `completed` is a dispatcher-controlled closeout state.
 
-A Trip may be marked completed only after:
+**API (V1 shipped):** `POST /api/v1/trips/{trip_id}/complete` transitions **`in_progress` → `completed`** only when the Trip has **zero OPEN** TripLoad memberships (`planned|active` with both timestamps NULL). Sets **`trips.completed_at`** once (immutable on idempotent retry). Does **not** mutate TripLoads, `Load.status`, `active_trip_id`, custody, payroll, or `dispatch_trips`. Does **not** auto-activate another Trip.
 
-- required documents are uploaded
-- dispatch reviews/confirms the Trip file
-- dispatch explicitly marks the Trip complete
+Product closeout may later also require documents / file review; those gates are **not** enforced by this endpoint yet.
 
 Completed means:
 
-> Dispatch file complete / ready for payroll or settlement review.
+> Dispatch file complete / ready for payroll or settlement review (operational Trip responsibility ended).
 
 Completed does **not** mean payroll is paid. Payroll/settlement remains a later workflow.
+Completed does **not** mean commercial Load final delivery.
 
 ---
 

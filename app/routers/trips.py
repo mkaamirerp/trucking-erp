@@ -53,6 +53,30 @@ async def cancel_trip(
     return detail
 
 
+@router.post("/{trip_id}/complete", response_model=TripDetailResponse)
+async def complete_trip(
+    trip_id: int,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> TripDetailResponse:
+    """Close Trip container (in_progress → completed) when zero OPEN TripLoads remain."""
+    actor_user_id = int(user.tenant_user.id) if user.tenant_user else None
+    actor_label = None if user.tenant_user else f"platform:{user.user.id}"
+    rid = getattr(request.state, "request_id", None)
+    detail = await trips_service.complete_trip_container(
+        db,
+        tenant_id,
+        trip_id,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=str(rid) if rid else None,
+    )
+    await db.commit()
+    return detail
+
+
 @router.post("/{trip_id}/loads", response_model=TripDetailResponse)
 async def add_load_to_trip(
     trip_id: int,

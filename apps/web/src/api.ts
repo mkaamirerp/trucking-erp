@@ -887,6 +887,7 @@ export type TripDetail = {
   trailer_id?: number | null;
   trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
   assigned_at?: string | null;
+  completed_at?: string | null;
   cancelled_at?: string | null;
   planned_start_at?: string | null;
   expected_completion_at?: string | null;
@@ -913,6 +914,7 @@ export type TripListItem = {
   trailer_id?: number | null;
   trailer?: { id: number; unit_number: string; trailer_type?: string | null } | null;
   assigned_at?: string | null;
+  completed_at?: string | null;
   cancelled_at?: string | null;
   planned_start_at?: string | null;
   expected_completion_at?: string | null;
