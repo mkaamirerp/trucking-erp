@@ -765,3 +765,118 @@ class TestCustodyOperationalSlice2:
         assert (await _load_row(load_b))["active_trip_id"] == trip_out_b
         assert (await _load_row(load_a))["custody_owner"] == CUSTODY_OWNER_TRIP
         assert (await _load_row(load_b))["custody_owner"] == CUSTODY_OWNER_TRIP
+
+    async def test_yard_handoff_idempotency_semantic_conflicts(
+        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+    ):
+        """Same key + different terminal/placement/trailer must conflict; exact replay OK."""
+        loads = await _pick_load_ids(client, 2)
+        if len(loads) < 2:
+            pytest.skip("need 2 loads")
+        load_id, load2 = loads[0], loads[1]
+        await _clear_open_memberships(load_id)
+        await _clear_open_memberships(load2)
+        trip_id, trailer_id, _ = await _create_assigned_trip(client, [load_id])
+        terminal_a = await ensure_active_terminal(client, AUTH_HEADERS, name=f"YA-{uuid.uuid4().hex[:6]}")
+        terminal_b = await ensure_active_terminal(client, AUTH_HEADERS, name=f"YB-{uuid.uuid4().hex[:6]}")
+        assert (await accept_custody(client, AUTH_HEADERS, trip_id, load_id)).status_code == 200
+
+        key = f"yh-sem-{uuid.uuid4().hex}"
+        wrong_trailer = trailer_id + 9_000_000  # semantic mismatch only; need not exist
+
+        r1 = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip_id,
+            load_id,
+            terminal_id=terminal_a,
+            placement="on_trailer",
+            body={"trailer_id": trailer_id, "idempotency_key": key},
+        )
+        assert r1.status_code == 200, r1.text
+        assert r1.json()["replayed"] is False
+        n1 = await _event_count(load_id, CUSTODY_EVENT_YARD_HANDOFF)
+
+        # 1) exact replay
+        r_ok = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip_id,
+            load_id,
+            terminal_id=terminal_a,
+            placement="on_trailer",
+            body={"trailer_id": trailer_id, "idempotency_key": key},
+        )
+        assert r_ok.status_code == 200, r_ok.text
+        assert r_ok.json()["replayed"] is True
+        assert await _event_count(load_id, CUSTODY_EVENT_YARD_HANDOFF) == n1
+
+        # 2) same key + different terminal
+        r_term = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip_id,
+            load_id,
+            terminal_id=terminal_b,
+            placement="on_trailer",
+            body={"trailer_id": trailer_id, "idempotency_key": key},
+        )
+        assert r_term.status_code == 409, r_term.text
+        assert r_term.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+        assert await _event_count(load_id, CUSTODY_EVENT_YARD_HANDOFF) == n1
+
+        # 3) same key + different placement
+        r_place = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip_id,
+            load_id,
+            terminal_id=terminal_a,
+            placement="staged",
+            body={"idempotency_key": key},
+        )
+        assert r_place.status_code == 409, r_place.text
+        assert r_place.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+        assert await _event_count(load_id, CUSTODY_EVENT_YARD_HANDOFF) == n1
+
+        # 4) same key + different trailer
+        r_tr = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip_id,
+            load_id,
+            terminal_id=terminal_a,
+            placement="on_trailer",
+            body={"trailer_id": wrong_trailer, "idempotency_key": key},
+        )
+        assert r_tr.status_code == 409, r_tr.text
+        assert r_tr.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+        assert await _event_count(load_id, CUSTODY_EVENT_YARD_HANDOFF) == n1
+
+        # 5–6) staged original: supplied trailer_id on replay cannot bypass; count unchanged
+        trip2, _, _ = await _create_assigned_trip(client, [load2])
+        assert (await accept_custody(client, AUTH_HEADERS, trip2, load2)).status_code == 200
+        key2 = f"yh-stg-{uuid.uuid4().hex}"
+        rs = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip2,
+            load2,
+            terminal_id=terminal_a,
+            placement="staged",
+            body={"idempotency_key": key2},
+        )
+        assert rs.status_code == 200, rs.text
+        n_st = await _event_count(load2, CUSTODY_EVENT_YARD_HANDOFF)
+        r_bypass = await yard_handoff(
+            client,
+            AUTH_HEADERS,
+            trip2,
+            load2,
+            terminal_id=terminal_a,
+            placement="staged",
+            body={"trailer_id": trailer_id, "idempotency_key": key2},
+        )
+        assert r_bypass.status_code == 409, r_bypass.text
+        assert r_bypass.json()["detail"]["code"] == "IDEMPOTENCY_KEY_CONFLICT"
+        assert await _event_count(load2, CUSTODY_EVENT_YARD_HANDOFF) == n_st

@@ -138,6 +138,28 @@ def _raise_if_membership_completed(tl: TripLoad) -> None:
         raise _conflict("MEMBERSHIP_ALREADY_COMPLETED", "Completed membership cannot be activated")
 
 
+def _yard_handoff_semantic_match(body: YardHandoffBody, event: LoadCustodyEvent) -> bool:
+    """True when request matches custody/equipment/location semantics of an existing handoff event.
+
+    Notes and occurred_at are non-semantic and ignored.
+    """
+    if event.terminal_id is None or int(event.terminal_id) != int(body.terminal_id):
+        return False
+    if event.placement_after != body.placement:
+        return False
+    if body.placement == CUSTODY_PLACEMENT_STAGED:
+        # Staged clears trailer; any supplied trailer_id is a different request.
+        if body.trailer_id is not None:
+            return False
+        return event.trailer_id is None
+    # on_trailer: retained trailer must match when caller supplies trailer_id
+    if event.trailer_id is None:
+        return False
+    if body.trailer_id is not None and int(body.trailer_id) != int(event.trailer_id):
+        return False
+    return True
+
+
 def _require_trip_not_terminal(trip: Trip) -> None:
     _raise_if_trip_already_completed(trip)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
@@ -424,14 +446,33 @@ async def yard_handoff_load_custody(
             and last.terminal_id == body.terminal_id
             and last.placement_after == body.placement
         ):
-            if body.idempotency_key and last.idempotency_key and last.idempotency_key != body.idempotency_key:
-                existing = await _find_event_by_idempotency(db, tenant_id, load_id, body.idempotency_key)
-                if existing is not None and int(existing.id) != int(last.id):
+            if _yard_handoff_semantic_match(body, last):
+                if body.idempotency_key and last.idempotency_key and last.idempotency_key != body.idempotency_key:
+                    existing = await _find_event_by_idempotency(
+                        db, tenant_id, load_id, body.idempotency_key
+                    )
+                    if existing is not None and int(existing.id) != int(last.id):
+                        raise _conflict(
+                            "IDEMPOTENCY_KEY_CONFLICT",
+                            "idempotency_key already used for a different custody event on this Load",
+                        )
+                return _transition_response(load=load, trip=trip, tl=tl, event=last, replayed=True)
+            # Same terminal/placement but trailer (or other semantic) mismatch:
+            # same key must conflict, not silently succeed.
+            if body.idempotency_key:
+                if last.idempotency_key == body.idempotency_key:
+                    raise _conflict(
+                        "IDEMPOTENCY_KEY_CONFLICT",
+                        "idempotency_key already used for a different yard-handoff request on this Load",
+                    )
+                existing = await _find_event_by_idempotency(
+                    db, tenant_id, load_id, body.idempotency_key
+                )
+                if existing is not None:
                     raise _conflict(
                         "IDEMPOTENCY_KEY_CONFLICT",
                         "idempotency_key already used for a different custody event on this Load",
                     )
-            return _transition_response(load=load, trip=trip, tl=tl, event=last, replayed=True)
 
     if body.idempotency_key:
         existing = await _find_event_by_idempotency(db, tenant_id, load_id, body.idempotency_key)
@@ -439,11 +480,10 @@ async def yard_handoff_load_custody(
             if (
                 existing.event_type == CUSTODY_EVENT_YARD_HANDOFF
                 and existing.trip_id == trip_id
-                and existing.terminal_id == body.terminal_id
-                and existing.placement_after == body.placement
                 and _is_completed_membership(tl)
                 and load.custody_owner == CUSTODY_OWNER_TERMINAL
-                and load.custody_terminal_id == body.terminal_id
+                and load.custody_terminal_id == existing.terminal_id
+                and _yard_handoff_semantic_match(body, existing)
             ):
                 return _transition_response(load=load, trip=trip, tl=tl, event=existing, replayed=True)
             raise _conflict(
