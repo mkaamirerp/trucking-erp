@@ -17,7 +17,9 @@ from app.schemas.load import (
     LoadUpdate,
 )
 from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
 from app.services import loads as loads_service
+from app.services import load_custody as custody_service
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 
 router = APIRouter(prefix="/loads", tags=["loads"])
@@ -170,6 +172,32 @@ async def mark_load_ready(
         db, tenant_id, load_id, expected_concurrency_version=body.expected_concurrency_version
     )
     return LoadResponse.model_validate(load)
+
+
+@router.get("/{load_id}/custody", response_model=LoadCustodySnapshotResponse)
+async def get_load_custody(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> LoadCustodySnapshotResponse:
+    """Current custody snapshot for a Load (read-only)."""
+    return await custody_service.get_load_custody_snapshot(db, tenant_id, load_id)
+
+
+@router.get("/{load_id}/custody-events", response_model=LoadCustodyEventListResponse)
+async def list_load_custody_events(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> LoadCustodyEventListResponse:
+    """Append-only custody event history for a Load (read-only)."""
+    return await custody_service.list_load_custody_events(
+        db, tenant_id, load_id, limit=limit, offset=offset
+    )
 
 
 @router.get("/{load_id}/notes", response_model=list)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, BigInteger, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -85,6 +85,23 @@ class Load(Base):
     last_ping_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     location_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    # Custody snapshot (Decision 12 continuity read-model; events are source of truth).
+    custody_owner: Mapped[str] = mapped_column(String(32), nullable=False, server_default="unknown")
+    custody_trip_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("trips.id", ondelete="SET NULL"), nullable=True
+    )
+    custody_terminal_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("terminals.id", ondelete="SET NULL"), nullable=True
+    )
+    custody_placement: Mapped[str] = mapped_column(String(32), nullable=False, server_default="unknown")
+    custody_trailer_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("trailers.id", ondelete="SET NULL"), nullable=True
+    )
+    custody_since_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_custody_event_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("load_custody_events.id", ondelete="SET NULL"), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -108,9 +125,11 @@ class Load(Base):
     )
     driver = relationship("Driver", back_populates="loads")
     truck = relationship("Truck", backref="loads")
-    trailer = relationship("Trailer", backref="loads")
+    trailer = relationship("Trailer", foreign_keys=[trailer_id], backref="loads")
     dispatch_trips = relationship("DispatchTrip", back_populates="load")
     active_trip = relationship("Trip", foreign_keys=[active_trip_id], viewonly=True)
+    custody_trip = relationship("Trip", foreign_keys=[custody_trip_id], viewonly=True)
+    custody_trailer = relationship("Trailer", foreign_keys=[custody_trailer_id], viewonly=True)
     stops = relationship("LoadStop", back_populates="load", order_by="LoadStop.sequence", cascade="all, delete-orphan")
     notes_rel = relationship("LoadNote", back_populates="load", order_by="LoadNote.created_at", cascade="all, delete-orphan")
 

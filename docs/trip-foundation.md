@@ -132,6 +132,8 @@ Planning Trip B does **not** mean Trip B currently possesses the freight. Curren
 
 **TripLoad is NOT the complete custody/audit timeline.** Custody events provide continuity/history.
 
+**Slice 1 (foundation shipped):** `terminals`, `load_custody_events`, Load custody snapshot columns, read APIs, bootstrap script. Operational handoff/takeover mutations and closing bare membership APIs are **later slices**.
+
 ---
 
 ### TripLoad membership semantics (LOCKED — V1)

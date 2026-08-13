@@ -33,6 +33,7 @@ from app.routers.auth import router as auth_router
 from app.routers.brokers import router as brokers_router
 from app.routers.customs_brokers import router as customs_brokers_router
 from app.routers.loads import router as loads_router
+from app.routers.terminals import router as terminals_router
 from app.routers.trips import router as trips_router
 from app.routers.load_lab import router as load_lab_router
 from app.routers.audit_events import router as audit_events_router
@@ -133,6 +134,7 @@ app.include_router(auth_router)
 app.include_router(brokers_router, prefix="/api/v1")
 app.include_router(customs_brokers_router, prefix="/api/v1")
 app.include_router(loads_router, prefix="/api/v1")
+app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(trips_router, prefix="/api/v1")
 app.include_router(load_lab_router, prefix="/api/v1")
 app.include_router(audit_events_router, prefix="/api/v1")
