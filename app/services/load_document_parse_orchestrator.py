@@ -29,13 +29,13 @@ async def parse_load_workspace_document_orchestrated(
     """
     Parse PDF for workspace hydration only (no DB, no load/trip mutation).
 
-    No feature flag and no legacy fallback: this route is the product guarded parser path.
+    No feature flag and no legacy diagnostics fallback: Rate Confirmation v2 path.
     """
     _ = email_thread_id, load_id
     fn = (filename or "upload.pdf")[:512]
 
     if tenant_id is None or db is None:
-        raise RuntimeError("tenant_id and db are required for guarded parse-document")
+        raise RuntimeError("tenant_id and db are required for parse-document")
 
     return await parse_pdf_bytes_to_load_document_response(
         db,

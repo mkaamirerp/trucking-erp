@@ -37,6 +37,9 @@ from app.models.platform import (
     UserInvite,
 )
 from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember
+from app.services.load_parser_tenant_identity_exclusion import (
+    invalidate_load_parser_tenant_identity_cache,
+)
 from app.services.login_password_abuse import clear_login_password_fail_streak
 from app.services.login_unlock_step_up_pending import set_login_step_up_pending_after_unlock
 from app.services.sign_in_lock_state import build_sign_in_lock_state, build_sign_in_security_panel
@@ -177,6 +180,8 @@ async def get_company_profile(
             db.add(profile)
             await db.commit()
             await db.refresh(profile)
+            # New profile rows change load-parser tenant_identity_exclusion.
+            invalidate_load_parser_tenant_identity_cache(tenant_id)
         else:
             payload_for_fallback = pj
     elif profile is None and tenant.onboarding_payload and tenant.onboarding_payload.payload_json:

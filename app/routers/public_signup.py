@@ -13,6 +13,9 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.deps.tenant import tenant_slug_from_request
 from app.core.storage import save_company_doc_upload, serve_file
+from app.services.load_parser_tenant_identity_exclusion import (
+    invalidate_load_parser_tenant_identity_cache,
+)
 from app.models.platform import (
     OnboardingStatus,
     OTPPurpose,
@@ -1061,6 +1064,8 @@ async def company_setup(payload: CompanySetupRequest, request: Request, db: Asyn
         db.add(profile)
 
     await db.commit()
+    # Identity fields feed load-parser tenant_identity_exclusion; drop stale cache.
+    invalidate_load_parser_tenant_identity_cache(tenant_id)
 
     tenant = await provision_tenant_db(int(tenant.id), db)
     dashboard_url = _workspace_url(request, tenant.slug, "/dashboard")

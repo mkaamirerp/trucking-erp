@@ -1,3 +1,9 @@
+"""Production Rate Confirmation parse-document entrypoint tests (v2 path).
+
+Legacy PRODUCT_PARSE_DIAGNOSTICS / apply_guarded_load_document_repairs coverage removed
+with the dead semantic diagnostics/repair modules.
+"""
+
 from __future__ import annotations
 
 import inspect
@@ -11,10 +17,7 @@ from app.core.config import settings
 from app.schemas.load_document_parse import LoadDocumentParseResponse, ParseDocumentSemanticModelOutput
 from app.services import load_document_parse_guarded
 from app.services.load_document_parse_adapter import map_lab_parse_response_to_document_contract
-from app.services.load_document_parse_guardrails import apply_guarded_load_document_repairs
 from app.services.load_document_parse_guarded import parse_pdf_bytes_to_load_document_response
-from app.services.load_document_parse_diagnostics import build_load_document_parse_diagnostics
-from app.services.load_document_parse_reference import rank_reference_candidates
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FIXTURE_DIR = _REPO_ROOT / "docs" / "fixtures" / "load_lab"
@@ -38,8 +41,8 @@ async def test_returns_sparse_shape_when_no_openai_client_or_key(monkeypatch: py
 
     assert isinstance(out, LoadDocumentParseResponse)
     assert out.document.filename == "fixture.pdf"
-    assert out.context["parse_path"] == "guarded_truckerjson"
-    assert "[guarded] OpenAI client not supplied; guarded extraction skipped." in out.warnings
+    assert out.context["parse_path"] == "load_rate_con_v2"
+    assert "[rate_con_v2] OpenAI client not supplied; extraction skipped." in out.warnings
     assert out.raw_text
 
 
@@ -47,6 +50,8 @@ async def test_returns_sparse_shape_when_no_openai_client_or_key(monkeypatch: py
 async def test_no_injected_client_uses_default_product_openai_when_key_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.services import load_document_parse_rate_con
+
     calls: list[dict] = []
 
     async def fake_default_openai(**kwargs):
@@ -62,7 +67,7 @@ async def test_no_injected_client_uses_default_product_openai_when_key_exists(
 
     monkeypatch.setattr(settings, "openai_api_key", "sk-test-key", raising=False)
     monkeypatch.setattr(
-        load_document_parse_guarded,
+        load_document_parse_rate_con,
         "parse_document_openai_chat_json_schema",
         fake_default_openai,
     )
@@ -75,10 +80,12 @@ async def test_no_injected_client_uses_default_product_openai_when_key_exists(
     )
 
     assert out.extracted.broker_load_reference == "DEF-123"
-    assert out.context["parse_path"] == "guarded_truckerjson"
+    assert out.context["parse_path"] == "load_rate_con_v2"
     assert calls
     assert calls[0]["api_key"] == "sk-test-key"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
+    assert "PRODUCT_PARSE_DIAGNOSTICS" not in calls[0]["user_text"]
+    assert "tenant_identity_exclusion" in calls[0]["user_text"]
 
 
 @pytest.mark.asyncio
@@ -113,21 +120,15 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
     assert out.extracted.broker_load_reference == "REF-123"
     assert out.extracted.broker_name_snapshot == "Acme Broker"
     assert out.field_confidence["broker_load_reference"] == "high"
-    assert out.context["parse_path"] == "guarded_truckerjson"
+    assert out.context["parse_path"] == "load_rate_con_v2"
     assert calls
     assert calls[0]["model"]
-    assert "document_type" in calls[0]["system"].casefold()
-    assert "two phases" in calls[0]["system"].casefold()
-    assert "Filename for document.filename: input.pdf" in calls[0]["user_text"]
-    assert "PRODUCT_PARSE_DIAGNOSTICS" in calls[0]["user_text"]
-    assert "STOP DETAIL" in calls[0]["user_text"]
-    assert "classification_reasoning" in calls[0]["user_text"].casefold()
-    assert "PU 05/29/25" in calls[0]["user_text"] or "05/29/25" in calls[0]["user_text"]
-    assert "reference_candidates" in calls[0]["user_text"]
-    assert "[review] Stop has facility/address but appointment date was not extracted" in calls[0][
-        "user_text"
-    ]
-    assert "--- BEGIN EXTRACTED PDF TEXT ---" in calls[0]["user_text"]
+    assert "PRODUCT_PARSE_DIAGNOSTICS" not in calls[0]["user_text"]
+    assert "broker_party" not in calls[0]["user_text"]
+    assert "role_hint" not in calls[0]["user_text"]
+    assert "tenant_identity_exclusion" in calls[0]["user_text"]
+    assert "field_rules" in calls[0]["user_text"]
+    assert "document.pages" in calls[0]["user_text"] or '"pages"' in calls[0]["user_text"]
     assert calls[0]["schema"]["type"] == "object"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
 
@@ -158,236 +159,26 @@ async def test_strips_parse_diagnostics_from_injected_payload() -> None:
     assert "parse_diagnostics" not in dumped
     assert "parse_diagnostics" not in out.context
     assert "unknown_root_key" not in dumped
-    assert out.context["parse_path"] == "guarded_truckerjson"
+    assert out.context["parse_path"] == "load_rate_con_v2"
 
 
-def test_module_does_not_import_load_lab_semantic() -> None:
+def test_guarded_module_is_thin_reexport_only() -> None:
     src = inspect.getsource(load_document_parse_guarded)
+    assert "parse_pdf_bytes_to_load_document_response" in src
+    assert "load_document_parse_rate_con" in src
+    assert "build_load_document_parse_diagnostics" not in src
+    assert "apply_guarded_load_document_repairs" not in src or "removed" in src.casefold()
     assert "app.services.load_lab_semantic" not in src
-    assert "load_lab_semantic" not in src
 
 
-def test_diagnostics_contacts_split_carrier_vs_broker_party() -> None:
-    text = """
-BROKER AGREEMENT
-CONTACT INFORMATION
-Jane Agent 800-111-2222 jane@acmebroker.com
+def test_v2_system_prompt_is_exclusion_and_field_rules_based() -> None:
+    from app.services.load_parser_openai_handoff_v2 import build_v2_openai_system_prompt
 
-Carrier Contact
-Dispatcher 513-688-6962 carrierops@carrier.com
-""".strip()
-    diag = build_load_document_parse_diagnostics(
-        raw_full_text=text,
-        page_texts=[text],
-        filename="t.pdf",
-        extraction_method="test",
-    )
-    bp = diag["contacts"]["broker_party"]
-    cp = diag["contacts"]["carrier_party"]
-    assert "jane@acmebroker.com" in bp["emails"]
-    assert "carrierops@carrier.com" in cp["emails"]
-    assert cp["phones"]
-
-
-def test_guardrails_clear_broker_contact_name_when_carrier_section_name_matches() -> None:
-    text = """
-CONTACT INFORMATION
-Jane Broker jane@shipco.com 800-111-2222
-
-Carrier Contact
-Name
-Dispatcher
-Imran Khan
-
-LOAD INFORMATION
-Mode
-""".strip()
-    diag = build_load_document_parse_diagnostics(
-        raw_full_text=text,
-        page_texts=[text],
-        filename="carriername.pdf",
-        extraction_method="test",
-    )
-    assert "imran khan" in {n.casefold() for n in (diag["contacts"]["carrier_party"].get("person_names") or [])}
-
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "carriername.pdf"},
-            "extracted": {
-                "broker_contact_name_snapshot": "Imran Khan",
-                "broker_contact_email_snapshot": "jane@shipco.com",
-                "broker_contact_phone_snapshot": "800-111-2222",
-                "references": [],
-                "stops": [],
-            },
-            "raw_text": text,
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-    out = apply_guarded_load_document_repairs(base, diagnostics=diag)
-    assert out.extracted.broker_contact_email_snapshot == "jane@shipco.com"
-    assert out.extracted.broker_contact_phone_snapshot == "800-111-2222"
-    assert out.extracted.broker_contact_name_snapshot is None
-    assert any("broker_party name candidates" in w or "carrier/driver-party name" in w for w in out.warnings)
-
-
-def test_guardrails_clear_broker_contact_when_carrier_party_matches() -> None:
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "x.pdf"},
-            "extracted": {
-                "broker_contact_name_snapshot": "Wrong Dispatch",
-                "broker_contact_phone_snapshot": "513-688-6962",
-                "broker_contact_email_snapshot": "mike@carrier.com",
-                "references": [],
-                "stops": [],
-            },
-            "raw_text": "x",
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-    diagnostics = {
-        "contact_candidates": [
-            {"kind": "email", "value": "mike@carrier.com", "role": "carrier_party"},
-            {"kind": "phone", "value": "(513) 688-6962", "role": "carrier_party"},
-            {"kind": "name", "value": "Wrong Dispatch", "role": "carrier_party"},
-        ],
-    }
-    out = apply_guarded_load_document_repairs(base, diagnostics=diagnostics)
-    assert out.extracted.broker_contact_email_snapshot is None
-    assert out.extracted.broker_contact_phone_snapshot is None
-    assert out.extracted.broker_contact_name_snapshot is None
-    assert any("Cleared broker_contact_email_snapshot" in w for w in out.warnings)
-    assert any("Cleared broker_contact_phone_snapshot" in w for w in out.warnings)
-
-
-def test_reference_ranking_prefers_load_number() -> None:
-    diagnostics = {
-        "reference_candidates": [
-            {"kind": "po_number", "value": "PO-777", "line": 2},
-            {"kind": "load_number", "value": "LOAD-123", "line": 5},
-            {"kind": "load_number", "value": "INFORMATION", "line": 1},
-            {"kind": "confirmation_number", "value": "Load", "line": 1},
-        ]
-    }
-
-    ranking = rank_reference_candidates(diagnostics)
-
-    assert ranking["primary"]["kind"] == "load_number"
-    assert ranking["primary"]["value"] == "LOAD-123"
-
-
-def test_guardrails_fill_missing_broker_reference_and_clear_decimal_reference() -> None:
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "x.pdf"},
-            "extracted": {"broker_load_reference": "12.34", "references": [], "stops": []},
-            "raw_text": "Load # LOAD-123",
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-    diagnostics = {
-        "reference_candidates": [{"kind": "load_number", "value": "LOAD-123", "line": 1}],
-    }
-
-    out = apply_guarded_load_document_repairs(base, diagnostics=diagnostics)
-
-    assert out.extracted.broker_load_reference == "LOAD-123"
-    assert any("broker_load_reference" in w and "ranked" in w for w in out.warnings)
-    assert any(r.value == "LOAD-123" for r in out.extracted.references)
-
-
-def test_guardrails_fill_missing_stop_facilities_and_move_customer_rate() -> None:
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "x.pdf"},
-            "extracted": {
-                "customer_rate": 1200,
-                "references": [],
-                "stops": [
-                    {"stop_type": "pickup", "sequence": 0, "city": "Miami", "reference_number": "P1"},
-                    {"stop_type": "delivery", "sequence": 1, "city": "Atlanta", "reference_number": "D1"},
-                ],
-            },
-            "raw_text": "x",
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-    diagnostics = {
-        "route_stop_hints": [
-            {
-                "sequence": 0,
-                "facility_name": "Pickup A",
-                "street": "10 Harbor Way",
-                "appointment_date": "2025-12-01",
-                "appointment_time_text": "07:00",
-            },
-            {
-                "sequence": 1,
-                "facility_name": "Single Drop",
-                "street": "500 Peachtree",
-                "appointment_date": "2025-12-03",
-                "appointment_time_text": "10:00-16:00",
-            },
-        ],
-    }
-
-    out = apply_guarded_load_document_repairs(base, diagnostics=diagnostics)
-
-    assert out.extracted.rate == 1200
-    assert out.extracted.customer_rate is None
-    assert out.extracted.stops[0].facility_name == "Pickup A"
-    assert out.extracted.stops[0].street == "10 Harbor Way"
-    assert out.extracted.stops[1].facility_name == "Single Drop"
-
-
-def test_guardrails_fill_missing_rate_from_financial_hint() -> None:
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "x.pdf"},
-            "extracted": {"references": [], "stops": []},
-            "raw_text": "Rate: $1,200.00 USD",
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-
-    out = apply_guarded_load_document_repairs(
-        base,
-        diagnostics={"financial_hints": {"linehaul_rate": 1200.0}},
-    )
-
-    assert out.extracted.rate == 1200
-
-
-def test_guardrails_repair_numeric_trailer_type_from_equipment_hint() -> None:
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "x.pdf"},
-            "extracted": {"trailer_type": "53", "references": [], "stops": []},
-            "raw_text": "Trailer: 53 dry van",
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-
-    out = apply_guarded_load_document_repairs(
-        base,
-        diagnostics={"equipment_hints": {"trailer_type": "Van", "trailer_size": "53"}},
-    )
-
-    assert out.extracted.trailer_type == "Van"
-    assert out.extracted.trailer_size == "53"
+    system = build_v2_openai_system_prompt().casefold()
+    assert "tenant_identity_exclusion" in system
+    assert "field_rules" in system
+    assert "product_parse_diagnostics" not in system
+    assert "broker_party" not in system
 
 
 def test_semantic_model_json_schema_includes_document_type_enum() -> None:
@@ -397,7 +188,6 @@ def test_semantic_model_json_schema_includes_document_type_enum() -> None:
     assert "classification_reasoning" in props
     enum = props["document_type"].get("anyOf") or props["document_type"].get("enum")
     if isinstance(enum, list) and enum and isinstance(enum[0], dict):
-        # nullable optional wraps anyOf
         inner = next((x for x in enum if x.get("type") == "string" and "enum" in x), None)
         assert inner is not None
         assert "rate_confirmation" in inner["enum"]
@@ -406,16 +196,30 @@ def test_semantic_model_json_schema_includes_document_type_enum() -> None:
         assert "rate_confirmation" in props["document_type"]["enum"]
 
 
-def test_prompt_user_text_includes_stop_detail_split_and_so_mapping() -> None:
-    text = load_document_parse_guarded._build_user_text_with_diagnostics(
-        filename="rc.pdf",
-        raw_full_text="STOP DETAIL\nPU 05/29/25\n09:00",
-        diagnostics={"version": "test"},
+def test_v2_user_message_has_no_product_parse_diagnostics() -> None:
+    from app.services.load_parser_openai_handoff_v2 import (
+        build_load_rate_con_openai_handoff_v2_payload,
+        build_v2_openai_user_message,
     )
+
+    handoff = build_load_rate_con_openai_handoff_v2_payload(
+        tenant_identity_exclusion={
+            "names": [],
+            "mc_numbers": [],
+            "usdot_numbers": [],
+            "phones": [],
+            "emails": [],
+            "email_domains": [],
+            "addresses": [],
+        },
+        pages=["STOP DETAIL\nPU 05/29/25\n09:00"],
+        filename="rc.pdf",
+    )
+    text = build_v2_openai_user_message(handoff)
+    assert "PRODUCT_PARSE_DIAGNOSTICS" not in text
+    assert "tenant_identity_exclusion" in text
+    assert "field_rules" in text
     assert "STOP DETAIL" in text
-    assert "PU 05/29/25" in text or "05/29/25" in text
-    assert "classification_reasoning" in text.casefold()
-    assert "SO" in text and "delivery" in text.casefold()
 
 
 @pytest.mark.asyncio
@@ -440,73 +244,7 @@ async def test_maps_document_type_and_reasoning_into_context() -> None:
     )
     assert out.context.get("document_type") == "rate_confirmation"
     assert "Broker→carrier" in str(out.context.get("classification_reasoning") or "")
-
-
-def test_guardrails_emit_review_when_rate_confirmation_stop_missing_appt_date() -> None:
-    raw = "CARRIER RATE CONFIRMATION PAGE 1\nSTOP DETAIL\n"
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "x.pdf"},
-            "extracted": {
-                "references": [],
-                "stops": [
-                    {
-                        "stop_type": "pickup",
-                        "sequence": 0,
-                        "city": "Sparta",
-                        "state_or_province": "MI",
-                    },
-                ],
-            },
-            "raw_text": raw,
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson", "document_type": "rate_confirmation"},
-        }
-    )
-    out = apply_guarded_load_document_repairs(base, diagnostics={})
-    assert any(
-        "verify STOP DETAIL table" in w and w.startswith("[review]") for w in out.warnings
-    )
-
-
-def test_guardrails_fill_split_stop_date_time_from_diagnostics_hints() -> None:
-    text = """
-STOP DETAIL
-PU 05/29/25
-09:00
-Old Orchard
-SO 05/30/25
-12:30
-WINDSORDC
-""".strip()
-    diag = build_load_document_parse_diagnostics(
-        raw_full_text=text,
-        page_texts=[text],
-        filename="stop.pdf",
-        extraction_method="test",
-    )
-    base = LoadDocumentParseResponse.model_validate(
-        {
-            "document": {"filename": "stop.pdf"},
-            "extracted": {
-                "references": [],
-                "stops": [
-                    {"stop_type": "pickup", "sequence": 0, "facility_name": "Old Orchard"},
-                    {"stop_type": "delivery", "sequence": 1, "facility_name": "WINDSORDC"},
-                ],
-            },
-            "raw_text": text,
-            "warnings": [],
-            "field_confidence": {},
-            "context": {"parse_path": "guarded_truckerjson"},
-        }
-    )
-    out = apply_guarded_load_document_repairs(base, diagnostics=diag)
-    assert out.extracted.stops[0].appointment_date == "2025-05-29"
-    assert out.extracted.stops[0].appointment_time_text == "09:00"
-    assert out.extracted.stops[1].appointment_date == "2025-05-30"
-    assert out.extracted.stops[1].appointment_time_text == "12:30"
+    assert out.context.get("parse_path") == "load_rate_con_v2"
 
 
 @pytest.mark.asyncio
@@ -532,6 +270,19 @@ async def test_product_parser_maps_saved_lab_golden_without_exposing_diagnostics
     dumped = product.model_dump(mode="json")
     assert "parse_diagnostics" not in dumped
     assert "parse_diagnostics" not in product.context
-    assert product.context["parse_path"] == "guarded_truckerjson"
+    assert product.context["parse_path"] == "load_rate_con_v2"
     assert product.extracted.broker_load_reference == mapped_lab.extracted.broker_load_reference
     assert len(product.extracted.stops) == len(mapped_lab.extracted.stops)
+
+
+def test_dead_semantic_modules_are_gone() -> None:
+    import importlib
+
+    for mod in (
+        "app.services.load_document_parse_diagnostics",
+        "app.services.load_document_parse_guardrails",
+        "app.services.load_document_parse_reference",
+        "app.services.load_document_parse_contact_candidates",
+    ):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(mod)

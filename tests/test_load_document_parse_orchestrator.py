@@ -81,8 +81,8 @@ async def test_orchestrator_without_client_returns_guarded_sparse_response() -> 
         openai_chat_json_schema=None,
     )
 
-    assert out.context.get("parse_path") == "guarded_truckerjson"
-    assert "[guarded] OpenAI client not supplied; guarded extraction skipped." in out.warnings
+    assert out.context.get("parse_path") == "load_rate_con_v2"
+    assert "[rate_con_v2] OpenAI client not supplied; extraction skipped." in out.warnings
     assert out.extracted.broker_load_reference is None
     _assert_public_response_clean(out)
 

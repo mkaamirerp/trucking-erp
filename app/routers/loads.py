@@ -86,7 +86,8 @@ async def parse_load_workspace_document(
     Extract normalized load fields from an uploaded PDF for workspace hydration only.
     Does not create or update a load row. Optional thread/load ids are echo-only context.
 
-    Uses the product guarded parser path only; no legacy parser fallback.
+    Uses the Rate Confirmation v2 product parser (acquisition + clean OpenAI handoff +
+    mechanical validation); no PRODUCT_PARSE_DIAGNOSTICS fallback.
     """
     data = await file.read()
     if not data:
