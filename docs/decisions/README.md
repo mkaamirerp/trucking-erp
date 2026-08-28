@@ -1,10 +1,15 @@
 # Driver decision records
 
-This folder contains the **small driver/onboarding ADR series 0001–0005**. It is separate from the newer top-level **Trip / Dispatch Decisions 6–14** under `docs/`.
+This folder contains only **current / implemented driver ADRs**. It is separate from the newer top-level **Trip / Dispatch Decisions 6–14** under `docs/`.
 
-## Trust rule
+## Trust order
 
-Use current code and the newer driver foundation/schema locks when an older ADR conflicts with them.
+When sources disagree, use this order:
+
+1. current application code and migrations;
+2. current driver foundation / schema locks;
+3. active ADRs in this folder;
+4. historical ADRs under `../archive/decisions/`.
 
 Current driver architecture references:
 
@@ -13,15 +18,17 @@ Current driver architecture references:
 - `../DRIVER_EXTENSION_PHASE3A_SCHEMA_LOCK.md`
 - `../DRIVER_OPERATING_MODEL_FOUNDATION.md`
 
-## Current contents
+## Active decision
 
-- `0002-driver-phones.md` — **implemented driver-scoped phone table**, with scope clarified against the people-first model.
-- `0003-emergency-contacts.md` — **design-only / not implemented**.
-- `0004-driver-licenses.md` — **design-only / not implemented**; normalized license/endorsement/restriction tables do not exist in current code.
+- `0002-driver-phones.md` — **implemented** driver-scoped operational phone model. It is tied to the dispatch-facing `drivers` row and is not universal `Person` contact authority.
 
-## Archived from this series
+## Historical decision records
 
-- `0001-driver-ownership.md` — superseded by the newer driver-extension `employment_relationship_type` model (`company_driver` / `owner_operator`).
-- `0005-storage-and-ocr.md` — superseded as OCR architecture by the shared Document Parser lock; OCR provider/execution is not currently locked or implemented.
+The following early ADRs are preserved under `../archive/decisions/` and must not be treated as implementation instructions:
 
-Archived copies live under `../archive/decisions/` and are historical only.
+- `0001-driver-ownership.md` — superseded by the newer driver-extension `employment_relationship_type` model.
+- `0003-emergency-contacts.md` — unimplemented historical proposal; future ownership must be decided against the people-first model.
+- `0004-driver-licenses.md` — unimplemented normalized-table proposal; the CA/US license requirement remains useful, but the old schema is not approved current design.
+- `0005-storage-and-ocr.md` — superseded as OCR architecture by the shared Document Parser lock.
+
+Do not create tables or product behavior from an archived ADR without a new current implementation decision.
