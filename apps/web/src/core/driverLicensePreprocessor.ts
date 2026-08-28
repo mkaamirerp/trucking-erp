@@ -444,6 +444,8 @@ function connectedComponents(mask: Uint8Array, width: number, height: number): C
       visited[start] = 1;
       let area = 0;
       const boundary: Point[] = [];
+      let boundarySeen = 0;
+      let boundaryRng = (start ^ 0x9e3779b9) >>> 0;
       while (head < tail) {
         const index = queue[head++];
         const x = index % width;
@@ -467,7 +469,20 @@ function connectedComponents(mask: Uint8Array, width: number, height: number): C
             }
           }
         }
-        if (isBoundary && boundary.length < 6000) boundary.push({ x, y });
+        if (isBoundary) {
+          // Keep a deterministic reservoir across the ENTIRE component boundary.
+          // The old first-6000 cap biased the rough rectangle toward whichever
+          // boundary region BFS happened to visit first and could discard the
+          // opposite DL edges on highly textured cards.
+          boundarySeen += 1;
+          if (boundary.length < 6000) {
+            boundary.push({ x, y });
+          } else {
+            boundaryRng = (1664525 * boundaryRng + 1013904223) >>> 0;
+            const slot = Math.floor((boundaryRng / 0x100000000) * boundarySeen);
+            if (slot < 6000) boundary[slot] = { x, y };
+          }
+        }
       }
       if (area >= minArea && boundary.length >= 8) {
         const sampled: Point[] = [];
