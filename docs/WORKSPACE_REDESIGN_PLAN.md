@@ -1,13 +1,16 @@
 # Workspace Redesign — Design & Implementation Plan
 
-**As of 2026-04:** This document mixes original design notes with a post-implementation summary. **Routing and shell names below match `apps/web/src/App.tsx` and the current components.**
+> **STATUS: SUPERSEDED FOR CURRENT DISPATCH PRODUCT OWNERSHIP (2026-08-28).**  
+> This file remains a historical implementation record for the legacy `DeprecatedDispatchPage` UI. Its statements describing `/dispatch` / `DeprecatedDispatchPage` as the active dispatch workspace are superseded by [`000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`](./000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md): **Trip page = Trip Container = Dispatch Control Center**. The legacy page is visual salvage / compatibility only; do not add new operational business logic here.
 
-## A. Current components / pages (truth)
+**As of 2026-04:** This document mixes original design notes with a post-implementation summary. **Routing and shell names below match `apps/web/src/App.tsx` and the components at that historical point.**
+
+## A. Current components / pages (historical snapshot)
 
 ### App shell & routing
 - **`App.tsx`** — `/dispatch` is wrapped in **`Layout`** (same as dashboard, loads, fleet, etc.). There is **no** separate “dispatch without layout” route.
 - **`Layout.tsx`** — Full-width shell: **`TopNav`** + scrollable `<main>` (not `SidebarNav`; that component does not exist in this repo).
-- **`DeprecatedDispatchPage.tsx`** — Dispatch workspace: ribbon tabs, **table** or **board** view, driver column, load cards/columns. Uses **`getDispatchBoard`**, **`listTrucks`**, **`listDrivers`**, **`listTrailers`**. **Unassigned** loads navigate to **`LoadWorkspacePage`** at `/loads/:id?dispatchAssign=1` (canonical load workspace + assignment). Other statuses open an **in-page summary modal** with a button to **Edit load** → same **`LoadWorkspacePage`**. **New load** → `/loads/new` (`LoadWorkspacePage` without id).
+- **`DeprecatedDispatchPage.tsx`** — Legacy dispatch workspace snapshot: ribbon tabs, **table** or **board** view, driver column, load cards/columns. Uses **`getDispatchBoard`**, **`listTrucks`**, **`listDrivers`**, **`listTrailers`**. **Unassigned** loads navigate to **`LoadWorkspacePage`** at `/loads/:id?dispatchAssign=1` (canonical load workspace + assignment). Other statuses open an **in-page summary modal** with a button to **Edit load** → same **`LoadWorkspacePage`**. **New load** → `/loads/new` (`LoadWorkspacePage` without id).
 - **`LoadsListPage.tsx`** — `listLoads` with search/pagination; row navigation uses **`OPS.LOAD_DETAIL`** → **`LoadWorkspacePage`** (`/loads/:id`). **New** uses **`OPS.LOAD_NEW`**.
 - **`LoadWorkspacePage.tsx`** — Canonical create/edit/assign workspace for loads (replaces any legacy “load detail page” naming in older docs).
 - **`listLoads`** — Supports `status`, `page`, `size`, `search`, etc. (see `apps/web/src/api.ts`).
@@ -68,7 +71,7 @@ Selected tab filters both table and board views.
 |------|--------|
 | `apps/web/src/hooks/useWorkspaceLayout.ts` | **Implemented** — shared hook for dispatch (and reusable for other workspaces). |
 | `apps/web/src/components/WorkspaceShell.tsx` | **Not extracted** — header/switcher/modal logic lives **inside** `DeprecatedDispatchPage.tsx`. |
-| `apps/web/src/pages/DeprecatedDispatchPage.tsx` | **Implemented** — ribbon, table/board, modal, navigation to `LoadWorkspacePage`. |
+| `apps/web/src/pages/DeprecatedDispatchPage.tsx` | **Implemented legacy surface** — ribbon, table/board, modal, navigation to `LoadWorkspacePage`; not the current operational product foundation. |
 | `apps/web/src/pages/LoadWorkspacePage.tsx` | **Implemented** — canonical load editor / assignment surface. |
 | `apps/web/src/App.tsx` | **Dispatch uses `Layout`** — same shell as other operational pages. |
 
