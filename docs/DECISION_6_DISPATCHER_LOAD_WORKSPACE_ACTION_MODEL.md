@@ -1,14 +1,17 @@
 # TruckERP — Decision 6 / Dispatcher load workspace action model
 
-**Context:** Designing the trip **execution / custody / assignment** layer after the **planned-trip lifecycle** foundation. **Implementation has not started.** This document is **report / product decision only** — not code.
+> **STATUS: LOCK RETAINED, IMPLEMENTATION-STATE TEXT UPDATED BY LATER DECISIONS.**  
+> The action meanings in this document remain part of the decision spine. However, the original statement that implementation “has not started” is historical. Read [`DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md`](./DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md) for the later assignment slice and [`000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`](./000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md) for current UI ownership: **Trip page = Trip Container = Dispatch Control Center**. Load Workspace remains commercial/readiness/document truth and may initiate or link to trip actions; it is not the execution control center.
 
-**Related:** `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`, `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`, `PHASE3L_D_OWNER_DECISION_CHECKLIST.md`.
+**Context:** This decision was written while designing the trip **execution / custody / assignment** layer after the **planned-trip lifecycle** foundation. It is a **product decision**, not a claim that later implementation has not begun.
+
+**Related:** `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`, `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`, `PHASE3L_D_OWNER_DECISION_CHECKLIST.md`, `DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md`, `000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`.
 
 ---
 
 ## Locked decision
 
-The dispatcher works from **one canonical Load verification / Load Workspace** screen. After reviewing and correcting the load, the dispatcher chooses the **next business action** from a **top action bar** or dropdown.
+The dispatcher verifies and corrects commercial/load data from the canonical **Load Workspace**. The dispatcher chooses the **next business action** from a **top action bar** or dropdown. Operational execution itself belongs to the Trip-backed Dispatch Control Center per 000.
 
 ### Preferred UI action bar
 
@@ -46,7 +49,7 @@ If there is room, show **buttons**. If not, use a **primary** button plus **drop
 
 ### 4. Assign & Send
 
-- **Fast dispatcher action** from the same load screen.
+- **Fast dispatcher action** initiated from load verification/planning context.
 - Dispatcher can, in one product flow: save corrections, make load ready if required, create/update **trip** and **membership** as needed, assign equipment, and **send** the driver the job information.
 - Driver can receive trip/load information **before** getting home or **before** finishing the current trip.
 - **Backend** should treat this as **multiple safe facts** even if the **UI** presents one button.
@@ -139,7 +142,7 @@ Avoid using **“Dispatched”** too early as a heavy backend label — companie
 
 ## Implementation note
 
-This decision **does not** prescribe exact API routes. Map composite actions to **3L-B** (assignment authority on trip), **3L-C** slices (PUT assignment, transitions, future package table), and **master index** guardrails when coding.
+This decision **does not** prescribe exact API routes. Map composite actions to **3L-B** (assignment authority on trip), **3L-C** slices, **Decision 14** (dedicated assignment slice), and **master index** guardrails when coding.
 
 ---
 
