@@ -40,7 +40,19 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Local save_bytes round trip
-        run: pytest -q tests/test_applicant_dl_processed_storage.py::test_local_save_bytes_round_trip
-      - name: Original remains unchanged
-        run: pytest -q tests/test_applicant_dl_processed_storage.py::test_processed_helper_writes_second_object_without_touching_original
+      - name: Run storage tests and capture output
+        id: storage_test
+        shell: bash
+        run: |
+          set +e
+          pytest -vv tests/test_applicant_dl_processed_storage.py > pytest-output.txt 2>&1
+          rc=$?
+          cat pytest-output.txt
+          exit $rc
+      - name: Upload pytest traceback
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dl-storage-pytest-output
+          path: pytest-output.txt
+          if-no-files-found: error
