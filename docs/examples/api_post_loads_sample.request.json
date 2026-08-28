@@ -1,5 +1,5 @@
 {
-  "status": "unassigned",
+  "status": "draft",
   "load_number": "",
   "customs_broker_id": null,
   "broker_id": null,
@@ -22,7 +22,7 @@
   "hazmat_flag": false,
   "temperature_requirement": null,
   "pallet_case_count": null,
-  "internal_notes": "Sample body for POST /api/v1/loads — replace broker_id with a real tenant broker id before calling.",
+  "internal_notes": "Sample body for POST /api/v1/loads. Replace example business values before calling.",
   "rate": 1800.0,
   "customer_rate": null,
   "miles": 450,
@@ -38,7 +38,7 @@
       "country": "US",
       "reference_number": "PU-001",
       "appointment_type": null,
-      "appointment_date": "2025-11-01",
+      "appointment_date": "2026-09-01",
       "appointment_time_text": "08:00-12:00",
       "notes": null,
       "commodity_notes": null
@@ -54,7 +54,7 @@
       "country": "US",
       "reference_number": "DR-002",
       "appointment_type": null,
-      "appointment_date": "2025-11-02",
+      "appointment_date": "2026-09-02",
       "appointment_time_text": "10:00 CST",
       "notes": null,
       "commodity_notes": null
