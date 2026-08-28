@@ -1,6 +1,6 @@
 # TruckERP documentation archive
 
-This directory contains **historical implementation reports, evaluation runs, rollout plans, and superseded architecture snapshots**. These files are retained because they explain how TruckERP reached the current design, but they are **not current production guidance**.
+This directory contains **historical implementation reports, evaluation runs, rollout plans, superseded architecture snapshots, and unshipped prototypes**. These files are retained because they explain how TruckERP reached the current design, but they are **not current production guidance**.
 
 ## Current document-parser truth
 
@@ -67,5 +67,14 @@ Under `fixtures/load_lab/`:
 - `load_lab_fixture_3pickups_1delivery.synthetic_expected_truckerjson.json`
 
 These two JSON files explicitly described themselves as illustrative expected output and were not consumed by current code/tests. The matching PDFs and `.lab_parse_response.json` golden compatibility inputs remain active under `../fixtures/load_lab/` because current tests reference them.
+
+## Archived driver-ID preprocessing prototype
+
+Under `driver_onboarding/`:
+
+- `DRIVER_ID_PREPROCESSING_LINE_INTERSECTION.md`
+- `TruckERP_Driver_ID_Preprocessor.prototype.py`
+
+This was a save-only geometry/preprocessing prototype. It was never wired into onboarding, and the documented `app/services/driver_id_preprocessing.py` module does not exist in current code. The raw prototype had been stored as an extensionless source file in the docs root; it is preserved here as historical prototype code, not a production module.
 
 These records remain useful for historical reasoning, regression archaeology, and understanding why current safety boundaries exist.
