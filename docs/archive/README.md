@@ -77,4 +77,15 @@ Under `driver_onboarding/`:
 
 This was a save-only geometry/preprocessing prototype. It was never wired into onboarding, and the documented `app/services/driver_id_preprocessing.py` module does not exist in current code. The raw prototype had been stored as an extensionless source file in the docs root; it is preserved here as historical prototype code, not a production module.
 
+## Archived January 2026 database-schema smoke snapshots
+
+Under `db_schema/legacy_db_schema_smoke_2026_01/`:
+
+- `README.md`
+- `tenant_smoke_active__schema.md`
+- `tenant_smoke_provision__schema.md`
+- `trucking_erp__schema.md`
+
+The folder already identified itself as an archived snapshot generated under obsolete container/database assumptions. It has no current repo consumers. Current generated live-DB snapshot rules live in `../db_schema/README.md`.
+
 These records remain useful for historical reasoning, regression archaeology, and understanding why current safety boundaries exist.
