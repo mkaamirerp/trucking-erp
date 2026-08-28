@@ -7,7 +7,7 @@
 ### App shell & routing
 - **`App.tsx`** — `/dispatch` is wrapped in **`Layout`** (same as dashboard, loads, fleet, etc.). There is **no** separate “dispatch without layout” route.
 - **`Layout.tsx`** — Full-width shell: **`TopNav`** + scrollable `<main>` (not `SidebarNav`; that component does not exist in this repo).
-- **`DispatchPage.tsx`** — Dispatch workspace: ribbon tabs, **table** or **board** view, driver column, load cards/columns. Uses **`getDispatchBoard`**, **`listTrucks`**, **`listDrivers`**, **`listTrailers`**. **Unassigned** loads navigate to **`LoadWorkspacePage`** at `/loads/:id?dispatchAssign=1` (canonical load workspace + assignment). Other statuses open an **in-page summary modal** with a button to **Edit load** → same **`LoadWorkspacePage`**. **New load** → `/loads/new` (`LoadWorkspacePage` without id).
+- **`DeprecatedDispatchPage.tsx`** — Dispatch workspace: ribbon tabs, **table** or **board** view, driver column, load cards/columns. Uses **`getDispatchBoard`**, **`listTrucks`**, **`listDrivers`**, **`listTrailers`**. **Unassigned** loads navigate to **`LoadWorkspacePage`** at `/loads/:id?dispatchAssign=1` (canonical load workspace + assignment). Other statuses open an **in-page summary modal** with a button to **Edit load** → same **`LoadWorkspacePage`**. **New load** → `/loads/new` (`LoadWorkspacePage` without id).
 - **`LoadsListPage.tsx`** — `listLoads` with search/pagination; row navigation uses **`OPS.LOAD_DETAIL`** → **`LoadWorkspacePage`** (`/loads/:id`). **New** uses **`OPS.LOAD_NEW`**.
 - **`LoadWorkspacePage.tsx`** — Canonical create/edit/assign workspace for loads (replaces any legacy “load detail page” naming in older docs).
 - **`listLoads`** — Supports `status`, `page`, `size`, `search`, etc. (see `apps/web/src/api.ts`).
@@ -17,10 +17,10 @@
 
 ### Implemented behavior (high level)
 - Ribbon filters table + board; **Delivered** is a tab, not a permanent board column.
-- Table columns include **Load #**, **Trip #** (read-only from load), **Route**, **Status** (see `DispatchPage.tsx`).
+- Table columns include **Load #**, **Trip #** (read-only from load), **Route**, **Status** (see `DeprecatedDispatchPage.tsx`).
 
 ### Where layout switcher and modal live
-- **Layout switcher** — Top toolbar on `DispatchPage` (List/Board), backed by **`useWorkspaceLayout("dispatch", me?.user_id, defaultMode)`**. First-time default for the hook argument is **`"board"`** in code (user override stored in `localStorage` once set).
+- **Layout switcher** — Top toolbar on `DeprecatedDispatchPage` (List/Board), backed by **`useWorkspaceLayout("dispatch", me?.user_id, defaultMode)`**. First-time default for the hook argument is **`"board"`** in code (user override stored in `localStorage` once set).
 - **Quick summary** — `selectedLoad` modal for non-unassigned row/card clicks; deep editing is delegated to **`LoadWorkspacePage`**.
 
 ### User preference persistence
@@ -47,7 +47,7 @@ Selected tab filters both table and board views.
 
 ## C. Table View (Layout C)
 
-- **Columns**: Load #, Trip #, Route, Status (see live `DispatchPage.tsx`).
+- **Columns**: Load #, Trip #, Route, Status (see live `DeprecatedDispatchPage.tsx`).
 - **Grouping**: By status within selected ribbon (e.g. Active → Unassigned, Assigned, Dispatched groups).
 - **Row click**: Unassigned → **`LoadWorkspacePage`** with dispatch-assign query; other statuses → summary modal (link into workspace for edits).
 - **Style**: Dark theme, compact, enterprise feel.
@@ -57,7 +57,7 @@ Selected tab filters both table and board views.
 ## D. Board View (Layout B — Optional)
 
 - **Columns**: Only statuses in current ribbon. Delivered is not a permanent multi-column lane set (handled via ribbon / single delivered column pattern).
-- **Cards**: Broker headline, load + **trip** line, route, miles pills, meta, status; assigned/unassigned footers per design in `DispatchPage.tsx`.
+- **Cards**: Broker headline, load + **trip** line, route, miles pills, meta, status; assigned/unassigned footers per design in `DeprecatedDispatchPage.tsx`.
 - **Row/card click**: Same routing/modal behavior as table rows.
 
 ---
@@ -67,8 +67,8 @@ Selected tab filters both table and board views.
 | File | Status |
 |------|--------|
 | `apps/web/src/hooks/useWorkspaceLayout.ts` | **Implemented** — shared hook for dispatch (and reusable for other workspaces). |
-| `apps/web/src/components/WorkspaceShell.tsx` | **Not extracted** — header/switcher/modal logic lives **inside** `DispatchPage.tsx`. |
-| `apps/web/src/pages/DispatchPage.tsx` | **Implemented** — ribbon, table/board, modal, navigation to `LoadWorkspacePage`. |
+| `apps/web/src/components/WorkspaceShell.tsx` | **Not extracted** — header/switcher/modal logic lives **inside** `DeprecatedDispatchPage.tsx`. |
+| `apps/web/src/pages/DeprecatedDispatchPage.tsx` | **Implemented** — ribbon, table/board, modal, navigation to `LoadWorkspacePage`. |
 | `apps/web/src/pages/LoadWorkspacePage.tsx` | **Implemented** — canonical load editor / assignment surface. |
 | `apps/web/src/App.tsx` | **Dispatch uses `Layout`** — same shell as other operational pages. |
 
@@ -76,7 +76,7 @@ Selected tab filters both table and board views.
 
 ## F. Implementation order (historical checklist)
 
-Completed in tree: `useWorkspaceLayout`, `DispatchPage` ribbon + table/board, Delivered handling, `LoadWorkspacePage` integration, `App.tsx` layout wrap. Optional future step: extract **`WorkspaceShell`** if another surface needs the same header/switcher pattern.
+Completed in tree: `useWorkspaceLayout`, `DeprecatedDispatchPage` ribbon + table/board, Delivered handling, `LoadWorkspacePage` integration, `App.tsx` layout wrap. Optional future step: extract **`WorkspaceShell`** if another surface needs the same header/switcher pattern.
 
 ---
 
@@ -84,14 +84,14 @@ Completed in tree: `useWorkspaceLayout`, `DispatchPage` ribbon + table/board, De
 
 ### What changed (summary)
 
-- **DispatchPage.tsx** — Ribbon (Active, In Transit, At Pickup, At Delivery, Delivered, Problem/Hold), **table** and **board** modes, trip-aware display, driver column; **navigation** to **`LoadWorkspacePage`** for deep edits and unassigned assignment; quick-read **modal** for other statuses.
+- **DeprecatedDispatchPage.tsx** — Ribbon (Active, In Transit, At Pickup, At Delivery, Delivered, Problem/Hold), **table** and **board** modes, trip-aware display, driver column; **navigation** to **`LoadWorkspacePage`** for deep edits and unassigned assignment; quick-read **modal** for other statuses.
 - **useWorkspaceLayout.ts** — Persists table/board preference per user and workspace id (`dispatch`).
 - **Layout + TopNav** — Dispatch is a normal routed page under the shared app chrome.
 
 ### What was reused / boundaries
 
 - **Read-heavy dispatch APIs:** `getDispatchBoard`, `listTrucks`, `listDrivers`, `listTrailers`.
-- **Load mutations** (save, assign, dispatch transitions, notes, etc.) live in **`LoadWorkspacePage`** and related API helpers — not as a scattered set of `updateLoad`/`createLoad` calls inside `DispatchPage` (verify `apps/web/src/pages/LoadWorkspacePage.tsx` and `api.ts` for the exact methods).
+- **Load mutations** (save, assign, dispatch transitions, notes, etc.) live in **`LoadWorkspacePage`** and related API helpers — not as a scattered set of `updateLoad`/`createLoad` calls inside `DeprecatedDispatchPage` (verify `apps/web/src/pages/LoadWorkspacePage.tsx` and `api.ts` for the exact methods).
 - **Load types** from `@/api` / backend `LoadResponse` (including **`trip_number`** read model).
 
 ### Layout B Alternate View
@@ -105,7 +105,7 @@ Completed in tree: `useWorkspaceLayout`, `DispatchPage` ribbon + table/board, De
 
 - **Key pattern**: `truckerp_workspace_layout_dispatch_${userId}` (see `storageKey()` in `useWorkspaceLayout.ts` — includes workspace id + user id, with `"anon"` when logged-in id not yet available).
 - **Values**: `"table"` | `"board"`.
-- **Hook default argument** in `DispatchPage.tsx`: `"board"` until/unless user has a stored preference.
+- **Hook default argument** in `DeprecatedDispatchPage.tsx`: `"board"` until/unless user has a stored preference.
 - Same-device/browser only until a backend prefs API exists.
 
 ### Delivered Removal
@@ -118,4 +118,4 @@ Completed in tree: `useWorkspaceLayout`, `DispatchPage` ribbon + table/board, De
 - User menu "Settings" links to admin company profile; non-admins may get blocked (role guard).
 - Profile link goes to Dashboard; a dedicated profile page can be added later.
 - No backend user-preferences API; localStorage only. Cross-device sync would need an endpoint.
-- WorkspaceShell not extracted as reusable component; logic is inline in DispatchPage. Can be extracted for settlements, onboarding review, etc.
+- WorkspaceShell not extracted as reusable component; logic is inline in DeprecatedDispatchPage. Can be extracted for settlements, onboarding review, etc.

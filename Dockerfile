@@ -7,9 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY requirements.lock.txt .
 RUN python -m pip install --upgrade pip wheel setuptools
-RUN python -m pip wheel --wheel-dir /wheels -r requirements.txt
+RUN python -m pip wheel --wheel-dir /wheels -r requirements.lock.txt
 
 # ---------- Runtime (no compilers) ----------
 FROM python:3.13-slim-bookworm AS prod
@@ -35,12 +35,8 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir "awscli==1.44.59"
-# Base runtime deps
-RUN python -m pip install --no-cache-dir uvicorn fastapi sqlalchemy asyncpg psutil pydantic-settings alembic
-
 COPY --from=builder /wheels /wheels
-COPY requirements.txt .
+COPY requirements.lock.txt .
 RUN python -m pip install --no-cache-dir /wheels/*
 
 RUN python -m pip check
@@ -56,9 +52,7 @@ CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", 
 
 # --- DEV TOOLBELT STAGE (debug utilities, non-prod) ---
 FROM prod AS dev
-COPY requirements-dev.txt /app/requirements-dev.txt
-RUN python -m pip install --no-cache-dir -r /app/requirements-dev.txt \
-    && python -m pytest --version
+RUN python -m pytest --version
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     jq \

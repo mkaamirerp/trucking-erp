@@ -25,8 +25,7 @@ jobs:
 
       - name: Install project dependencies (if present)
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          if [ -f requirements.lock.txt ]; then pip install -r requirements.lock.txt; fi
 
       - name: "Guard: tenant safety script must exist"
         run: |

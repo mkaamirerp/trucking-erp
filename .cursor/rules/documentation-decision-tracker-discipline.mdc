@@ -1,0 +1,64 @@
+description: Documentation discipline — decisions must be written to markdown before code
+globs: docs/**/*.md,docs/**/*.mdc,.cursor/rules/**/*.md,.cursor/rules/**/*.mdc
+
+# TruckERP documentation decision tracker discipline
+
+## Core rule
+
+A chat discussion is not durable project state.
+
+When a TruckERP design, workflow, architecture, schema, parser, intake, dispatch, trip, payroll, accounting, tenant isolation, auth/security, deployment, or business-rule decision is accepted, Cursor must save it into the correct markdown document before implementation starts.
+
+A code change is not complete if the related markdown tracker/design/reality doc is stale.
+
+## Required lifecycle
+
+Every major feature/change follows this lifecycle:
+
+1. Discuss / decide.
+2. Save decision in markdown.
+3. Link markdown from `docs/DOCUMENTATION_MASTER_INDEX.md` if cross-cutting.
+4. Implement in small slices.
+5. Update markdown as each slice changes status/scope.
+6. After commit, update or confirm markdown with:
+   - commit SHA
+   - files touched
+   - tests run
+   - runtime proof if applicable
+   - remaining gaps
+7. Mark the doc status when verified or superseded.
+
+## When a markdown doc is required
+
+Cursor must create or update a markdown doc before implementation when work touches:
+
+- architecture decisions
+- business rules
+- workflow/state-machine changes
+- schema/model changes
+- API contracts
+- UI workflow changes with business meaning
+- parser / PDF / Load Page / Load Lab behavior
+- email ingestion / filtering / broker intake
+- trip / dispatch / custody / assignment
+- payroll / accounting / settlement
+- tenant isolation / platform-vs-tenant DB boundaries
+- auth / security / rate limits
+- deployment / ops process
+- safety guardrails
+- anything future Cursor sessions could drift on
+
+## Standard major-doc header
+
+Major docs should use this header block:
+
+```md
+**Status:** ACTIVE-DESIGN | ACTIVE-TRACKER | CURRENT-REALITY | IMPLEMENTED-PENDING-VERIFY | IMPLEMENTED-VERIFIED | SUPERSEDED | ARCHIVED | DEPRECATED-DO-NOT-USE
+**Last reviewed:** YYYY-MM-DD
+**Owner area:** <module/area>
+**Doc kind:** Target design | Current reality | Implementation report | Ledger | Decision record | Index
+**Implementation state:** Not implemented | Partial | Implemented | Verified
+**Supersedes:** <links or none>
+**Superseded by:** <links or none>
+**Master index:** <link>
+```

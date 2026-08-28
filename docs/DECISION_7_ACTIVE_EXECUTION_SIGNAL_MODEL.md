@@ -1,6 +1,8 @@
 # TruckERP — Decision 7 / Active execution signal model
 
-**Context:** Trip **execution / custody** layer after **planned-trip lifecycle** and **Decision 6** (dispatcher load workspace). **Implementation has not started.** This document is **report / product decision only** — not code.
+**Context:** When **active execution** starts (first real signal, not assignment / package send). This document remains the **product lock**.
+
+**Implementation state (code, 2026-08-28):** **Partial slice shipped — not “has not started.”** `POST /trips/{id}/execution-signal` moves `assigned` → `in_progress` (`dispatcher_manual` / `driver_app`). UI: `TripWorkspacePage` / `TripContainerPage`. Does **not** implement geofence, full driver-app status ladder, or dispatch-package send. Custody is a **separate** shipped slice — see `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md` §7.
 
 **Related:** `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`, `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md`, `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`, `PHASE3L_D_OWNER_DECISION_CHECKLIST.md`.
 

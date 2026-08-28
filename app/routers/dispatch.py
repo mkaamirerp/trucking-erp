@@ -22,7 +22,7 @@ async def get_dispatch_board(
     db: AsyncSession = Depends(get_tenant_db),
     search: Optional[str] = Query(None),
 ):
-    """Loads grouped by dispatch status for board columns. No pagination."""
+    """Loads grouped by dispatch status for board columns (legacy UI: DeprecatedDispatchPage). No pagination."""
     grouped = await loads_service.list_loads_for_board(db, tenant_id=tenant_id, search=search)
     return {
         status_key: [LoadResponse.model_validate(load) for load in items]

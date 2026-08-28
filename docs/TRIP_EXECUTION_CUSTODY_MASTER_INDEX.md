@@ -1,7 +1,7 @@
 # Trip execution & custody — master index
 
 **Type:** Navigation map and source-of-truth pointer.  
-**Status:** **Approved index.** Does **not** replace any detailed doc below.
+**Status:** **Approved index** (shipped-state corrected 2026-08-28 against `app/constants/trip_dispatch.py` + trip/custody routers). Does **not** replace any detailed doc below.
 
 ---
 
@@ -54,6 +54,7 @@ Read in this order when onboarding or before migrations / implementation:
 | **Implementation planning** | `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md` |
 | **Owner decision checklist** | `PHASE3L_D_OWNER_DECISION_CHECKLIST.md` (includes **locked** decisions in the opening section) |
 | **Dispatcher load workspace (Decision 6)** | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` |
+| **Trip assignment first slice (Decision 14)** — **LOCKED**; `PUT /trips/{id}/assignment` shipped | `DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md` |
 | **Active execution signal (Decision 7)** | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` |
 | **Driver dispatch package & financial visibility (Decision 8)** — **DRAFT / NOT LOCKED** | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` |
 | **Load readiness / planning queue (Decision 9)** — **LOCKED** | `DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md` |
@@ -92,6 +93,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md` | Read before changing **`Load.status`** **new-write** allowlists, **dispatch board** migration, or conflating **load readiness** with **trip execution** — **Decision 11** + Slice 1 compatibility. |
 | `DECISION_12_TERMINAL_YARD_CUSTODY_FOUNDATION.md` | Read before custody/terminal/trailer-transfer design — **LOCKED** consolidation of [`TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md`](./TRIP_LIFECYCLE_TERMINAL_ROUTING_YARD_HANDOFF_DISPATCH_LOAD_TRANSFER_FOUNDATION.md) on the decision spine (**Decision 12**). |
 | `DECISION_13_TRIP_EXCEPTION_RECOVERY_REPOWER.md` | Read before exception/repower/recovery flows, **original vs recovery trip** rules, **payroll review** / **`review_required`** guard, or **planned handoff vs failed assignment** — **LOCKED** (**Decision 13**). |
+| `DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md` | Read before changing **`PUT /trips/{id}/assignment`** (driver/truck/trailer; `planned`↔`assigned`) — **LOCKED** first slice; **shipped**. |
 
 The **A–F** reading order remains the **required spine**; supporting references are **situational**, not replacements for the spine.
 
@@ -255,10 +257,10 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 
 ## 6. Implementation guardrails
 
-Before writing migrations or product code:
+Before writing **further** migrations or product code:
 
-- **No tenant migrations** for execution/custody until **owner decisions** needed for that slice are **locked** (continue from 3L-D).
-- **No backend/UI implementation** of execution/custody should start without **reading this index** and the **ordered docs** in §2.
+- **Further** tenant migrations for execution/custody still require **owner decisions** for **that** slice to be **locked** (continue from 3L-D for remaining gaps). Foundation + operational custody migrations **already shipped** (see §7).
+- **Do not** start a **new** execution/custody slice without **reading this index** and the **ordered docs** in §2. Do **not** treat §7 as “not started.”
 - **Do not** modify **`Load.status`** from **`Trip.status`** transitions in V1 (unless a future explicit, tested coupling feature is approved).
 - **Do not** auto-**create/modify `dispatch_trips`** from **`Trip.status`** in V1.
 - **Do not** **silently sync** trip assignment to load assignment (3L-B).
@@ -278,20 +280,31 @@ Before writing migrations or product code:
 
 ## 7. Current shipped state
 
-- **Planned-trip lifecycle** is **complete through 3K** in product (list/detail, create from load, add/remove/cancel, active + historical members, labels per module-close + later commits; see `PLANNED_TRIP_LIFECYCLE_MODULE_CLOSE.md` for inventory — commit hashes in that file may be older than current `main`).
-- **3L-A through 3L-D** docs exist in the current project state as **planning / contract docs** (paths above).
-- **Execution/custody implementation** (new statuses, custody tables, transition APIs) **has not started** in code.
-- **Working product model** for trip **container** remains **`planned` / `cancelled` only**; **`Load.status`** still drives the **load-centric dispatch board**.
+Code authority: `app/constants/trip_dispatch.py` (`trips.status` + `trip_loads.status_within_trip`), `app/routers/trips.py`, `app/services/trips.py`, `app/services/load_custody.py`, `app/services/load_custody_transitions.py`. Do **not** treat **`POST /trips` create-only `planned`** as the working lifecycle.
+
+- **Planned-trip lifecycle** is **complete through 3K** (list/detail, create, add/remove/cancel, membership). See `PLANNED_TRIP_LIFECYCLE_MODULE_CLOSE.md` (commit hashes there may lag `main`).
+- **Trip container `trips.status` working model (shipped):** `planned` → `assigned` → `in_progress` → `completed`, plus `cancelled`. Constants: `TRIP_CONTAINER_STATUS_PLANNED` / `_ASSIGNED` / `_IN_PROGRESS` / `_COMPLETED` / `_CANCELLED`.
+  - **Create** still accepts **`planned` only** (`POST /trips`, `INVALID_TRIP_STATUS` otherwise) — that is a **create guard**, not the full model.
+  - **Assignment** (`PUT /trips/{id}/assignment`, Decision 14A, `afcb0c81`): complete driver+truck+trailer promotes `planned` → `assigned`; clearing resources demotes `assigned` → `planned`. Does not write loads, custody, or `dispatch_trips`.
+  - **Execution start** (`POST /trips/{id}/execution-signal`, Decision 7 slice, `c3f87b91`): `assigned` → `in_progress` from accepted signal (`dispatcher_manual` / `driver_app`). Does not write `Load.status`, `dispatch_trips`, custody, or payroll.
+  - **Trip close** (`POST /trips/{id}/complete`, `a876368e`): `in_progress` → `completed` when **zero OPEN** TripLoads; sets `trips.completed_at`.
+  - **Cancel** (`POST /trips/{id}/cancel`): → `cancelled`; open memberships removed.
+- **TripLoad membership:** open `planned` / `active` (partial unique indexes on `trip_loads`); public bare `/activate` and `/complete` return **409 `MEMBERSHIP_TRANSITION_REQUIRES_CUSTODY`**.
+- **Custody foundation (Slice 1, `229bde35`, migration `d7e8f0a1b2c3`):** `terminals`, append-only `load_custody_events`, Load snapshot columns (`custody_owner`, `custody_trip_id`, `custody_terminal_id`, `custody_placement`, `custody_trailer_id`, `custody_since_at`, `last_custody_event_id`); reads `GET /loads/{id}/custody`, `GET /loads/{id}/custody-events`, `GET /terminals`; bootstrap `python -m app.scripts.bootstrap_load_custody`.
+- **Custody operational transitions (Slice 2, `4325da27`, idempotency `273756e4`):** `POST /trips/{id}/loads/{id}/accept-custody` (unknown→trip + planned→active), `.../yard-handoff` (trip→terminal + active→completed), `.../take-custody` (terminal→outbound trip). Does not auto-start Trip execution or mutate `Load.status`.
+- **Schedule bounds:** `PUT /trips/{id}/schedule` (`planned_start_at` / `expected_completion_at`).
+- **Legacy dispatch board:** **`Load.status`** still drives **`DeprecatedDispatchPage`** / `getDispatchBoard`. That is a **legacy UI**, not proof that Trip execution has not started.
+- **UI lag (not a backend model limit):** some Trip page membership add/remove/cancel controls still gate on `status === planned` (`TripWorkspacePage` / `TripContainerPage`). Execution-signal **is** wired on those pages. Do not document the product as planned/cancelled-only because of those gates.
+- **3L-A through 3L-D** remain **planning / contract** docs; several slices they described are **now in code** (this section). Remaining gaps: Decision 8 package (draft), Decision 10 conflict-guard **code** (deferred), Decision 13 exception/recovery/payroll, granular 3L-C trip sub-statuses, trip-first board rewrite, Assign & Send persistence.
 
 ---
 
 ## 8. Next recommended workflow
 
-1. **Finish review** of this **master index** (and fix any drift vs underlying docs).
-2. **Commit** this file **only after** maintainer approval (draft until then).
-3. **Resume owner decisions** from **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`** (items still **not** LOCKED).
-4. Produce **3L-E implementation readiness plan** (migrations order, feature flags, cutover checks) — **documentation phase**, not code.
-5. **Only after owner approval** of readiness: **start migrations** and implementation slices per **3L-C** (A→H) with guardrails in §6.
+1. Keep this index’s **§7 shipped state** aligned with `app/routers/trips.py` and custody services after each slice (do not reintroduce “has not started”).
+2. Stamp **SUPERSEDED** on docs that still say execution/custody has not started or that `trips.status` is only `planned`/`cancelled` (including Decision 6/7 **context** lines if they still say that).
+3. **Remaining product gaps** (not a greenfield start): Decision 8 dispatch package; Decision 10 scheduling-conflict **code**; Decision 13 exception/recovery + `review_required`; Decision 12 remaining custody sequences (e.g. `trailer_transfer` / undelivered close); Load Workspace Assign / Assign & Send vs Trip assignment API; retire **DeprecatedDispatchPage** as operational home per `000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`.
+4. Do **not** produce a “start migrations / 3L-E as if greenfield” plan — foundation and operational custody migrations **already exist**.
 
 ---
 

@@ -1,0 +1,36 @@
+---
+description: Trip page = Trip Container = Dispatch Control Center (one surface); Load workspace = directory + commercial; DeprecatedDispatchPage legacy board only.
+globs: "app/routers/trips.py,app/services/trips.py,apps/web/src/pages/TripWorkspacePage.tsx,apps/web/src/pages/DeprecatedDispatchPage.tsx,docs/000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md"
+alwaysApply: true
+---
+
+# Trip page = Trip Container = Dispatch Control Center
+
+## Locked identity
+
+- **Trip page = Trip Container = Dispatch Control Center** — **one** operational surface (today: `TripWorkspacePage` / `/trips/:id`). Do **not** describe these as separate products, competing pages, or a “dispatch product” built apart from the Trip page.
+- **No separate active DispatchPage.** The legacy **`Load.status`** board is **`DeprecatedDispatchPage`** only (visual salvage / retire later).
+- **Load workspace** (`LoadWorkspacePage`) = **load directory** + **commercial / readiness / document** detail — not the execution control center.
+
+## Rule summary
+
+- **Backend / domain** may say **Trip**; **frontend / operator** may say **Dispatch** — **labels for the same center**, not a second app.
+- **Load** is commercial / readiness / document truth — not the operational status board.
+- **DeprecatedDispatchPage** is deprecated legacy **`Load.status`** board — **visual salvage** only.
+- **Do not** add new operational business logic to **DeprecatedDispatchPage** unless **explicitly approved**.
+- **Do not** revive **`Load.status = dispatched`**.
+- **Do not** write **`dispatch_trips`** from **new Trip** flows.
+- **Do not** mix **parser / email-intake / dependency cleanup** into Trip / legacy-board boundary work.
+
+## Before touching Trip page, Load workspace, or DeprecatedDispatchPage UI
+
+**Report** whether the change is:
+
+1. **Visual salvage** (from legacy board only)  
+2. **Trip read-model integration**  
+3. **Operational mutation**  
+4. **Legacy cleanup**
+
+## Reference
+
+- `docs/000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`

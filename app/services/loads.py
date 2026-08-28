@@ -567,7 +567,7 @@ async def list_loads_for_board(
     tenant_id: int,
     search: str | None = None,
 ) -> dict[str, list]:
-    """Return loads grouped by status for dispatch board. Excludes draft. No pagination."""
+    """Return loads grouped by status for dispatch board (legacy UI: DeprecatedDispatchPage). Excludes draft. No pagination."""
     stmt = (
         select(Load)
         .options(

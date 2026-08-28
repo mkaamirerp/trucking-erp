@@ -43,7 +43,7 @@ This 3L-A record **sharpens** that narrative into **current vs future boundaries
 ### 1.3 What the dispatch board still uses today
 
 - **`GET /api/v1/dispatch/board`** returns a **dictionary of status keys → lists of `LoadResponse`** (`app/routers/dispatch.py`, `loads_service.list_loads_for_board`).
-- **UI** (`DispatchPage.tsx`): ribbon tabs map to subsets of **`Load.status`** (e.g. unassigned, assigned, dispatched, in_transit, delivered, issue_hold). **Trip number** on cards is **read-only** context from the load row, not a trip-first grouping key.
+- **UI** (`DeprecatedDispatchPage.tsx`): ribbon tabs map to subsets of **`Load.status`** (e.g. unassigned, assigned, dispatched, in_transit, delivered, issue_hold). **Trip number** on cards is **read-only** context from the load row, not a trip-first grouping key.
 
 ### 1.4 What `trip_loads` means today
 

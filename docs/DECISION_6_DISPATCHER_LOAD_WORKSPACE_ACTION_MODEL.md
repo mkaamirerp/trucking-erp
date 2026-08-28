@@ -1,6 +1,8 @@
 # TruckERP — Decision 6 / Dispatcher load workspace action model
 
-**Context:** Designing the trip **execution / custody / assignment** layer after the **planned-trip lifecycle** foundation. **Implementation has not started.** This document is **report / product decision only** — not code.
+**Context:** Load Workspace dispatcher **action bar** lock (Save Draft / Save Ready / Assign / Assign & Send) after the planned-trip lifecycle. **This file remains the product decision** for those four actions and the dispatch-package *concept*.
+
+**Implementation state (code, 2026-08-28):** **Partial — not “has not started.”** Trip assignment shipped as `PUT /trips/{id}/assignment` (Decision 14A). Load Workspace has **Mark ready**. **Assign & Send** package persistence is **not** shipped (Decision 8 still draft). Execution/custody are **separate** shipped slices — see `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md` §7. Do not read this header as “Trip execution has not started.”
 
 **Related:** `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`, `PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`, `PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`, `PHASE3L_D_OWNER_DECISION_CHECKLIST.md`.
 

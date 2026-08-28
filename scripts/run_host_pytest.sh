@@ -12,7 +12,7 @@ cd "$REPO_ROOT"
 
 VENV_PY="${REPO_ROOT}/venv/bin/python"
 if [[ ! -x "$VENV_PY" ]]; then
-  echo "Expected venv at ${REPO_ROOT}/venv — create it and pip install -r requirements.txt -r requirements-dev.txt" >&2
+  echo "Expected venv at ${REPO_ROOT}/venv — create it and pip install -r requirements.lock.txt" >&2
   exit 1
 fi
 
