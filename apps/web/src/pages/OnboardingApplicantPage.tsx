@@ -442,7 +442,12 @@ export default function OnboardingApplicantPage() {
       }));
       setApp(prev => prev ? { ...prev, intake_payload: resp.intake_payload ?? prev.intake_payload } : prev);
       if (ok) {
-        const thumbFileId = resp.sanitized_file_id ?? (resp.intake_payload as any)?.files?.[docType]?.enh_file_id ?? resp.file_id!;
+        const files = (resp.intake_payload as any)?.files ?? {};
+        const thumbFileId =
+          files[docType]?.enh_file_id ??
+          files[`${docType}_PROCESSED`]?.storage_key ??
+          resp.sanitized_file_id ??
+          resp.file_id!;
         try {
           const thumbUrl = await getPersonApplicationFileThumbnail({ appId: app.id, fileId: thumbFileId, onboardingToken: token });
           setPreviewUrl(prev => {

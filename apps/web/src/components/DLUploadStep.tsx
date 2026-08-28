@@ -45,8 +45,19 @@ export default function DLUploadStep({
     setLocalPreview((prev) => ({ ...prev, back: null }));
   }, [backPreviewUrl, localPreview.back]);
 
-  const frontPreview = frontPreviewUrl ?? localPreview.front;
-  const backPreview = backPreviewUrl ?? localPreview.back;
+  const frontPreview = useMemo(() => {
+    if (frontState === "SUCCESS") return frontPreviewUrl;
+    if (frontState === "FAILED") return frontPreviewUrl;
+    if (frontState === "UPLOADING" || frontState === "SCANNING") return localPreview.front ?? frontPreviewUrl;
+    return frontPreviewUrl ?? localPreview.front;
+  }, [frontPreviewUrl, frontState, localPreview.front]);
+
+  const backPreview = useMemo(() => {
+    if (backState === "SUCCESS") return backPreviewUrl;
+    if (backState === "FAILED") return backPreviewUrl;
+    if (backState === "UPLOADING" || backState === "SCANNING") return localPreview.back ?? backPreviewUrl;
+    return backPreviewUrl ?? localPreview.back;
+  }, [backPreviewUrl, backState, localPreview.back]);
   const busy =
     frontState === "UPLOADING" ||
     frontState === "SCANNING" ||

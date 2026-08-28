@@ -888,9 +888,9 @@ async def get_applicant_application_file(
     # DL files (front/back)
     files = intake.get("files") or {}
     for _side, meta in files.items():
-        if _file_meta_matches(meta, file_id):
-            storage_key = meta.get("enh_file_id") if meta.get("enh_file_id") == file_id else meta.get("storage_key")
-            return serve_file(storage_key or file_id, "applicant_dl", tenant_slug, meta.get("original_filename"))
+        storage_key = _resolve_applicant_dl_serve_key(meta, file_id)
+        if storage_key:
+            return serve_file(storage_key, "applicant_dl", tenant_slug, meta.get("original_filename"))
     # Step-4 documents
     documents = intake.get("documents") or {}
     for _doc_type, meta in documents.items():
@@ -988,6 +988,15 @@ def _file_meta_matches(meta: dict, file_id: str) -> bool:
         meta.get("file_id"),
         meta.get("enh_file_id"),
     }
+
+
+def _resolve_applicant_dl_serve_key(meta: dict, file_id: str) -> str | None:
+    """Return storage key to serve. When preprocess succeeded, always serve processed JPEG."""
+    if not _file_meta_matches(meta, file_id):
+        return None
+    if meta.get("dl_preprocess_status") == "PROCESSED" and meta.get("enh_file_id"):
+        return str(meta["enh_file_id"])
+    return str(meta.get("storage_key") or meta.get("file_id") or file_id)
 
 
 @router.post("/submissions", response_model=DriverOnboardingCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -1464,9 +1473,9 @@ async def get_admin_application_file(
     # DL files (front/back)
     files = intake.get("files") or {}
     for _side, meta in files.items():
-        if _file_meta_matches(meta, file_id):
-            storage_key = meta.get("enh_file_id") if meta.get("enh_file_id") == file_id else meta.get("storage_key")
-            return serve_file(storage_key or file_id, "applicant_dl", tenant_slug, meta.get("original_filename"))
+        storage_key = _resolve_applicant_dl_serve_key(meta, file_id)
+        if storage_key:
+            return serve_file(storage_key, "applicant_dl", tenant_slug, meta.get("original_filename"))
     # Step-4 documents
     documents = intake.get("documents") or {}
     for _doc_type, meta in documents.items():

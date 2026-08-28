@@ -465,7 +465,7 @@ function DlViewCard({
   applicationId: number;
   onView: (applicationId: number, fileId: string, filename?: string) => void;
 }) {
-  const fileId = meta.storage_key || meta.file_id || meta.enh_file_id;
+  const fileId = meta.enh_file_id || meta.file_id || meta.storage_key;
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
