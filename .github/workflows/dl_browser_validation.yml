@@ -40,4 +40,7 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt
-      - run: pytest -q tests/test_applicant_dl_processed_storage.py
+      - name: Local save_bytes round trip
+        run: pytest -q tests/test_applicant_dl_processed_storage.py::test_local_save_bytes_round_trip
+      - name: Original remains unchanged
+        run: pytest -q tests/test_applicant_dl_processed_storage.py::test_processed_helper_writes_second_object_without_touching_original
