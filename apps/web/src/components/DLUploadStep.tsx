@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { preprocessDriverLicense } from "../core/driverLicensePreprocessor";
-import DLCornerTool from "./DLCornerTool";
-
 type Side = "front" | "back";
 type UploadState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
 
@@ -13,7 +10,7 @@ type Props = {
   backState: UploadState;
   frontMessage?: string;
   backMessage?: string;
-  onConfirmSide: (side: Side, blob: Blob, originalName: string) => Promise<boolean> | boolean;
+  onUploadSide: (side: Side, file: File) => Promise<boolean> | boolean;
 };
 
 type LocalPreviewState = { front: string | null; back: string | null };
@@ -25,13 +22,8 @@ export default function DLUploadStep({
   backState,
   frontMessage = "",
   backMessage = "",
-  onConfirmSide,
+  onUploadSide,
 }: Props) {
-  const [frontFile, setFrontFile] = useState<File | null>(null);
-  const [backFile, setBackFile] = useState<File | null>(null);
-  const [activeSide, setActiveSide] = useState<Side | null>(null);
-  const [automaticSide, setAutomaticSide] = useState<Side | null>(null);
-  const [automaticMessage, setAutomaticMessage] = useState("");
   const [localPreview, setLocalPreview] = useState<LocalPreviewState>({ front: null, back: null });
 
   useEffect(() => {
@@ -56,74 +48,20 @@ export default function DLUploadStep({
   const frontPreview = frontPreviewUrl ?? localPreview.front;
   const backPreview = backPreviewUrl ?? localPreview.back;
   const busy =
-    automaticSide !== null ||
     frontState === "UPLOADING" ||
     frontState === "SCANNING" ||
     backState === "UPLOADING" ||
     backState === "SCANNING";
   const canReview = Boolean(frontPreview && backPreview);
 
-  const setFileForSide = (side: Side, file: File) => {
-    if (side === "front") setFrontFile(file);
-    else setBackFile(file);
-  };
-
-  const saveProcessed = async (side: Side, originalFile: File, blob: Blob) => {
-    const url = URL.createObjectURL(blob);
+  const handleFileSelect = async (side: Side, file: File) => {
+    const url = URL.createObjectURL(file);
     setLocalPreview((prev) => {
       const old = side === "front" ? prev.front : prev.back;
       if (old) URL.revokeObjectURL(old);
       return side === "front" ? { ...prev, front: url } : { ...prev, back: url };
     });
-
-    const saved = await onConfirmSide(side, blob, originalFile.name);
-    if (saved) {
-      setActiveSide(null);
-      return true;
-    }
-
-    URL.revokeObjectURL(url);
-    setLocalPreview((prev) => side === "front" ? { ...prev, front: null } : { ...prev, back: null });
-    return false;
-  };
-
-  const handleFileSelect = async (side: Side, file: File) => {
-    setFileForSide(side, file);
-    setActiveSide(null);
-    setAutomaticSide(side);
-    setAutomaticMessage("Finding all four licence edges and checking the four corner angles...");
-
-    try {
-      const result = await preprocessDriverLicense(file);
-      if (result.processedBlob && result.metadata.status === "PROCESSED") {
-        if (result.metadata.classification === "FLAT_LEVEL") {
-          setAutomaticMessage("All four corners are approximately 90°. The licence is flat and level, so only a confirmed-corner crop is needed.");
-        } else if (result.metadata.classification === "FLAT_ROTATED") {
-          setAutomaticMessage("All four corners are approximately 90°, but the long edges are tilted. Rotating the flat licence until the long edges are horizontal...");
-        } else {
-          setAutomaticMessage("The four edges are confirmed, but the corner geometry is not rectangular. Correcting perspective from TL/TR/BR/BL...");
-        }
-        await saveProcessed(side, file, result.processedBlob);
-        return;
-      }
-
-      // Non-negotiable rule: no four confirmed independent edges/corners means
-      // no guessed automatic crop or perspective warp. Use the original file
-      // in the manual tool instead.
-      setAutomaticMessage("Automatic processing could not prove all four straight licence edges. Please confirm the four corners manually.");
-      setActiveSide(side);
-    } catch {
-      setAutomaticMessage("Automatic geometry could not be completed. Please confirm the four corners manually.");
-      setActiveSide(side);
-    } finally {
-      setAutomaticSide(null);
-    }
-  };
-
-  const handleManualConfirm = async (side: Side, blob: Blob) => {
-    const originalFile = side === "front" ? frontFile : backFile;
-    if (!originalFile) return;
-    await saveProcessed(side, originalFile, blob);
+    await onUploadSide(side, file);
   };
 
   const promptReplacementFile = (side: Side) => {
@@ -138,13 +76,17 @@ export default function DLUploadStep({
     input.click();
   };
 
-  const card = useMemo(() => ({
-    background: "var(--trk-surface)",
-    border: "1px solid var(--trk-border)",
-    borderRadius: 12,
-    padding: 16,
-    cursor: "pointer",
-  } as const), []);
+  const card = useMemo(
+    () =>
+      ({
+        background: "var(--trk-surface)",
+        border: "1px solid var(--trk-border)",
+        borderRadius: 12,
+        padding: 16,
+        cursor: "pointer",
+      }) as const,
+    [],
+  );
 
   const uploadStage = (
     side: Side,
@@ -153,8 +95,7 @@ export default function DLUploadStep({
     message: string,
     state: UploadState,
   ) => {
-    const stageBusy = automaticSide === side || state === "UPLOADING" || state === "SCANNING";
-    const stageMessage = automaticSide === side ? automaticMessage : message;
+    const stageBusy = state === "UPLOADING" || state === "SCANNING";
     return (
       <div style={card}>
         <div
@@ -178,16 +119,34 @@ export default function DLUploadStep({
         >
           {stageBusy ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "var(--trk-text)" }}>
-              <div style={{ width: 38, height: 38, borderRadius: "50%", border: "2px solid var(--trk-border-strong)", borderTopColor: "var(--trk-heading)", animation: "spin 0.7s linear infinite" }} />
-              <div style={{ fontWeight: 700 }}>{stageMessage || "Processing your licence..."}</div>
+              <div
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "50%",
+                  border: "2px solid var(--trk-border-strong)",
+                  borderTopColor: "var(--trk-heading)",
+                  animation: "spin 0.7s linear infinite",
+                }}
+              />
+              <div style={{ fontWeight: 700 }}>{message || "Saving your licence..."}</div>
             </div>
           ) : (
             <div>
-              <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--trk-heading)", marginBottom: 10 }}>
+              <div
+                style={{
+                  fontSize: "0.78rem",
+                  fontWeight: 800,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.12em",
+                  color: "var(--trk-heading)",
+                  marginBottom: 10,
+                }}
+              >
                 {side === "front" ? "Step 1" : "Step 2"}
               </div>
               <div style={{ color: "var(--trk-text)", fontSize: "1.5rem", fontWeight: 800, marginBottom: 10 }}>{title}</div>
-              <div style={{ color: "var(--trk-text-muted)", maxWidth: 460, lineHeight: 1.6 }}>{subtitle}</div>
+              <div style={{ color: "var(--trk-text-muted)", maxWidth: 420, lineHeight: 1.6 }}>{subtitle}</div>
             </div>
           )}
           {!stageBusy && (
@@ -195,7 +154,15 @@ export default function DLUploadStep({
               type="file"
               accept="image/*"
               capture="environment"
-              style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%", borderRadius: 14 }}
+              style={{
+                position: "absolute",
+                inset: 0,
+                opacity: 0,
+                cursor: "pointer",
+                width: "100%",
+                height: "100%",
+                borderRadius: 14,
+              }}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void handleFileSelect(side, file);
@@ -208,36 +175,19 @@ export default function DLUploadStep({
     );
   };
 
-  if (activeSide) {
-    const file = activeSide === "front" ? frontFile : backFile;
-    if (!file) return null;
-    return (
-      <div style={{ maxWidth: 980, margin: "0 auto" }}>
-        <div style={{ marginBottom: 12, color: "var(--trk-text-muted)", textAlign: "center" }}>
-          {automaticMessage || "Automatic edge detection needs your help. Confirm all four corners."}
-        </div>
-        <DLCornerTool
-          imageFile={file}
-          label={activeSide === "front" ? "Front of Driver's Licence" : "Back of Driver's Licence"}
-          confirmLabel={activeSide === "front" ? "Use These Corners - Next Upload Back" : "Use These Corners - Read PDF417"}
-          onConfirm={(blob) => void handleManualConfirm(activeSide, blob)}
-          onCancel={() => setActiveSide(null)}
-        />
-      </div>
-    );
-  }
-
   if (!frontPreview) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {uploadStage(
           "front",
           "Upload front of driver licence",
-          "Take or choose a clear photo. TruckERP first proves four independent straight edges while ignoring the rounded corner arcs. It then checks the four 90° angles before deciding whether to crop, rotate, or correct perspective.",
+          "Take or choose a clear photo of the front of your licence.",
           frontMessage,
           frontState,
         )}
-        {frontState === "FAILED" && <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{frontMessage || "Upload failed. Please try again."}</p>}
+        {frontState === "FAILED" && (
+          <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{frontMessage || "Upload failed. Please try again."}</p>
+        )}
       </div>
     );
   }
@@ -245,18 +195,36 @@ export default function DLUploadStep({
   if (!backPreview) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ ...card, textAlign: "center" }}>
-          <div style={{ fontSize: "0.78rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--trk-success)", marginBottom: 8 }}>
+        <div style={{ ...card, textAlign: "center", cursor: "default" }}>
+          <div
+            style={{
+              fontSize: "0.78rem",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.12em",
+              color: "var(--trk-success)",
+              marginBottom: 8,
+            }}
+          >
             Front saved
           </div>
-          <div style={{ color: "var(--trk-text-muted)", lineHeight: 1.6 }}>
-            The automatic geometry check completed before the existing upload flow.
-          </div>
+          <div style={{ color: "var(--trk-text-muted)", lineHeight: 1.6 }}>Continue with the back side for PDF417 barcode reading.</div>
           <button
             type="button"
             onClick={() => promptReplacementFile("front")}
             disabled={busy}
-            style={{ marginTop: 14, background: "none", border: "1px solid var(--trk-border)", borderRadius: 6, color: "var(--trk-heading)", padding: "9px 18px", fontSize: "0.8rem", fontWeight: 700, cursor: !busy ? "pointer" : "default", opacity: busy ? 0.6 : 1 }}
+            style={{
+              marginTop: 14,
+              background: "none",
+              border: "1px solid var(--trk-border)",
+              borderRadius: 6,
+              color: "var(--trk-heading)",
+              padding: "9px 18px",
+              fontSize: "0.8rem",
+              fontWeight: 700,
+              cursor: !busy ? "pointer" : "default",
+              opacity: busy ? 0.6 : 1,
+            }}
           >
             Re-upload front
           </button>
@@ -264,11 +232,13 @@ export default function DLUploadStep({
         {uploadStage(
           "back",
           "Upload back of driver licence",
-          "The same four-edge geometry check runs first. If it succeeds, the corrected image continues to the existing PDF417 path. If it cannot prove all four edges, the manual corner tool opens instead of guessing.",
+          "Take or choose a clear photo of the back. The barcode will be read after upload.",
           backMessage,
           backState,
         )}
-        {backState === "FAILED" && <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{backMessage || "Upload failed. Please try again."}</p>}
+        {backState === "FAILED" && (
+          <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{backMessage || "Upload failed. Please try again."}</p>
+        )}
       </div>
     );
   }
@@ -277,23 +247,68 @@ export default function DLUploadStep({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {canReview && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18 }}>
-          {([
-            ["front", "Front preview", frontPreview],
-            ["back", "Back preview", backPreview],
-          ] as const).map(([side, label, preview]) => (
-            <div key={side} style={{ ...card, border: "1px solid rgba(34,197,94,0.45)", boxShadow: "0 0 0 1px rgba(34,197,94,0.12) inset" }}>
+          {(
+            [
+              ["front", "Front preview", frontPreview],
+              ["back", "Back preview", backPreview],
+            ] as const
+          ).map(([side, label, preview]) => (
+            <div
+              key={side}
+              style={{
+                ...card,
+                border: "1px solid rgba(34,197,94,0.45)",
+                boxShadow: "0 0 0 1px rgba(34,197,94,0.12) inset",
+                cursor: "default",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <div style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--trk-success)" }}>{label}</div>
+                <div
+                  style={{
+                    fontSize: "0.72rem",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "var(--trk-success)",
+                  }}
+                >
+                  {label}
+                </div>
                 <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "var(--trk-success)" }}>READY</div>
               </div>
-              <div style={{ borderRadius: 12, overflow: "hidden", border: "2px solid rgba(34,197,94,0.45)", background: "var(--trk-bg)", aspectRatio: "8 / 5", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {preview && <img src={preview} alt={`${label} corrected`} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />}
+              <div
+                style={{
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  border: "2px solid rgba(34,197,94,0.45)",
+                  background: "var(--trk-bg)",
+                  aspectRatio: "8 / 5",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {preview && (
+                  <img src={preview} alt={`${label}`} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => promptReplacementFile(side)}
                 disabled={busy}
-                style={{ marginTop: 10, width: "100%", background: "none", border: "1px solid var(--trk-border)", borderRadius: 6, color: "var(--trk-heading)", padding: "8px 0", fontSize: "0.78rem", fontWeight: 700, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
+                style={{
+                  marginTop: 10,
+                  width: "100%",
+                  background: "none",
+                  border: "1px solid var(--trk-border)",
+                  borderRadius: 6,
+                  color: "var(--trk-heading)",
+                  padding: "8px 0",
+                  fontSize: "0.78rem",
+                  fontWeight: 700,
+                  cursor: busy ? "default" : "pointer",
+                  opacity: busy ? 0.6 : 1,
+                }}
               >
                 Re-upload {side}
               </button>
