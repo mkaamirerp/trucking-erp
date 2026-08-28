@@ -1,0 +1,179 @@
+name: DL Sandbox Production Reset Apply
+
+on:
+  push:
+    branches:
+      - feature/dl-sandbox-production-reset
+    paths:
+      - '.github/workflows/dl_reset_apply.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/dl-sandbox-production-reset
+          fetch-depth: 0
+
+      - name: Apply DL reset wiring
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Frontend page: upload the raw File unchanged.
+          page = Path('apps/web/src/pages/OnboardingApplicantPage.tsx')
+          text = page.read_text()
+          old = '''  async function handleCorrectedDl(side: "front" | "back", blob: Blob, originalName: string): Promise<boolean> {
+            const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
+            const stem = originalName.replace(/\\.[^.]+$/, "") || side;
+            const file = new File([blob], `${stem}_corrected.jpg`, { type: "image/jpeg" });
+            return uploadDl(docType, file);
+          }'''
+          new = '''  async function handleDlUpload(side: "front" | "back", file: File): Promise<boolean> {
+            const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
+            return uploadDl(docType, file);
+          }'''
+          if old not in text:
+              raise SystemExit('handleCorrectedDl block not found; refusing blind patch')
+          text = text.replace(old, new, 1)
+          if 'onConfirmSide={handleCorrectedDl}' not in text:
+              raise SystemExit('old DLUploadStep callback not found; refusing blind patch')
+          text = text.replace('onConfirmSide={handleCorrectedDl}', 'onUploadSide={handleDlUpload}', 1)
+          page.write_text(text)
+
+          # Backend route: raw canonical upload, exact sandbox derivative, existing PDF417/hydration.
+          router = Path('app/routers/driver_onboarding.py')
+          text = router.read_text()
+          if 'import copy\n' not in text:
+              raise SystemExit('router import anchor not found')
+          text = text.replace('import copy\n', 'import asyncio\nimport copy\nimport io\n', 1)
+          old_storage = '''from app.core.storage import (
+              readable_path,
+              save_applicant_dl_upload,
+              save_applicant_doc_upload,
+              serve_file,
+          )'''
+          new_storage = '''from app.core.storage import (
+              get_storage,
+              readable_path,
+              save_applicant_dl_upload,
+              save_applicant_doc_upload,
+              serve_file,
+          )'''
+          if old_storage not in text:
+              raise SystemExit('storage import block not found')
+          text = text.replace(old_storage, new_storage, 1)
+          anchor = 'from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417\n'
+          if anchor not in text:
+              raise SystemExit('PDF417 import anchor not found')
+          text = text.replace(
+              anchor,
+              anchor + 'from app.services.applicant_dl_sandbox_preprocessing import preprocess_driver_license_bytes\n',
+              1,
+          )
+
+          old_block = '''    stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
+              intake = dict(app.intake_payload or {})
+              files = dict(intake.get("files") or {})
+              files[doc_type] = {
+                  "storage_key": stored.storage_key,
+                  "file_id": stored.storage_key,
+                  "enh_file_id": stored.storage_key,
+                  "original_filename": stored.original_filename,
+                  "upload_status": "READY",
+              }
+              intake["files"] = files
+              if doc_type == "CDL_BACK":
+                  intake = await apply_stored_cdl_back_pdf417(intake, stored.storage_key, tenant_slug)'''
+          new_block = '''    # Canonical evidence: save the user's original upload unchanged first.
+              stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
+              raw_bytes = get_storage().read_bytes(stored.storage_key, "applicant_dl", tenant_slug)
+
+              # Production preprocessing is exactly the proven sandbox four-corner algorithm.
+              # CPU-heavy OpenCV work runs off the event loop. No four corners = no derivative.
+              preprocessed = await asyncio.to_thread(preprocess_driver_license_bytes, raw_bytes)
+              processed_stored = None
+              if preprocessed.processed_jpeg is not None:
+                  processed_upload = UploadFile(
+                      file=io.BytesIO(preprocessed.processed_jpeg),
+                      filename="dl_processed.jpg",
+                  )
+                  processed_stored = await save_applicant_dl_upload(tenant_slug, app.id, processed_upload)
+
+              effective_key = processed_stored.storage_key if processed_stored is not None else stored.storage_key
+              intake = dict(app.intake_payload or {})
+              files = dict(intake.get("files") or {})
+              files[doc_type] = {
+                  "storage_key": stored.storage_key,
+                  "file_id": stored.storage_key,
+                  "enh_file_id": effective_key,
+                  "original_filename": stored.original_filename,
+                  "upload_status": "READY",
+                  "preprocess_status": preprocessed.status,
+                  "preprocess_diagnostics": preprocessed.diagnostics,
+              }
+              intake["files"] = files
+              if doc_type == "CDL_BACK":
+                  intake = await apply_stored_cdl_back_pdf417(intake, effective_key, tenant_slug)'''
+          if old_block not in text:
+              raise SystemExit('DL upload route body not found; refusing blind patch')
+          text = text.replace(old_block, new_block, 1)
+          router.write_text(text)
+
+          # Runtime dependencies needed by the exact sandbox code.
+          for filename in ('requirements.in', 'requirements.txt'):
+              path = Path(filename)
+              text = path.read_text()
+              if 'opencv-python-headless==' not in text:
+                  anchor = 'pyzbar==0.1.9\n'
+                  if anchor not in text:
+                      raise SystemExit(f'{filename}: pyzbar anchor missing')
+                  text = text.replace(anchor, anchor + 'numpy==2.2.6\nopencv-python-headless==4.11.0.86\n', 1)
+              path.write_text(text)
+
+          lock = Path('requirements.lock.txt')
+          text = lock.read_text()
+          if 'numpy==2.2.6' not in text:
+              anchor = 'markupsafe==3.0.3\n    # via mako\n'
+              if anchor not in text:
+                  raise SystemExit('requirements.lock.txt numpy anchor missing')
+              text = text.replace(anchor, anchor + 'numpy==2.2.6\n    # via\n    #   -r requirements.in\n    #   opencv-python-headless\n', 1)
+          if 'opencv-python-headless==4.11.0.86' not in text:
+              anchor = 'packaging==26.2\n    # via pytest\n'
+              if anchor not in text:
+                  raise SystemExit('requirements.lock.txt opencv anchor missing')
+              text = text.replace(anchor, anchor + 'opencv-python-headless==4.11.0.86\n    # via -r requirements.in\n', 1)
+          lock.write_text(text)
+
+          # Destroy the obsolete pre-reset processing prototype and its design note.
+          for filename in (
+              'app/services/driver_id_preprocessing.py',
+              'docs/archive/driver_onboarding/DRIVER_ID_PREPROCESSING_LINE_INTERSECTION.md',
+          ):
+              path = Path(filename)
+              if path.exists():
+                  path.unlink()
+          PY
+
+      - name: Verify no old processor references remain
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R "driverLicensePreprocessor\|DLCornerTool\|handleCorrectedDl" apps/web/src app --exclude-dir=node_modules
+          python -m py_compile app/services/applicant_dl_sandbox_preprocessing.py app/routers/driver_onboarding.py
+          git diff --check
+          git status --short
+
+      - name: Commit reset
+        shell: bash
+        run: |
+          git config user.name 'mkaamirerp'
+          git config user.email 'mkaamir@gmail.com'
+          git add -A
+          git commit -m 'reset(dl): replace processing stack with proven sandbox algorithm'
+          git push origin HEAD:feature/dl-sandbox-production-reset
