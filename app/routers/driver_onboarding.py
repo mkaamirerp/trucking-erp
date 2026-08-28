@@ -14,7 +14,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
+import io
 import hashlib
 import logging
 import secrets
@@ -27,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.storage import (
+    get_storage,
     readable_path,
     save_applicant_dl_upload,
     save_applicant_doc_upload,
@@ -63,6 +66,7 @@ from app.schemas.driver_onboarding import (
 from app.deps.admin import is_tenant_admin
 from app.deps.entitlements import require_tenant_subscription_active
 from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417
+from app.services.applicant_dl_sandbox_preprocessing import preprocess_driver_license_bytes
 from app.constants.person_application_workflow import WORKFLOW_LANE_COMPLETE, normalize_workflow_lane
 from app.constants.person_onboarding import PERSON_SETUP_UI_COMBINED, normalize_person_setup_ui_mode
 from app.schemas.driver_compensation_setup import DriverCompensationSetupOut, DriverCompensationSetupWrite
@@ -819,19 +823,35 @@ async def upload_applicant_dl(
             status_code=status.HTTP_409_CONFLICT,
             detail="Application already submitted",
         )
+    # Canonical evidence: save the user's original upload unchanged first.
     stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
+    raw_bytes = get_storage().read_bytes(stored.storage_key, "applicant_dl", tenant_slug)
+
+    # Exact successful sandbox four-corner algorithm. No four corners = no derivative.
+    preprocessed = await asyncio.to_thread(preprocess_driver_license_bytes, raw_bytes)
+    processed_stored = None
+    if preprocessed.processed_jpeg is not None:
+        processed_upload = UploadFile(
+            file=io.BytesIO(preprocessed.processed_jpeg),
+            filename="dl_processed.jpg",
+        )
+        processed_stored = await save_applicant_dl_upload(tenant_slug, app.id, processed_upload)
+
+    effective_key = processed_stored.storage_key if processed_stored is not None else stored.storage_key
     intake = dict(app.intake_payload or {})
     files = dict(intake.get("files") or {})
     files[doc_type] = {
         "storage_key": stored.storage_key,
         "file_id": stored.storage_key,
-        "enh_file_id": stored.storage_key,
+        "enh_file_id": effective_key,
         "original_filename": stored.original_filename,
         "upload_status": "READY",
+        "preprocess_status": preprocessed.status,
+        "preprocess_diagnostics": preprocessed.diagnostics,
     }
     intake["files"] = files
     if doc_type == "CDL_BACK":
-        intake = await apply_stored_cdl_back_pdf417(intake, stored.storage_key, tenant_slug)
+        intake = await apply_stored_cdl_back_pdf417(intake, effective_key, tenant_slug)
     app.intake_payload = intake
     await db.commit()
     await db.refresh(app)
