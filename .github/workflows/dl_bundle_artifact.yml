@@ -1,0 +1,29 @@
+name: DL Browser Bundle Artifact
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/src/core/driverLicenseGeometry.ts'
+      - 'apps/web/src/core/driverLicensePreprocessor.ts'
+      - '.github/workflows/dl_bundle_artifact.yml'
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx esbuild src/core/driverLicensePreprocessor.ts --bundle --format=iife --global-name=DLPreprocessor --platform=browser --target=es2020 --outfile=dl-preprocessor-browser.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dl-preprocessor-browser-bundle
+          path: apps/web/dl-preprocessor-browser.js
+          if-no-files-found: error
