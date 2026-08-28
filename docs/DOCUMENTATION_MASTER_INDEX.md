@@ -5,6 +5,21 @@
 
 **Docs landing page:** [`README.md`](./README.md) (this file is the **master tracker** for major design topics).
 
+## Trust / precedence rule
+
+When two documents conflict, prefer the **newer explicit lock or decision** and then check whether the older document has a SUPERSEDED / PARTIALLY SUPERSEDED banner. Historical implementation reports remain useful evidence, but they are not allowed to override a later product or architecture lock.
+
+---
+
+## Trip / dispatch control center — current product locks
+
+| Title | Path | Status / purpose |
+|------|------|------------------|
+| **000 — Trip Container Is the Dispatch Control Center** | [`000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`](./000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md) | **Current product/UI identity lock.** Trip page = Trip Container = Dispatch Control Center. `DeprecatedDispatchPage` is legacy `Load.status` board / visual salvage only. |
+| **001 — Trip Container Accordion Wireframe** | [`001_TRIP_CONTAINER_ACCORDION_WIREFRAME.md`](./001_TRIP_CONTAINER_ACCORDION_WIREFRAME.md) | **Design / wireframe only.** UI structure for the same Trip-backed Dispatch Control Center; not implementation truth. |
+| **Trip execution & custody master index** | [`TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`](./TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md) | Approved execution/custody reading map. Read together with 000 and Decision 14 for current UI ownership and assignment slice state. |
+| **Decision 14 — Trip Assignment Update Slice** | [`DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md`](./DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md) | **LOCKED** first post-cutover trip-assignment implementation slice; trip-level driver/truck/trailer assignment without reviving `Load.status = dispatched`. |
+
 ---
 
 ## Load, email intake, documents, parser
@@ -17,15 +32,16 @@
 | Broker / email intake — QR design | [`BROKER_EMAIL_INTAKE_QR_DESIGN.md`](./BROKER_EMAIL_INTAKE_QR_DESIGN.md) | QR-derived intake metadata (lineage, audit, broker/load linkage). |
 | Trip container — Load Page + parser integration map | [`TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md`](./TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md) | Load Page vs parser vs Lab; canonical `LoadWorkspaceForm` boundaries. |
 | Current PDF load paths and gaps | [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md) | Where PDFs are parsed today (workspace vs email thread vs Lab) and gaps. |
-| **Load Rate Confirmation Semantic Parser Design** | [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) | Design lock: evidence (not conclusions) + runtime tenant identity exclusion + OpenAI semantic result with provenance. Not per-broker JSON; OCR gate for empty-text PDFs. |
+| **Load Rate Confirmation Semantic Parser Design** | [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) | **Current parser design lock.** Evidence (not conclusions) + runtime tenant identity exclusion + OpenAI semantic result with provenance. The new evidence/exclusion contract is a design target; the live guarded parser already uses OpenAI but still carries older diagnostics until cutover. |
+| OpenAI semantic extraction integration report | [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) | **Historical / superseded as a current-state report.** Useful for original connectivity and Load Lab integration rationale; do not use its old “semantic extraction not implemented” statement as current parser truth. |
 
 ---
 
-## Trip execution, custody, dispatch (separate spine)
+## Trip execution, custody, dispatch (decision spine)
 
 | Document | When to read |
 |----------|----------------|
-| [`TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`](./TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md) | **Approved** reading order and supporting references for trip execution, custody, assignment, load workspace decisions **6–13**, and related DDL/payroll docs. |
+| [`TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`](./TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md) | Approved reading order and supporting references for trip execution, custody, assignment, load workspace decisions **6–14**, and related DDL/payroll docs. |
 
 ---
 
@@ -47,4 +63,4 @@ Operational and architecture locks for agents and humans live under **`.cursor/r
 
 ---
 
-*Add new cross-cutting design reports here under the appropriate section so they stay discoverable.*
+*Add new cross-cutting design reports here under the appropriate section so they stay discoverable. When a later lock replaces an older document, stamp the older document explicitly instead of leaving two apparently-current truths.*
