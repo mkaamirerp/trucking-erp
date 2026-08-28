@@ -59,4 +59,13 @@ Under `email/`:
 
 - `EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY_PRE_V2_REPORT.md` — detailed pre-parser-v2 mixed current/target investigation. Preserved for provider/routing archaeology; not current parser or intake architecture authority.
 
+## Archived fixture-only illustrative outputs
+
+Under `fixtures/load_lab/`:
+
+- `load_lab_fixture_1pickup_3deliveries.synthetic_expected_truckerjson.json`
+- `load_lab_fixture_3pickups_1delivery.synthetic_expected_truckerjson.json`
+
+These two JSON files explicitly described themselves as illustrative expected output and were not consumed by current code/tests. The matching PDFs and `.lab_parse_response.json` golden compatibility inputs remain active under `../fixtures/load_lab/` because current tests reference them.
+
 These records remain useful for historical reasoning, regression archaeology, and understanding why current safety boundaries exist.
