@@ -1,12 +1,13 @@
+# TruckERP Engineering Playbook
 
----
+The canonical engineering playbook lives at:
 
-## 🔐 Tenant Safety – Forbidden SQL Rules
+- [`docs/ENGINEERING_PLAYBOOK.md`](docs/ENGINEERING_PLAYBOOK.md)
 
-All developers **must** follow the tenant-safe SQL rules.
+Tenant-safe SQL rules are documented at:
 
-See the canonical cheat-sheet:
-- `docs/tenant_safety_forbidden_sql.md`
+- [`docs/tenant_safety_forbidden_sql.md`](docs/tenant_safety_forbidden_sql.md)
 
-These rules are **mechanically enforced by CI** (grep + pytest).  
-PRs that violate them **must fail**.
+Repository-enforced operational and architecture rules also live under `.cursor/rules/`.
+
+Do not maintain a second copy of the playbook at repository root; this file is intentionally only a pointer to the canonical documentation.
