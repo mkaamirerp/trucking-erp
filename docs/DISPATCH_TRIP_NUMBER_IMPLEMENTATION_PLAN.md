@@ -21,7 +21,7 @@
 **Current codebase touchpoints (reference):**
 
 - Loads / trips: `app/models/load.py`, `app/models/dispatch_trip.py`, `app/services/loads.py`, `app/services/dispatch_trips.py`, `app/routers/loads.py`, `app/schemas/load.py` (`LoadResponse` includes read-model `trip_number` where applicable)
-- Dispatch board: `app/routers/dispatch.py`, `apps/web/src/pages/DispatchPage.tsx` (board/list UI; deep assign/edit flows defer to load workspace — see `LoadWorkspacePage.tsx`)
+- Dispatch board: `app/routers/dispatch.py`, `apps/web/src/pages/DeprecatedDispatchPage.tsx` (board/list UI; deep assign/edit flows defer to load workspace — see `LoadWorkspacePage.tsx`)
 - Load workspace UI: **`apps/web/src/pages/LoadWorkspacePage.tsx`** (header/summary/strips for load + **trip** display), **`LoadsListPage.tsx`** (list + CSV includes `trip_number` when present)
 - Tenant admin: `app/routers/tenant_admin.py` (tenant-scoped settings + `get_tenant_db`; **dispatch numbering** in tenant DB — see `AdminDispatchNumberingPage.tsx`)
 - Payroll (tracing): `app/models/payroll.py` (`PayEntry`, `PayRunItem` with `metadata_json`), `app/routers/payroll.py`
@@ -313,7 +313,7 @@ Code: `app/constants/trip_dispatch.py` (`PRE_DISPATCH_TRIP_CANCEL_STATUSES`) and
 | Surface | Change |
 |---------|--------|
 | **Admin — dispatch numbering** | Form: prefix, lock; show error when **planned Trip create** **or** dispatch is blocked |
-| **`DispatchPage.tsx`** | Card / row / table: show **`trip_number`** when present; handle 409 from API with toast + link to admin |
+| **`DeprecatedDispatchPage.tsx`** | Card / row / table: show **`trip_number`** when present; handle 409 from API with toast + link to admin |
 | **`LoadWorkspacePage.tsx`** | Header/summary / context: **`trip_number`** next to broker/load identity with clear labels (operational **Trip** vs broker refs / load #) |
 | **`LoadsListPage.tsx`** | List + export: `trip_number` column where applicable; search passes through `listLoads` `search` / backend filters as implemented |
 | **`LoadInboxPage.tsx`** / intake | Show **`trip_number` only when it exists** (post-`dispatched` / active trip). **Never** fabricate or reserve trip numbers during intake or draft stages ([intake boundary](#intake-and-draft-boundary) below) |
