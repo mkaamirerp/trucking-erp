@@ -822,16 +822,51 @@ async def upload_applicant_dl(
     stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
     intake = dict(app.intake_payload or {})
     files = dict(intake.get("files") or {})
+
+    from app.core.storage import readable_path, save_applicant_dl_processed_bytes
+    from app.services.applicant_dl_preprocess import run_applicant_dl_opencv
+
+    import asyncio
+
+    with readable_path(stored.storage_key, "applicant_dl", tenant_slug) as image_path:
+        processed = await asyncio.to_thread(run_applicant_dl_opencv, str(image_path))
+
+    preprocess_debug = processed.debug
+    preprocess_status = "FAILED"
+    ocr_storage_key: str | None = None
+
+    if processed.success and processed.jpeg_bytes:
+        stored_processed = await save_applicant_dl_processed_bytes(
+            tenant_slug,
+            app.id,
+            processed.jpeg_bytes,
+            original_storage_key=stored.storage_key,
+        )
+        ocr_storage_key = stored_processed.storage_key
+        preprocess_status = "PROCESSED"
+        files[f"{doc_type}_PROCESSED"] = {
+            "storage_key": stored_processed.storage_key,
+            "file_id": stored_processed.storage_key,
+            "enh_file_id": stored_processed.storage_key,
+            "original_filename": stored_processed.original_filename,
+            "upload_status": "READY",
+            "dl_preprocess_status": preprocess_status,
+        }
+
     files[doc_type] = {
         "storage_key": stored.storage_key,
         "file_id": stored.storage_key,
-        "enh_file_id": stored.storage_key,
         "original_filename": stored.original_filename,
-        "upload_status": "READY",
+        "upload_status": "READY" if preprocess_status == "PROCESSED" else "FAILED",
+        "dl_preprocess_status": preprocess_status,
+        "dl_preprocess_debug": preprocess_debug,
     }
+    if ocr_storage_key:
+        files[doc_type]["enh_file_id"] = ocr_storage_key
+
     intake["files"] = files
-    if doc_type == "CDL_BACK":
-        intake = await apply_stored_cdl_back_pdf417(intake, stored.storage_key, tenant_slug)
+    if doc_type == "CDL_BACK" and ocr_storage_key:
+        intake = await apply_stored_cdl_back_pdf417(intake, ocr_storage_key, tenant_slug)
     app.intake_payload = intake
     await db.commit()
     await db.refresh(app)

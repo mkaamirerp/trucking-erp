@@ -427,17 +427,18 @@ export default function OnboardingApplicantPage() {
       setDlState(s => s[docType] === "UPLOADING" ? { ...s, [docType]: "SCANNING" } : s);
       setDlMessage(m => ({
         ...m,
-        [docType]: docType === "CDL_BACK" ? "Reading PDF417 barcode..." : "Saving your licence...",
+        [docType]: docType === "CDL_BACK" ? "Processing licence and reading PDF417..." : "Processing licence image...",
       }));
     }, 600);
     try {
       const resp = await uploadPersonApplicationDlFile({ appId: app.id, onboardingToken: token, docType, file });
       window.clearTimeout(timer);
-      const ok = resp.file_id != null;
+      const fileMeta = (resp.intake_payload as any)?.files?.[docType];
+      const ok = resp.file_id != null && fileMeta?.dl_preprocess_status === "PROCESSED";
       setDlState(s => ({ ...s, [docType]: ok ? "SUCCESS" : "FAILED" }));
       setDlMessage(m => ({
         ...m,
-        [docType]: ok ? "" : "We could not save this corrected image. Please try again.",
+        [docType]: ok ? "" : "We could not process this licence image. Please try again.",
       }));
       setApp(prev => prev ? { ...prev, intake_payload: resp.intake_payload ?? prev.intake_payload } : prev);
       if (ok) {
