@@ -12,10 +12,12 @@ import {
   EDGE_SAMPLE_CORNER_IGNORE_START,
   EDGE_SAMPLE_COUNT,
   GRADIENT_MAG_THRESHOLD,
+  LEVEL_TOLERANCE_DEG,
   MIN_ABSOLUTE_INLIERS,
   MIN_EDGE_SPAN_COVERAGE,
   MIN_INLIER_RATIO,
   ORIENTATION_ORDER,
+  PARALLEL_TOLERANCE_DEG,
   PREPROCESS_VERSION,
   RANSAC_DISTANCE_THRESHOLD,
   RANSAC_ITERATIONS,
@@ -410,7 +412,8 @@ function buildCandidateMasks(image: ImageData, gradient: Float32Array): Array<{ 
   for (let p = 0, i = 0; p < count; p += 1, i += 4) {
     const hsv = rgbToHsv255(image.data[i], image.data[i + 1], image.data[i + 2]);
     saturationValues[p] = Math.round(hsv.s);
-    if (hsv.h >= 35 && hsv.h <= 135 && hsv.s >= 18 && hsv.v >= 60) cool[p] = 1;
+    // OpenCV sandbox used H=35..135 on a 0..179 hue scale => approximately 70..270 degrees in browser HSV.
+    if (hsv.h >= 70 && hsv.h <= 270 && hsv.s >= 18 && hsv.v >= 60) cool[p] = 1;
     if (hsv.v >= 100) bright[p] = 1;
     if (gradient[p] >= 70) edge[p] = 1;
   }
@@ -1024,11 +1027,21 @@ export async function processDriverLicenseCanvas(sourceCanvas: HTMLCanvasElement
         all_four_confirmed: true,
       };
       const rotatedMetrics = measureQuadrilateral(rotated.corners, rotatedEdges, rotated.canvas.width, rotated.canvas.height);
+      const level = rotatedMetrics.level_errors;
+      const rotationGeometryPass =
+        level.top_horizontal_error_deg <= LEVEL_TOLERANCE_DEG &&
+        level.bottom_horizontal_error_deg <= LEVEL_TOLERANCE_DEG &&
+        level.left_vertical_error_deg <= LEVEL_TOLERANCE_DEG &&
+        level.right_vertical_error_deg <= LEVEL_TOLERANCE_DEG &&
+        rotatedMetrics.parallel_error_top_bottom_deg <= PARALLEL_TOLERANCE_DEG &&
+        rotatedMetrics.parallel_error_left_right_deg <= PARALLEL_TOLERANCE_DEG;
       postRotationGeometry = {
-        level_error: rotatedMetrics.level_errors,
+        level_error: level,
         parallel_error_top_bottom_deg: rotatedMetrics.parallel_error_top_bottom_deg,
         parallel_error_left_right_deg: rotatedMetrics.parallel_error_left_right_deg,
+        pass: rotationGeometryPass,
       };
+      if (!rotationGeometryPass) throw new Error("post_rotation_geometry_failed");
       corrected = cropAndResize(rotated.canvas, rotated.corners);
     } else if (best.classification === "PERSPECTIVE") {
       correction = "PERSPECTIVE_WARP";
