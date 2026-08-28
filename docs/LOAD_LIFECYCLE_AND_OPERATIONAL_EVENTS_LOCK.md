@@ -1,6 +1,9 @@
 # 🔒 TruckERP — Load Lifecycle & Operational Events (LOCKED)
 
-**Status:** locked. Changes require explicit architecture review.
+> **STATUS: PARTIALLY SUPERSEDED (2026-08-28).**  
+> Keep this document for the durable principles that a Load persists across Trips, operational events matter, and custody must remain visible. Its old **Load lifecycle/status ladder** (`Assigned`, `Dispatched`, `In Transit`, `Delivered`, `Closed`) is **not** the current new-write `Load.status` model. For current status ownership use [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md): new writes are **`draft` / `ready` / `cancelled`**; Trip/TripLoad/custody own operational execution. For current Trip/Dispatch UI ownership use [`000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`](./000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md).
+
+**Status:** historical architecture lock with the status-ladder portion superseded by later decisions.
 
 ---
 
@@ -21,9 +24,9 @@ Loads can:
 
 ---
 
-## 2) Load Lifecycle (High-Level Only)
+## 2) Load Lifecycle (HISTORICAL — SUPERSEDED FOR `Load.status` NEW WRITES)
 
-This is the stable lifecycle (**do not overload this**):
+This was the earlier lifecycle model:
 
 - Draft
 - Ready
@@ -33,11 +36,13 @@ This is the stable lifecycle (**do not overload this**):
 - Delivered
 - Closed
 
-Notes:
+**Current rule:** do not implement this list as the new `Load.status` write model. Decision 11 owns current status semantics: `draft`, `ready`, `cancelled` for new writes; operational assignment/execution/delivery belongs to Trip / TripLoad / custody/event truth.
 
-- **Delivered** = operational completion
-- **Closed** = business/accounting completion
-- Do **not** add split/reject/yard into lifecycle
+Historical notes:
+
+- **Delivered** was used here as operational completion
+- **Closed** was used here as business/accounting completion
+- Do **not** add split/reject/yard into a single lifecycle field
 
 ---
 
@@ -73,30 +78,33 @@ Example:
 - Delivered: 8
 - Remaining: 2
 
-System state:
+Historical state wording in this document used:
 
 - Lifecycle: **In Transit**
 - Progress: **Partial Delivery**
 - Remaining Stops: **2**
 
+Current implementations should express execution/progress through Trip / TripLoad / custody/event models rather than introducing `In Transit` as a new `Load.status` write.
+
 ### 3.5 Rejected Delivery
 
 Receiver refuses freight.
 
-System result:
+System result concept:
 
 - Custody → **Driver**
-- Status → **Problem / Hold**
+- Operational problem / hold condition
 - Next → **Return to yard** OR **reattempt**
+
+Do not encode the operational problem as a new execution-style `Load.status` without a later explicit decision.
 
 ### 3.6 Return to Yard (CRITICAL)
 
 Failed delivery → driver returns freight.
 
-System state:
+Conceptual state:
 
-- Lifecycle: **In Transit**
-- Sub-status: **Yard Hold**
+- Operational movement remains incomplete
 - Custody: **Terminal / Yard / Trailer**
 
 ⚠️ This is **not** Delivered.
@@ -124,10 +132,9 @@ Example: **Load B — JB Hunt**
 - Delivered: 8
 - Remaining: 2
 
-State:
+Operational truth:
 
-- Lifecycle: **In Transit**
-- Sub-status: **Partial Delivery / Returned to Yard**
+- Partial delivery / returned to yard
 - Custody: **Yard (Trailer 404)**
 
 Next Action:
@@ -142,7 +149,7 @@ Result:
 
 ---
 
-## 5) Design Rules (LOCK THESE)
+## 5) Design Rules (STILL VALID UNLESS A LATER DECISION OVERRIDES THEM)
 
 ### Rule 1 — Load never splits into new loads
 
@@ -186,16 +193,14 @@ Options:
 
 ## 6) Summary (Core Model)
 
-- **Load** = persistent truth
+- **Load** = persistent commercial truth
 - **Trip** = execution layer
-- **Events** = state changes
+- **Events / custody** = operational continuity truth
 
-🔒 **STATUS: LOCKED ARCHITECTURE**
+🔒 **DURABLE PRINCIPLES RETAINED; OLD LOAD STATUS LADDER SUPERSEDED**
 
-This model must be followed for:
+For current implementation, cross-check:
 
-- Dispatch UI
-- Trip system
-- Load handling
-- Future automation
-
+- `DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`
+- `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`
+- `000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`
