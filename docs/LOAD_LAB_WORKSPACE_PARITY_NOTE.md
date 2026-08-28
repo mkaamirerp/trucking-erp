@@ -1,48 +1,110 @@
-# Load Lab ↔ Load workspace parity (grounded note)
+# Load Lab ↔ Load Workspace parity
 
-**Date:** 2026-04-20  
-**Scope:** Product direction lock — no second “final” load editing model in Lab. This note is **code-grounded** (repo paths cited); it is **not** a promise that UI parity is already shipped.
+**Status:** **CURRENT PRODUCT BOUNDARY + SHIPPED PARITY NOTE — refreshed 2026-08-28.**  
+**Product lock:** **Load Lab is a proving / debug / regression surface. `LoadWorkspaceForm` is the production load form.** Lab must not become a second product Load implementation.  
+**Merged history:** The durable implementation facts from `LOAD_LAB_WORKSPACE_FORM_PARITY_SLICE.md` are consolidated here; that implementation report is now historical/archive-ready.
 
----
+**Related current truth:**
 
-## What already aligns with the real Load workspace contract
-
-1. **Backend candidate shape** — Lab persists successful semantic output as **`LoadDocumentParseResponse`** (`app/schemas/load_document_parse.py`), the same Pydantic model returned by **`POST /api/v1/loads/parse-document`** (`app/routers/loads.py`). Stops in that schema are documented to align with **`LoadStopWrite`** geometry (`LoadParseStopItem` docstring in `load_document_parse.py`).
-
-2. **Workspace already consumes that DTO** — **`LoadWorkspacePage`** applies PDF parse results by reading **`res.extracted`**, **`res.raw_text`**, **`res.warnings`**, and mapping stops through **`extractedStopsToDraft`** (`apps/web/src/pages/LoadWorkspacePage.tsx`, `onParseWorkspacePdf`). That is the **canonical client-side hydration path** from parse DTO → workspace draft state today.
-
-3. **Lab-only overlays** — Run metadata, **`normalized_package`**, **`lab_confidence`**, **`contradictions`**, **`lab_review_*`**, OpenAI metadata, and raw JSON debug panels are **audit/review** structures. They are **not** a second operational load row shape and do not replace **`LoadWritePayload`** / **`Load`**.
+- [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md)
+- [`TruckERP_Shared_Document_Parsing_Architecture.md`](./TruckERP_Shared_Document_Parsing_Architecture.md)
+- [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md)
+- [`LoadLabCleaner.md`](./LoadLabCleaner.md)
 
 ---
 
-## What currently diverges from “same form experience”
+## 1. Product rule
 
-1. **UI surface** — **`LoadLabPage`** (`apps/web/src/pages/LoadLabPage.tsx`) is a **dedicated** route with JSON previews, review banners, and pipeline controls. It does **not** mount **`LoadWorkspaceForm`** (`apps/web/src/loadWorkspace/LoadWorkspaceForm.tsx`), which is the **canonical editable load form** shared by manual / detail / intake modes.
+There is one production load-editing experience:
 
-2. **DTO vs persist payload** — **`LoadDocumentParseResponse`** is the **hydration** contract (extracted block + raw text + parse warnings). The **save** contract for real loads is **`LoadWritePayload`** / server **`Load`** (`buildLoadPersistPayload` in `apps/web/src/loadWorkspace/loadWorkspaceShared.ts`). Fields such as **`broker_id`**, **`load_number`**, **`status`**, fleet/driver/trailer IDs, **`hazmat_flag`**, **`pallet_case_count`**, **`broker_contact_extension_snapshot`**, and structured **notes** are part of workspace persistence, not fully represented in the parse DTO. Lab correctly does **not** pretend the parse DTO is the full load row.
+```text
+LoadWorkspacePage
+  → LoadWorkspaceForm
+```
 
-3. **Hydration completeness vs workspace PDF parse** — Workspace **`onParseWorkspacePdf`** applies many **`extracted`** scalars and stops; it does **not** map **`extracted.references[]`** into a separate references UI (no `references` handling in that callback as of this note). Any future “full parity” should mean **one shared apply function** used by both workspace PDF parse and Lab, not two diverging copy/paste lists.
+Load Lab may show the same production form for comparison and review, but Lab-specific metadata, JSON, diagnostics, experiments, run history, confidence panels, or promote/reject tooling do **not** create a second canonical load-editing model.
 
-4. **Docs drift** — Older text in **`LOAD_LAB_FIRST_MIGRATION_CUT.md`** allowed “no direct reuse of `LoadWorkspaceForm` for v1.” That was a **scope shortcut**, not a product principle. It is now **explicit debt** relative to the parity lock (see cleaner ledger).
-
----
-
-## Smallest next step (no promote, no operational writes)
-
-**Goal:** Same field groups the operator knows, **read-only** in Lab, **zero** default write to **`loads`**.
-
-1. **Extract** the parse → workspace field application from **`onParseWorkspacePdf`** into a shared helper, e.g. **`applyLoadDocumentParseToWorkspaceDraft(...)`** in `apps/web/src/loadWorkspace/` (inputs: extracted + options such as whether to resolve broker identity; outputs: partial state patch or setter callbacks). **`LoadWorkspacePage`** keeps current behavior by calling that helper.
-
-2. **On `LoadLabPage`**, when **`parse_response`** exists: mount **`LoadWorkspaceForm`** (or a thin wrapper) with **`visibleSections`** / **`editableSections`** set so the **same sections** render as production, but **editing disabled** (or all handlers no-op), plus existing **lab-only** panels **below or beside** the form. Broker dropdown resolution can stay **read-only** (snapshots only) in the first cut to avoid implying a save.
-
-3. **Optional follow-up:** map **`extracted.references`** into whatever the workspace uses for reference UX **once** that path exists in the shared helper so Lab and workspace stay aligned.
-
-This delivers **“normal load page + lab/debug context”** without implementing **promote** or any **POST/PATCH load** from Lab.
+> **Same production form and hydration rules; different proving/debug context.**
 
 ---
 
-## References
+## 2. What is already shared / shipped
 
-- `docs/LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md` — updated with explicit workspace parity lock.
-- `docs/LOAD_LAB_FIRST_MIGRATION_CUT.md` — first-cut scope vs long-term parity.
-- `docs/LoadLabCleaner.md` — ledger entry for temporary UI divergence.
+### Same parser DTO family
+
+Lab and product workflows use the `LoadDocumentParseResponse` / `LoadParseExtractedFields` contract family for workspace-shaped parse results. That DTO is a **hydration contract**, not the persisted `Load` row schema.
+
+### Shared parse → workspace hydration helper
+
+The April parity slice extracted the production parse-application logic into:
+
+```text
+apps/web/src/loadWorkspace/applyLoadDocumentParseResponse.ts
+```
+
+The helper owns the workspace-shaped mapping that had previously lived inline in `LoadWorkspacePage`, including parsed broker/contact snapshots, load reference, financial/equipment values, notes, and meaningful stops through `extractedStopsToDraft`.
+
+The product Load Page calls that shared helper rather than maintaining a separate mapping list.
+
+### Same production form rendered in Lab
+
+`LoadLabPage` renders the same:
+
+```text
+apps/web/src/loadWorkspace/LoadWorkspaceForm.tsx
+```
+
+for workspace-shaped review. In Lab it is used **read-only** with production/manual section visibility and Lab/debug context alongside it.
+
+This was the important parity correction: Lab should not invent a second set of load fields or a parallel editor just because it is a test surface.
+
+---
+
+## 3. What remains intentionally different
+
+These differences do **not** violate parity because they belong to Lab/debug context rather than the production Load model:
+
+1. **Lab run metadata / JSON / diagnostics** — persisted extraction-run details, confidence, contradictions, raw JSON, semantic-mode comparisons, and other proving tools may remain Lab-only.
+2. **Read-only behavior** — Lab may freeze `LoadWorkspaceForm` controls. Production edit/save behavior belongs to `LoadWorkspacePage`.
+3. **Page shell / header chrome** — status/title/navigation outside `LoadWorkspaceForm` can differ; the canonical field groups should not fork.
+4. **Document focus behavior** — production workspace may focus/highlight source-document text; Lab can use a no-op or debug-oriented document viewer.
+5. **Mode coverage** — Lab commonly renders the manual/read-only section configuration. It does not need to pretend to be intake, payroll, or every future workspace mode.
+6. **`extracted.references[]` UX** — references may still appear in Lab JSON when the production workspace has no dedicated editable references subsection. Do not invent a Lab-only production field UI to close that gap.
+7. **Lab persistence / promote tooling** — if Lab stores runs or exposes explicit review/promote actions, those are proving-surface controls. They do not redefine normal Load create/update semantics.
+
+---
+
+## 4. Rules for future changes
+
+### Must
+
+- Reuse `LoadWorkspaceForm` for production-shaped load review instead of copying its field groups into Lab.
+- Reuse the shared parse → workspace hydration helper instead of maintaining a Lab-only mapping list.
+- Keep parser semantics in the canonical parser/profile, not in Lab UI components.
+- Keep Lab-specific diagnostics clearly secondary to the production-shaped form.
+- Treat `LoadDocumentParseResponse` as candidate/hydration data and the normal Load save payload/model as the operational persistence contract.
+
+### Must not
+
+- Create a second “final load form” in `LoadLabPage`.
+- Add Lab-only business meanings that alter what a parsed Rate Confirmation field means in production.
+- Make a Lab debug field silently become a production Load field without a normal product/schema decision.
+- Use Lab success as permission to bypass production workspace review/save rules.
+
+---
+
+## 5. Historical implementation report
+
+`LOAD_LAB_WORKSPACE_FORM_PARITY_SLICE.md` records the April 20 implementation details that introduced the shared hydration helper and read-only `LoadWorkspaceForm` rendering in Lab.
+
+Those facts are now captured here as the current parity rule. The slice report should be treated as **historical implementation evidence**, not a second parity source of truth.
+
+---
+
+## 6. One-line test
+
+When deciding whether a Lab change is correct, ask:
+
+> **If we removed Load Lab tomorrow, would the production Load Page and canonical parser still contain the real business rule?**
+
+If the answer is no, the rule is probably being implemented in the wrong place.

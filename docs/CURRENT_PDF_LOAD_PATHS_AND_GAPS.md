@@ -1,89 +1,141 @@
 # Current PDF load paths and gaps
 
-**Scope:** Factual summary of **today’s** load-related PDF and document handling in the repo (default branch / deployed line). This is an **investigation checkpoint**, not a specification for new code in this document.
+**Status:** **CURRENT REALITY MAP — verified 2026-08-28 against `inspect/current-working-state-2026-08-28`.**  
+**Scope:** Factual map of the current Load / Rate Confirmation PDF entry points and the boundaries between the product parser, Email Intake, and Load Lab.  
+**Product rule:** **Load Lab is a proving / debug surface, not the product Load Page.** The production editable load form is `LoadWorkspaceForm`.
 
-For the **approved target** pipeline (fingerprinting, classification, canonical JSON, AI mapping, OCR fallback, gates, persistence of evidence), see [`PDF_LOAD_PIPELINE.md`](./PDF_LOAD_PIPELINE.md).
+**Current parser truth:**
 
-**Related:**
+- [`TruckERP_Shared_Document_Parsing_Architecture.md`](./TruckERP_Shared_Document_Parsing_Architecture.md) — shared acquisition / semantic boundary.
+- [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) — implemented Rate Confirmation v2 profile and frozen handoff contract.
+- [`LOAD_LAB_WORKSPACE_PARITY_NOTE.md`](./LOAD_LAB_WORKSPACE_PARITY_NOTE.md) — Lab vs production Load Page boundary.
 
-- [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](./load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md) — proposed async job + polling for **Load Page** `POST /loads/parse-document` (**design / future only** — not implemented; synchronous parse remains current).
-- [`MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md`](./MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md) — multi-document load candidate, grouping, and merge design contract (not implemented yet; applies beyond current single-document Lab/workspace paths).
-- [`LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md`](./LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md) — design + **as-implemented** Load Lab notes.
-- [`LoadLabCleaner.md`](./LoadLabCleaner.md) — temporary bridges and cleanup ledger.
-- [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) — future OpenAI integration (not wired to parsing yet).
+`PDF_LOAD_PIPELINE.md` and the old OpenAI integration report are retained as historical design/rollout records; they are not current parser implementation authority.
 
 ---
 
 ## 1. Summary
 
-Load-related PDF behavior is **split across multiple HTTP routes and parser implementations**. There is **no** single `load_document_parse.py` module on current `main`; the **Load Page** parse route uses **`parse_load_workspace_document_orchestrated`** → **`parse_pdf_bytes_to_load_document_response`** (`app/services/load_document_parse_orchestrator.py`, `load_document_product_parser.py`, `load_document_parse_guarded.py`). **Load Lab** uses **`app/services/load_lab.py`** (normalized package + semantic extraction path for a workspace-shaped `parse_response` — not the same code path as a monolithic legacy file).
+There is now a **canonical public product parser entrypoint** for Load / Rate Confirmation PDFs:
 
-**Email / Gmail intake** uses **`apply_email_pdf_intake`** (`app/services/email_engine/intake_service.py`): unified broker resolution, optional **`parse_pdf_bytes_to_load_document_response`** for a **review snapshot** (truncated `raw_text` in stored detail), plus QR hooks. **`app/services/email_intake_pdf.py`** supplies **PDF text extraction and MC/DOT hint helpers** only — not a separate TQL-only gate. **`apply_email_pdf_intake` does not create `Load` rows** (guardrail tests).
+```text
+app/services/load_document_product_parser.py
+  → parse_pdf_bytes_to_load_document_response(...)
+  → app/services/load_document_parse_rate_con.py
+```
 
-**Manual “create draft load” from intake review** (`create_draft_load_from_review_thread`) does **not** run full PDF-to-load-column parsing; it resolves broker via **`resolve_booking_broker_for_email_intake`** and MC/DOT hints from subject/snippet, and may take **`broker_load_reference`** from review **`detail_json.guarded_parse.extracted`** when present.
+That product path is **Rate Confirmation v2**:
 
-Operators therefore see **inconsistent** outcomes for the **same file** depending on **where** it enters the system and **which** code path runs — and, for Lab vs workspace, whether results are **persisted and versioned** or **client-only**. A **single canonical extraction brain** across all surfaces is still **not** achieved (§4–5).
+```text
+PDF
+→ page acquisition / embedded-text usability classification
+→ controlled OCR-required gate when needed
+→ cached tenant_identity_exclusion
++ frozen Rate Confirmation field_rules
++ page-separated text
+→ OpenAI schema mapping
+→ mechanical validation
+→ LoadDocumentParseResponse
+```
 
----
+The product path does **not** use `PRODUCT_PARSE_DIAGNOSTICS`, `broker_party`, `carrier_party`, `role_hint`, ranked semantic candidates, or the old diagnostics-driven semantic repair stack.
 
-## 2. Route table (current reality)
+Two important product surfaces now converge on that public parser:
 
-| Route (concept) | Frontend entry | Frontend API helper | Backend route | Parser / service | File persisted? | Parse timing | State hydrated |
-|-----------------|----------------|---------------------|---------------|------------------|-----------------|----------------|----------------|
-| **Manual load workspace PDF parse** | `apps/web/src/pages/LoadWorkspacePage.tsx` — `onParseWorkspacePdf`, hidden PDF input | `apps/web/src/api.ts` — `parseLoadWorkspaceDocument` → `POST /api/v1/loads/parse-document` | `app/routers/loads.py` — `parse_load_workspace_document` | **`parse_load_workspace_document_orchestrated`** → **`parse_pdf_bytes_to_load_document_response`** (product / guarded parser stack; schemas in `app/schemas/load_document_parse.py`) | **No** (request body processed; not stored as load document by this endpoint) | **Synchronous** | **Client draft only** — React workspace state (broker snapshots, refs, equipment, rate/miles, stops, etc.). `email_thread_id` / `load_id` form fields are **echo-only** in response `context`. |
-| **Load Lab — PDF upload / review / promote** | `apps/web/src/pages/LoadLabPage.tsx`; nav **Load Lab** → `/loads/lab` | `apps/web/src/api.ts` — `uploadLoadLabRun`, `listLoadLabRuns`, `getLoadLabRun`, `promoteLoadLabRun`, etc. → `POST /api/v1/load-lab/runs/upload` (and sibling `/load-lab/*` routes) | `app/routers/load_lab.py` → `app/services/load_lab.py` | **`ingest_pdf_and_run_pipeline`**: PDF text via `extract_text_and_pages_from_pdf_bytes`, normalized package on run, then **`load_lab_semantic`** semantic mapping to workspace-shaped **`LoadDocumentParseResponse`** (digital path); promote is explicit | **Yes** — tenant tables `load_lab_extraction_runs`, `load_lab_promote_audits` (Alembic tenant revision `l9a8b7c6d5e4`) | **Synchronous** | **Persisted run** + JSON panels in UI; **no** operational load write until **explicit promote** (`create_draft` / `update_existing`). |
-| **Email / Load Intake — upload PDF to thread** | `apps/web/src/pages/LoadInboxPage.tsx` — `handleUploadDocumentChange`; `apps/web/src/components/intake/IntakeVerificationPanel.tsx` wires the same upload handler | `apps/web/src/api.ts` — `uploadPdfToEmailThread` → `POST /api/v1/email-threads/{thread_id}/upload-pdf` | `app/routers/email_threads.py` → `app/services/email_threads.py` — `upload_pdf_to_intake_thread` | After storage: **`recompute_email_thread_intake`** → **`apply_intake_routing_for_email_thread`** (alias of **`apply_email_pdf_intake`**, `app/services/email_intake_routing.py` → `intake_service.py`): broker **`resolve_booking_broker_for_email_intake`**; PDF bytes → **`parse_pdf_bytes_to_load_document_response`** for **intake review snapshot** (not Load Page hydration); **`email_intake_pdf.py`** for **`extract_pdf_text_bytes`** / **`extract_broker_mc_dot_hints`** (supplemental resolver hints); QR via `email_intake_qr_decode` / `email_intake_qr_extractions` | **Yes** — tenant object storage (`save_upload`, module `email_intake`, synthetic `EmailMessage` + `EmailMessageAttachment`) | **Synchronous** in the upload request (includes recompute) | **Email thread** — `intake_bucket`, `confidence_level` / `confidence_score`, `routing_reason`; **`EmailIntakeReview`** with guarded-parse detail; **does not** auto-create **`Load`** inside **`apply_email_pdf_intake`** |
-| **Email thread intake recompute** | `LoadInboxPage.tsx` — `handleRecomputeIntake` | `recomputeEmailThreadIntake` → `POST /api/v1/email-threads/{thread_id}/recompute-intake` | `email_threads.recompute_email_thread_intake` | Same as upload: **`apply_email_pdf_intake`** + `sync_email_intake_review_for_thread` | No new file unless attachments already exist | **Synchronous** | Same as upload — refreshes thread intake classification and review rows; **no** automatic new **`Load`** from this path |
-| **Gmail sync / post-ingestion** | Operator or job triggers Gmail pull (e.g. delta from inbox UI); not a dedicated “parse PDF” button | Various sync endpoints | `app/services/email_engine/message_router.py` — `route_after_ingestion` → `run_post_ingest_intake` | Gmail: **`apply_email_pdf_intake`** (when access token present); other providers: **`apply_review_only_mailbox_intake`** | Attachments stored during message persistence (outside this summary’s per-line detail) | **After** messages are in DB | Thread intake fields + review sync; **no** `Load` auto-creation from **`apply_email_pdf_intake`** |
-| **Create draft load from intake review** | `IntakeVerificationPanel` / `LoadInboxPage` — create draft flow | `createDraftLoadFromEmailThread` → `POST /api/v1/email-threads/{thread_id}/create-draft-load` | `email_threads.create_draft_load_from_email_thread` → **`app/services/email_threads.py`** — `create_draft_load_from_review_thread` | **`extract_broker_mc_dot_hints`** on subject+snippet; broker resolution **`resolve_booking_broker_for_email_intake`**; **`broker_load_reference`** from review **`detail_json.guarded_parse.extracted`** when present; **no** full PDF column mapping into `Load` here | N/A for this action’s core logic | **Synchronous** | **New `Load`** row + `EmailThread.linked_load_id` — **explicit operator action**, not Gmail PDF intake automation |
-| **Link existing load to thread** | Intake UI | `linkLoadToEmailThread` | `link_load_to_email_thread` | No PDF parse | N/A | Synchronous | Thread ↔ load association |
+1. **Load Page / Load Workspace PDF parse** — hydrates the production workspace draft.
+2. **Email Intake PDF review snapshot** — calls the same public parser, but stores the result as review evidence and does **not** auto-create a Load.
 
-**Important:** The **Load Page** HTTP helper **`parse_load_workspace_document_orchestrated`** (and the **Lab** pipeline in `load_lab.py`) are **not** the same binary entrypoint as **`apply_email_pdf_intake`**. Email upload / recompute / post-ingest intake call **`apply_email_pdf_intake`**, which uses **`parse_pdf_bytes_to_load_document_response`** for **review snapshots**, not for direct **Load Workspace** hydration. **Create-draft-load** is a **separate** explicit path. **Async job + poll** for Load Page parse is **design-only** — see [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](./load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md).
-
----
-
-## 3. Why operators see inconsistent behavior
-
-1. **Same PDF, different code:** **Load Page** uses **`parse_load_workspace_document_orchestrated`** → guarded product parser; **Load Lab** uses **`load_lab.py`** normalized package + **semantic** mapping; **email intake** uses **`apply_email_pdf_intake`** → **`parse_pdf_bytes_to_load_document_response`** for **review detail** (truncated storage) with **different** UX and persistence. Paths **converge on the `LoadDocumentParseResponse` contract family** in places but **not** on one shared orchestration layer.
-2. **Same expectation, different guarantees:** The workspace path hydrates the **main form**; operators expect **rate-con fidelity**. Extraction is still **not** a unified document-classified pipeline; confidence semantics vary by path.
-3. **Create draft ≠ parse PDF:** “Create draft from review” builds a **`Load`** from **broker resolution + review snapshot fields**, not a full PDF-to-columns map. A PDF on the thread may appear in **intake review** via **`apply_email_pdf_intake`** without feeding the **same** mapping as **Load Page** “Parse PDF.”
-4. **Split “brains”:** There is **no single canonical extraction package** or shared mapping layer across **all** entry points — hence **no single place** to fix “wrong broker ref” for **everything**.
+**Load Lab remains separate by design.** It has persisted runs, historical diagnostic/semantic experiment modes, review metadata, and lab-only controls. It is useful for regression and proving work, but it is **not** the source of truth for the current production Rate Confirmation parser.
 
 ---
 
-## 4. Biggest current gaps
+## 2. Current route / ownership table
 
-| Gap | Description |
-|-----|-------------|
-| **Split parser paths** | **Guarded product parser** (Load Page + intake review snapshot) vs **Load Lab** semantic pipeline vs **subject/snippet + review detail** (manual draft). Different orchestration, persistence, and gates. |
-| **Heuristic / model weakness** | Guarded + Lab paths still risk **over-broad** or **first-match** field behavior without a **single** document-type classifier across routes — fine for controlled demos; **not** a unified production extraction standard. |
-| **Route inconsistency** | One UI speaks “parse this PDF into my load”; another path “ingest this PDF for intake review.” They **sound** unified but **are not** the same pipeline. |
-| **Over-broad field extraction** | Examples in code: **first** email/phone in file as “broker contact”; aggressive **rate** dollar pattern; **first** `load`/`ref`-style token as broker reference; **first** “miles” numeric pattern. |
-| **Stop list quality** | Dense or ambiguous PDF layout can still yield **many** low-value or duplicate stop-like rows depending on path (model/heuristic behavior); operators should treat extraction as **candidate** data until verified on the Load Page. |
-| **No one canonical extraction brain** | No shared **normalized document package**, **classification**, or **TruckERP-owned JSON** step across routes — so fixes in one path **do not** propagate to others. **Load Lab** persists a **normalized package** shape for its route only; intake and workspace do not consume that artifact yet. |
-| **Lab vs workspace duplicate entry** | Two HTTP surfaces can call the **same** `parse_load_workspace_from_pdf_bytes` with different persistence and limits — risks **divergent** product rules (rate limits, RBAC, max bytes) unless kept intentionally aligned. See [`LoadLabCleaner.md`](./LoadLabCleaner.md). |
+| Flow | Current parser / service | Persistence / effect | Product meaning |
+|---|---|---|---|
+| **Load Page PDF parse** — `POST /api/v1/loads/parse-document` | `parse_load_workspace_document_orchestrated(...)` → public product parser → Rate Confirmation v2 | Endpoint itself does not create/update a Load; result hydrates client workspace draft state | **Production Load Page parse path** |
+| **Email Intake PDF upload / recompute** | `apply_email_pdf_intake(...)` → `load_document_product_parser.parse_pdf_bytes_to_load_document_response(...)` for review snapshot, plus email-specific broker-resolution / QR / duplicate checks | Persists intake/review state and attachment metadata; **no automatic Load creation** inside PDF intake | **Production intake review path using the same Rate Confirmation product parser for PDF semantics** |
+| **Create draft Load from intake review** | Explicit email-thread action; uses intake review / broker-resolution state rather than silently treating attachment ingestion as a Load save | Creates a Load only after explicit operator action | **Separate product action; not the PDF parser itself** |
+| **Load Lab upload / semantic evaluation** | `app/services/load_lab.py` + Lab-specific semantic/diagnostic modules and persisted run models | Persists `load_lab_extraction_runs` and Lab review/debug state; any promote behavior is explicit Lab tooling | **Proving / regression surface — not production parser truth** |
+| **Async Load Page parse job** | [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](./load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md) | Not implemented in this snapshot | **Future transport/execution model; does not change parser semantics** |
 
 ---
 
-## 5. Decision (direction of record)
+## 3. What is shared now
 
-- The **current Load Page parse** (`POST /loads/parse-document` via **`parse_load_workspace_document_orchestrated`** / guarded parser) is **not** the final **unified** architecture. It remains an **interim** hydration surface until a single pipeline exists.
-- **Future direction** is **one canonical pipeline** that produces **TruckERP-owned JSON** (with deterministic validation, confidence, and contradictions), then an **apply/review** decision — as described in [`PDF_LOAD_PIPELINE.md`](./PDF_LOAD_PIPELINE.md).
-- **OpenAI schema mapping** to that canonical JSON is the **planned primary extraction brain** for semantics; local logic handles **gates, validation, and orchestration**, not ad hoc per-broker regex as the long-term sole source of truth.
-- **OCR / AWS-style text acquisition** is the **planned fallback** when the readability gate finds weak or scanned text — still feeding the **same** normalized package and mapping contract.
-- **Implementation remains phased:** document the target, map current gaps, ship **Load Lab** as the controlled surface, then plan explicit cutover for workspace/intake — **without** removing existing routes or silently replacing operator flows until an explicit cutover plan exists.
+### 3.1 Public product parser
+
+Feature code that needs product PDF → `LoadDocumentParseResponse` semantics should use:
+
+```text
+app/services/load_document_product_parser.py
+```
+
+That module explicitly points to the Rate Confirmation v2 production implementation. The Load Workspace and Email Intake review path both use that public contract.
+
+### 3.2 Output / hydration contract
+
+The product parser returns the existing `LoadDocumentParseResponse` / `LoadParseExtractedFields` family. The production Load Page maps that DTO into workspace draft state; it does not treat the parse DTO as the persisted `Load` row itself.
+
+### 3.3 Shared acquisition principles
+
+Rate Confirmation v2 classifies per-page embedded-text usability and blocks semantic parsing when OCR is required. Weak/scanned pages are **not** sent as blank/garbage evidence to OpenAI and do **not** fall back to the legacy diagnostics parser.
 
 ---
 
-## 6. Related code index (quick reference)
+## 4. What is intentionally still separate
+
+### Load Lab
+
+Load Lab is an experiment and regression harness. It may retain historical diagnostics, comparison modes, persisted run metadata, JSON panels, or evaluation-only controls that do not belong on the production Load Page.
+
+The rule is:
+
+> **Do not fix the product parser by making Load Lab the product.** Fix the canonical parser/profile, then use Lab to prove the behavior.
+
+### Email-specific intake routing
+
+Email Intake performs work beyond PDF semantic parsing: thread routing, broker-resolution signals, duplicate-content checks, QR extraction, review persistence, and explicit operator actions. Those are **intake responsibilities**, not a reason to fork the Rate Confirmation semantic parser.
+
+### Explicit create-draft action
+
+Attachment ingestion/review and operational Load creation remain separate. PDF intake may produce review evidence; creating a Load is an explicit product action.
+
+---
+
+## 5. Current gaps
+
+| Gap | Current reality |
+|---|---|
+| **OCR execution** | Page classification / `requires_ocr` gating is implemented; an OCR provider and OCR execution path are **not implemented**. |
+| **Load Lab parser drift** | Lab still contains older proving-pipeline semantics and diagnostics that are intentionally not the production Rate Confirmation v2 brain. Lab docs must not call that pipeline the current product parser. |
+| **General document classification / relevance** | Rate Confirmation is the first production profile. A generalized cross-module relevance/classification layer for arbitrary Load/Fuel/Toll documents is an architecture goal, not a claim about this shipped slice. |
+| **Persisted product parse runs / versions** | Load Lab persists run/version/debug evidence. The synchronous Load Page parse endpoint is still hydration-oriented rather than a persisted parse-job/audit model. |
+| **Async parse job** | The Load Page request remains synchronous in this snapshot; async job + polling is still design-only. |
+| **Multi-document candidate merge** | [`MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md`](./MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md) remains a future design for grouping/merging multiple source documents. |
+| **Lab cleanup debt** | [`LoadLabCleaner.md`](./LoadLabCleaner.md) remains the ledger for temporary/historical Lab bridges and needs periodic re-audit against parser v2. |
+
+---
+
+## 6. Direction of record
+
+1. **Rate Confirmation v2 is the current product parser.** Do not revive the diagnostics-driven production path.
+2. **LoadWorkspaceForm is the production load form.** Parse output hydrates that product surface.
+3. **Load Lab is proving/debug/regression infrastructure.** It may compare ideas, but it does not define production parser truth.
+4. **Email Intake may add routing/review logic around the product parser**, but should not grow a competing Rate Confirmation semantic brain.
+5. **OCR, broader document classification/relevance, persisted parse-job execution, and multi-document merging remain separate future slices.**
+6. When docs conflict, prefer current code + Shared Parsing Architecture + the Rate Confirmation parser design over April-era Lab pipeline reports.
+
+---
+
+## 7. Quick code index
 
 | Area | Key files |
-|------|-----------|
-| Workspace parse API | `app/routers/loads.py`, `app/services/load_document_parse_orchestrator.py`, `app/services/load_document_product_parser.py`, `app/services/load_document_parse_guarded.py`, `app/schemas/load_document_parse.py` |
-| Workspace parse UI | `apps/web/src/pages/LoadWorkspacePage.tsx`, `apps/web/src/api.ts` (`parseLoadWorkspaceDocument`), `apps/web/src/loadWorkspace/loadParse*.ts` |
-| Load Lab API + service + models | `app/routers/load_lab.py`, `app/services/load_lab.py`, `app/services/load_lab_semantic.py`, `app/schemas/load_lab.py`, `app/models/load_lab.py`, migration `alembic_tenant/versions/l9a8b7c6d5e4_load_lab_extraction_tables.py` |
-| Load Lab UI | `apps/web/src/pages/LoadLabPage.tsx`, `apps/web/src/api.ts` (`uploadLoadLabRun`, …), `apps/web/src/routes.ts` (`OPS.LOAD_LAB`), `apps/web/src/components/TopNav.tsx` |
-| Email PDF upload / recompute | `app/routers/email_threads.py`, `app/services/email_threads.py`, `app/services/email_intake_routing.py` |
-| Gmail / email PDF intake | `app/services/email_engine/intake_service.py` (`apply_email_pdf_intake`, `run_post_ingest_intake`), `app/services/email_intake_pdf.py` (text + MC/DOT helpers) |
-| Post-ingestion routing | `app/services/email_engine/message_router.py`, `app/services/email_engine/message_classifier.py` |
-| Manual draft from review | `app/services/email_threads.py` — `create_draft_load_from_review_thread` |
+|---|---|
+| Public product parser | `app/services/load_document_product_parser.py` |
+| Rate Confirmation v2 | `app/services/load_document_parse_rate_con.py`, `load_parser_openai_handoff_v2.py`, `load_parser_rate_con_field_rules.py`, `load_parser_tenant_identity_exclusion.py`, `load_parser_mechanical_validation.py` |
+| Acquisition | `app/services/pdf_text_extract.py`, `app/services/load_parser_pdf_acquisition.py` |
+| Load Page parse route | `app/routers/loads.py`, `app/services/load_document_parse_orchestrator.py` |
+| Production Load form / hydration | `apps/web/src/pages/LoadWorkspacePage.tsx`, `apps/web/src/loadWorkspace/LoadWorkspaceForm.tsx`, `apps/web/src/loadWorkspace/applyLoadDocumentParseResponse.ts` |
+| Email PDF intake | `app/services/email_engine/intake_service.py`, `app/services/email_intake_pdf.py`, email review services |
+| Load Lab | `app/routers/load_lab.py`, `app/services/load_lab.py`, `app/services/load_lab_semantic.py`, `app/models/load_lab.py`, `apps/web/src/pages/LoadLabPage.tsx` |
