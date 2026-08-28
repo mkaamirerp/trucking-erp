@@ -26,15 +26,23 @@ When two documents conflict, prefer the **newer explicit lock/decision and the c
 
 | Title | Path | Description |
 |------|------|-------------|
-| **Email Intake Filtering and Load Intake Safety** | [`email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md`](./email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md) | Cross-provider design/report for filtering email intake before Load Intake. Defines current behavior, target A/B/C/D/E classifier routing, broker/domain/reference signals, human review, and hard safety boundaries preventing email intake from creating final loads, trips, dispatch, assignments, payroll, custody, or driver packages. |
-| **Async Load Page Parse Job Design** | [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](./load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md) | Design note for moving the real Load Page PDF parser from a blocking synchronous request to an async parse job with POST job creation, worker execution, GET polling, SHA256 reuse, and unchanged `LoadDocumentParseResponse` hydration. |
-| Gmail automatic ingestion (definition of done) | [`GMAIL_AUTOMATIC_INGESTION.md`](./GMAIL_AUTOMATIC_INGESTION.md) | Gmail Pub/Sub + watch definition of done and proof checklist. |
-| Broker / email intake — QR design | [`BROKER_EMAIL_INTAKE_QR_DESIGN.md`](./BROKER_EMAIL_INTAKE_QR_DESIGN.md) | QR-derived intake metadata (lineage, audit, broker/load linkage). |
-| Trip container — Load Page + parser integration map | [`TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md`](./TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md) | Load Page vs parser vs Lab; canonical `LoadWorkspaceForm` boundaries. |
-| Current PDF load paths and gaps | [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md) | Where PDFs are parsed today and remaining gaps. |
-| **Load Rate Confirmation Semantic Parser Design** | [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) | **Implemented Rate Confirmation v2 contract.** Runtime tenant identity exclusion + field rules + page-separated text → OpenAI → mechanical validation → existing New Load hydration contract. OCR remains a separate future slice. |
-| **Shared Document Parsing Architecture** | [`TruckERP_Shared_Document_Parsing_Architecture.md`](./TruckERP_Shared_Document_Parsing_Architecture.md) | Architecture lock for reusable acquisition + semantic parsing boundaries. Rate Confirmation is the first production profile. |
-| **OpenAI semantic extraction integration report** | [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) | **Historical / superseded as current implementation guidance.** Useful for the original connectivity and rollout rationale only; semantic extraction is now implemented on the product Rate Confirmation v2 path. |
+| **Email Intake Filtering and Load Intake Safety** | [`email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md`](./email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md) | Cross-provider filtering and safety boundaries before Load Intake. |
+| **Async Load Page Parse Job Design** | [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](./load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md) | Future async job + polling transport for the product Load Page parser; does not redefine parser semantics. |
+| Gmail automatic ingestion | [`GMAIL_AUTOMATIC_INGESTION.md`](./GMAIL_AUTOMATIC_INGESTION.md) | Gmail Pub/Sub + watch definition of done and proof checklist. |
+| Broker / email intake — QR design | [`BROKER_EMAIL_INTAKE_QR_DESIGN.md`](./BROKER_EMAIL_INTAKE_QR_DESIGN.md) | QR-derived intake metadata, lineage, audit, and broker/load linkage. |
+| **Current PDF load paths and gaps** | [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md) | **Current reality map.** Product Load Page + Email Intake review use the public Rate Confirmation v2 parser; Load Lab is a separate proving surface; OCR execution remains missing. |
+| **Load Lab ↔ Load Workspace parity** | [`LOAD_LAB_WORKSPACE_PARITY_NOTE.md`](./LOAD_LAB_WORKSPACE_PARITY_NOTE.md) | **Current product boundary.** Load Lab is proving/debug/regression; `LoadWorkspaceForm` is the production form. Shared hydration/form parity is shipped; Lab must not become a second Load product. |
+| Trip container — Load Page + parser integration map | [`TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md`](./TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md) | Load Page / parser / Trip boundary map; check against newer parser and Trip locks when using. |
+| **Load Rate Confirmation Semantic Parser Design** | [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) | **Implemented Rate Confirmation v2 profile contract.** Tenant exclusion + field rules + page-separated text → OpenAI → mechanical validation → existing Load hydration DTO. |
+| **Shared Document Parsing Architecture** | [`TruckERP_Shared_Document_Parsing_Architecture.md`](./TruckERP_Shared_Document_Parsing_Architecture.md) | **Architecture lock.** Shared acquisition/semantic ownership plus durable safety principles; Rate Confirmation v2 is the first shipped production profile. |
+| **OpenAI semantic extraction integration report** | [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) | **Historical / superseded.** Original connectivity/rollout rationale only. |
+
+### Load Lab evidence / cleanup (not product parser authority)
+
+- [`LOAD_LAB_BASELINE_6PDF.md`](./LOAD_LAB_BASELINE_6PDF.md) — frozen regression/evaluation evidence; keep as evidence, not architecture.
+- [`LoadLabCleaner.md`](./LoadLabCleaner.md) — cleanup ledger for temporary/historical Lab bridges; entries must be re-audited against parser v2 before being treated as current conditions.
+
+Historical Lab pipeline and implementation reports should not be added back to this current index merely because they contain the word “current.”
 
 ---
 
@@ -52,7 +60,7 @@ When two documents conflict, prefer the **newer explicit lock/decision and the c
 
 ## Cursor / AI rules (repo)
 
-Operational and architecture locks for agents and humans live under **`.cursor/rules/`**. This index lists **`docs/`** markdown only; open `.cursor/rules` when editing matching paths.
+Operational and architecture locks for agents and humans live under **`.cursor/rules/`**. This index lists `docs/` markdown only; open `.cursor/rules` when editing matching paths.
 
 ---
 

@@ -1,146 +1,142 @@
-# PDF load pipeline — target architecture
+# PDF load pipeline — historical target architecture
 
-**Scope:** This document describes the **approved future** pipeline for load-related PDFs and derived documents. It is **design and architecture only** (the target contract and ordering of stages).
+**Status:** **SUPERSEDED / HISTORICAL TARGET-ARCHITECTURE RECORD.**  
+**Current architecture:** [`TruckERP_Shared_Document_Parsing_Architecture.md`](./TruckERP_Shared_Document_Parsing_Architecture.md) + [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md).  
+**Current route reality:** [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md).  
+**2026-08-28 consolidation:** durable rules from this document — file sanity/dedupe, readability before semantics, OCR converging on the same profile/schema, relevance before aggressive hydration, unknown-over-wrong, no silent overwrite, contradiction/review gates, and version/evidence retention — were consolidated into the Shared Document Parsing Architecture.
 
-**Out of scope here:** Full specification of today’s production code paths. For a **factual map** of current routes and parsers (workspace, inbox, Load Lab v1, etc.), see [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md).
-
-**Related:**
-
-- [`MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md`](./MULTI_DOCUMENT_LOAD_CANDIDATE_CONTRACT.md) — one load candidate may have many source documents; identity, classification, field authority, merge/conflict rules (design only; not TQL-specific).
-- [`LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md`](./LOAD_LAB_AND_EXTRACTION_AUDIT_PLAN.md) — isolated rollout surface, persistence, promote, audit.
-- [`OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`](./OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md) — where OpenAI fits when the semantic layer is implemented.
-- [`LoadLabCleaner.md`](./LoadLabCleaner.md) — temporary bridges and cleanup ledger for Load Lab work.
+The body below is retained as the earlier target design and rollout rationale. Statements such as “Load Lab first,” “OpenAI not yet implemented,” or “direction of record” describe the **pre–Rate Confirmation v2** phase and must not override the current architecture/code.
 
 ---
 
-## 1. Goal
+## 1. Historical goal
 
-TruckERP must turn heterogeneous broker/carrier/customs PDFs into **one canonical, TruckERP-owned JSON** contract suitable for validation, review, and apply decisions.
+TruckERP must turn heterogeneous broker/carrier/customs PDFs into a TruckERP-owned structured contract suitable for validation, review, and apply decisions.
 
-The target system must **not** rely on broker-specific labels or **global regex alone** as the final semantic layer.
+The target system must not rely on broker-specific labels or global regex alone as the final semantic layer.
 
 ---
 
-## 2. Core architectural decision
+## 2. Historical core architectural decision
 
 | Layer | Role |
-|--------|------|
-| **Primary extraction brain** | OpenAI (or equivalent) **schema-constrained structured output** mapped to TruckERP **canonical JSON**. |
-| **Fallback acquisition** | **OCR** (e.g. AWS Textract–class) when text is weak, scanned, or layout-dependent. |
-| **Final semantics** | Always converge on the **same** canonical JSON contract — OCR supplies **text/layout evidence**, not a parallel ad hoc schema. |
+|---|---|
+| **Primary extraction brain** | OpenAI (or equivalent) schema-constrained structured output mapped to TruckERP-owned JSON. |
+| **Fallback acquisition** | OCR when text is weak, scanned, or layout-dependent. |
+| **Final semantics** | Digital text and OCR converge on the same downstream profile/schema; OCR supplies evidence, not a parallel business schema. |
 
-**Rule:** OCR is **not** the final business extractor by itself; it feeds the same downstream mapping and gates as the digital text path.
-
----
-
-## 3. Approved pipeline (ordered)
-
-1. **File intake** — Accept upload; record metadata, tenant/source context, size, MIME; bind to thread/load/workspace context as applicable.
-2. **Fingerprint / dedupe gate** — Content hash (and logical keys); skip or short-circuit duplicate work; surface duplicate awareness to operators when relevant.
-3. **File type sanity gate** — PDF vs image vs unsupported; reject malformed inputs early with clear feedback.
-4. **Readability gate** — After initial text pull: classify text usability (strong digital text vs weak vs scanned/mixed).
-5. **Acquisition branch** — **Digital text path** vs **OCR path** (weak/scanned); both feed the same next stage.
-6. **Normalized document package** — Single intermediate shape: metadata, method, per-page text, full text, structure hints (blocks/lines/tables where available), warnings.
-7. **Document classification** — Coarse type (e.g. rate confirmation, broker information sheet, customs, invoice/irrelevant, unknown) to drive field relevance and review rules.
-8. **Relevance gate** — Decide if the document should influence **load** extraction at all (full / partial / none).
-9. **AI schema mapping** — Map normalized evidence → **TruckERP canonical JSON** via schema-bound generation (not broker-native field names as the persistence contract).
-10. **Deterministic validation** — Types, enums, dates, money, stop ordering, required pairs, impossible combinations — **schema-valid ≠ business-valid**.
-11. **Confidence + contradiction gates** — Document-, group-, and field-level confidence; detect conflicts (e.g. identity vs MC/DOT, competing rates/refs, stop inconsistencies). Contradictions push toward **review**, not silent apply.
-12. **Apply / review decision** — Outcomes such as auto-apply, apply-with-review, review-only, reject — with rules against overwriting trusted or user-confirmed values with weak evidence.
-13. **Persist evidence and versions** — Store extraction method, schema/prompt/parser versions, confidence, warnings, contradiction flags, and traceable evidence where practical for audit and safe reparse.
+**Durable rule retained:** OCR is acquisition, not the final business extractor.
 
 ---
 
-## 4. Stage notes (expanded)
+## 3. Historical ordered pipeline
 
-### File intake
+1. **File intake** — accept upload; record metadata, tenant/source context, size, MIME, and relevant product context.
+2. **Fingerprint / dedupe gate** — content hash and logical duplicate awareness.
+3. **File type sanity gate** — PDF vs image vs unsupported; reject malformed inputs early.
+4. **Readability gate** — classify usable digital text vs weak/scanned/mixed evidence.
+5. **Acquisition branch** — digital extraction vs OCR; both feed the same downstream shape.
+6. **Normalized document package** — metadata, method, per-page text, warnings, and structure hints where available.
+7. **Document classification** — coarse document type to drive relevance and field expectations.
+8. **Relevance gate** — decide whether the document should influence Load extraction.
+9. **AI schema mapping** — evidence → TruckERP-owned structured output through schema-bound generation.
+10. **Deterministic validation** — types, enums, dates, money, stop ordering, required pairs, impossible combinations.
+11. **Confidence + contradiction gates** — conflicting ids/rates/parties/stops push toward review rather than silent apply.
+12. **Apply / review decision** — auto-apply, review-only, reject, etc., with no silent overwrite of trusted values.
+13. **Persist evidence and versions** — parser/schema/prompt/model/acquisition versions, warnings, confidence, contradictions, traceable evidence where practical.
 
-Capture **provenance** (manual workspace, email thread upload, sync-derived attachment, etc.) so later gates and UI can explain **why** a package was produced.
-
-### Fingerprint / dedupe gate
-
-Reduces noise from the same bytes attached multiple times; supports linking to prior outcomes without re-running full extraction when policy allows.
-
-### File type sanity gate
-
-Stops unsupported types before expensive OCR or model calls.
-
-### Readability gate
-
-**Digital PDF ≠ usable text.** Layout extraction may yield garbage order or empty text; this gate chooses the acquisition branch and records warnings.
-
-### Digital text path vs OCR path
-
-Both branches **must** emit the **same normalized document package** shape so downstream classification and mapping do not fork by implementation.
-
-### Normalized document package
-
-The contract between **acquisition** and **semantic extraction**. Keeps one “document brain” input regardless of how text was obtained.
-
-### Document classification + relevance gate
-
-Prevents irrelevant PDFs (e.g. generic certificates, wrong doc type) from hydrating load fields; enables **document-type-aware** field expectations and operator messaging.
-
-### AI schema mapping into TruckERP canonical JSON
-
-This is the planned **primary semantic step**: structured output aligned to an internal schema, with explicit handling of unknowns and ambiguity.
-
-### Deterministic validation + confidence / contradiction gates
-
-Human-trust and system-safety layer **after** the model — not optional polish.
-
-### Apply / review decision
-
-Bridges extraction to product behavior: what may auto-fill, what is suggestion-only, what blocks save until acknowledged.
-
-### Persist evidence and versions
-
-Enables debugging (“why did this PDF set rate X?”), regression analysis on prompt/schema changes, and compliance-style audit trails.
+The newer Shared Document Parsing Architecture retains the durable safety rules above while intentionally using a simpler first production profile for Rate Confirmation v2.
 
 ---
 
-## 5. Non-negotiable principles
+## 4. Historical stage notes
 
-- **One** canonical JSON output contract for loads (and explicit extensions for non-load doc types if needed).
-- **Unknown is better than wrong** at the mapping layer.
-- **No silent overwrite** of trusted or user-confirmed values with low-evidence extractions.
-- **Relevance before hydration**; **classification before aggressive field fill** where possible.
-- **Confidence and contradictions are first-class.**
-- **Version and evidence** travel with results.
+### File intake / provenance
+
+Capture whether evidence came from manual workspace upload, email attachment, sync-derived document, or another source so operators can understand why a parse/review result exists.
+
+### Fingerprint / dedupe
+
+Repeated bytes should be identifiable. Reuse policy is a product decision and must not silently merge unrelated business records.
+
+### File type / readability
+
+Digital PDF does not guarantee usable ordered text. Weak/scanned evidence should be identified before expensive semantic processing.
+
+### Digital vs OCR
+
+Both acquisition branches must converge on the same semantic profile/schema. OCR does not create a separate business interpretation stack.
+
+### Classification / relevance
+
+When many document types are accepted, irrelevant documents should not hydrate aggressive Load fields simply because text exists.
+
+### AI mapping
+
+Semantic output should be schema-constrained and TruckERP-owned rather than persisting broker-native labels as the product contract.
+
+### Mechanical validation / contradiction gates
+
+Schema-valid is not automatically business-valid. Ambiguity and conflicting evidence should surface as review rather than being hidden by a deterministic guess.
+
+### Apply / review
+
+Extraction and persistence are separate decisions. Trusted/user-confirmed values must not be silently overwritten by weak candidate data.
+
+### Evidence / versions
+
+Persisted parse runs should carry enough version/evidence metadata to explain and reproduce why a value was proposed.
 
 ---
 
-## 6. Pitfalls the target design avoids
+## 5. Durable principles retained in the current architecture
 
-- Assuming all digital PDFs yield ordered, complete plain text.
-- Using **one global regex scan** of raw text as the **final** semantic source for broker PDFs.
-- Letting **inbox** and **workspace** paths drift into **two incompatible “truths”** without a shared normalized package and mapping step.
-- Returning **different JSON shapes** from OCR vs digital branches.
-- Single global confidence scores with no contradiction handling.
-- Unversioned prompt/schema changes in production debugging.
+- Unknown is better than wrong.
+- No silent overwrite of trusted/user-confirmed values.
+- Readability before semantics.
+- OCR and digital acquisition converge on one semantic profile/schema.
+- Relevance before aggressive hydration when multiple doc types are accepted.
+- Confidence/contradictions should drive review.
+- Persisted runs should retain versions/evidence.
+- Do not use one global regex scan as the final semantic brain.
 
----
-
-## 7. Current implementation footprint (Load Lab v1)
-
-Load Lab is the **first shipped slice** aligned with this document’s **persistence, versioning, and review** intent. It does **not** yet implement the full target pipeline (no OpenAI semantic mapping in production code; no OCR acquisition path).
-
-| Pipeline stage (this doc) | Load Lab v1 (approx.) |
-|----------------------------|------------------------|
-| 1–2 Intake + fingerprint / dedupe | Yes — upload, SHA-256, optional reuse of prior run when version pins match. |
-| 3–4 File type + readability | Partial — PDF magic check; weak/image-only → `ocr_required` / `failed` without OCR execution. |
-| 5–6 Acquisition + normalized package | Partial — digital text via existing PDF text extraction; `normalized_package` JSON persisted. |
-| 7–8 Classification + relevance | Stub — e.g. `classification_label` / `relevance` heuristics; not doc-type ML. |
-| 9 AI schema mapping | **Not yet** — regex-backed `parse_response` only; `ai_model_output` reserved. |
-| 10–11 Validation + confidence / contradictions | Partial — Pydantic validation of parse response; limited contradiction model. |
-| 12–13 Apply decision + evidence | Partial — explicit **promote** / **reject**; promote audit rows; best-effort `audit_events`. |
-
-**Cleanup / debt** for shortcuts inside Load Lab: [`LoadLabCleaner.md`](./LoadLabCleaner.md).
+These principles now live in `TruckERP_Shared_Document_Parsing_Architecture.md`; maintain them there going forward.
 
 ---
 
-## 8. Implementation stance
+## 6. Historical pitfalls this design was meant to avoid
 
-**Report-first / investigation-first:** This pipeline remains the **direction of record**. Further shipping should close gaps row-by-row in §7 (OpenAI mapping, OCR, classification, field-level promote, etc.) with **explicit cutover** from today’s split routes — **without** treating `load_document_parse.py` or ad hoc inbox regex as the long-term **extraction brain**.
+- Assuming all digital PDFs yield ordered/complete text.
+- Using one global regex scan as the final semantic source.
+- Letting inbox/workspace/Lab grow incompatible business semantics.
+- Returning different business schemas from OCR vs digital branches.
+- Single global confidence without contradiction handling.
+- Unversioned prompt/schema changes that cannot be debugged.
 
-**Operational rule:** New semantic extraction work should land in **Load Lab first** until quality and audit gates justify wiring the same contract into the main load workspace or intake automation.
+---
+
+## 7. Historical Load Lab v1 footprint
+
+At the time this document was active, Load Lab was the first proving slice for persistence/versioning/review ideas. It did not represent the final product parser and its implementation reports are now historical.
+
+The original approximation was:
+
+| Stage | Historical Load Lab state |
+|---|---|
+| Intake + fingerprint | Upload + SHA-256 + optional prior-run reuse |
+| File type + readability | Partial PDF/weak-text checks |
+| Acquisition + normalized package | Digital text + persisted Lab normalized package |
+| Classification + relevance | Stub / heuristic |
+| AI mapping | Initially absent; later added in Lab experiments |
+| Validation/confidence | Partial / evolving |
+| Apply/review + evidence | Lab-specific review/promote/audit tooling |
+
+Current production Rate Confirmation semantics no longer depend on this Lab evolution path.
+
+---
+
+## 8. Historical implementation stance
+
+The original rollout stance was investigation-first and Lab-first: prove new semantic behavior in an isolated surface before cutting it into the product Load Page.
+
+That rollout history remains useful, but **it is no longer current parser authority**. Rate Confirmation v2 is now shipped on the product parser path. Future shared-parser work should start from the Shared Document Parsing Architecture and the current code rather than reopening this historical target document.
