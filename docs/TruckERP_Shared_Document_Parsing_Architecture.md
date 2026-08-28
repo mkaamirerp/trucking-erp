@@ -1,241 +1,249 @@
 # TruckERP — Shared Document Parsing Architecture
 
-**Status:** **ARCHITECTURE LOCK — Rate Confirmation v2 is the first shipped production profile.**  
-**Scope:** Reusable document acquisition + semantic parsing boundaries across TruckERP modules.  
+**Status:** **ARCHITECTURE LOCK — one shared Document Parser pipeline; Rate Confirmation v2 is the first shipped production profile.**  
+**Scope:** Reusable document acquisition + semantic parsing across TruckERP.  
 **Date:** 2026-08-27; current-state refresh 2026-08-28.
 
 **Related current docs:**
 
-- [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) — implemented Rate Confirmation profile, field rules, tenant exclusion, and product output contract.
-- [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md) — factual current route / integration map.
+- [`TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md`](./TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md) — implemented Rate Confirmation profile contract.
+- [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md) — factual current route/integration map.
+- [`LOAD_LAB_WORKSPACE_PARITY_NOTE.md`](./LOAD_LAB_WORKSPACE_PARITY_NOTE.md) — Load Lab vs production Load Page boundary.
 
 ---
 
-## 1. Purpose
+## 1. Core lock: one parser pipeline, many document profiles
 
-TruckERP needs one shared boundary for turning unstructured documents into schema-valid JSON without every business module inventing its own PDF → OpenAI → semantic-repair stack.
+TruckERP has **one shared Document Parser engine/pipeline**. Business document types attach to that engine as **profiles/adapters**; they do not create competing end-to-end parser stacks.
 
-This architecture separates:
+```text
+                    ┌─ Rate Confirmation profile
+Document Parser ────┼─ Fuel document profile
+(shared engine)     ├─ Toll document profile
+                    ├─ Invoice / other future profiles
+                    └─ ...
+```
 
-1. **Shared Document Acquisition** — obtain normalized page-separated evidence without business meaning.
-2. **Shared Semantic Parsing** — profile/schema/rules + OpenAI semantic interpretation + mechanical validation.
-3. **Calling-module ownership** — module-specific profile, schema, context/exclusions, hydration/reconciliation/posting behavior.
+The shared engine owns acquisition, model transport, schema enforcement, mechanical validation patterns, and safe failure behavior. A document profile contributes the business-specific meaning needed for that document type.
 
-Rate Confirmation is the first shipped production profile. Fuel, Toll, and other document profiles are **intended future consumers of the same boundaries**; this document does not claim those profiles are already implemented.
+**Do not build separate full pipelines such as `fuel_parser`, `toll_parser`, or another Load parser that each reinvent PDF acquisition → OpenAI → validation.** A profile/package may use a document-specific module name, but it must plug into the same shared parser boundary.
+
+Rate Confirmation is the first shipped production profile. Fuel, Toll, and other profiles are future consumers unless their implementation is explicitly documented as shipped.
+
+Structured trusted API data is different: Fuel/Toll API JSON can bypass document parsing and go directly through module-owned normalization/validation.
 
 ---
 
-## 2. Pipeline 1 — Shared Document Acquisition
+## 2. Shared pipeline
 
-**Purpose:** Convert an uploaded document into normalized page-separated text and mechanical acquisition metadata without assigning business meaning.
+### Pipeline A — Document acquisition
 
 ```text
 PDF / image / attachment
         ↓
+file sanity
+        ↓
 embedded text extraction
         ↓
-classify each page mechanically
+mechanical page usability classification
         ↓
 embedded_text OR ocr_required
         ↓
-OCR only where required  (NOT implemented yet)
+OCR only where required (not implemented yet)
         ↓
-normalized pages[]
+normalized pages[] + mechanical metadata
 ```
 
-Acquisition must **not** decide:
+Acquisition must not decide business meaning such as broker/carrier identity, fuel vendor meaning, toll authority meaning, rate, load reference, stop role, or accounting treatment.
 
-- broker / carrier / fuel vendor / toll authority
-- rate / load reference / transaction meaning
-- stop role / business field mapping
+Current reusable implementation/patterns include:
 
-It may produce:
+- `app/services/pdf_text_extract.py` — embedded extraction
+- `app/services/load_parser_pdf_acquisition.py` — current Rate Confirmation page usability classifier
+- OCR provider/execution — **not implemented / not locked**
 
-- page-separated text for usable pages
-- mechanical metadata such as `pdf_type`, `requires_ocr`, per-page `source`, metrics, and warnings
+When OCR is required and unavailable, callers must not send blank/garbage pages into the semantic model and must not fall back to an obsolete semantic diagnostics stack.
 
-### Current Rate Confirmation acquisition implementation
-
-| Piece | Module | Status |
-|---|---|---|
-| Embedded extraction | `app/services/pdf_text_extract.py` | Live |
-| Page usability classification | `app/services/load_parser_pdf_acquisition.py` (`acquire_load_parser_pdf_pages`) | Complete |
-| OCR provider / execution | — | **Not implemented** |
-| OCR provider architecture lock | — | **Not locked** |
-
-When `requires_ocr` is true and OCR is unavailable, the production Rate Confirmation parser must **not** send blank/garbage pages into OpenAI and must **not** fall back to legacy semantic diagnostics.
-
----
-
-## 3. Pipeline 2 — Shared Semantic Parsing
+### Pipeline B — Semantic parsing
 
 ```text
 normalized pages[]
 +
-parser profile
+document profile
 +
-profile-specific field_rules
+profile field_rules
 +
-module-owned output schema
+profile output schema
 +
-optional module context / exclusions
+profile context / exclusions
         ↓
-OpenAI semantic interpretation
+shared model transport
+        ↓
+semantic interpretation
         ↓
 schema-valid JSON
         ↓
 mechanical validation
         ↓
-canonical parser JSON returned to requesting module
+profile result returned to calling module
 ```
 
-### Ownership boundary
-
-| Owner | Responsibility |
-|---|---|
-| **OpenAI / semantic model** | Business interpretation within the supplied profile/rules: party roles, primary ids, stop meaning, rate meaning, etc. |
-| **Server mechanical layer** | Shape/schema cleanup, exact/normalized exclusions, finite numeric/date/sequence checks, weak literal-presence warnings, leak stripping, safe errors |
-
-There must be **no second semantic parser on the server** competing with the model through diagnostics-driven broker/contact/reference/rate/stop ranking and repair.
+There is **one semantic owner per profile**. Deterministic server code can validate mechanically but must not become a second hidden semantic brain through candidate ranking or post-model business reinterpretation.
 
 ---
 
-## 4. Calling module owns
+## 3. What a document profile owns
 
-Each business module owns:
+Each attached document profile owns only its document-specific contract:
 
-- parser **profile** name
-- semantic **field_rules**
-- module-owned **output schema**
-- module-specific **context / exclusions**
-- business processing after parse: hydrate UI, reconcile, review, post, etc.
+- profile identifier/name
+- semantic field definitions / `field_rules`
+- output JSON schema
+- profile-specific context and exclusions
+- mapping/hydration into the calling module
+- business processing after parse
 
-### Load / Rate Confirmation
+Examples:
 
-The Load module provides:
+### Rate Confirmation profile — shipped
 
 - `profile = rate_confirmation`
-- frozen Rate Confirmation field rules (`load_parser_rate_con_field_rules`)
-- output schema (`ParseDocumentSemanticModelOutput` → `LoadDocumentParseResponse`)
-- `tenant_identity_exclusion` derived at runtime from the authenticated tenant/company profile
+- frozen Rate Confirmation field rules
+- `tenant_identity_exclusion`
+- `ParseDocumentSemanticModelOutput` → `LoadDocumentParseResponse`
+- Load Workspace hydration after parse
 
-The parser returns Load parser JSON. The Load module hydrates the production Load Workspace; the parse DTO is not itself the persisted Load row.
+### Future Fuel document profile
 
-### Future Fuel / Toll document profiles
+A Fuel PDF/statement plugs into the same Document Parser engine with Fuel-owned field rules/schema/context, then returns Fuel JSON to the Fuel module. Fuel reconciliation/posting remains Fuel-module logic.
 
-Unstructured Fuel or Toll documents may use the same acquisition + semantic boundaries with their **own** profile, field rules, output schema, exclusions/context, and post-parse business logic.
+### Future Toll document profile
 
-Structured trusted API payloads do **not** require OpenAI by default; they can flow directly through module-owned normalization/validation.
+A Toll PDF/statement plugs into the same Document Parser engine with Toll-owned field rules/schema/context, then returns Toll JSON to the Toll module. Toll reconciliation/posting remains Toll-module logic.
+
+A new profile must **not** fork the acquisition/model/validation pipeline merely because its business fields differ.
 
 ---
 
-## 5. Shared parser owns
+## 4. Shared Document Parser owns
 
-Shared responsibilities:
+The shared parser boundary owns:
 
-- document acquisition primitives
+- file/document acquisition primitives
 - embedded text extraction
 - OCR orchestration when implemented
 - page normalization
-- OpenAI request transport / common envelope
+- common model/OpenAI request transport and safe timeout/error handling
+- profile handoff envelope
 - response schema enforcement
-- generic mechanical validation patterns
-- safe error/warning handling
+- generic mechanical validation framework/patterns
+- common leak/redaction/safety handling
 
-Shared parsing must **not** own:
+The shared parser must not own:
 
-- Load / Fuel / Toll business posting logic
-- accounting reconciliation
-- broker-specific product decisions outside the active profile/rules
-- fuel/toll reconciliation rules
+- Load/Fuel/Toll posting or reconciliation
+- accounting decisions
+- broker-specific decisions outside the active Rate Confirmation profile
 - UI save/apply policy
+- dispatch/payroll/custody logic
 
 ---
 
-## 6. Rate Confirmation — current production profile
+## 5. Rate Confirmation v2 — first production profile
 
-Rate Confirmation is the first shipped production profile for this architecture.
-
-| Slice | Status |
-|---|---|
-| Tenant identity exclusion | Complete |
-| In-process TTL cache + profile-save invalidation | Complete |
-| Frozen field rules + OpenAI handoff v2 | Complete |
-| PDF acquisition classifier | Complete |
-| OCR | **Not implemented** |
-| Mechanical post-model validator | Complete |
-| Product cutover | **Shipped on inspection snapshot (`5498e6c4`)** |
-
-### Current production path
+Current shipped path on the inspection snapshot:
 
 ```text
 POST /api/v1/loads/parse-document
   → public load_document_product_parser
+  → Rate Confirmation profile
   → acquire_load_parser_pdf_pages()
   → if requires_ocr: controlled OCR-required response
-       (no OpenAI; no legacy diagnostics)
   → get_load_parser_tenant_identity_exclusion()
-  → Rate Confirmation field_rules + v2 handoff + page text
-  → OpenAI (ParseDocumentSemanticModelOutput)
-  → map → LoadDocumentParseResponse
+  → frozen Rate Confirmation field_rules + page text
+  → OpenAI semantic mapping
+  → LoadDocumentParseResponse
   → apply_load_parser_mechanical_validation()
-  → production Load Workspace hydration
+  → LoadWorkspaceForm hydration
 ```
+
+Implemented:
+
+- tenant identity exclusion
+- in-process TTL cache + profile-save invalidation
+- frozen field rules + clean OpenAI handoff v2
+- page usability classification
+- mechanical post-model validation
+- product cutover (`5498e6c4` on the inspection branch)
+
+Not implemented:
+
+- OCR provider/execution
+- generalized arbitrary-document classification/relevance across all profiles
+- Fuel/Toll document profiles unless separately shipped later
 
 Forbidden on the Rate Confirmation production path:
 
 - `PRODUCT_PARSE_DIAGNOSTICS`
 - `broker_party` / `carrier_party` / `role_hint`
-- ranked semantic reference/contact candidates as model input
-- `financial_hints` / `route_stop_hints`
-- post-model semantic broker/contact/reference/rate repair
-- competing semantic stop reconstruction
+- ranked semantic candidate packets as model input
+- diagnostics-driven post-model broker/contact/reference/rate repair
+- a second semantic stop reconstruction engine
 
 ---
 
-## 7. Durable safety rules for future shared expansion
+## 6. Durable safety principles for every profile
 
-These rules are retained from earlier PDF-pipeline design work because they remain useful beyond the first Rate Confirmation slice. They are **architecture principles**, not claims that every generic stage is already implemented.
-
-1. **File sanity before expensive work.** Validate supported type/shape before OCR/model calls.
-2. **Fingerprint/dedupe where the caller persists documents/runs.** Repeated bytes should be identifiable and reusable according to product policy; dedupe is not a reason to merge unrelated business records silently.
-3. **Readability before semantics.** Digital PDF does not automatically mean usable evidence. Weak/scanned pages must be classified before model invocation.
-4. **OCR must feed the same downstream profile/schema.** OCR is acquisition, not a separate business extractor.
-5. **Classification/relevance before aggressive hydration when multiple document types are accepted.** An irrelevant certificate/invoice/etc. should not hydrate Rate Confirmation fields merely because text exists.
-6. **Unknown is better than wrong.** Unsupported or ambiguous fields should remain null/unknown and surface warnings/review signals rather than be invented.
-7. **No silent overwrite of trusted/user-confirmed values.** Applying parse output to persisted business records is a calling-module/product decision and must respect evidence strength and operator intent.
-8. **Contradictions push toward review.** Competing identifiers, rates, parties, or stop evidence should be exposed rather than silently collapsed by a hidden heuristic.
-9. **Version/evidence retention when parse runs are persisted.** Persisted evaluation/production-run models should record parser/schema/prompt/model/acquisition versions and enough evidence/warnings to reproduce why a value was proposed.
-10. **One semantic owner per profile.** Deterministic code may validate mechanically, but it must not become a second hidden semantic brain.
-
-### What Rate Confirmation v2 currently implements from this list
-
-Implemented now: file/PDF sanity at the route, page readability classification, one downstream schema, model-owned semantics, mechanical validation, unknown/controlled OCR-required handling, and tenant-exclusion safety.
-
-Still future/generalized: OCR execution, broad multi-document classification/relevance, a universal persisted parse-run/audit model for product routes, and generalized dedupe/reuse across all document entry points.
+1. **File sanity before expensive work.**
+2. **Fingerprint/dedupe where the caller persists documents/runs.** Dedupe must never silently merge unrelated business records.
+3. **Readability before semantics.** Digital PDF does not automatically mean usable text.
+4. **OCR feeds the same Document Parser/profile contract.** OCR is acquisition, not a separate business parser.
+5. **Classification/relevance before aggressive hydration** when a surface accepts multiple document types.
+6. **Unknown is better than wrong.** Ambiguous/unsupported values remain null/unknown with warnings/review signals.
+7. **No silent overwrite of trusted or user-confirmed values.** Applying parser output is a calling-module/product decision.
+8. **Contradictions push toward review.** Do not hide competing identifiers, rates, parties, or stop evidence behind a heuristic.
+9. **Persist versions/evidence when parse runs are stored.** Record parser/profile/schema/prompt/model/acquisition versions plus enough evidence/warnings to reproduce outcomes.
+10. **One semantic owner per profile.** Mechanical code validates; it does not compete with the semantic model.
 
 ---
 
-## 8. Naming note
+## 7. Naming / module organization
 
-Several modules still carry `load_parser_*` prefixes because Rate Confirmation was the first consumer. Functionally they already separate:
+Some existing modules still carry `load_parser_*` names because Rate Confirmation was the first consumer. That does **not** mean the target architecture is “one Load parser plus separate Fuel/Toll parsers.”
 
-- acquisition (`load_parser_pdf_acquisition`) — reusable primitive/pattern
-- mechanical validation (`load_parser_mechanical_validation`) — reusable pattern
-- tenant exclusion / field rules / handoff — Rate Confirmation profile-specific today
+Target organization is conceptually:
 
-Broad renames are not required merely for aesthetics. Future profiles should add clear profile packages/contracts rather than forcing a risky rename during feature work.
+```text
+document_parser/                  # shared engine/pipeline
+  acquisition
+  model_transport
+  validation
+  profiles/
+    rate_confirmation/
+    fuel/                         # future
+    toll/                         # future
+```
+
+A broad rename is not required during active feature work. The architectural boundary matters more than cosmetic filenames: new profiles must attach to the shared engine rather than duplicating it.
+
+---
+
+## 8. Load Lab boundary
+
+Load Lab is a proving/debug/regression surface. It may retain persisted runs, experiment modes, historical diagnostics, or evaluation metadata, but it is **not** the shared Document Parser and it is **not** a second production Load Page.
+
+Fix production semantics in the shared parser/profile, then use Lab to prove them.
 
 ---
 
 ## 9. Documentation precedence
 
-For current parser work, use this order:
+For current document-parser work, use this order:
 
 1. Current code on the inspected branch.
 2. This Shared Document Parsing Architecture lock.
-3. `TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md` for the Rate Confirmation profile contract.
+3. The active document profile design/contract (currently Rate Confirmation).
 4. `CURRENT_PDF_LOAD_PATHS_AND_GAPS.md` for route/integration reality.
-5. Load Lab documents only for proving/debug history and Lab-specific mechanics.
+5. Load Lab evidence only for proving/debug history.
 
-`PDF_LOAD_PIPELINE.md` is retained as a **superseded historical target-architecture record**. Its durable safety rules have been consolidated into this document; it must not override the shipped v2 architecture.
+Earlier pipeline/rollout reports are retained under [`archive/`](./archive/README.md) after their durable rules are consolidated. They must not override this one-engine/many-profiles architecture.
