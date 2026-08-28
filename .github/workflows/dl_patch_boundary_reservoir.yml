@@ -25,10 +25,10 @@ jobs:
           from pathlib import Path
           path = Path('apps/web/src/core/driverLicensePreprocessor.ts')
           text = path.read_text()
-          old1 = '''        let area = 0;\n        const boundary: Point[] = [];'''
-          new1 = '''        let area = 0;\n        const boundary: Point[] = [];\n        let boundarySeen = 0;\n        let boundaryRng = (start ^ 0x9e3779b9) >>> 0;'''
-          old2 = '''          if (isBoundary && boundary.length < 6000) boundary.push({ x, y });'''
-          new2 = '''          if (isBoundary) {\n            // Keep a deterministic reservoir across the ENTIRE component boundary.\n            // The old first-6000 cap biased the rough rectangle toward whichever\n            // boundary region BFS happened to visit first and could discard the\n            // opposite DL edges on highly textured cards.\n            boundarySeen += 1;\n            if (boundary.length < 6000) {\n              boundary.push({ x, y });\n            } else {\n              boundaryRng = (1664525 * boundaryRng + 1013904223) >>> 0;\n              const slot = Math.floor((boundaryRng / 0x100000000) * boundarySeen);\n              if (slot < 6000) boundary[slot] = { x, y };\n            }\n          }'''
+          old1 = '''      let area = 0;\n      const boundary: Point[] = [];'''
+          new1 = '''      let area = 0;\n      const boundary: Point[] = [];\n      let boundarySeen = 0;\n      let boundaryRng = (start ^ 0x9e3779b9) >>> 0;'''
+          old2 = '''        if (isBoundary && boundary.length < 6000) boundary.push({ x, y });'''
+          new2 = '''        if (isBoundary) {\n          // Keep a deterministic reservoir across the ENTIRE component boundary.\n          // The old first-6000 cap biased the rough rectangle toward whichever\n          // boundary region BFS happened to visit first and could discard the\n          // opposite DL edges on highly textured cards.\n          boundarySeen += 1;\n          if (boundary.length < 6000) {\n            boundary.push({ x, y });\n          } else {\n            boundaryRng = (1664525 * boundaryRng + 1013904223) >>> 0;\n            const slot = Math.floor((boundaryRng / 0x100000000) * boundarySeen);\n            if (slot < 6000) boundary[slot] = { x, y };\n          }\n        }'''
           if old1 not in text or old2 not in text:
               raise SystemExit('expected connected-component boundary code not found; refusing blind patch')
           text = text.replace(old1, new1, 1).replace(old2, new2, 1)
