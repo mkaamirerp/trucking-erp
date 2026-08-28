@@ -1,41 +1,48 @@
 # TruckERP — Load Rate Confirmation Semantic Parser Design
 
-**Status:** DESIGN LOCK (discussion captured; not implemented as the new contract yet)  
-**Scope:** Load / New Load rate-confirmation PDF parse only (not Fuel, not Load Lab product, not email intake rewrite)  
-**Date captured:** 2026-08-13  
-**Related:** live path today = `POST /api/v1/loads/parse-document` → guarded product parser (`load_document_parse_guarded` + diagnostics + OpenAI `gpt-4o-mini`)
+**Status:** **DESIGN LOCK + IMPLEMENTED / SHIPPED (Rate Confirmation v2)**  
+**Implementation anchor:** local cutover commit `5498e6c4` (included in inspection branch `inspect/current-working-state-2026-08-28`).  
+**Scope:** Load / New Load rate-confirmation PDF parse only (not Fuel, not Load Lab product, not email intake rewrite).  
+**Current production path on this inspection branch:** `POST /api/v1/loads/parse-document` → `load_document_parse_rate_con.parse_pdf_bytes_to_load_document_response()` → page acquisition → cached tenant identity exclusion + frozen field rules + page-separated text → OpenAI `gpt-4o-mini` → mechanical validation → existing `LoadDocumentParseResponse` hydration.  
+**Critical boundary:** no `PRODUCT_PARSE_DIAGNOSTICS`, `broker_party`, `carrier_party`, `role_hint`, ranked semantic candidates, or server-side semantic repair on the Rate Confirmation v2 handoff.
+
+**Implementation note:** The original August 13 design explored a richer prebuilt “evidence package” and a separate provenance-heavy semantic result. The shipped v2 cutover intentionally uses the simpler frozen production handoff: **tenant identity exclusion + field rules + page-separated document text** under the existing product output schema. Historical conceptual sections below are retained where they explain the reasoning, but they do not override the frozen implemented contract.
 
 ---
 
-## 1. Problem statement
+## 1. Problem statement — historical pre-cutover baseline
 
-The live New Load rate-con path extracts PDF text, builds **diagnostics** that already assign business meaning (`role_hint: broker_context|carrier_context`, `broker_party|carrier_party`, ranked references), embeds that dump in the OpenAI user message, then runs post-AI regex/guardrail repairs.
+Before the v2 cutover, the live New Load rate-con path extracted PDF text, built **diagnostics** that already assigned business meaning (`role_hint: broker_context|carrier_context`, `broker_party|carrier_party`, ranked references), embedded that dump in the OpenAI user message, then ran post-AI regex/guardrail repairs.
 
-That is the wrong boundary.
+That was the wrong boundary.
 
 **Pre-AI JSON must describe evidence, not decide the business meaning of that evidence.**
 
 Once code guesses wrong (e.g. `carriers@…` → carrier MC, stop-level `Broker:` → freight broker, first PO → primary load id), OpenAI is handed a **biased** version of the document.
 
-Armstrong identity work (prompt + diagnostics fix + candidate-backed repairs) improved one regression case. It must **not** become a second full-text semantic parser. The durable design is below.
+Armstrong identity work (prompt + diagnostics fix + candidate-backed repairs) improved one regression case. It was intentionally not allowed to grow into a second full-text semantic parser. The v2 cutover retires that diagnostics-as-brain path for the product Rate Confirmation parser.
 
 ---
 
-## 2. Design principle
+## 2. Locked design principle and shipped v2 path
 
 ```text
 PDF
-  → acquisition (digital text | OCR)
-  → evidence package (labels + context + ids; NO broker/carrier conclusions)
-  → tenant_identity_exclusion (runtime, from THIS tenant's company profile)
+  → acquisition (usable embedded text | OCR-required gate)
+  → page-separated text
+  + tenant_identity_exclusion (runtime, from THIS tenant's company profile)
+  + frozen Rate Confirmation field_rules
   → OpenAI rate-confirmation semantic profile
-  → RateConfirmationSemanticResult (with evidence provenance)
-  → thin map → LoadDocumentParseResponse (New Load hydration)
+  → existing schema-valid semantic JSON
+  → mechanical validation only
+  → LoadDocumentParseResponse (New Load hydration)
 ```
 
-OpenAI owns if/but party logic, primary reference selection, and person-specific contacts.
+OpenAI owns broker/carrier interpretation, primary reference selection, contact meaning, rate meaning, and stop semantics.
 
-Post-AI may **cite-check** (cited value appears in evidence/page text) and hydrate. It must not re-parse the PDF into a competing semantic engine.
+Post-AI server code may perform **mechanical** checks only: schema/shape cleanup, exact/normalized tenant-exclusion matches, numeric/date/sequence sanity, weak literal-presence warnings, and leak stripping. It must not re-parse the PDF into a competing semantic engine.
+
+The original richer “evidence IDs / provenance object” concept remains a possible future enhancement; it is **not required** to change the current v2 production contract.
 
 ---
 
@@ -76,16 +83,17 @@ There are **thousands of brokers**. Do **not** create a JSON file per broker.
 **Dynamic JSON** = one object **assembled in memory at parse time** for:
 
 1. **This authenticated tenant** (company profile from platform DB)
-2. **This PDF** (pages + evidence)
+2. **This PDF** (page-separated text)
 
-Same builder for every tenant. IK, Jaysm, demo, unknown broker #1001: same function, different data.
+Same builder for every tenant. Unknown broker #1001 uses the same code as any known broker; the runtime tenant profile and document text are different, not the parser implementation.
 
 ```text
 request tenant_id
-  → PlatformTenant + PlatformCompanyProfile (or server cache)
+  → PlatformTenant + PlatformCompanyProfile (cached server-side)
   → normalize → tenant_identity_exclusion
-  → PDF acquisition → pages + evidence
-  → assemble RateConfirmationParseInput
+  → PDF acquisition → pages[]
+  → add frozen field_rules
+  → assemble v2 handoff
   → OpenAI
 ```
 
@@ -95,230 +103,167 @@ Never:
 - browser IndexedDB as authoritative identity for OpenAI
 - hardcoded broker or tenant names/MC/phones in parser code
 
-Tenant `brokers` table / dropdown MC-DOT resolution is a **later** step after semantic output is correct — not OpenAI input.
+Tenant `brokers` table / dropdown MC-DOT resolution remains downstream product logic after semantic output; it is not the OpenAI input authority.
 
 ---
 
-## 5. Tenant identity exclusion
+## 5. Tenant identity exclusion — frozen implemented contract
 
 ### Source of truth (platform DB)
 
-| Source | Fields |
+The production builder intentionally uses only the following Rate Confirmation-relevant sources:
+
+| Source | Fields used by the exclusion builder |
 |---|---|
-| `PlatformTenant` | `id`, `name` (workspace / display name) |
-| `PlatformCompanyProfile` | `legal_name`, `mc_number`, `usdot_number`, `cvor_number`, `operator_license`, `company_phone`, `company_email`, `address_*` |
+| `PlatformTenant` | `name` |
+| `PlatformCompanyProfile` | `legal_name`, `mc_number`, `usdot_number`, `company_phone`, `company_email`, `address_street`, `address_city`, `address_postal` |
+
+`cvor_number`, `operator_license`, address region/country, and unrelated company-profile fields are **not** part of the frozen first production exclusion shape. Do not expand this source list or output shape without new evidence and an explicit parser decision.
 
 Derived at runtime. Not a second stored profile copy that can drift.
 
-### Conceptual shape
-
-**Builder output (first implementation slice — flat):**
+### Frozen flat shape
 
 ```json
 {
-  "names": ["IK Logistics", "9582479 Canada Inc"],
+  "names": ["Tenant Display Name", "Legal Company Name"],
   "mc_numbers": ["1397898"],
   "usdot_numbers": ["3842541"],
-  "cvor_numbers": [],
   "phones": ["6472419696"],
-  "emails": ["info@iklogistics.com"],
-  "email_domains": ["iklogistics.com"],
+  "emails": ["info@example.com"],
+  "email_domains": ["example.com"],
   "addresses": [
     {
       "street": "123 Example St",
       "city": "Brampton",
-      "region": "ON",
-      "postal": "L6T2T4",
-      "country": "CA"
+      "postal": "L6T2T4"
     }
   ]
 }
 ```
 
+**Exact top-level keys are frozen for this slice:**
+
+`names`, `mc_numbers`, `usdot_numbers`, `phones`, `emails`, `email_domains`, `addresses`.
+
+No `tenant_id` is sent inside this object. No nested `hard_identifiers` wrapper is used in the shipped v2 handoff.
+
 Public mailbox domains (`gmail.com`, `hotmail.com`, `outlook.com`, `yahoo.com`, …) must **not** appear in `email_domains`.
 
 Module: `app/services/load_parser_tenant_identity_exclusion.py`.
 
-**Later OpenAI assembly** may wrap this object and optionally present hard identifiers (MC/USDOT/CVOR) separately from supporting values in the prompt. Nested wrap example:
+### Historical nested-wrap concept — not current contract
 
-```json
-{
-  "tenant_identity_exclusion": {
-    "tenant_id": 53,
-    "hard_identifiers": {
-      "mc": ["…"],
-      "usdot": ["…"],
-      "cvor": ["…"],
-      "operator_license": ["…"]
-    },
-    "identity_values": {
-      "names": ["…display/legal/DBA as stored…"],
-      "phones": ["6472419696"],
-      "emails": ["info@example.com"],
-      "addresses": [
-        {
-          "street": "…",
-          "city": "…",
-          "region": "…",
-          "postal": "…",
-          "country": "CA"
-        }
-      ]
-    }
-  }
-}
-```
-
-(Operator licence and nested wrap are **not** required in the first builder slice.)
+Earlier design discussion considered wrapping the exclusion in a richer nested object containing CVOR/operator-licence and region/country values. That is **not the production v2 contract** and must not be treated as an implementation target unless a later evidence-backed decision explicitly reopens the shape.
 
 ### Normalization
 
-- Phone → digits only (prompt: formatting variants match); NANP 11-digit values starting with `1` store the last 10 digits
-- MC / USDOT / CVOR → digits (leading zeros stripped); no invented format variants
+- Phone → digits only; NANP 11-digit values starting with `1` store the last 10 digits
+- MC / USDOT → normalized authority id (digits when present; leading zeros stripped)
 - Email → lowercase; `email_domains` from company email only when not a public provider
 - Names → collapse whitespace; keep display casing; dedupe case-insensitively
-- Address → non-empty fields only; region/country uppercased; postal spaces collapsed
+- Address → `street`, `city`, `postal` only; postal spaces collapsed / uppercased
 - Do **not** invent every visual phone variant in the JSON
 - Missing/null profile fields → empty arrays (never `null`, `"None"`, or `""` list entries)
 
 ### Hard vs supporting
 
-- **Hard:** MC / USDOT / CVOR / operator licence → strong “this party is us”
-- **Supporting:** name, phone, email, address → alone, city/region is never enough
+- **Hard:** MC / USDOT → strong “this party is us” identifiers
+- **Supporting:** name, phone, email, address → useful corroboration but not authority-number equivalents
 
-### AI instruction (conceptual)
+### AI instruction
 
 Treat matching parties as **our carrier / tenant**.  
 Use that to understand the transaction side.  
-Do **not** emit those values as broker company, broker contact, or broker address.  
+Do **not** emit those values as broker company or broker contact.  
 Do not erase them from reasoning.
 
 ### Cache (server-side, load-parser only)
 
 ```text
-get_load_parser_tenant_identity(tenant_id)
-  cache key: load_parser_tenant_identity:{tenant_id}
-  (optional: bind to profile.updated_at)
-  TTL 30–60 minutes
-  invalidate on company profile SAVE
+get_load_parser_tenant_identity_exclusion(tenant_id)
+  logical cache key: load_parser_tenant_identity:{tenant_id}
+  in-process TTL: 1800 seconds (30 minutes)
+  invalidate on company-profile create/update paths that change exclusion inputs
 ```
 
-- Trusted backend only (works for New Load, email intake, future API)
+- Trusted backend only
+- Cache stores plain dicts, not ORM instances
+- Defensive copies prevent one parse from mutating cached state
 - **Not** browser IndexedDB as source of truth
-- Fuel does not share this object until Fuel has its own profile
+- Fuel does not inherit this Load-profile exclusion object automatically
 
-### Demo caveat (tenant 53 as of 2026-08-13)
+### Demo/profile caveat
 
-Live `platform_company_profiles` for tenant 53 is **not** IK Logistics (placeholder `legal_name` / MC / USDOT; phone/email null). Exclusion is only as good as the profile. Fixture PDFs that show IK as carrier still work via PDF evidence; exclusion prevents confusing **us** with the broker when the profile is real.
+Exclusion quality is only as good as the canonical platform tenant/company profile. Fixture behavior must never justify hardcoding a tenant identity into parser code.
 
 ---
 
-## 6. RateConfirmationParseInput (conceptual)
+## 6. OpenAI handoff v2 — implemented production contract
 
-Three layers:
-
-### A. Acquisition / document
+The shipped v2 handoff is intentionally simpler than the original conceptual evidence-bucket design.
 
 ```json
 {
+  "handoff_version": "load_rate_con_openai_handoff_v2",
   "profile": "rate_confirmation",
+  "tenant_identity_exclusion": { "...": "frozen flat shape from §5" },
+  "field_rules": { "...": "frozen Rate Confirmation rules" },
   "document": {
     "filename": "Armstrong.pdf",
+    "content_type": "application/pdf",
     "page_count": 3,
+    "extraction_method": "product_pdf_text",
     "acquisition_method": "digital_text",
-    "text_quality": "good",
-    "pages": [{ "page": 1, "text": "…" }]
+    "pages": [
+      { "page_number": 1, "text": "..." }
+    ]
   }
 }
 ```
 
-Rule:
+The handoff must not contain pre-decided business conclusions such as:
+
+- `PRODUCT_PARSE_DIAGNOSTICS`
+- `broker_party` / `carrier_party`
+- `role_hint`
+- `contact_candidates`
+- ranked `reference_candidates`
+- `financial_hints`
+- `route_stop_hints`
+- diagnostics-driven semantic repair instructions
+
+### Acquisition / OCR gate
 
 ```text
-digital PDF → text extraction
-scanned / empty text → OCR
-                 ↓
-            same evidence + pages contract
-                 ↓
-            OpenAI rate-con profile
+digital PDF → embedded text extraction → page usability classifier → OpenAI
+scanned / weak-text page → requires_ocr = true → controlled OCR-required response
 ```
 
-If text is empty, do **not** call the model on blank pages; return `needs_ocr` or run OCR first. Agriculture is the fixture that requires OCR. OCR implementation is a separate slice.
+OCR is **not implemented yet**. If any page is classified OCR-required, the Rate Confirmation production parser does not send blank/weak pages into OpenAI and does not fall back to the legacy semantic diagnostics path.
 
-### B. Evidence (no conclusions)
+### Historical evidence-bucket concept
 
-Preserve observed labels from the PDF (`Carrier Name`, `BROKER Contact`, `After Hours`, `PO #`, `Bill To`, `Load #`, …). Attach `id`, page, short context.
-
-Buckets (illustrative): `organizations`, `people`, `authority_numbers`, `contacts`, `references`, `money`, `stops`, `equipment`, `weights`.
-
-**Deliberately missing from evidence:**
-
-- `broker_party` / `carrier_party`
-- `broker_mc` / `primary_phone`
-- `role_hint: broker_context`
-
-Proximity heuristics may feed **context strings**; they must not become conclusions in the input JSON.
-
-### C. Tenant exclusion
-
-Runtime object from §5.
+The earlier proposal to prebuild generic buckets such as `organizations`, `people`, `authority_numbers`, `contacts`, `references`, `money`, `stops`, `equipment`, and `weights` remains design history. It is not part of the current v2 handoff and should not be added casually; doing so could reintroduce a second semantic parser if those buckets begin assigning business meaning.
 
 ---
 
-## 7. RateConfirmationSemanticResult (conceptual)
+## 7. Semantic result / provenance direction
 
-OpenAI returns semantic structure with **provenance**, not product snapshot field names only.
+OpenAI currently returns the existing schema-owned semantic payload (`ParseDocumentSemanticModelOutput`) that maps into `LoadDocumentParseResponse`.
 
-Illustrative:
+The original design proposed a richer `RateConfirmationSemanticResult` with explicit `evidence_ids` / provenance. That remains a possible future schema evolution, but **is not required for the shipped v2 cutover**.
 
-```json
-{
-  "document_type": "rate_confirmation",
-  "carrier": {
-    "is_tenant": true,
-    "company_name": "…",
-    "tenant_match_basis": ["mc_number", "dot_number"],
-    "evidence_ids": ["org_1", "auth_1"]
-  },
-  "broker": {
-    "company_name": "Armstrong Transport Group",
-    "mc_number": "555609",
-    "evidence_ids": ["org_2", "auth_3"],
-    "confidence": "high"
-  },
-  "broker_contact": {
-    "name": "Loflin Phillips",
-    "phone": "208-751-8073",
-    "email": "l.phillips@armstrongtransport.com",
-    "evidence_ids": ["person_1", "contact_1"],
-    "confidence": "high"
-  },
-  "primary_load_reference": {
-    "value": "3872125-1",
-    "source_type": "load_number",
-    "evidence_id": "ref_1"
-  },
-  "references": [],
-  "carrier_rate": {
-    "total": 1800.0,
-    "currency": "USD",
-    "evidence_ids": ["money_1"]
-  },
-  "stops": [],
-  "warnings": []
-}
-```
-
-Rules of thumb for the model:
+Locked semantic behavior still applies:
 
 - Individual agent ≠ broker company
 - Factoring / QuickPay / AP / shipper / receiver / customs broker / insurer ≠ freight broker by default
 - Prefer person-specific phone/email; do not substitute after-hours, corporate main, claims, AP
 - Primary load reference = broker’s principal id for this shipment (whatever label the document uses)
 - Rate = compensation to our carrier; distinguish linehaul/total from detention, TONU, late fees, QuickPay fees, lumpers
-- Landstar: issuing broker / load agent vs stop-level `Broker:` (may map to `customs_broker_name` or stop note in product layer — not `broker_name_snapshot`)
+- Stop roles and appointment semantics belong to the model via `field_rules`, not to a competing server ranking engine
 
-No hidden chain-of-thought required; provenance via `evidence_ids` / snippets.
+No hidden chain-of-thought is required. If richer provenance is added later, it should use explicit evidence fields/snippets rather than hidden reasoning.
 
 ---
 
@@ -329,77 +274,87 @@ Keep New Load hydration on:
 `LoadDocumentParseResponse` / `LoadParseExtractedFields`
 (`broker_name_snapshot`, `broker_contact_*`, `broker_load_reference`, `rate`, `stops`, …)
 
-Thin adapter only:
+The v2 production parser validates the OpenAI payload into the existing schema, then applies mechanical validation and tenant broker-name canonicalization for hydration.
 
-`RateConfirmationSemanticResult` → snapshots.
-
-Do not force the model to invent product field names as its only brain. Do not put new business rules in the adapter.
+Do not put new semantic business rules in the product adapter/validator.
 
 ---
 
-## 9. What current live OpenAI hand-off looks like (baseline)
+## 9. Historical pre-v2 OpenAI handoff baseline
 
-As of 2026-08-13, a dump of the exact Chat Completions body for Armstrong (minus Authorization) was captured for review:
+On 2026-08-13, a dump of the exact pre-cutover Chat Completions body for Armstrong (minus Authorization) was captured for review:
 
 - Host path example: `/home/admin/openai_handed_armstrong.json`
 - Endpoint: `POST https://api.openai.com/v1/chat/completions`
 - Model: `gpt-4o-mini`, temperature `0.1`
-- Messages: system prompt + user text that embeds:
+- Messages contained:
   - extraction instructions
-  - `PRODUCT_PARSE_DIAGNOSTICS` (JSON string, capped ~20k chars) including **role_hint / broker_party**
+  - `PRODUCT_PARSE_DIAGNOSTICS` including **role_hint / broker_party**
   - extracted PDF text
 - Schema: `load_document_parse_guarded_truckerjson_v1`
-- **Not sent:** `tenant_id`, `tenant_identity_exclusion`, company profile
+- **Not sent then:** `tenant_identity_exclusion`
 
-This baseline documents why the architecture must change: diagnostics already assert meaning before the model runs.
+That capture is now **historical baseline evidence**, not a description of the current v2 production handoff.
 
 ---
 
-## 10. Explicit non-goals (this design slice)
+## 10. Explicit non-goals / guardrails
 
 - Per-broker JSON packs or broker catalog as OpenAI input
 - Browser IndexedDB as identity authority for parse
-- Fuel / other document profiles (separate later)
-- Shared `pdf_pipeline` mega-framework (unless later locked)
-- Frontend broker dropdown / MC-DOT alias resolution (after parser correctness)
-- Expanding post-AI full-text regex semantic ranking as the long-term brain
-- Implementing OCR in the same slice as the JSON contract (record Agriculture as requiring it)
+- Fuel / other document profiles inside this Load-specific contract
+- Reintroducing a generic `pdf_pipeline` mega-framework merely for naming consistency
+- Frontend broker dropdown / MC-DOT alias resolution as OpenAI input authority
+- Expanding post-AI full-text regex semantic ranking as the brain
+- Expanding the frozen tenant exclusion shape without evidence
+- Calling OpenAI on OCR-required blank/garbage pages
 
 ---
 
-## 11. Implementation order (when approved)
+## 11. Implementation record and remaining work
 
-1. Freeze **RateConfirmationParseInput** + **RateConfirmationSemanticResult** field lists in this doc (or linked schema files).
-2. Hand-author expected semantic JSON for the seven fixture PDFs.
-3. Spec `build_load_parser_tenant_identity(tenant_id)` + cache invalidate-on-profile-save (no product code until approved).
-4. Implement acquisition → evidence (labels only) → exclusion → OpenAI → cite-check → hydrate.
-5. Retire / shrink diagnostics conclusions (`role_hint`, party roles as inputs) and the tactical identity guardrail stack as the new path lands.
-6. OCR path for empty-text PDFs (Agriculture).
+### Shipped / complete in the v2 cutover
 
-Do **not** start coding the new contract until the JSON shapes and seven expected results are accepted.
+1. **Slice 1 — tenant identity exclusion** from platform tenant + company profile
+2. **Slice 1B — in-process TTL cache** with invalidation on profile write paths
+3. **Slice 2 — frozen Rate Confirmation field rules + OpenAI handoff v2**
+4. **Slice 3A — embedded-text page acquisition / OCR-required classifier**
+5. **Mechanical post-model validation** with no semantic candidate ranking/repair
+6. **Production cutover** of `POST /api/v1/loads/parse-document` to `load_document_parse_rate_con`
+7. **Legacy semantic diagnostics/repair modules removed from the product Rate Confirmation runtime path**
 
----
+### Remaining / separate slices
 
-## 12. Relationship to uncommitted Armstrong identity fix
-
-Tactical work may remain in the working tree (prompt contract, email-local-part MC hint, company/person inconsistency repair, contact repair from **existing** `contact_candidates` only — no full-text phone/email rescan).
-
-That path can stabilize today’s product. It is **compatible with “don’t ship more regex as the brain,”** not with “diagnostics conclusions forever.”
-
-When this design ships, most pre-AI role conclusions and agent-phone scoring should go away in favor of evidence + tenant exclusion + OpenAI + cite-check.
+- OCR provider/orchestration for OCR-required pages
+- Any richer explicit provenance/evidence-id schema, if later approved
+- Broader shared profiles such as Fuel/Toll under the shared document parsing architecture
+- Additional golden-fixture coverage where original PDFs are available
 
 ---
 
-## 13. Acceptance criteria (design)
+## 12. Historical relationship to Armstrong tactical fixes
 
-- [ ] No broker-specific JSON files or hardcoded broker identities in parser code
-- [ ] Tenant exclusion built only from platform tenant + company profile (dynamic per request)
-- [ ] Evidence input has observed labels; no `broker_party` / `role_hint` conclusions
-- [ ] OpenAI selects broker company, agent contact, primary reference, rate with provenance
-- [ ] Seven fixtures have expected semantic results before code
-- [ ] Empty-text PDFs require OCR (or explicit `needs_ocr`) before semantics
-- [ ] Product hydration remains `LoadDocumentParseResponse`
-- [ ] Server-side identity cache; invalidate on profile save; no IndexedDB authority
+Before v2, tactical Armstrong prompt/diagnostic repairs were used to stabilize the old guarded parser. They are retained only as historical reasoning for why server-side semantic guesses were risky.
+
+The v2 product path deliberately replaces that boundary with field rules + tenant exclusion + page text → OpenAI → mechanical validation.
+
+Do not resurrect the old candidate/diagnostics stack as a fallback for Rate Confirmation parsing.
+
+---
+
+## 13. Acceptance criteria — current v2
+
+- [x] No broker-specific JSON files or hardcoded broker identities in parser code
+- [x] Tenant exclusion built only from frozen platform tenant + company-profile fields (dynamic per request/cache)
+- [x] Production handoff contains no `PRODUCT_PARSE_DIAGNOSTICS`, `broker_party`, `carrier_party`, or `role_hint`
+- [x] OpenAI receives frozen `field_rules` + page-separated text + tenant exclusion
+- [x] Product hydration remains `LoadDocumentParseResponse`
+- [x] Server-side identity cache; invalidate on relevant profile writes; no IndexedDB authority
+- [x] OCR-required PDFs are blocked from semantic parsing until OCR exists
+- [x] Post-model validation is mechanical, not a second semantic parser
+- [ ] OCR provider implemented
+- [ ] Rich evidence-id/provenance result contract (future only if approved)
+- [ ] All originally discussed seven fixture PDFs available and frozen as golden evidence
 
 ---
 
@@ -409,5 +364,6 @@ When this design ships, most pre-AI role conclusions and agent-phone scoring sho
 |---|---|
 | Owner | TruckERP load intake / parse |
 | Location | `docs/TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md` |
-| Supersedes | Ad-hoc chat conclusions on rate-con identity / evidence vs conclusions (2026-08-13) |
-| Next doc update | When input/output schemas are field-frozen and golden fixtures attached |
+| Supersedes | Ad-hoc chat conclusions and the pre-v2 diagnostics-as-input Rate Confirmation path |
+| Current implementation | `5498e6c4` Rate Confirmation v2 cutover on inspection branch |
+| Next doc update | OCR slice, explicit provenance schema change, or any approved change to the frozen tenant exclusion / field-rules contract |
