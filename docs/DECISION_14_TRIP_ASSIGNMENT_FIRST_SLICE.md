@@ -1,8 +1,10 @@
 # TruckERP — Decision 14 / Trip Assignment Update (first implementation slice)
 
-**Status:** **LOCKED** — formal scope for the **first** post–Slice-1 implementation slice. **Not** code; implementation follows this doc.
+**Status:** **LOCKED + SHIPPED / IMPLEMENTED** — the first post–Slice-1 Trip assignment slice is in the codebase.  
+**Current code:** `PUT /api/v1/trips/{trip_id}/assignment` updates Trip-level driver/truck/trailer assignment, promotes `planned` → `assigned` when the required assignment is complete, writes Trip audit history, and does **not** revive `Load.status = dispatched` or write `dispatch_trips`.  
+**Document-use note:** The detailed body below is preserved as the **pre-implementation scope/acceptance record**. Wording such as “implementation follows,” “before coding,” or “Trips do not yet emit audit_events” is historical planning context, not current shipped-state truth. For current cross-slice execution/custody status, use `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`.
 
-**Depends on (merged):** PR **#31** / legacy dispatch cutover Slice 1 (`7012f40a` + docs), **Decision 6** (Load workspace actions), **Decision 7** (active execution signal — **not** implemented in this slice), **Decision 9** (planning queue), **Decision 10** (future assignment guard — **not** fully implemented here unless explicitly added later), **Decisions 11–13** (readiness/custody/exception **principles** — **no** custody or payroll in this slice), **`PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`**, **`PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`**.
+**Depends on (merged):** PR **#31** / legacy dispatch cutover Slice 1 (`7012f40a` + docs), **Decision 6** (Load workspace actions), **Decision 7** (active execution signal — implemented separately after this slice), **Decision 9** (planning queue), **Decision 10** (future assignment guard — not fully implemented here unless explicitly added later), **Decisions 11–13** (readiness/custody/exception principles — later slices own those behaviors), **`PHASE3L_B_TRIP_ASSIGNMENT_CONTRACT.md`**, **`PHASE3L_C_TRIP_EXECUTION_SCHEMA_API_PLAN.md`**.
 
 **Related:** `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`, `PHASE3L_D_OWNER_DECISION_CHECKLIST.md`.
 
@@ -95,17 +97,19 @@ This slice **must not**:
 
 ---
 
-## H. Audit strategy (pre-implementation inventory — **before coding**)
+## H. Audit strategy (pre-implementation inventory — historical)
 
-### H.1 What exists today
+> **Historical planning section:** assignment audit is now shipped. This section is retained to explain why `audit_events` was chosen over a dedicated `trip_assignment_events` table.
+
+### H.1 What existed before this slice
 
 - **Tenant table:** **`audit_events`** (append-only), model **`app.models.tenant.AuditEvent`**, writer **`app.services.audit_events.write_audit_event`**.
 - **Tenant migration:** `alembic_tenant/versions/s1b2c3d4e5f6_audit_events_foundation.py` (and successors if any).
-- **Usage today:** **`write_audit_event`** is **wired** for **Loads** (e.g. Slice 5 paths) and **People** workspace (dual-write pattern). **Trips** do **not** yet emit **`audit_events`**, but the writer is **module-agnostic** and **tenant-scoped**.
+- At design time, **`write_audit_event`** was already wired for Loads and People while Trip assignment had not yet adopted it. The shipped assignment slice now writes Trip audit history.
 
 ### H.2 Decision for Trip Assignment Update Slice
 
-**Prefer reusing `audit_events`** for assignment changes:
+**Reuse `audit_events`** for assignment changes:
 
 - Call **`write_audit_event`** with e.g. **`module="trips"`** (or **`"dispatch"`** — pick one and keep consistent), **`entity_type="trip"`**, **`entity_id=str(trip_id)`**, **`action`** such as **`trip_assignment_updated`**, **`source="api"`** (or **`ui`** when called from UI-backed requests), **`actor_user_id`** from auth, and **`changed_fields`** and/or **`snapshot_before` / `snapshot_after`** for driver/truck/trailer (and **`assigned_at`** / **`status`** if changed).
 - **Tenant-safe:** **`tenant_id`** is required on every row; indexes support **`(tenant_id, entity_type, entity_id, …)`** queries.
@@ -150,7 +154,7 @@ This slice **must not**:
 | **Custody / terminals** | **None** |
 | **Assign & Send** | **Deferred** |
 | **Load.status** | **No change**; Slice 1 **`dispatched`** block preserved |
-| **Audit** | **Prefer `audit_events` + `write_audit_event`**; **`trip_assignment_events`** **not** required |
+| **Audit** | **`audit_events` + `write_audit_event`**; **`trip_assignment_events`** **not** required |
 | **Alembic (typical)** | **None** for assignment + audit_events path if tenant already migrated |
 
 ---
