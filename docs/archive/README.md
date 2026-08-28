@@ -53,4 +53,10 @@ Under `decisions/`:
 - `0001-driver-ownership.md` — superseded by the newer driver-extension employment-relationship model.
 - `0005-storage-and-ocr.md` — superseded as OCR architecture by the shared Document Parser lock.
 
+## Archived email-intake investigation report
+
+Under `email/`:
+
+- `EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY_PRE_V2_REPORT.md` — detailed pre-parser-v2 mixed current/target investigation. Preserved for provider/routing archaeology; not current parser or intake architecture authority.
+
 These records remain useful for historical reasoning, regression archaeology, and understanding why current safety boundaries exist.
