@@ -20,7 +20,7 @@ For document parsing, use:
 - Durable rules must be consolidated into a current canonical document before an old file is archived.
 - Frozen regression evidence such as `../LOAD_LAB_BASELINE_6PDF.md` stays outside this archive while it remains useful to active tests/evaluation.
 - `../LoadLabCleaner.md` remains outside the archive as the active cleanup ledger; individual entries must be re-audited against current parser v2/shared-parser truth.
-- Historical files were moved without rewriting their bodies. Relative links inside them may reflect their original `docs/` location; use this README and the current master index for navigation.
+- Historical files moved here may contain old relative links or status wording. Use current docs and the master index for present-day guidance.
 
 ## Archived in the 2026-08-28 Load Lab/parser cleanup
 
@@ -45,5 +45,12 @@ For document parsing, use:
 
 - `PDF_LOAD_PIPELINE.md`
 - `OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md`
+
+## Archived early driver decision records
+
+Under `decisions/`:
+
+- `0001-driver-ownership.md` — superseded by the newer driver-extension employment-relationship model.
+- `0005-storage-and-ocr.md` — superseded as OCR architecture by the shared Document Parser lock.
 
 These records remain useful for historical reasoning, regression archaeology, and understanding why current safety boundaries exist.
