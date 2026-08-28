@@ -804,12 +804,14 @@ async def reset_applicant_application(
 async def upload_applicant_dl(
     token: str = Query(..., description="Invite link token"),
     doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., description="Original RAW upload (unchanged)"),
+    processed_file: UploadFile | None = File(None, description="Browser-processed JPEG for OCR/preview when available"),
+    preprocess_metadata: str | None = Form(None, description="JSON geometry diagnostics from browser preprocessor"),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Upload driver license front or back for applicant (token auth). Stores file and updates intake_payload.files."""
+    """Upload driver license front or back for applicant (token auth). Stores original + optional processed artifact."""
     if doc_type not in ("CDL_FRONT", "CDL_BACK"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
     app = await _get_application_by_token(db, tenant_id, token)
@@ -822,16 +824,55 @@ async def upload_applicant_dl(
     stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
     intake = dict(app.intake_payload or {})
     files = dict(intake.get("files") or {})
+
+    ocr_storage_key = stored.storage_key
+    preprocess_status = "ORIGINAL_ONLY"
+    preprocess_debug: dict = {}
+
+    if processed_file and processed_file.filename:
+        from app.core.storage import save_applicant_dl_processed_bytes
+
+        body = await processed_file.read()
+        if body:
+            stored_processed = await save_applicant_dl_processed_bytes(
+                tenant_slug,
+                app.id,
+                body,
+                original_storage_key=stored.storage_key,
+            )
+            ocr_storage_key = stored_processed.storage_key
+            preprocess_status = "PROCESSED"
+            files[f"{doc_type}_PROCESSED"] = {
+                "storage_key": stored_processed.storage_key,
+                "file_id": stored_processed.storage_key,
+                "enh_file_id": stored_processed.storage_key,
+                "original_filename": stored_processed.original_filename,
+                "upload_status": "READY",
+                "dl_preprocess_status": preprocess_status,
+            }
+
+    if preprocess_metadata:
+        try:
+            import json
+
+            parsed = json.loads(preprocess_metadata)
+            if isinstance(parsed, dict):
+                preprocess_debug = parsed
+        except (json.JSONDecodeError, TypeError):
+            preprocess_debug = {"parse_error": True}
+
     files[doc_type] = {
         "storage_key": stored.storage_key,
         "file_id": stored.storage_key,
-        "enh_file_id": stored.storage_key,
         "original_filename": stored.original_filename,
         "upload_status": "READY",
+        "dl_preprocess_status": preprocess_status,
+        "dl_preprocess_debug": preprocess_debug,
+        "enh_file_id": ocr_storage_key,
     }
     intake["files"] = files
     if doc_type == "CDL_BACK":
-        intake = await apply_stored_cdl_back_pdf417(intake, stored.storage_key, tenant_slug)
+        intake = await apply_stored_cdl_back_pdf417(intake, ocr_storage_key, tenant_slug)
     app.intake_payload = intake
     await db.commit()
     await db.refresh(app)

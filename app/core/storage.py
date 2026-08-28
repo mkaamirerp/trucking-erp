@@ -84,6 +84,20 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
+    async def save_bytes(
+        self,
+        tenant_slug: str,
+        module: str,
+        entity_type: str,
+        entity_id: str | int,
+        body: bytes,
+        *,
+        filename_hint: str = "upload.bin",
+        content_type: str | None = None,
+    ) -> StoredFile:
+        ...
+
+    @abstractmethod
     def read_bytes(
         self,
         storage_key: str,
@@ -181,6 +195,31 @@ class LocalStorageBackend(StorageBackend):
             content_type=file.content_type,
             file_size_bytes=size,
             sha256=h.hexdigest(),
+        )
+
+    async def save_bytes(
+        self,
+        tenant_slug: str,
+        module: str,
+        entity_type: str,
+        entity_id: str | int,
+        body: bytes,
+        *,
+        filename_hint: str = "upload.bin",
+        content_type: str | None = None,
+    ) -> StoredFile:
+        original = _safe_filename(filename_hint)
+        ext = Path(original).suffix.lower()[:10] or ".bin"
+        key = build_storage_key(tenant_slug, module, entity_type, entity_id, f"{uuid.uuid4().hex}{ext}")
+        dest = self._storage_root() / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+        return StoredFile(
+            storage_key=key,
+            original_filename=original,
+            content_type=content_type,
+            file_size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
         )
 
     def read_bytes(
@@ -291,6 +330,38 @@ class S3StorageBackend(StorageBackend):
             content_type=file.content_type,
             file_size_bytes=len(body),
             sha256=h.hexdigest(),
+        )
+
+    async def save_bytes(
+        self,
+        tenant_slug: str,
+        module: str,
+        entity_type: str,
+        entity_id: str | int,
+        body: bytes,
+        *,
+        filename_hint: str = "upload.bin",
+        content_type: str | None = None,
+    ) -> StoredFile:
+        original = _safe_filename(filename_hint)
+        ext = Path(original).suffix.lower()[:10] or ".bin"
+        key = build_storage_key(tenant_slug, module, entity_type, entity_id, f"{uuid.uuid4().hex}{ext}")
+        full_key = self._full_key(key, module, tenant_slug)
+        extra: dict[str, str] = {}
+        if content_type:
+            extra["ContentType"] = content_type
+        self._client.put_object(
+            Bucket=self._bucket,
+            Key=full_key,
+            Body=body,
+            **extra,
+        )
+        return StoredFile(
+            storage_key=key,
+            original_filename=original,
+            content_type=content_type,
+            file_size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
         )
 
     def read_bytes(
@@ -412,6 +483,25 @@ async def save_applicant_dl_upload(
 ) -> StoredFile:
     return await get_storage().save_upload(
         tenant_slug, "applicant_dl", "application", application_id, file
+    )
+
+
+async def save_applicant_dl_processed_bytes(
+    tenant_slug: str,
+    application_id: int,
+    body: bytes,
+    *,
+    original_storage_key: str,
+) -> StoredFile:
+    stem = Path(original_storage_key).name.rsplit(".", 1)[0]
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "applicant_dl",
+        "application",
+        application_id,
+        body,
+        filename_hint=f"{stem}_processed.jpg",
+        content_type="image/jpeg",
     )
 
 

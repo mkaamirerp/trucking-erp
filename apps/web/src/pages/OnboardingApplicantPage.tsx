@@ -418,7 +418,7 @@ export default function OnboardingApplicantPage() {
   const sources = useMemo(() => (intake.field_sources || {}) as Record<string, any>, [intake]);
   const edited = useMemo(() => (intake.user_edited_fields || {}) as Record<string, boolean>, [intake]);
 
-  async function uploadDl(docType: DocType, file: File): Promise<boolean> {
+  async function uploadDl(docType: DocType, file: File, processedFile?: File | Blob, preprocessMetadata?: Record<string, unknown>): Promise<boolean> {
     if (!app) return false;
     setError(null);
     setDlState(s => ({ ...s, [docType]: "UPLOADING" }));
@@ -427,11 +427,11 @@ export default function OnboardingApplicantPage() {
       setDlState(s => s[docType] === "UPLOADING" ? { ...s, [docType]: "SCANNING" } : s);
       setDlMessage(m => ({
         ...m,
-        [docType]: docType === "CDL_BACK" ? "Reading PDF417 barcode..." : "Saving your licence...",
+        [docType]: docType === "CDL_BACK" ? "Reading PDF417 barcode..." : "Saving licence images...",
       }));
     }, 600);
     try {
-      const resp = await uploadPersonApplicationDlFile({ appId: app.id, onboardingToken: token, docType, file });
+      const resp = await uploadPersonApplicationDlFile({ appId: app.id, onboardingToken: token, docType, file, processedFile, preprocessMetadata });
       window.clearTimeout(timer);
       const ok = resp.file_id != null;
       setDlState(s => ({ ...s, [docType]: ok ? "SUCCESS" : "FAILED" }));
@@ -463,11 +463,9 @@ export default function OnboardingApplicantPage() {
     }
   }
 
-  async function handleCorrectedDl(side: "front" | "back", blob: Blob, originalName: string): Promise<boolean> {
+  async function handleDlFileUpload(side: "front" | "back", rawFile: File, processedBlob?: Blob, preprocessMetadata?: Record<string, unknown>): Promise<boolean> {
     const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
-    const stem = originalName.replace(/\.[^.]+$/, "") || side;
-    const file = new File([blob], `${stem}_corrected.jpg`, { type: "image/jpeg" });
-    return uploadDl(docType, file);
+    return uploadDl(docType, rawFile, processedBlob, preprocessMetadata);
   }
 
   async function resetSavedDraft() {
@@ -888,7 +886,7 @@ export default function OnboardingApplicantPage() {
               backState={dlState.CDL_BACK}
               frontMessage={dlMessage.CDL_FRONT}
               backMessage={dlMessage.CDL_BACK}
-              onConfirmSide={handleCorrectedDl}
+              onUploadSide={handleDlFileUpload}
             />
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>

@@ -2527,12 +2527,24 @@ export async function uploadPersonApplicationDlFile(params: {
   onboardingToken: string;
   docType: string;
   file: File;
+  processedFile?: File | Blob;
+  preprocessMetadata?: Record<string, unknown>;
 }): Promise<{ file_id?: string; intake_payload?: Record<string, unknown>; license_extract_status?: string; sanitized_file_id?: string }> {
   const url = new URL(`${API_BASE}/driver-onboarding/applicant/application/dl-upload`, window.location.origin);
   url.searchParams.set("token", params.onboardingToken);
   const form = new FormData();
   form.append("doc_type", params.docType);
   form.append("file", params.file);
+  if (params.processedFile) {
+    const processed =
+      params.processedFile instanceof File
+        ? params.processedFile
+        : new File([params.processedFile], "processed.jpg", { type: "image/jpeg" });
+    form.append("processed_file", processed);
+  }
+  if (params.preprocessMetadata) {
+    form.append("preprocess_metadata", JSON.stringify(params.preprocessMetadata));
+  }
   const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
     method: "POST",
     body: form,
