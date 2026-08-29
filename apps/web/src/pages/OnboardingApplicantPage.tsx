@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   getPersonApplicationByOnboardingToken,
@@ -11,6 +11,7 @@ import {
   type PersonApplication,
 } from "../api";
 import DLUploadStep from "../components/DLUploadStep";
+import DlPhoneCapturePanel from "../components/DlPhoneCapturePanel";
 import {
   cleanIntakeText,
   hydrateOnboardingFormFromIntake,
@@ -108,6 +109,54 @@ function resolveDlThumbFileId(docType: DocType, intake: Record<string, any>): st
 
 function hasStoredDlSide(docType: DocType, intake: Record<string, any>): boolean {
   return resolveDlThumbFileId(docType, intake) != null;
+}
+
+function dlUiStateFromIntake(intake: Record<string, any>, docType: DocType): DlUiState {
+  const meta = intake.files?.[docType];
+  if (meta?.dl_preprocess_status === "PROCESSED") return "SUCCESS";
+  if (meta?.dl_preprocess_status === "FAILED") return "FAILED";
+  if (hasStoredDlSide(docType, intake)) return "SUCCESS";
+  return "IDLE";
+}
+
+function applyApplicationDlRefresh(
+  data: PersonApplication,
+  token: string,
+  setPreviewUrl: Dispatch<SetStateAction<Record<DocType, string | null>>>,
+): { intake: Record<string, any>; dlState: Record<DocType, DlUiState> } {
+  const intake = (data.intake_payload as Record<string, any>) || {};
+  const dlState: Record<DocType, DlUiState> = {
+    CDL_FRONT: dlUiStateFromIntake(intake, "CDL_FRONT"),
+    CDL_BACK: dlUiStateFromIntake(intake, "CDL_BACK"),
+  };
+  void (async () => {
+    const updates: Partial<Record<DocType, string>> = {};
+    for (const docType of ["CDL_FRONT", "CDL_BACK"] as DocType[]) {
+      const fid = resolveDlThumbFileId(docType, intake);
+      if (!fid) continue;
+      try {
+        const url = await getPersonApplicationFileThumbnail({ appId: data.id, fileId: fid, onboardingToken: token });
+        updates[docType] = url;
+      } catch {
+        /* preview optional */
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      setPreviewUrl((prev) => {
+        const next = { ...prev };
+        (["CDL_FRONT", "CDL_BACK"] as DocType[]).forEach((d) => {
+          const u = updates[d];
+          if (u != null) {
+            const old = prev[d];
+            if (old?.startsWith("blob:")) URL.revokeObjectURL(old);
+            next[d] = u;
+          }
+        });
+        return next;
+      });
+    }
+  })();
+  return { intake, dlState };
 }
 
 function parseOnboardingStep(raw: unknown): Step | null {
@@ -347,8 +396,8 @@ export default function OnboardingApplicantPage() {
           return { CDL_FRONT: null, CDL_BACK: null };
         });
         setDlState({
-          CDL_FRONT: hasStoredDlSide("CDL_FRONT", intake) ? "SUCCESS" : "IDLE",
-          CDL_BACK: hasStoredDlSide("CDL_BACK", intake) ? "SUCCESS" : "IDLE",
+          CDL_FRONT: dlUiStateFromIntake(intake, "CDL_FRONT"),
+          CDL_BACK: dlUiStateFromIntake(intake, "CDL_BACK"),
         });
         setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
         if (typeof intake.agree_info_accurate === "boolean") setAgree1(intake.agree_info_accurate);
@@ -417,6 +466,16 @@ export default function OnboardingApplicantPage() {
   const intake = useMemo(() => getIntake(app), [app]);
   const sources = useMemo(() => (intake.field_sources || {}) as Record<string, any>, [intake]);
   const edited = useMemo(() => (intake.user_edited_fields || {}) as Record<string, boolean>, [intake]);
+
+  function handlePhoneApplicationUpdated(data: PersonApplication) {
+    setApp(data);
+    const { dlState: nextDlState } = applyApplicationDlRefresh(data, token, setPreviewUrl);
+    setDlState(nextDlState);
+    setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
+    setForm((prev) =>
+      hydrateOnboardingFormFromIntake(prev, (data.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
+    );
+  }
 
   async function uploadDl(docType: DocType, file: File): Promise<boolean> {
     if (!app) return false;
@@ -885,6 +944,7 @@ export default function OnboardingApplicantPage() {
                 {saving ? "Clearing..." : "Clear Saved Data"}
               </button>
             </div>
+            <p className="text-gray-400 text-sm">Upload from this device</p>
             <DLUploadStep
               frontPreviewUrl={previewUrl.CDL_FRONT}
               backPreviewUrl={previewUrl.CDL_BACK}
@@ -895,6 +955,14 @@ export default function OnboardingApplicantPage() {
               onUploadSide={handleDlUploadSide}
               onNormalizeError={(message) => setError(message)}
             />
+            {token && (
+              <DlPhoneCapturePanel
+                onboardingToken={token}
+                intake={intake}
+                disabled={saving || !app}
+                onApplicationUpdated={handlePhoneApplicationUpdated}
+              />
+            )}
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>
               <div className="grid grid-cols-2 gap-4">

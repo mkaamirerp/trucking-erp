@@ -2523,6 +2523,26 @@ export async function resetPersonApplicationDraft(params: {
   return handle<PersonApplication>(res);
 }
 
+export type DlCaptureLinkResult = {
+  application_id: number;
+  token: string;
+  link: string;
+  expires_at: string;
+};
+
+/** Issue restricted phone DL capture link (applicant invite token auth). */
+export async function issueApplicantDlCaptureLink(onboardingToken: string): Promise<DlCaptureLinkResult> {
+  const url = new URL(
+    `${API_BASE}/driver-onboarding/applicant/application/dl-capture-link`,
+    window.location.origin,
+  );
+  url.searchParams.set("token", onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+  });
+  return handle<DlCaptureLinkResult>(res);
+}
+
 /** Upload DL file (front or back) for applicant; returns updated application with intake_payload. */
 export async function uploadPersonApplicationDlFile(params: {
   appId: number;

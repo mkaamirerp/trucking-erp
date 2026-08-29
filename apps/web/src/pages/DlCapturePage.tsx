@@ -154,6 +154,12 @@ export default function DlCapturePage() {
     }
   };
 
+  const onInputFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.currentTarget.value = "";
+    if (f) void handleFile(f);
+  };
+
   const shell: CSSProperties = {
     minHeight: "100vh",
     background: "var(--trk-bg, #0f172a)",
@@ -217,7 +223,7 @@ export default function DlCapturePage() {
             ✓ Driver licence received
           </div>
           <p style={{ margin: 0, lineHeight: 1.55, color: "var(--trk-text-muted, #94a3b8)" }}>
-            You can close this page.
+            You can return to the other device.
           </p>
         </div>
       </div>
@@ -225,7 +231,7 @@ export default function DlCapturePage() {
   }
 
   const busy = phase === "UPLOADING" || phase === "SCANNING";
-  const stepLabel = session.step === "FRONT" ? "Step 1 of 2 — Front" : "Step 2 of 2 — Back";
+  const stepLabel = session.step === "FRONT" ? "Front Driver Licence" : "Back Driver Licence";
   const failed =
     (session.step === "FRONT" && session.front_status === "FAILED") ||
     (session.step === "BACK" && session.back_status === "FAILED");
@@ -298,11 +304,7 @@ export default function DlCapturePage() {
           capture="environment"
           style={{ display: "none" }}
           disabled={busy}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            e.currentTarget.value = "";
-            if (f) void handleFile(f);
-          }}
+          onChange={onInputFile}
         />
         <input
           ref={uploadInputRef}
@@ -310,23 +312,14 @@ export default function DlCapturePage() {
           accept="image/*"
           style={{ display: "none" }}
           disabled={busy}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            e.currentTarget.value = "";
-            if (f) void handleFile(f);
-          }}
+          onChange={onInputFile}
         />
 
         <button type="button" style={primary} disabled={busy} onClick={() => takeInputRef.current?.click()}>
-          {failed ? "Take Photo" : "Take Photo"}
+          Take Photo
         </button>
-        <button
-          type="button"
-          style={btn}
-          disabled={busy}
-          onClick={() => uploadInputRef.current?.click()}
-        >
-          {failed ? "Try Another Photo" : "Upload Existing Photo"}
+        <button type="button" style={btn} disabled={busy} onClick={() => uploadInputRef.current?.click()}>
+          Choose Existing Photo
         </button>
       </div>
     </div>

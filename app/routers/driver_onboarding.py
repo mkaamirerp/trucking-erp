@@ -154,6 +154,15 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _public_request_base_url(request: Request) -> str:
+    """Public HTTPS base for applicant-facing links (respects reverse-proxy forwarded headers)."""
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    scheme = forwarded_proto.split(",")[0].strip() if forwarded_proto else request.url.scheme
+    host_header = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    host = host_header.split(",")[0].strip() if host_header else request.url.netloc
+    return f"{scheme}://{host}".rstrip("/")
+
+
 
 
 def _merge_applicant_intake_payload(existing: dict | None, incoming: dict) -> dict:
@@ -1113,23 +1122,13 @@ async def get_dl_capture_file(
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
 
-@router.post(
-    "/applications/{application_id}/dl-capture-link",
-    response_model=DlCaptureLinkResponse,
-)
-async def issue_dl_capture_link(
+async def _issue_dl_capture_link_for_application(
+    db: AsyncSession,
+    tenant_id: int,
     application_id: int,
     request: Request,
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    """Admin: issue a resumable DL capture link (hash-only; revokes prior dl_capture tokens only)."""
-    if not is_tenant_admin(current_user.role):
-        raise HTTPException(status_code=403, detail="Admin role required")
-    app = await _get_person_application_admin_or_404(db, tenant_id, application_id)
-    _require_driver_workflow(app)
-
+) -> DlCaptureLinkResponse:
+    """Issue hash-only dl_capture token; revokes prior active dl_capture tokens for this application only."""
     await _revoke_active_access_tokens_for_application(
         db,
         tenant_id,
@@ -1154,7 +1153,7 @@ async def issue_dl_capture_link(
     )
     await db.commit()
 
-    base = str(request.base_url).rstrip("/")
+    base = _public_request_base_url(request)
     link = f"{base}/dl-capture/{raw}"
     return DlCaptureLinkResponse(
         application_id=application_id,
@@ -1162,6 +1161,53 @@ async def issue_dl_capture_link(
         link=link,
         expires_at=expires_at,
     )
+
+
+@router.post(
+    "/applications/{application_id}/dl-capture-link",
+    response_model=DlCaptureLinkResponse,
+)
+async def issue_dl_capture_link(
+    application_id: int,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Admin: issue a resumable DL capture link (hash-only; revokes prior dl_capture tokens only)."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    app = await _get_person_application_admin_or_404(db, tenant_id, application_id)
+    _require_driver_workflow(app)
+    return await _issue_dl_capture_link_for_application(db, tenant_id, application_id, request)
+
+
+@router.post(
+    "/applicant/application/dl-capture-link",
+    response_model=DlCaptureLinkResponse,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def issue_applicant_dl_capture_link(
+    request: Request,
+    token: str = Query(..., description="Invite link token"),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Applicant: issue restricted phone DL capture link for the authenticated draft application."""
+    app, access = await _get_application_and_access_by_token(db, tenant_id, token)
+    purpose = getattr(access, "purpose", None) or TOKEN_PURPOSE_INVITE
+    if purpose != TOKEN_PURPOSE_INVITE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the main application invite link can request a phone capture link",
+        )
+    if app.status != DriverOnboardingStatus.DRAFT.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Phone capture links are only available while the application is in draft",
+        )
+    _require_driver_workflow(app)
+    return await _issue_dl_capture_link_for_application(db, tenant_id, app.id, request)
 
 
 @router.get("/applicant/application/file", dependencies=_APPLICANT_SUBSCRIPTION)
