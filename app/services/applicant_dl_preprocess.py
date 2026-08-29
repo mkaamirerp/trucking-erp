@@ -22,8 +22,9 @@ class ApplicantDlPreprocessOutcome:
 
 
 def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> ApplicantDlPreprocessOutcome:
-    """Run OpenCV crop/deskew/perspective. No fallback — processed JPEG only when validation passes."""
-    result, corrected = process_applicant_dl_image_path(image_path, side=side)
+    """Run the exact frozen sandbox processor. `side` is accepted for router compatibility only."""
+    _ = side
+    result, corrected = process_applicant_dl_image_path(image_path)
     debug = dict(result.report)
     debug["preprocess_version"] = PREPROCESS_VERSION
 
