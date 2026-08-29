@@ -17,6 +17,12 @@ from app.services.applicant_dl_opencv import (
     process_applicant_dl_image_path,
 )
 
+# Internal working-copy only. Original upload remains untouched in storage.
+# Phone photos at full resolution often fail four-corner confirmation; sandbox
+# scale (long side ≤ 1544) matches the proven OpenCV operating range.
+WORKING_COPY_MAX_SIDE = 1544
+WORKING_COPY_PREP_VERSION = "2026-08-29-working-copy-v1"
+
 
 @dataclass(frozen=True)
 class ApplicantDlPreprocessOutcome:
@@ -40,24 +46,49 @@ def _load_bgr_with_exif(path: Path) -> np.ndarray | None:
         return cv2.imread(str(path), cv2.IMREAD_COLOR)
 
 
-def _opencv_input_path(image_path: Path) -> tuple[Path, Path | None]:
-    """Write EXIF-corrected pixels for the frozen path-based OpenCV processor."""
+def _prepare_working_copy(image_path: Path) -> tuple[Path, Path | None, dict[str, Any]]:
+    """
+    Build an EXIF-corrected, optionally downscaled temp JPEG for OpenCV.
+
+    Does not mutate the stored original. No EDGE_WARP / STORAGE_NORMALIZE.
+    """
     image = _load_bgr_with_exif(image_path)
     if image is None:
-        return image_path, None
+        return image_path, None, {
+            "working_copy_prep_version": WORKING_COPY_PREP_VERSION,
+            "working_copy_error": "load_failed",
+        }
+
+    height, width = image.shape[:2]
+    meta: dict[str, Any] = {
+        "working_copy_prep_version": WORKING_COPY_PREP_VERSION,
+        "original_input_shape": {"width": int(width), "height": int(height)},
+        "working_copy_downscaled": False,
+    }
+
+    long_side = max(height, width)
+    if long_side > WORKING_COPY_MAX_SIDE:
+        scale = WORKING_COPY_MAX_SIDE / long_side
+        width = max(1, int(width * scale))
+        height = max(1, int(height * scale))
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
+        meta["working_copy_downscaled"] = True
+        meta["working_copy_max_side"] = WORKING_COPY_MAX_SIDE
+
+    meta["opencv_input_shape"] = {"width": int(width), "height": int(height)}
 
     fd, tmp = tempfile.mkstemp(suffix=".jpg")
     os.close(fd)
     temp_path = Path(tmp)
     cv2.imwrite(str(temp_path), image)
-    return temp_path, temp_path
+    return temp_path, temp_path, meta
 
 
 def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> ApplicantDlPreprocessOutcome:
     """Run the exact frozen sandbox processor. `side` is accepted for router compatibility only."""
     _ = side
     source_path = Path(image_path)
-    work_path, temp_path = _opencv_input_path(source_path)
+    work_path, temp_path, prep_meta = _prepare_working_copy(source_path)
     try:
         result, corrected = process_applicant_dl_image_path(work_path)
     finally:
@@ -65,6 +96,7 @@ def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> 
             temp_path.unlink(missing_ok=True)
 
     debug = dict(result.report)
+    debug.update(prep_meta)
     debug["preprocess_version"] = PREPROCESS_VERSION
 
     if not result.post_validation_pass:
