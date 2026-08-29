@@ -22,7 +22,7 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-PREPROCESS_VERSION = "2026-08-28-hsv-scene-v1"
+PREPROCESS_VERSION = "2026-08-29-hsv-canny-rough-v1"
 GEOMETRY_ENGINE_VERSION = "2026-08-28-sandbox-exact"
 SANDBOX_BASE_SHA256 = "ac008e5b3583dee103d975fd08c61dacc2076a768ed10fa39ab737ff2c097d8a"
 SANDBOX_REFINEMENT_SHA256 = "bade5f5a34beb2537750235c3525fbd6420bc28b255518d55a4701531908f6d4"
@@ -36,6 +36,7 @@ CLOSEUP_CONFIRM_MAX_AREA_RATIO = 0.98
 # Close-up candidates are much larger in pixel terms, so require
 # stronger four-edge evidence than the normal path.
 CLOSEUP_MIN_EDGE_INLIERS = 80
+SOURCE_FRAME_MARGIN_PX = 8
 ORIENTATION_ORDER = ["original", "cw90", "ccw90", "rotate180"]
 
 @dataclass
@@ -452,7 +453,166 @@ def _rough_card_candidates(image_bgr):
         )
     )
 
+    for candidate in all_candidates[:7]:
+        candidate.setdefault("rough_locator", "HSV")
+        candidate.setdefault("source_frame_rejected", False)
     return all_candidates[:7]
+
+
+def _is_source_frame_candidate(box: np.ndarray, width: int, height: int) -> bool:
+    """True when the rough box is effectively the photograph border, not the card."""
+    xs = box[:, 0]
+    ys = box[:, 1]
+    margin = SOURCE_FRAME_MARGIN_PX
+    return bool(
+        float(xs.min()) <= margin
+        and float(ys.min()) <= margin
+        and float(xs.max()) >= width - margin
+        and float(ys.max()) >= height - margin
+    )
+
+
+def _canny_rough_card_candidates(image_bgr):
+    """
+    Second rough locator: external physical-edge contour -> minAreaRect.
+
+    Proposes candidate boxes only. Final truth remains _confirm_all_four_corners().
+    """
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 40, 120)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    edges = cv2.morphologyEx(
+        edges,
+        cv2.MORPH_CLOSE,
+        np.ones((9, 9), np.uint8),
+        iterations=2,
+    )
+
+    height, width = edges.shape
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates: list[dict[str, Any]] = []
+    source_frame_rejected = 0
+
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:20]:
+        contour_area = float(cv2.contourArea(contour))
+        if contour_area < 0.04 * height * width:
+            continue
+
+        rect = cv2.minAreaRect(contour)
+        (_center), (rw, rh), _angle = rect
+        if min(rw, rh) < 20:
+            continue
+
+        ratio = max(rw, rh) / max(min(rw, rh), 1e-6)
+        area_ratio = (rw * rh) / float(height * width)
+        box = order_corners(cv2.boxPoints(rect).astype(np.float32))
+
+        if _is_source_frame_candidate(box, width, height):
+            source_frame_rejected += 1
+            continue
+
+        is_normal_area = 0.06 <= area_ratio <= NORMAL_MAX_AREA_RATIO
+        is_closeup_area = (
+            NORMAL_MAX_AREA_RATIO < area_ratio <= CLOSEUP_ROUGH_MAX_AREA_RATIO
+            and 1.25 <= ratio <= 1.95
+        )
+        if not (is_normal_area or is_closeup_area):
+            continue
+
+        top_len = float(np.linalg.norm(box[1] - box[0]))
+        left_len = float(np.linalg.norm(box[3] - box[0]))
+        if top_len < left_len:
+            continue
+
+        ratio_error = abs(ratio - DL_ASPECT) / DL_ASPECT
+        seed_score = ratio_error * 4.0 - area_ratio * 0.5
+
+        candidates.append(
+            {
+                "seed_score": float(seed_score),
+                "rough_box": box,
+                "area_ratio": float(area_ratio),
+                "rough_ratio": float(ratio),
+                "is_closeup_seed": bool(is_closeup_area),
+                "rough_locator": "CANNY",
+                "source_frame_rejected": False,
+                "mask_name": "canny_external",
+                "mask_priority": 10,
+            }
+        )
+
+    candidates.sort(key=lambda item: item["seed_score"])
+    # Preserve best close-up alongside top normal seeds (same spirit as HSV keep).
+    normal = [c for c in candidates if not c.get("is_closeup_seed")]
+    closeup = [c for c in candidates if c.get("is_closeup_seed")]
+    selected = normal[:4]
+    if closeup:
+        selected.append(closeup[0])
+    for candidate in selected:
+        candidate["source_frame_hits_in_locator"] = int(source_frame_rejected)
+    return selected[:5]
+
+
+def _search_confirmed_seed(
+    image_bgr: np.ndarray,
+    seed_fn,
+    *,
+    locator_name: str,
+) -> Optional[dict[str, Any]]:
+    """Run orientation loop + confirmer for one rough locator. Confirmer unchanged."""
+    best: Optional[dict[str, Any]] = None
+    source_frame_hits = 0
+
+    for orientation_rank, orientation in enumerate(ORIENTATION_ORDER):
+        oriented = rotate_image(image_bgr, orientation)
+        seeds = seed_fn(oriented)
+        if seeds and "source_frame_hits_in_locator" in seeds[0]:
+            source_frame_hits = max(
+                source_frame_hits,
+                int(seeds[0].get("source_frame_hits_in_locator") or 0),
+            )
+
+        for candidate_rank, seed in enumerate(seeds):
+            corners, diagnostics, support = _confirm_all_four_corners(
+                oriented,
+                seed["rough_box"],
+                is_closeup_seed=bool(seed.get("is_closeup_seed")),
+            )
+            if corners is None:
+                continue
+
+            score = (
+                seed["seed_score"]
+                + diagnostics["ratio_error_percent"] / 50.0
+                + diagnostics["max_angle_error_from_90"] / 100.0
+                + orientation_rank * 0.002
+                + candidate_rank * 0.001
+            )
+
+            if best is None or score < best["score"]:
+                best = {
+                    "score": float(score),
+                    "orientation": orientation,
+                    "oriented": oriented,
+                    "seed_rank": candidate_rank,
+                    "corners": corners,
+                    "diagnostics": diagnostics,
+                    "support": support,
+                    "seed_mask": seed.get("mask_name"),
+                    "scene_profile": seed.get("scene_profile"),
+                    "is_closeup_seed": bool(seed.get("is_closeup_seed")),
+                    "rough_locator": locator_name,
+                    "rough_area_ratio": float(seed.get("area_ratio") or 0.0),
+                    "rough_ratio": float(seed.get("rough_ratio") or 0.0),
+                    "source_frame_rejected": False,
+                    "source_frame_hits": int(source_frame_hits),
+                }
+
+    if best is not None:
+        best["source_frame_hits"] = int(source_frame_hits)
+    return best
+
 
 def _gradient_magnitude(image_bgr):
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
@@ -711,48 +871,33 @@ def process_driver_license_image(
     Exact sandbox decision:
       no 4 confirmed corners -> FAILED
       4 confirmed corners    -> exact sandbox four-corner perspective warp
+
+    Rough locators (proposals only):
+      1) HSV scene seeds (unchanged)
+      2) if HSV never confirms -> Canny external-contour seeds
+    Final authority remains _confirm_all_four_corners().
     """
-    best: Optional[dict[str, Any]] = None
-
-    for orientation_rank, orientation in enumerate(ORIENTATION_ORDER):
-        oriented = rotate_image(image_bgr, orientation)
-
-        for candidate_rank, seed in enumerate(_rough_card_candidates(oriented)):
-            corners, diagnostics, support = _confirm_all_four_corners(
-                oriented,
-                seed["rough_box"],
-                is_closeup_seed=bool(seed.get("is_closeup_seed")),
-            )
-            if corners is None:
-                continue
-
-            # Exact sandbox ranking formula.
-            score = (
-                seed["seed_score"]
-                + diagnostics["ratio_error_percent"] / 50.0
-                + diagnostics["max_angle_error_from_90"] / 100.0
-                + orientation_rank * 0.002
-                + candidate_rank * 0.001
-            )
-
-            if best is None or score < best["score"]:
-                best = {
-                    "score": float(score),
-                    "orientation": orientation,
-                    "oriented": oriented,
-                    "seed_rank": candidate_rank,
-                    "corners": corners,
-                    "diagnostics": diagnostics,
-                    "support": support,
-                    "seed_mask": seed.get("mask_name"),
-                    "scene_profile": seed.get("scene_profile"),
-                    "is_closeup_seed": bool(seed.get("is_closeup_seed")),
-                }
+    best = _search_confirmed_seed(
+        image_bgr,
+        _rough_card_candidates,
+        locator_name="HSV",
+    )
+    if best is None:
+        best = _search_confirmed_seed(
+            image_bgr,
+            _canny_rough_card_candidates,
+            locator_name="CANNY",
+        )
 
     if best is None:
         report = {
             "four_edges_confirmed": False,
             "status": "FOUR_CORNERS_NOT_CONFIRMED",
+            "rough_locator_used": None,
+            "hsv_locator_attempted": True,
+            "canny_locator_attempted": True,
+            "source_frame_rejected": False,
+            "source_frame_margin_px": SOURCE_FRAME_MARGIN_PX,
             "preprocess_version": PREPROCESS_VERSION,
             "sandbox_base_sha256": SANDBOX_BASE_SHA256,
             "sandbox_refinement_sha256": SANDBOX_REFINEMENT_SHA256,
@@ -761,6 +906,7 @@ def process_driver_license_image(
 
     oriented = best["oriented"]
     corners = best["corners"]
+    diagnostics = best["diagnostics"]
 
     # Exact historical sandbox final correction. Do not classify/reinterpret.
     final = _warp_confirmed_card(oriented, corners)
@@ -783,13 +929,26 @@ def process_driver_license_image(
         "orientation_used": best["orientation"],
         "seed_mask_used": best.get("seed_mask"),
         "hsv_scene_profile": best.get("scene_profile"),
+        "rough_locator_used": best.get("rough_locator", "HSV"),
+        "rough_area_ratio": best.get("rough_area_ratio"),
+        "rough_ratio": best.get("rough_ratio"),
+        "source_frame_rejected": bool(best.get("source_frame_hits", 0) > 0),
+        "source_frame_hits": int(best.get("source_frame_hits") or 0),
+        "source_frame_margin_px": SOURCE_FRAME_MARGIN_PX,
         "closeup_mode_used": bool(
             best.get("is_closeup_seed", False)
         ),
         "geometry_engine_version": GEOMETRY_ENGINE_VERSION,
         "corners_tl_tr_br_bl": corners.tolist(),
-        "edge_inliers": best["diagnostics"].get("edge_inliers"),
-        "confirm_diagnostics": best["diagnostics"],
+        "edge_inliers": diagnostics.get("edge_inliers"),
+        "confirmed_polygon_area": (
+            None
+            if diagnostics.get("area_percent") is None
+            else float(diagnostics["area_percent"]) / 100.0
+        ),
+        "final_ratio": diagnostics.get("ratio"),
+        "max_angle_error": diagnostics.get("max_angle_error_from_90"),
+        "confirm_diagnostics": diagnostics,
         "classification": "FOUR_CORNER_WARP",
         "correction_applied": "sandbox_four_corner_perspective_warp",
         "post_validation": post_report,
