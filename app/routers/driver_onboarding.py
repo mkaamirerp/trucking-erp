@@ -764,6 +764,7 @@ async def save_applicant_intake(
 async def reset_applicant_application(
     token: str = Query(..., description="Invite link token"),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Clear saved draft onboarding data for the current invite token."""
@@ -773,6 +774,10 @@ async def reset_applicant_application(
             status_code=status.HTTP_409_CONFLICT,
             detail="Application already submitted",
         )
+
+    from app.core.storage import purge_applicant_dl_application
+
+    purge_applicant_dl_application(tenant_slug, app.id)
 
     preserved_intake = {}
     for key in ("step", "form_country_default", "form_region_default"):
