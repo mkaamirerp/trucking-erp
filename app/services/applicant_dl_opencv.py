@@ -30,6 +30,12 @@ SANDBOX_REFINEMENT_SHA256 = "bade5f5a34beb2537750235c3525fbd6420bc28b255518d55a4
 DL_ASPECT = 85.60 / 53.98
 TARGET_W = 1000
 TARGET_H = int(round(TARGET_W / DL_ASPECT))
+NORMAL_MAX_AREA_RATIO = 0.65
+CLOSEUP_ROUGH_MAX_AREA_RATIO = 1.00
+CLOSEUP_CONFIRM_MAX_AREA_RATIO = 0.98
+# Close-up candidates are much larger in pixel terms, so require
+# stronger four-edge evidence than the normal path.
+CLOSEUP_MIN_EDGE_INLIERS = 80
 ORIENTATION_ORDER = ["original", "cw90", "ccw90", "rotate180"]
 
 @dataclass
@@ -336,10 +342,19 @@ def _rough_card_candidates(image_bgr):
                 ratio = max(rw, rh) / min(rw, rh)
                 area_ratio = (rw * rh) / float(h * w)
 
-                # KEEP the existing historical rough area gate for this slice.
-                # Do not mix the separate close-up / >65% issue into the HSV fix.
-                if not (0.06 <= area_ratio <= 0.65):
+                is_normal_area = (
+                    0.06 <= area_ratio <= NORMAL_MAX_AREA_RATIO
+                )
+
+                is_closeup_area = (
+                    NORMAL_MAX_AREA_RATIO < area_ratio <= CLOSEUP_ROUGH_MAX_AREA_RATIO
+                    and 1.25 <= ratio <= 1.95
+                )
+
+                if not (is_normal_area or is_closeup_area):
                     continue
+
+                is_closeup_seed = bool(is_closeup_area)
 
                 box = order_corners(
                     cv2.boxPoints(rect).astype(np.float32)
@@ -395,6 +410,7 @@ def _rough_card_candidates(image_bgr):
                         "mask_name": mask_name,
                         "mask_priority": int(mask_priority),
                         "scene_profile": dict(profile),
+                        "is_closeup_seed": is_closeup_seed,
                     }
                 )
 
@@ -402,19 +418,30 @@ def _rough_card_candidates(image_bgr):
             key=lambda item: item["seed_score"]
         )
 
-        # Critical:
-        # Do not allow a noisy legacy mask to crowd the good
-        # scene-specific candidates out of the global top six.
-        if mask_priority == 0:
-            keep = 4
-        elif mask_priority == 1:
-            keep = 2
-        else:
-            keep = 1
+        normal_candidates = [
+            c for c in candidates_for_mask
+            if not c.get("is_closeup_seed")
+        ]
 
-        all_candidates.extend(
-            candidates_for_mask[:keep]
-        )
+        closeup_candidates = [
+            c for c in candidates_for_mask
+            if c.get("is_closeup_seed")
+        ]
+
+        if mask_priority == 0:
+            keep_normal = 4
+        elif mask_priority == 1:
+            keep_normal = 2
+        else:
+            keep_normal = 1
+
+        selected = normal_candidates[:keep_normal]
+
+        # Always preserve at least the best plausible close-up seed.
+        if closeup_candidates:
+            selected.append(closeup_candidates[0])
+
+        all_candidates.extend(selected)
 
     # Preferred scene mask first, then strict mask, then legacy.
     # Within each mask preserve the historical seed ranking.
@@ -518,7 +545,11 @@ def _intersect_fitted_lines(a, b):
     t, _ = np.linalg.solve(matrix, vector)
     return np.array([x1 + t * vx1, y1 + t * vy1], dtype=np.float32)
 
-def _confirm_all_four_corners(image_bgr, rough_box):
+def _confirm_all_four_corners(
+    image_bgr,
+    rough_box,
+    is_closeup_seed=False,
+):
     """Four edge lines must independently succeed. Only their intersections become corners."""
     side_lengths = [
         float(np.linalg.norm(rough_box[(i + 1) % 4] - rough_box[i]))
@@ -597,12 +628,24 @@ def _confirm_all_four_corners(image_bgr, rough_box):
     ]
     max_angle_error = max(abs(value - 90.0) for value in angles)
 
+    max_polygon_area = (
+        CLOSEUP_CONFIRM_MAX_AREA_RATIO
+        if is_closeup_seed
+        else NORMAL_MAX_AREA_RATIO
+    )
+
+    required_min_edge_inliers = (
+        CLOSEUP_MIN_EDGE_INLIERS
+        if is_closeup_seed
+        else 50
+    )
+
     confirmed = bool(
         all_inside
-        and 0.08 <= polygon_area <= 0.65
+        and 0.08 <= polygon_area <= max_polygon_area
         and 1.25 <= ratio <= 1.95
         and max_angle_error <= 20.0
-        and min(edge_inliers) >= 50
+        and min(edge_inliers) >= required_min_edge_inliers
     )
 
     diagnostics = {
@@ -615,6 +658,9 @@ def _confirm_all_four_corners(image_bgr, rough_box):
         "corner_angles": angles,
         "max_angle_error_from_90": max_angle_error,
         "search_px": search_px,
+        "is_closeup_seed": bool(is_closeup_seed),
+        "max_polygon_area_allowed": float(max_polygon_area),
+        "required_min_edge_inliers": int(required_min_edge_inliers),
         "corners": {
             "TL": corners[0].tolist(),
             "TR": corners[1].tolist(),
@@ -673,7 +719,9 @@ def process_driver_license_image(
 
         for candidate_rank, seed in enumerate(_rough_card_candidates(oriented)):
             corners, diagnostics, support = _confirm_all_four_corners(
-                oriented, seed["rough_box"]
+                oriented,
+                seed["rough_box"],
+                is_closeup_seed=bool(seed.get("is_closeup_seed")),
             )
             if corners is None:
                 continue
@@ -698,6 +746,7 @@ def process_driver_license_image(
                     "support": support,
                     "seed_mask": seed.get("mask_name"),
                     "scene_profile": seed.get("scene_profile"),
+                    "is_closeup_seed": bool(seed.get("is_closeup_seed")),
                 }
 
     if best is None:
@@ -734,6 +783,9 @@ def process_driver_license_image(
         "orientation_used": best["orientation"],
         "seed_mask_used": best.get("seed_mask"),
         "hsv_scene_profile": best.get("scene_profile"),
+        "closeup_mode_used": bool(
+            best.get("is_closeup_seed", False)
+        ),
         "geometry_engine_version": GEOMETRY_ENGINE_VERSION,
         "corners_tl_tr_br_bl": corners.tolist(),
         "edge_inliers": best["diagnostics"].get("edge_inliers"),
