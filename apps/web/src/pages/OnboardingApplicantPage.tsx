@@ -893,6 +893,7 @@ export default function OnboardingApplicantPage() {
               frontMessage={dlMessage.CDL_FRONT}
               backMessage={dlMessage.CDL_BACK}
               onUploadSide={handleDlUploadSide}
+              onNormalizeError={(message) => setError(message)}
             />
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>

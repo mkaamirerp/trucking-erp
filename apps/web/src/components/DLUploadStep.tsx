@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { normalizeDlUpload } from "../lib/normalizeDlUpload";
 
 type Side = "front" | "back";
 type UploadState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
@@ -11,6 +12,8 @@ type Props = {
   frontMessage?: string;
   backMessage?: string;
   onUploadSide: (side: Side, file: File) => Promise<boolean> | boolean;
+  /** Optional: surface browser-normalize failures through the parent error UI. */
+  onNormalizeError?: (message: string) => void;
 };
 
 type LocalPreviewState = { front: string | null; back: string | null };
@@ -23,6 +26,7 @@ export default function DLUploadStep({
   frontMessage = "",
   backMessage = "",
   onUploadSide,
+  onNormalizeError,
 }: Props) {
   const [localPreview, setLocalPreview] = useState<LocalPreviewState>({ front: null, back: null });
 
@@ -66,13 +70,25 @@ export default function DLUploadStep({
   const canReview = Boolean(frontPreview && backPreview);
 
   const handleFileSelect = async (side: Side, file: File) => {
-    const url = URL.createObjectURL(file);
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeDlUpload(file);
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? `Could not prepare this image for upload (${err.message}). Please try again.`
+          : "Could not prepare this image for upload. Please try again.";
+      onNormalizeError?.(message);
+      return;
+    }
+
+    const url = URL.createObjectURL(normalizedFile);
     setLocalPreview((prev) => {
       const old = side === "front" ? prev.front : prev.back;
       if (old) URL.revokeObjectURL(old);
       return side === "front" ? { ...prev, front: url } : { ...prev, back: url };
     });
-    await onUploadSide(side, file);
+    await onUploadSide(side, normalizedFile);
   };
 
   const promptReplacementFile = (side: Side) => {
