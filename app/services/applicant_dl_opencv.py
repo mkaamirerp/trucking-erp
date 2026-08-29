@@ -17,7 +17,9 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 import cv2
 import numpy as np
 
-PREPROCESS_VERSION = "2026-08-28-sandbox-v2"
+PREPROCESS_VERSION = "2026-08-28-sandbox-v3"
+
+MAX_OPENCV_INPUT_SIDE = 2400
 
 RECTANGLE_CORNER_TOLERANCE_DEG = 4.0
 PARALLEL_TOLERANCE_DEG = 3.0
@@ -84,6 +86,31 @@ class ProcessResult:
     candidate: CandidateResult
     final_shape: Dict[str, int]
     report: Dict[str, Any]
+
+
+def load_bgr_image_for_processing(image_path: str | Path, max_side: int = MAX_OPENCV_INPUT_SIDE) -> np.ndarray | None:
+    """Load upload for OpenCV. Downscale phone photos so edge/RANSAC matches sandbox scale."""
+    path = Path(image_path)
+    image = cv2.imread(str(path))
+    if image is None:
+        try:
+            from PIL import Image
+
+            pil = Image.open(path).convert("RGB")
+            image = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        except Exception:
+            return None
+
+    height, width = image.shape[:2]
+    long_side = max(height, width)
+    if long_side > max_side:
+        scale = max_side / long_side
+        image = cv2.resize(
+            image,
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    return image
 
 
 def rotate_image(image: np.ndarray, orientation: str) -> np.ndarray:
@@ -722,12 +749,17 @@ def process_driver_license_image(image_bgr: np.ndarray, debug_dir: Optional[Path
 
 
 def process_applicant_dl_image_path(image_path: str | Path, debug_dir: Optional[Path] = None) -> Tuple[ProcessResult, np.ndarray]:
-    image = cv2.imread(str(image_path))
+    path = Path(image_path)
+    image = load_bgr_image_for_processing(path)
     if image is None:
         candidate = CandidateResult("original", 0, -999.0, "UNCONFIRMED", None, None, None, None, None)
         report = {"four_edges_confirmed": False, "status": "IMAGE_LOAD_FAILED", "preprocess_version": PREPROCESS_VERSION}
         return _failure_result(image_bgr=np.zeros((1, 1, 3), dtype=np.uint8), report=report, candidate=candidate), np.zeros((1, 1, 3), dtype=np.uint8)
-    return process_driver_license_image(image, debug_dir)
+
+    result, corrected = process_driver_license_image(image, debug_dir)
+    result.report["input_path"] = str(path)
+    result.report["opencv_input_shape"] = {"width": int(image.shape[1]), "height": int(image.shape[0])}
+    return result, corrected
 
 
 def encode_processed_jpeg(image_bgr: np.ndarray, quality: int = 92) -> bytes:
