@@ -1,7 +1,7 @@
 # TruckERP Driver Licence Capture & OpenCV Pipeline
 
 **Project:** TruckERP  
-**Scope:** Applicant driver-licence front/back capture, browser normalization, automatic OpenCV localization/confirmation, storage, onboarding UI, tenant-scoped phone companion capture, QR/SMS handoff, and future event/iOS delivery architecture.
+**Scope:** Applicant driver-licence front/back capture, browser normalization, automatic OpenCV localization/confirmation, storage, onboarding UI, tenant-scoped phone companion capture, QR/SMS handoff, real-time synchronization, and future native-app delivery.
 
 ## Current frozen implementation checkpoints
 
@@ -10,7 +10,7 @@
 `adb87f7d7920d50e253467ab6ee7331af081ea12`  
 `fix(dl): add Canny rough locator after HSV failure`
 
-Current processor version:
+Processor version:
 
 `PREPROCESS_VERSION = "2026-08-29-hsv-canny-rough-v1"`
 
@@ -24,26 +24,55 @@ Current processor version:
 `67db75d9eeef23b1bb4e90c61a73bf443b0541db`  
 `feat(dl): add tenant-scoped resumable licence capture link`
 
-These checkpoints are separate layers. Do not change server geometry while working on browser/mobile handoff, QR/SMS, events, or iOS integration.
+### Applicant Application Page QR phone companion
+
+`32b28531417300cbe8f58343a5061daa3e3ed36d`  
+`feat(dl): add QR phone companion to applicant licence step`
+
+These are separate frozen layers. Do not change server geometry while working on QR/SMS, event delivery, guided camera, or native-app integration.
 
 ---
 
-## 1. Core design goals
+## 1. Product model
 
-The driver-licence pipeline must:
+The existing Applicant Application Page is the control center:
 
-- Accept ordinary real-world phone photos.
-- Work with tilt, perspective, varied backgrounds, and card position when geometry can be proved.
-- Preserve the uploaded source image.
-- Produce a separate corrected 1000×631 processed image only after geometry confirms the card.
-- Never mark a failed crop as a successful processed licence.
-- Never use a guessed crop.
-- Keep the existing four-edge confirmer as the final authority.
-- Show the uploaded picture even when automatic processing fails.
-- Let an applicant upload from the current device or use a phone companion flow.
-- Keep the normal onboarding application and the restricted phone-capture link tied to the same `person_application`.
-- Keep FRONT/BACK completion in application state, not duplicated into client/session state.
-- Support QR and SMS handoff today without preventing future iOS/Android native apps.
+```text
+/onboarding?token=<applicant-token>
+```
+
+The Driver's License box on that page owns the user-facing licence workflow.
+
+The phone route:
+
+```text
+/dl-capture/<opaque-dl-capture-token>
+```
+
+is not another onboarding application. It is a temporary, restricted phone companion tied to the same `person_application`.
+
+Approved user story:
+
+```text
+Applicant Application Page
+        ↓
+Driver's License box
+        ↓
+Upload from this device
+        OR
+Use your phone
+        ↓
+QR code now
+SMS later
+        ↓
+Phone captures FRONT then BACK
+        ↓
+Same person_application updated
+        ↓
+Laptop reflects fresh application state
+        ↓
+Continue onboarding
+```
 
 ---
 
@@ -55,8 +84,6 @@ Photo selected or captured
 Browser normalization
 (EXIF-aware decode + max 2400px long side + JPEG 0.92)
         ↓
-Upload normalized source
-        ↓
 Persist source/original
         ↓
 Server OpenCV
@@ -67,7 +94,6 @@ existing four-edge confirmer
         ↓
 PASS?
  ├─ YES → perspective warp → 1000×631 → save enh_file_id
- │
  └─ NO
       ↓
    Canny external-contour rough locator
@@ -79,13 +105,13 @@ PASS?
     └─ NO  → FAILED, keep original, no enh_file_id
 ```
 
-A future guided-camera mode may assist framing after a failed upload, but it must still submit the full camera frame to this same server pipeline. The browser must not become an independent geometry authority.
+No four confirmed corners means no processed crop.
 
 ---
 
 ## 3. Browser normalization — implemented
 
-Current normalization helper:
+File:
 
 `apps/web/src/lib/normalizeDlUpload.ts`
 
@@ -110,17 +136,8 @@ upload normalized File
 Constants:
 
 ```ts
-const DL_UPLOAD_MAX_LONG_SIDE = 2400;
-const DL_UPLOAD_JPEG_QUALITY = 0.92;
-```
-
-Resize formula:
-
-```ts
-const scale = Math.min(
-  1,
-  DL_UPLOAD_MAX_LONG_SIDE / Math.max(width, height),
-);
+DL_UPLOAD_MAX_LONG_SIDE = 2400
+DL_UPLOAD_JPEG_QUALITY = 0.92
 ```
 
 Examples:
@@ -131,53 +148,29 @@ Examples:
 1536×2048 → unchanged dimensions
 ```
 
-Non-images such as PDF are passed through unchanged by the helper.
+Non-images are passed through unchanged.
 
-### Browser responsibilities
+Browser may normalize representation and provide capture UI, but it must not become the licence geometry authority.
 
-Allowed:
+Do not add browser-side HSV, Canny, perspective correction, manual corner selection, or guide-region cropping.
 
-- EXIF-aware image decode
-- payload resizing
-- JPEG re-encode
-- immediate preview of what will be uploaded
-- camera/file input selection
-- future guided-camera assistance
-
-Not allowed:
-
-- HSV
-- Canny
-- card cropping
-- corner selection
-- perspective correction
-- manual geometry
-- treating the guide rectangle as the crop
-
-The browser normalizes representation and payload size. The server decides licence geometry.
-
-### Proven normalization observations
+Proven observations:
 
 ```text
 IMG_6446 normalized to 1350×2400 → PASS via CANNY
 IMG_8788 normalized → PASS via HSV
 IMG_8789 → honest FAIL
-```
-
-One useful representation-specific observation:
-
-```text
 ed3411 earlier/raw representation → PASS via CANNY
-ed3411 normalized representation  → PASS via HSV
+ed3411 normalized representation → PASS via HSV
 ```
 
-This is evidence that normalization can help the primary HSV path on a sample; it is not a universal claim that normalization always improves HSV.
+The `ed3411` result is sample-specific evidence; do not generalize that normalization always improves HSV.
 
 ---
 
-## 4. Storage contract
+## 4. Storage and preview contract
 
-### OpenCV success
+### Success
 
 ```text
 file_id      = source/original upload
@@ -186,7 +179,7 @@ status       = PROCESSED
 processed    = 1000×631 corrected card
 ```
 
-### OpenCV failure
+### Failure
 
 ```text
 file_id      = source/original upload
@@ -195,68 +188,47 @@ status       = FAILED
 processed    = none
 ```
 
-Never:
-
-```text
-OpenCV FAIL
-→ letterbox full photo
-→ mark PROCESSED
-```
+Never turn a failed OpenCV result into a fake processed image.
 
 Never:
 
 ```text
 OpenCV FAIL
-→ alternate guessed crop
-→ mark successful
+→ letterbox full source
+→ PROCESSED
 ```
 
-The desktop applicant upload regression after the shared upload refactor confirmed that the original source remains separate from the enhanced 1000×631 processed image.
+Never:
+
+```text
+OpenCV FAIL
+→ guessed fallback crop
+→ PROCESSED
+```
+
+Preview availability and crop status are separate:
+
+```text
+PROCESSED → show enhanced preview
+FAILED    → show source preview + retry options
+```
 
 ---
 
-## 5. Preview contract
+## 5. Server OpenCV architecture
 
-Crop status and preview availability are separate.
-
-### Successful crop
-
-```text
-status = PROCESSED
-preview = enh_file_id
-UI = READY
-```
-
-### Failed crop
-
-```text
-status = FAILED
-preview = original file_id
-UI = retry / guided capture
-```
-
-A failed crop must not make the uploaded image disappear.
-
----
-
-## 6. OpenCV architecture
-
-Two rough-localization strategies are used in order:
+Rough localization order:
 
 ```text
 1. HSV scene-based locator
-2. Canny external-contour locator
+2. Canny external-contour locator only after HSV fails
 ```
 
-Both feed the same existing four-edge confirmation engine.
+Both feed the same existing `_confirm_all_four_corners()` authority.
 
-Canny is not a second crop engine. It only proposes a rough card location.
+Canny is a second rough locator, not an independent crop engine.
 
----
-
-## 7. Server orientation handling
-
-The processor tests:
+Server orientation passes:
 
 ```text
 original
@@ -265,185 +237,76 @@ ccw90
 rotate180
 ```
 
-This remains useful after browser EXIF normalization because EXIF may be absent or incorrect and the card itself may be arbitrarily oriented.
-
-Do not blindly rotate portrait captures to landscape in the browser.
+Do not blindly force phone images to landscape in the browser.
 
 ---
 
-## 8. HSV scene preflight
+## 6. Frozen geometry
 
-The HSV classifier describes the scene/background, not card geometry.
-
-Sample the outer ~12% border and compute:
-
-```text
-s50
-s75
-v25
-v50
-v75
-```
-
-Scene family:
-
-```text
-if s50 < 55:
-    if v50 < 85:
-        NEUTRAL_DARK
-    elif v50 < 170:
-        NEUTRAL_MID
-    else:
-        NEUTRAL_LIGHT
-else:
-    CHROMATIC
-```
-
-### Masks
-
-NEUTRAL_DARK:
-
-```text
-H 35–135
-S >= 30
-V low = max(90, min(160, v50 + 25))
-```
-
-NEUTRAL_MID:
-
-```text
-H 35–135
-S >= 40
-V low = max(120, min(185, v50 + 30))
-```
-
-NEUTRAL_LIGHT:
-
-```text
-H 35–135
-S low = max(35, min(90, s75 + 12))
-V >= 60
-```
-
-CHROMATIC:
-
-```text
-H 35–135
-S >= 25
-V >= 60
-```
-
-Secondary strict-cool:
-
-```text
-H 35–135
-S >= 40
-V >= 60
-```
-
-Legacy-cool:
-
-```text
-H 35–135
-S >= 18
-V >= 60
-```
-
-Morphology:
+HSV morphology:
 
 ```text
 open 5×5 ellipse
 close 19×19 ellipse
 ```
 
-Candidate generation:
+Rough admission:
 
 ```text
-minimum component area ratio = 0.004
-top components = up to 6
-minimum side = 20px
-normal rough area = 0.06–0.65
-close-up rough area = 0.65–1.00 with rough ratio 1.25–1.95
+normal rough area: 0.06–0.65
+close-up rough area: >0.65–1.00
+close-up rough ratio: 1.25–1.95
+minimum side: 20px
+minimum component area ratio: 0.004
 ```
 
-Candidate score:
+Four-edge confirmer:
 
 ```text
-ratio_error * 4 - density * 0.6
+Gaussian blur = 5×5
+Sobel kernel = 3
+edge sample range = 8%–92%
+edge sample count = 180
+winner score = gradient - 0.6 * abs(offset)
+minimum gradient = 25
+RANSAC distance = 4.5px
+RANSAC iterations = 400
+RNG seed = 123
 ```
+
+Universal per-edge floor:
+
+```text
+>= 50 inliers
+```
+
+Mode-specific final gates:
+
+```text
+normal min edge inliers = 50
+close-up min edge inliers = 80
+normal polygon area = 0.08–0.65
+close-up polygon area <= 0.98
+final ratio = 1.25–1.95
+max corner angle error <= 20°
+corners within source bounds/tolerance
+```
+
+Output:
+
+```text
+1000×631 JPEG
+```
+
+Do not weaken these thresholds merely to force a difficult sample through.
 
 ---
 
-## 9. Guarded close-up mode
+## 7. Source-frame rejection
 
-Normal mode:
+A rectangle that is effectively the photograph boundary is not a licence.
 
-```text
-rough area: 0.06–0.65
-confirmed polygon area: 0.08–0.65
-minimum final edge inliers: 50
-```
-
-Close-up admission:
-
-```text
-0.65 < rough area <= 1.00
-and
-1.25 <= rough ratio <= 1.95
-```
-
-Close-up confirmation:
-
-```text
-confirmed polygon area <= 0.98
-minimum final edge inliers >= 80
-```
-
-A universal per-edge floor of 50 still applies before the stricter close-up aggregate test.
-
----
-
-## 10. Canny external-contour rough locator
-
-Added at:
-
-`adb87f7d fix(dl): add Canny rough locator after HSV failure`
-
-Canny runs only after HSV fails to confirm a card.
-
-Conceptual flow:
-
-```text
-grayscale
-  ↓
-blur
-  ↓
-Canny
-  ↓
-validated minimal morphology
-  ↓
-external contours
-  ↓
-cv2.minAreaRect
-  ↓
-cv2.boxPoints
-  ↓
-ordered rough corners
-  ↓
-source-frame rejection
-  ↓
-existing _confirm_all_four_corners()
-```
-
-Known Canny rescue examples include `IMG_6446` and the earlier/raw representation of `ed3411`.
-
----
-
-## 11. Source-frame rejection
-
-A detected rectangle that is effectively the photograph boundary is not a licence.
-
-Current rule:
+Current margin:
 
 ```text
 SOURCE_FRAME_MARGIN_PX = 8
@@ -458,111 +321,13 @@ and max_x >= width - 8
 and max_y >= height - 8
 ```
 
-Example:
-
-```text
-IMG_8789
-legacy_cool
-area ≈ 99.8%
-touches all four image boundaries
-→ SOURCE_FRAME_CANDIDATE
-→ reject
-```
+`IMG_8789` remains an honest failure and must not be forced through by lowering geometry thresholds.
 
 ---
 
-## 12. Four-edge confirmation engine
+## 8. Current regression expectations
 
-The existing confirmer is the sole acceptance authority.
-
-Frozen geometry:
-
-```text
-Gaussian blur = 5×5
-Sobel kernel = 3
-edge sample range = 8%–92%
-edge sample count = 180
-winner score = gradient - 0.6 * abs(offset)
-minimum gradient = 25
-RANSAC distance = 4.5px
-RANSAC iterations = 400
-RNG seed = 123
-```
-
-For each proposed edge:
-
-```text
-rough edge
-  ↓
-sample along edge
-  ↓
-search normal to rough edge
-  ↓
-choose strongest gradient evidence
-  ↓
-RANSAC
-  ↓
-cv2.fitLine
-```
-
-All four fitted lines are required.
-
-No four confirmed edges = no crop.
-
----
-
-## 13. Final geometry gates
-
-Acceptance requires:
-
-- all four edge lines;
-- valid line intersections;
-- corners within source bounds/tolerance;
-- mode-specific polygon area;
-- final card ratio between 1.25 and 1.95;
-- max angle error <= 20°;
-- required edge inliers.
-
-Normal:
-
-```text
-minimum edge inliers >= 50
-```
-
-Close-up:
-
-```text
-universal per-edge floor >= 50
-final close-up minimum edge inliers >= 80
-```
-
-No threshold should be weakened merely to force a difficult sample through.
-
----
-
-## 14. Perspective warp
-
-After confirmation only:
-
-```text
-confirmed TL/TR/BR/BL
-        ↓
-perspective transform
-        ↓
-corrected licence
-        ↓
-1000×631 JPEG
-```
-
-The processed image is stored separately as `enh_file_id`.
-
----
-
-## 15. Regression battery
-
-Current expected server behavior:
-
-| Sample | Result | Typical locator in current tested representation |
+| Sample | Expected | Typical locator in tested representation |
 |---|---|---|
 | IMG_6446 | PASS | CANNY |
 | ed3411 normalized | PASS | HSV |
@@ -576,128 +341,23 @@ Current expected server behavior:
 | closeup_8EF4 | PASS | HSV |
 | closeup_59a5 | PASS | HSV |
 
-Targeted server DL pytest checkpoint from the OpenCV slice:
+OpenCV slice checkpoint:
 
 ```text
-6 passed
+6 targeted DL tests passed
 ```
 
-Capture-link unit checkpoint from the tenant phone-capture slice:
+QR/capture slice checkpoint:
 
 ```text
-5 passed
+10 tests passed in tests/test_dl_capture.py
 ```
 
-Unrelated repository DB/socket failures or unrelated syntax/test failures must not be reported as DL regressions.
+Do not represent unrelated repository DB/socket/syntax failures as DL regressions.
 
 ---
 
-## 16. Known difficult case: IMG_8789
-
-`IMG_8789` remains an honest failure.
-
-Canny can propose a near-full-bleed candidate:
-
-```text
-rough area ≈ 0.897
-rough ratio ≈ 1.530
-close-up mode = true
-```
-
-Edge evidence:
-
-```text
-[159, 53, 82, 47]
-```
-
-The universal edge floor fails on one side before close-up confirmation can succeed.
-
-Correct result:
-
-```text
-FAILED
-```
-
-Do not lower thresholds just to accept this image.
-
-This is a natural candidate for future guided capture.
-
----
-
-## 17. Existing-upload acceptance threshold
-
-Do not use an arbitrary confidence percentage.
-
-The acceptance threshold is:
-
-```text
-FOUR_CORNERS_CONFIRMED
-```
-
-Flow:
-
-```text
-HSV
- ↓ fail
-Canny
- ↓
-existing four-edge confirmer
-```
-
-If confirmed:
-
-```text
-accept
-show corrected preview
-READY
-```
-
-If not confirmed:
-
-```text
-show source preview
-FAILED
-offer retry / future guided camera
-```
-
----
-
-## 18. Main onboarding Driver's License box — product model
-
-The Driver's License box on the normal applicant onboarding page is the complete user-facing licence workflow.
-
-The applicant should not need to understand separate APIs, tokens, or sessions.
-
-Approved product story:
-
-```text
-DRIVER'S LICENSE
-
-Upload from this device
-[ Upload / Take Photo ]
-
-──────── OR ────────
-
-Use your phone
-[ QR CODE ]
-
-Mobile number: [____________]
-[ Send Link ]
-```
-
-If the applicant is already on a phone, the current-device controls can use the native camera or the phone's Photos/Gallery picker.
-
-If the applicant is on a laptop/desktop, `Use your phone` creates/uses the restricted tenant-scoped `dl_capture` companion link.
-
-The laptop remains on the onboarding application while the phone captures FRONT and BACK.
-
-The phone companion is not another onboarding application. It is a temporary licence-capture surface attached to the same `person_application`.
-
----
-
-## 19. Two-token security model
-
-The two token types have deliberately different authority.
+## 9. Two-token security model
 
 ### Normal applicant token
 
@@ -705,44 +365,43 @@ The two token types have deliberately different authority.
 /onboarding?token=<applicant-token>
 ```
 
-Purpose:
+Authority:
 
 ```text
 full applicant onboarding application
 ```
 
-### DL capture token
+### Restricted phone capture token
 
 ```text
 /dl-capture/<opaque-token>
 ```
 
-Purpose:
+Authority:
 
 ```text
-restricted FRONT/BACK driver-licence capture only
+FRONT/BACK driver-licence capture only
 ```
 
-This separation is intentional. A QR code or SMS sent to a phone should not need to expose the token that grants access to the applicant's full onboarding application.
+The QR/SMS handoff must use the restricted capture token, not the full applicant onboarding token.
 
 ---
 
-## 20. Tenant-scoped capture token — implemented
+## 10. Tenant-scoped capture token — implemented
 
-Implemented by checkpoint `67db75d9` using existing `application_access_tokens`.
+Checkpoint: `67db75d9`
 
-Key properties:
+Uses existing `application_access_tokens` with:
 
 ```text
 purpose = dl_capture
 token_hash = SHA-256 of raw token
-raw token returned only when link is issued
-expires_at = 24-hour initial policy
+expires_at = 24 hours
 revoked_at
 completed_at
 ```
 
-Generation uses cryptographically secure randomness:
+Generation:
 
 ```python
 raw_token = secrets.token_urlsafe(32)
@@ -751,35 +410,29 @@ token_hash = sha256(raw_token)
 
 The database stores the hash, not the raw capture token.
 
-Issuing a new DL capture link revokes only prior active `dl_capture` tokens for that application. It must not revoke `invite`, `document_resume`, or any other token purpose.
+Issuing a new capture token revokes only prior active `dl_capture` tokens for the same application. It must not revoke `invite`, `document_resume`, or any other token purpose.
 
-### Tenant validation
-
-Capture lookup is bound to the tenant resolved from the hostname:
+Capture lookup requires:
 
 ```text
-request.state.tenant_id
+hostname-resolved tenant_id
 + token_hash
 + purpose = dl_capture
 + revoked_at IS NULL
 + expires_at > now
 ```
 
-Wrong tenant, unknown token, expired token, or revoked token must all produce the same generic capture-page experience:
+Wrong tenant, unknown token, expired token, or revoked token must show the same generic phone-page experience:
 
 ```text
 Invalid or expired capture link
 ```
 
-No cross-tenant token-existence details are shown in the phone UI.
-
 ---
 
-## 21. Capture progress and resume behavior — implemented
+## 11. Capture progress and resume
 
-FRONT/BACK progress is not duplicated into the access-token row.
-
-Source of truth:
+FRONT/BACK state lives only in the application:
 
 ```text
 person_applications.intake_payload.files.CDL_FRONT.dl_preprocess_status
@@ -801,170 +454,236 @@ FRONT PROCESSED + BACK PROCESSED
 
 `FAILED` does not count as complete.
 
-The same token may be closed/reopened or opened from another device and must resume from fresh server-side application state.
+The same capture token may be reopened or used from another device and must resume from fresh server-side application state.
 
-After both sides are `PROCESSED`, `completed_at` is set and further arbitrary capture uploads are rejected.
-
-One capture token handles both FRONT and BACK.
+After both sides are `PROCESSED`, set `completed_at`; further arbitrary capture uploads are rejected.
 
 ---
 
-## 22. Phone capture UI
+## 12. QR phone companion — implemented
 
-The phone companion should remain intentionally simple:
+Checkpoint: `32b28531`
+
+The existing Driver's License section on the Applicant Application Page now supports an explicit **Use your phone** action.
+
+Important behavior:
 
 ```text
-Driver Licence
+Application Page loads
+→ no capture token is issued
 
-Front
-[ Take Photo ]
-[ Choose Existing Photo ]
-
-        ↓ accepted
-
-Back
-[ Take Photo ]
-[ Choose Existing Photo ]
-
-        ↓ accepted
-
-✓ Driver licence received
-You can close this page.
+Applicant clicks Use your phone
+→ applicant-scoped endpoint authenticates invite token
+→ requires invite purpose + DRAFT application
+→ derives application_id server-side
+→ issues restricted dl_capture token
+→ returns tenant HTTPS capture URL
+→ Application Page renders QR
 ```
 
-Mobile input behavior:
+Applicant endpoint:
 
-```html
-<!-- Take a new photo -->
-<input type="file" accept="image/*" capture="environment">
-
-<!-- Pick an existing saved photo -->
-<input type="file" accept="image/*">
+```text
+POST /api/v1/driver-onboarding/applicant/application/dl-capture-link?token=<applicant-token>
 ```
 
-Both paths must reuse the same handler and the same `normalizeDlUpload()` helper before calling the same capture upload API.
+The browser does not supply `application_id`.
 
-Do not duplicate browser normalization or server OpenCV logic.
+The existing admin capture-link issuer remains available and shares the same underlying issue logic.
 
-A custom `getUserMedia()` guided camera is not required merely to take a phone picture; the native camera input already provides that behavior. A custom camera should be added only if we later need a live overlay, framing assistance, or auto-capture.
+The QR is rendered in-browser with:
+
+```text
+react-qr-code@2.0.15
+```
+
+No external QR service is used.
+
+QR content is exactly:
+
+```text
+https://{tenant-slug}.truckerp.me/dl-capture/<opaque-token>
+```
+
+Do not put any PII or the full applicant token in the QR.
+
+No:
+
+```text
+applicant name
+application_id
+licence number
+email
+phone number
+full onboarding token
+```
+
+Production capture URLs use the proxy-aware public HTTPS scheme. Nginx explicitly overwrites `X-Forwarded-Proto` with `$scheme` on the API proxy, so client-supplied forwarding headers are not trusted for URL construction.
 
 ---
 
-## 23. QR and SMS handoff — approved next product flow
+## 13. Application Page phone panel
 
-The laptop Driver's License box can issue one restricted capture URL:
-
-```text
-https://{tenant-slug}.truckerp.me/dl-capture/{opaque-token}
-```
-
-That exact URL is used by both delivery methods:
+Current Application Page behavior:
 
 ```text
-QR code → encodes capture URL
-SMS     → sends capture URL
+DRIVER'S LICENSE
+
+existing upload-from-this-device controls
+
+──────── OR ────────
+
+Use your phone
+[ Use your phone ]
 ```
 
-QR requires no external delivery provider and should be implemented/tested first.
-
-SMS later adds only a delivery provider; it must not create a different capture protocol or token model.
-
-No PII should be placed directly in the URL. Do not include applicant name, licence number, application ID, email, or phone number in the path/query.
-
----
-
-## 24. Laptop companion behavior
-
-The laptop stays on the normal onboarding application while the phone works.
-
-Example UI progression:
+After explicit issuance:
 
 ```text
 Use your phone
 
 [ QR CODE ]
 
-Front: Waiting...
-Back:  Waiting...
+Scan this code with your phone to take or choose
+photos of the front and back of your driver licence.
+
+Front: Waiting / Received
+Back:  Waiting / Received
+
+[ Check status ]
 ```
 
-After the phone uploads FRONT successfully:
+The QR is not generated automatically on page mount or re-render. This avoids silently revoking a capture link already being used on a phone.
 
-```text
-Front: ✓ Received
-Back:  Waiting...
-```
+The **Check status** button is a temporary/manual fallback only. It performs one fresh application fetch and derives FRONT/BACK status from the database-backed application state.
 
-After BACK succeeds:
-
-```text
-Front: ✓ Received
-Back:  ✓ Received
-
-✓ Driver licence received
-
-[ Continue ]
-```
-
-Both browser sessions operate on the same `person_application`; there is no direct phone-to-laptop connection.
-
-```text
-PHONE ───────→ SERVER ←─────── LAPTOP
-   uploads               receives change signal
-```
-
-The laptop must always render completion from fresh server state, not from an event payload alone.
+There is no polling loop and no `setInterval` for this feature.
 
 ---
 
-## 25. Real-time synchronization — future-proof architecture
+## 14. Phone companion UI
+
+The phone page remains intentionally simple:
+
+```text
+Front Driver Licence
+[ Take Photo ]
+[ Choose Existing Photo ]
+
+        ↓ accepted
+
+Back Driver Licence
+[ Take Photo ]
+[ Choose Existing Photo ]
+
+        ↓ accepted
+
+✓ Driver licence received
+You can return to the other device.
+```
+
+Native mobile inputs:
+
+```html
+<!-- New photo -->
+<input type="file" accept="image/*" capture="environment">
+
+<!-- Existing saved photo -->
+<input type="file" accept="image/*">
+```
+
+Both paths use the same handler:
+
+```text
+File
+→ normalizeDlUpload()
+→ existing dl_capture upload API
+→ existing _apply_applicant_dl_upload()
+→ existing OpenCV pipeline
+```
+
+No guided camera, `getUserMedia`, live overlay, or automatic shutter is required for ordinary phone capture.
+
+---
+
+## 15. Proven QR companion flow
+
+Live demo verification established:
+
+```text
+Phone FRONT IMG_8788
+→ PROCESSED via HSV
+
+Laptop manual Check status
+→ Front ✓ Received
+→ Back waiting
+
+Phone BACK IMG_6446
+→ PROCESSED via CANNY
+
+Laptop manual Check status
+→ Front ✓ Received
+→ Back ✓ Received
+→ licence complete
+```
+
+The desktop applicant `dl-upload` route also remained `PROCESSED` in regression testing after the shared capture-link/upload changes.
+
+---
+
+## 16. SMS delivery — next delivery channel, not implemented
+
+QR and SMS must use the same restricted HTTPS capture URL:
+
+```text
+https://{tenant-slug}.truckerp.me/dl-capture/<opaque-token>
+```
+
+SMS must not introduce a different token model or capture protocol.
+
+The mobile number / Send Link feature is intentionally separate from the QR checkpoint.
+
+---
+
+## 17. Real-time synchronization — next architecture slice
 
 Do not make one-second polling the primary design.
 
-Also do not make a specific browser transport such as SSE the business architecture.
-
-The durable architecture is:
+Current repo inspection found no implemented onboarding/DL:
 
 ```text
-Application state changes
-        ↓
-DOMAIN EVENT
-        ↓
-Event delivery layer
-        ↓
-┌───────────────┬───────────────┬────────────────┐
-│               │               │                │
-Web browser     iOS app         Android/future
-SSE today       APNs later      push/other
+SSE
+WebSocket
+Redis event bus
+background worker
+PostgreSQL LISTEN/NOTIFY event path
+transactional outbox
 ```
 
-### Database remains the source of truth
+The current **Check status** button is a one-shot refresh only.
 
-Events only signal that something changed.
-
-Example:
+Approved future architecture:
 
 ```text
-Phone upload
-    ↓
-OpenCV PASS
-    ↓
-DB commits CDL_FRONT = PROCESSED
-    ↓
-domain event emitted
-    ↓
-laptop receives event
-    ↓
-laptop fetches application once
-    ↓
-render Front ✓ from DB state
+phone upload
+        ↓
+DB/application state commits
+        ↓
+durable domain event / transactional outbox
+        ↓
+delivery layer
+        ↓
+┌──────────────────┬───────────────────┐
+│                  │                   │
+web browser        iOS/native
+SSE today          APNs later
 ```
 
-Never use an event message itself as proof that the licence is complete.
+The database/application state remains authoritative. Events only signal that something changed.
 
-### Suggested event names
+When the laptop receives a change signal, it should fetch fresh application state once and render from that state.
 
-Transport-independent domain names:
+Suggested transport-independent event names:
 
 ```text
 driver_licence.front_processed
@@ -973,84 +692,76 @@ driver_licence.processing_failed
 driver_licence.capture_complete
 ```
 
-The event contract should not contain assumptions about SSE, Apple Push Notifications, Redis, or PostgreSQL.
+Do not encode SSE, Redis, PostgreSQL, or Apple-specific assumptions into the domain event contract.
 
 ---
 
-## 26. Durable event delivery / transactional outbox — planned
+## 18. Transactional outbox direction
 
-For a future-proof production event layer, prefer a transactional outbox over making PostgreSQL `LISTEN/NOTIFY` the permanent source of events.
+Prefer a durable transactional outbox over making `LISTEN/NOTIFY` the permanent source of truth for events.
 
 Desired transaction:
 
 ```text
 BEGIN
 
-1. save CDL_FRONT/CLD_BACK application state
+1. save application CDL state
 2. insert corresponding domain event into outbox
 
 COMMIT
 ```
 
-Then an event worker delivers pending events to interested transports.
+Then a delivery worker/adaptor sends pending events to interested transports.
 
-This prevents a successful licence DB update from permanently losing its notification if an API process crashes immediately afterward.
+This prevents a successful application update from permanently losing its notification if an API process crashes immediately afterward.
 
-`LISTEN/NOTIFY` may still be used as an optimization/wakeup mechanism, but the durable event record should live in the outbox.
+`LISTEN/NOTIFY` may later be used as a wakeup optimization, but the durable event record should live in the outbox.
 
 ---
 
-## 27. Web delivery today — SSE planned
+## 19. Browser delivery direction — SSE
 
-For the laptop browser, Server-Sent Events are a good one-way transport:
+For the Applicant Application Page, SSE is the likely one-way browser transport:
 
 ```text
 Laptop opens one SSE connection
         ↓
-server waits
-        ↓
 phone commits licence change
         ↓
-domain event delivered
+durable event becomes deliverable
         ↓
-SSE tells laptop application changed
+SSE signals application changed
         ↓
 laptop fetches fresh application once
+        ↓
+render Front/Back status from DB state
 ```
 
-This avoids aggressive one-second polling while keeping the browser implementation simple.
-
-SSE is a transport adapter only. Business logic must not depend on it.
-
-A conservative low-frequency reconnect/fallback strategy may be added for degraded-network conditions, but tight polling is not the primary path.
+SSE is a transport adapter only; business logic must not depend on SSE.
 
 ---
 
-## 28. Future iOS app / Universal Link
+## 20. Future native apps / Universal Links
 
-The capture URL must remain an ordinary tenant HTTPS URL:
+Keep the capture URL as a normal tenant HTTPS URL:
 
 ```text
-https://{tenant-slug}.truckerp.me/dl-capture/{opaque-token}
+https://{tenant-slug}.truckerp.me/dl-capture/<opaque-token>
 ```
 
-This allows the same QR code and SMS format to survive a future native app launch.
-
-Future iPhone behavior can become:
+Future iPhone behavior:
 
 ```text
-Capture URL opened on iPhone
+Capture URL opened
         ↓
 TruckERP iOS app installed?
    ├─ NO  → mobile web /dl-capture page
-   └─ YES → Apple Universal Link opens TruckERP iOS app
+   └─ YES → Apple Universal Link opens native app
 ```
 
-The native app then uses the same restricted capture token and the same backend DL upload/application APIs.
+The native app can use the same restricted capture token and the same backend application/upload contract.
 
-The QR code and SMS sender do not need to know whether the destination is web or native.
-
-Future client delivery can use:
+Delivery transports may evolve independently:
 
 ```text
 browser → SSE
@@ -1058,54 +769,31 @@ iOS     → APNs
 Android → platform push
 ```
 
-while all clients consume the same domain/application state model.
+The QR/SMS link itself does not change.
 
 ---
 
-## 29. Guided mobile camera — optional later enhancement
+## 21. Guided camera — optional later enhancement
 
-A custom browser camera is not necessary for the basic phone flow.
+A custom browser camera is not required for the basic flow.
 
-If normal native-camera/upload attempts fail OpenCV confirmation, a future guided camera may provide an ID-1-shaped guide.
+If normal native-camera/upload attempts repeatedly fail strict OpenCV confirmation, a future guided camera may provide framing assistance.
 
-ID-1 aspect ratio:
+Possible ID-1 guide ratio:
 
 ```text
 85.60 / 53.98 ≈ 1.586
 ```
 
-Possible target framing:
+Possible framing guidance must remain assistance only.
 
-```text
-ideal card width:    70–75% of frame
-acceptable range:    60–80%
-auto-capture range:  approximately 65–78%
-```
+Do not crop to the guide before upload. Submit the full frame and keep server four-edge confirmation as final authority.
 
-Keep visible background around all four edges. Avoid full-bleed capture.
-
-Possible guidance:
-
-```text
-Too far       → Move closer
-Too close     → Move farther away
-Outside guide → Fit all four corners
-Too tilted    → Hold phone straighter
-Motion        → Hold steady
-Too dark      → More light
-```
-
-Important invariants:
-
-- the guide is assistance only;
-- do not crop to the guide rectangle before upload;
-- submit the full camera frame;
-- server four-edge confirmation remains final authority;
-- auto-capture should not be added until framing measurements are empirically proven.
+Do not add automatic shutter until live framing measurements are empirically proven.
 
 ---
 
-## 30. Frozen invariants
+## 22. Frozen invariants
 
 Do not reintroduce:
 
@@ -1121,133 +809,13 @@ Do not reintroduce:
 - source-frame candidates as valid cards;
 - arbitrary confidence replacing four-edge confirmation.
 
-Do not change without empirical evidence:
-
-```text
-gradient threshold = 25
-RANSAC distance = 4.5px
-RANSAC iterations = 400
-RNG seed = 123
-normal min edge inliers = 50
-close-up min edge inliers = 80
-ratio gate = 1.25–1.95
-max angle error = 20°
-normal polygon max = 0.65
-close-up polygon max = 0.98
-```
+Do not change frozen geometry without empirical evidence.
 
 ---
 
-## 31. Separation of responsibilities
+## 23. Capture token schema deployment
 
-### Main onboarding browser
-
-```text
-full applicant application
-Driver's License box
-upload from current device
-issue/show phone companion QR/SMS link
-reflect fresh application state
-Continue when FRONT + BACK are PROCESSED
-```
-
-### Phone web/native client
-
-```text
-restricted dl_capture token
-FRONT/BACK capture or existing-photo selection
-normalize payload (web)
-upload to same backend
-show success/failure
-```
-
-### Server rough localization
-
-```text
-HSV first
-Canny second
-```
-
-### Server final geometry
-
-```text
-Sobel
-RANSAC
-fitLine
-four intersections
-strict confirmation gates
-```
-
-### Server output
-
-```text
-perspective warp
-1000×631
-separate enhanced file
-```
-
-### Storage/application state
-
-```text
-preserve source
-store enhanced separately only on success
-FRONT/BACK PROCESSED state is authoritative
-```
-
-### Event layer
-
-```text
-business/application commit
-→ durable domain event/outbox
-→ browser SSE / future APNs / other transports
-```
-
----
-
-## 32. Important checkpoints
-
-HSV adaptive scene seed:
-
-```text
-b6618bd2
-fix(dl): adapt HSV seed to scene background
-```
-
-Guarded close-up:
-
-```text
-6257a70b
-fix(dl): allow guarded close-up licence photos above 65% area
-```
-
-HSV-first + Canny-second:
-
-```text
-adb87f7d7920d50e253467ab6ee7331af081ea12
-fix(dl): add Canny rough locator after HSV failure
-```
-
-Browser normalization:
-
-```text
-f00cf96e61438d65f0fe334d59750c45239b0c64
-feat(dl): normalize licence images before upload
-```
-
-Tenant-scoped resumable phone capture:
-
-```text
-67db75d9eeef23b1bb4e90c61a73bf443b0541db
-feat(dl): add tenant-scoped resumable licence capture link
-```
-
-Treat these as frozen layer checkpoints for subsequent QR/SMS, event delivery, guided camera, and native-app work.
-
----
-
-## 33. Deployment note for capture token schema
-
-Capture checkpoint `67db75d9` introduced tenant migration:
+Checkpoint `67db75d9` introduced tenant migration:
 
 ```text
 e8f9a0b1c2d4_application_access_token_completed_at.py
@@ -1255,24 +823,24 @@ e8f9a0b1c2d4_application_access_token_completed_at.py
 
 It adds nullable `completed_at` to `application_access_tokens`.
 
-The migration is tenant-generic and must be applied through the normal tenant Alembic upgrade process for every tenant DB before enabling the capture feature across tenants.
+The migration is tenant-generic and must be applied through the normal tenant Alembic process to every tenant DB before enabling capture across tenants.
 
 ---
 
-## 34. Development rule
+## 24. Development rule
 
 Make one controlled change at a time.
 
 For every slice:
 
 ```text
-1. report current behavior
+1. report current behavior/infrastructure
 2. modify one layer only
-3. run the relevant known battery
+3. run the relevant battery
 4. verify live/container behavior
-5. confirm no previous PASS regressed
+5. confirm previous PASS behavior remains intact
 6. commit only intended files
-7. record the new checkpoint
+7. record the checkpoint
 ```
 
 Keep these as separate slices unless there is a strong implementation reason to combine them:
@@ -1281,9 +849,9 @@ Keep these as separate slices unless there is a strong implementation reason to 
 server OpenCV geometry
 browser normalization
 tenant capture token/session
-main-page QR handoff
-SMS delivery
+Application Page QR handoff
 real-time event/outbox delivery
+SMS delivery
 guided camera
 iOS/Android native clients
 ```
