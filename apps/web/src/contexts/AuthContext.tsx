@@ -210,6 +210,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (pathname.startsWith("/dl-capture/") || pathname === "/dl-capture") {
+        prevPathnameRef.current = pathname;
+        setSession(null);
+        setIsValid(false);
+        setIsValidating(false);
+        setAuthReady(true);
+        setError(null);
+        setErrorStatus(null);
+        return;
+      }
+
       if (tenantSlug && isLoginShellPath(pathname) && Date.now() < skipLoginShellValidateUntilRef.current) {
         prevPathnameRef.current = pathname;
         setSession(null);

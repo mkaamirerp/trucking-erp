@@ -29,6 +29,7 @@ import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
 import PeopleWorkspacePage from "./pages/PeopleWorkspacePage";
 import OnboardingApplicantPage from "./pages/OnboardingApplicantPage";
+import DlCapturePage from "./pages/DlCapturePage";
 import ToolsDiagnosticsPage from "./pages/ToolsDiagnosticsPage";
 import AdminLayout from "./components/AdminLayout";
 import AdminCompanyProfilePage from "./pages/AdminCompanyProfilePage";
@@ -142,6 +143,7 @@ function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />
       <Route path="/onboarding" element={<OnboardingApplicantPage />} />
+      <Route path="/dl-capture/:token" element={<DlCapturePage />} />
       <Route path="/company-setup" element={<CompanySetupPage />} />
       <Route path="/account-setup" element={<CompanySetupPage />} />
       <Route

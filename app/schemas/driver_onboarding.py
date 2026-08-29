@@ -229,6 +229,24 @@ class PersonApplicationDocumentRequestResponse(BaseModel):
     email_error: str | None = None
 
 
+class DlCaptureSessionOut(BaseModel):
+    """Public DL capture resume state. Progress derived from application files only."""
+
+    step: str = Field(description="FRONT | BACK | COMPLETE")
+    front_status: str = Field(description="MISSING | FAILED | PROCESSED")
+    back_status: str = Field(description="MISSING | FAILED | PROCESSED")
+    front_preview_file_id: str | None = None
+    back_preview_file_id: str | None = None
+    message: str | None = None
+
+
+class DlCaptureLinkResponse(BaseModel):
+    application_id: int
+    token: str
+    link: str
+    expires_at: datetime
+
+
 class PersonApplicationDocumentAcceptBody(BaseModel):
     doc_type: str = Field(..., min_length=1, max_length=64)
     accepted: bool = Field(..., description="True = admin accepted; False = clear acceptance")

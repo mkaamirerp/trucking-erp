@@ -1,6 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "/api/v1";
 const PUBLIC_API_BASE = import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1/public";
 
+export { API_BASE };
+
 /** Tenant is resolved server-side from the request Host (workspace subdomain). Do not send X-Tenant-* from the browser. */
 function withTenantHeaders(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers as HeadersInit | undefined);

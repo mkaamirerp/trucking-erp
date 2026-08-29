@@ -46,6 +46,8 @@ from app.schemas.driver_onboarding import (
     ApplicantApplicationOut,
     ApplicantIntakeRequest,
     ApplicantApplicationUpdate,
+    DlCaptureLinkResponse,
+    DlCaptureSessionOut,
     PersonApplicationDocumentAcceptBody,
     PersonApplicationDocumentRequest,
     PersonApplicationDocumentRequestResponse,
@@ -129,6 +131,12 @@ async def _maybe_ensure_person_for_combined_admin_setup(
 
 TOKEN_PURPOSE_INVITE = "invite"
 TOKEN_PURPOSE_DOCUMENT_RESUME = "document_resume"
+TOKEN_PURPOSE_DL_CAPTURE = "dl_capture"
+
+# Capture-link lifetime for purpose=dl_capture (not schema-bound).
+DL_CAPTURE_TOKEN_TTL = timedelta(hours=24)
+
+_DL_CAPTURE_INVALID = "Invalid or expired capture link"
 
 # Applicant may upload / resubmit documents after initial submit or after approval (admin document request).
 _POST_SUBMIT_DOC_RESUME_STATUSES = frozenset(
@@ -528,32 +536,171 @@ def _token_sha256_hex(raw: str) -> str:
 
 
 async def _get_application_and_access_by_token(
-    db: AsyncSession, tenant_id: int, token: str
+    db: AsyncSession,
+    tenant_id: int,
+    token: str,
+    *,
+    purpose: str | None = None,
+    detail: str = "Invalid or expired invite link",
 ) -> tuple[PersonApplication, ApplicationAccessToken]:
-    """Resolve token by SHA-256 hash (preferred) or legacy plaintext `token` column."""
+    """Resolve token by SHA-256 hash (preferred) or legacy plaintext `token` column.
+
+    When ``purpose`` is set, only tokens with that purpose authenticate (e.g. dl_capture).
+    """
     if not token or not str(token).strip():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired invite link")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     raw = str(token).strip()
     now = _utcnow()
     th = _token_sha256_hex(raw)
-    access = await db.scalar(
-        select(ApplicationAccessToken).where(
-            ApplicationAccessToken.tenant_id == tenant_id,
-            ApplicationAccessToken.expires_at > now,
-            ApplicationAccessToken.revoked_at.is_(None),
-            or_(ApplicationAccessToken.token_hash == th, ApplicationAccessToken.token == raw),
-        )
-    )
+    clauses = [
+        ApplicationAccessToken.tenant_id == tenant_id,
+        ApplicationAccessToken.expires_at > now,
+        ApplicationAccessToken.revoked_at.is_(None),
+        or_(ApplicationAccessToken.token_hash == th, ApplicationAccessToken.token == raw),
+    ]
+    if purpose is not None:
+        clauses.append(ApplicationAccessToken.purpose == purpose)
+    access = await db.scalar(select(ApplicationAccessToken).where(*clauses))
     if not access:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired invite link")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     app = await db.get(PersonApplication, access.application_id)
     if not app or app.tenant_id != tenant_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return app, access
 
 
 async def _get_application_by_token(db: AsyncSession, tenant_id: int, token: str) -> PersonApplication:
     app, _access = await _get_application_and_access_by_token(db, tenant_id, token)
+    return app
+
+
+def _dl_side_status(intake: dict, side: str) -> str:
+    meta = (intake.get("files") or {}).get(side)
+    if not isinstance(meta, dict):
+        return "MISSING"
+    status_val = meta.get("dl_preprocess_status")
+    if status_val == "PROCESSED":
+        return "PROCESSED"
+    if status_val == "FAILED":
+        return "FAILED"
+    return "MISSING"
+
+
+def _dl_side_preview_file_id(intake: dict, side: str) -> str | None:
+    meta = (intake.get("files") or {}).get(side)
+    if not isinstance(meta, dict):
+        return None
+    return (
+        meta.get("enh_file_id")
+        or meta.get("file_id")
+        or meta.get("storage_key")
+    )
+
+
+def _dl_capture_step(front_status: str, back_status: str) -> str:
+    if front_status != "PROCESSED":
+        return "FRONT"
+    if back_status != "PROCESSED":
+        return "BACK"
+    return "COMPLETE"
+
+
+async def _maybe_complete_dl_capture_token(
+    db: AsyncSession,
+    access: ApplicationAccessToken,
+    intake: dict,
+) -> None:
+    """Set completed_at when both licence sides are PROCESSED."""
+    if access.completed_at is not None:
+        return
+    if (
+        _dl_side_status(intake, "CDL_FRONT") == "PROCESSED"
+        and _dl_side_status(intake, "CDL_BACK") == "PROCESSED"
+    ):
+        access.completed_at = _utcnow()
+
+
+def _dl_capture_session_out(
+    access: ApplicationAccessToken,
+    intake: dict,
+    *,
+    message: str | None = None,
+) -> DlCaptureSessionOut:
+    front_status = _dl_side_status(intake, "CDL_FRONT")
+    back_status = _dl_side_status(intake, "CDL_BACK")
+    step = _dl_capture_step(front_status, back_status)
+    if access.completed_at is not None:
+        step = "COMPLETE"
+    return DlCaptureSessionOut(
+        step=step,
+        front_status=front_status,
+        back_status=back_status,
+        front_preview_file_id=_dl_side_preview_file_id(intake, "CDL_FRONT"),
+        back_preview_file_id=_dl_side_preview_file_id(intake, "CDL_BACK"),
+        message=message,
+    )
+
+
+async def _apply_applicant_dl_upload(
+    *,
+    db: AsyncSession,
+    app: PersonApplication,
+    tenant_slug: str,
+    doc_type: str,
+    file: UploadFile,
+) -> PersonApplication:
+    """Shared DL storage + OpenCV path used by invite upload and dl-capture upload."""
+    stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
+    intake = dict(app.intake_payload or {})
+    files = dict(intake.get("files") or {})
+
+    from app.core.storage import save_applicant_dl_processed_bytes
+    from app.services.applicant_dl_preprocess import run_applicant_dl_opencv
+
+    import asyncio
+
+    with readable_path(stored.storage_key, "applicant_dl", tenant_slug) as image_path:
+        processed = await asyncio.to_thread(run_applicant_dl_opencv, str(image_path), doc_type)
+
+    preprocess_debug = processed.debug
+    preprocess_status = "FAILED"
+    ocr_storage_key: str | None = None
+
+    if processed.success and processed.jpeg_bytes:
+        stored_processed = await save_applicant_dl_processed_bytes(
+            tenant_slug,
+            app.id,
+            processed.jpeg_bytes,
+            original_storage_key=stored.storage_key,
+        )
+        ocr_storage_key = stored_processed.storage_key
+        preprocess_status = "PROCESSED"
+        files[f"{doc_type}_PROCESSED"] = {
+            "storage_key": stored_processed.storage_key,
+            "file_id": stored_processed.storage_key,
+            "enh_file_id": stored_processed.storage_key,
+            "original_filename": stored_processed.original_filename,
+            "upload_status": "READY",
+            "dl_preprocess_status": preprocess_status,
+        }
+
+    files[doc_type] = {
+        "storage_key": stored.storage_key,
+        "file_id": stored.storage_key,
+        "original_filename": stored.original_filename,
+        "upload_status": "READY" if preprocess_status == "PROCESSED" else "FAILED",
+        "dl_preprocess_status": preprocess_status,
+        "dl_preprocess_debug": preprocess_debug,
+    }
+    if ocr_storage_key:
+        files[doc_type]["enh_file_id"] = ocr_storage_key
+
+    intake["files"] = files
+    if doc_type == "CDL_BACK" and ocr_storage_key:
+        intake = await apply_stored_cdl_back_pdf417(intake, ocr_storage_key, tenant_slug)
+    app.intake_payload = intake
+    await db.commit()
+    await db.refresh(app)
     return app
 
 
@@ -824,58 +971,197 @@ async def upload_applicant_dl(
             status_code=status.HTTP_409_CONFLICT,
             detail="Application already submitted",
         )
-    stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
-    intake = dict(app.intake_payload or {})
-    files = dict(intake.get("files") or {})
-
-    from app.core.storage import readable_path, save_applicant_dl_processed_bytes
-    from app.services.applicant_dl_preprocess import run_applicant_dl_opencv
-
-    import asyncio
-
-    with readable_path(stored.storage_key, "applicant_dl", tenant_slug) as image_path:
-        processed = await asyncio.to_thread(run_applicant_dl_opencv, str(image_path), doc_type)
-
-    preprocess_debug = processed.debug
-    preprocess_status = "FAILED"
-    ocr_storage_key: str | None = None
-
-    if processed.success and processed.jpeg_bytes:
-        stored_processed = await save_applicant_dl_processed_bytes(
-            tenant_slug,
-            app.id,
-            processed.jpeg_bytes,
-            original_storage_key=stored.storage_key,
-        )
-        ocr_storage_key = stored_processed.storage_key
-        preprocess_status = "PROCESSED"
-        files[f"{doc_type}_PROCESSED"] = {
-            "storage_key": stored_processed.storage_key,
-            "file_id": stored_processed.storage_key,
-            "enh_file_id": stored_processed.storage_key,
-            "original_filename": stored_processed.original_filename,
-            "upload_status": "READY",
-            "dl_preprocess_status": preprocess_status,
-        }
-
-    files[doc_type] = {
-        "storage_key": stored.storage_key,
-        "file_id": stored.storage_key,
-        "original_filename": stored.original_filename,
-        "upload_status": "READY" if preprocess_status == "PROCESSED" else "FAILED",
-        "dl_preprocess_status": preprocess_status,
-        "dl_preprocess_debug": preprocess_debug,
-    }
-    if ocr_storage_key:
-        files[doc_type]["enh_file_id"] = ocr_storage_key
-
-    intake["files"] = files
-    if doc_type == "CDL_BACK" and ocr_storage_key:
-        intake = await apply_stored_cdl_back_pdf417(intake, ocr_storage_key, tenant_slug)
-    app.intake_payload = intake
-    await db.commit()
-    await db.refresh(app)
+    app = await _apply_applicant_dl_upload(
+        db=db,
+        app=app,
+        tenant_slug=tenant_slug,
+        doc_type=doc_type,
+        file=file,
+    )
     return _person_application_to_out(app)
+
+
+@router.get(
+    "/applicant/dl-capture/{token}",
+    response_model=DlCaptureSessionOut,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def get_dl_capture_session(
+    token: str,
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Resume DL capture: step derived from application file preprocess status."""
+    app, access = await _get_application_and_access_by_token(
+        db,
+        tenant_id,
+        token,
+        purpose=TOKEN_PURPOSE_DL_CAPTURE,
+        detail=_DL_CAPTURE_INVALID,
+    )
+    _require_driver_workflow(app)
+    intake = dict(app.intake_payload or {})
+    before_completed = access.completed_at
+    await _maybe_complete_dl_capture_token(db, access, intake)
+    if access.completed_at is not None and before_completed is None:
+        await db.commit()
+        await db.refresh(access)
+    return _dl_capture_session_out(access, intake)
+
+
+@router.post(
+    "/applicant/dl-capture/{token}/upload",
+    response_model=DlCaptureSessionOut,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def upload_dl_capture_side(
+    token: str,
+    doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
+    file: UploadFile = File(...),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Upload one DL side via capture token; same OpenCV path as applicant dl-upload."""
+    if doc_type not in ("CDL_FRONT", "CDL_BACK"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
+
+    app, access = await _get_application_and_access_by_token(
+        db,
+        tenant_id,
+        token,
+        purpose=TOKEN_PURPOSE_DL_CAPTURE,
+        detail=_DL_CAPTURE_INVALID,
+    )
+    _require_driver_workflow(app)
+
+    if access.completed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Driver licence capture is already complete",
+        )
+    if app.status != DriverOnboardingStatus.DRAFT.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application already submitted",
+        )
+
+    intake_before = dict(app.intake_payload or {})
+    step = _dl_capture_step(
+        _dl_side_status(intake_before, "CDL_FRONT"),
+        _dl_side_status(intake_before, "CDL_BACK"),
+    )
+    if step == "COMPLETE":
+        await _maybe_complete_dl_capture_token(db, access, intake_before)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Driver licence capture is already complete",
+        )
+    expected = "CDL_FRONT" if step == "FRONT" else "CDL_BACK"
+    if doc_type != expected:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Expected {expected} for current capture step",
+        )
+
+    app = await _apply_applicant_dl_upload(
+        db=db,
+        app=app,
+        tenant_slug=tenant_slug,
+        doc_type=doc_type,
+        file=file,
+    )
+    intake = dict(app.intake_payload or {})
+    # Re-load access after commit (session may expire identity); refresh by id.
+    access = await db.get(ApplicationAccessToken, access.id)
+    assert access is not None
+    await _maybe_complete_dl_capture_token(db, access, intake)
+    await db.commit()
+    await db.refresh(access)
+    await db.refresh(app)
+
+    side_status = _dl_side_status(intake, doc_type)
+    message = None
+    if side_status == "FAILED":
+        message = "We couldn't clearly detect all four edges."
+    return _dl_capture_session_out(access, intake, message=message)
+
+
+@router.get("/applicant/dl-capture/{token}/file", dependencies=_APPLICANT_SUBSCRIPTION)
+async def get_dl_capture_file(
+    token: str,
+    file_id: str = Query(..., description="Storage key / file id"),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Serve a DL file for the capture session (original or processed)."""
+    app, _access = await _get_application_and_access_by_token(
+        db,
+        tenant_id,
+        token,
+        purpose=TOKEN_PURPOSE_DL_CAPTURE,
+        detail=_DL_CAPTURE_INVALID,
+    )
+    _require_driver_workflow(app)
+    files = (app.intake_payload or {}).get("files") or {}
+    for _side, meta in files.items():
+        storage_key = _resolve_applicant_dl_serve_key(meta, file_id)
+        if storage_key:
+            return serve_file(storage_key, "applicant_dl", tenant_slug, meta.get("original_filename"))
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+
+@router.post(
+    "/applications/{application_id}/dl-capture-link",
+    response_model=DlCaptureLinkResponse,
+)
+async def issue_dl_capture_link(
+    application_id: int,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Admin: issue a resumable DL capture link (hash-only; revokes prior dl_capture tokens only)."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    app = await _get_person_application_admin_or_404(db, tenant_id, application_id)
+    _require_driver_workflow(app)
+
+    await _revoke_active_access_tokens_for_application(
+        db,
+        tenant_id,
+        application_id,
+        purpose=TOKEN_PURPOSE_DL_CAPTURE,
+    )
+    raw = secrets.token_urlsafe(32)
+    th = _token_sha256_hex(raw)
+    now = _utcnow()
+    expires_at = now + DL_CAPTURE_TOKEN_TTL
+    db.add(
+        ApplicationAccessToken(
+            tenant_id=tenant_id,
+            application_id=application_id,
+            token=None,
+            token_hash=th,
+            expires_at=expires_at,
+            revoked_at=None,
+            completed_at=None,
+            purpose=TOKEN_PURPOSE_DL_CAPTURE,
+        )
+    )
+    await db.commit()
+
+    base = str(request.base_url).rstrip("/")
+    link = f"{base}/dl-capture/{raw}"
+    return DlCaptureLinkResponse(
+        application_id=application_id,
+        token=raw,
+        link=link,
+        expires_at=expires_at,
+    )
 
 
 @router.get("/applicant/application/file", dependencies=_APPLICANT_SUBSCRIPTION)
@@ -1271,17 +1557,23 @@ async def patch_person_application_review_fields(
 
 
 async def _revoke_active_access_tokens_for_application(
-    db: AsyncSession, tenant_id: int, application_id: int
+    db: AsyncSession,
+    tenant_id: int,
+    application_id: int,
+    *,
+    purpose: str | None = None,
 ) -> None:
+    """Revoke active tokens for an application. When purpose is set, only that purpose is revoked."""
     now = _utcnow()
+    clauses = [
+        ApplicationAccessToken.tenant_id == tenant_id,
+        ApplicationAccessToken.application_id == application_id,
+        ApplicationAccessToken.revoked_at.is_(None),
+    ]
+    if purpose is not None:
+        clauses.append(ApplicationAccessToken.purpose == purpose)
     await db.execute(
-        update(ApplicationAccessToken)
-        .where(
-            ApplicationAccessToken.tenant_id == tenant_id,
-            ApplicationAccessToken.application_id == application_id,
-            ApplicationAccessToken.revoked_at.is_(None),
-        )
-        .values(revoked_at=now)
+        update(ApplicationAccessToken).where(*clauses).values(revoked_at=now)
     )
 
 
