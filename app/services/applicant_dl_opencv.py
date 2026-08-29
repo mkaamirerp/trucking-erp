@@ -22,7 +22,8 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-PREPROCESS_VERSION = "2026-08-28-sandbox-exact"
+PREPROCESS_VERSION = "2026-08-28-hsv-scene-v1"
+GEOMETRY_ENGINE_VERSION = "2026-08-28-sandbox-exact"
 SANDBOX_BASE_SHA256 = "ac008e5b3583dee103d975fd08c61dacc2076a768ed10fa39ab737ff2c097d8a"
 SANDBOX_REFINEMENT_SHA256 = "bade5f5a34beb2537750235c3525fbd6420bc28b255518d55a4701531908f6d4"
 
@@ -96,80 +97,335 @@ def ensure_landscape_upright_for_dl(image_bgr: np.ndarray) -> np.ndarray:
         out = cv2.rotate(out, cv2.ROTATE_180)
     return out
 
-def _rough_card_candidates(image_bgr):
-    """Color is only a seed for where to search; it is never accepted as final card geometry."""
+
+def _hsv_scene_profile(image_bgr):
+    """
+    Classify only the surrounding scene/background.
+
+    IMPORTANT:
+    - This is NOT card geometry.
+    - This does NOT decide whether a crop is valid.
+    - It only decides which HSV masks should be tried first.
+
+    Hue is not trusted when saturation is low.
+    """
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    cool = cv2.inRange(hsv, np.array([35, 18, 60]), np.array([135, 255, 255]))
-    cool = cv2.morphologyEx(
-        cool, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    h_chan, s_chan, v_chan = cv2.split(hsv)
+
+    h, w = s_chan.shape
+
+    # Sample only the outside border of the photograph.
+    # Avoid the center because that is where the licence normally sits.
+    border_ratio = 0.12
+    bx = max(1, int(round(w * border_ratio)))
+    by = max(1, int(round(h * border_ratio)))
+
+    border_mask = np.zeros((h, w), dtype=np.uint8)
+    border_mask[:by, :] = 255
+    border_mask[h - by :, :] = 255
+    border_mask[:, :bx] = 255
+    border_mask[:, w - bx :] = 255
+
+    s_values = s_chan[border_mask > 0].astype(np.float32)
+    v_values = v_chan[border_mask > 0].astype(np.float32)
+
+    if s_values.size == 0 or v_values.size == 0:
+        return {
+            "family": "CHROMATIC",
+            "s50": 0.0,
+            "s75": 0.0,
+            "v25": 0.0,
+            "v50": 0.0,
+            "v75": 0.0,
+        }
+
+    s50 = float(np.percentile(s_values, 50))
+    s75 = float(np.percentile(s_values, 75))
+    v25 = float(np.percentile(v_values, 25))
+    v50 = float(np.percentile(v_values, 50))
+    v75 = float(np.percentile(v_values, 75))
+
+    # Initial evidence thresholds from current real DL photo set.
+    #
+    # IMG_9084 dark:
+    #   S50 ~23, V50 ~63
+    #
+    # IMG_9083 gray couch:
+    #   S50 ~30, V50 ~93
+    #
+    # white backgrounds:
+    #   S50 ~10-30, V50 ~188-201
+    #
+    # wood/red backgrounds are clearly more saturated.
+    neutral = s50 < 55.0
+
+    if neutral:
+        if v50 < 85.0:
+            family = "NEUTRAL_DARK"
+        elif v50 < 170.0:
+            family = "NEUTRAL_MID"
+        else:
+            family = "NEUTRAL_LIGHT"
+    else:
+        family = "CHROMATIC"
+
+    return {
+        "family": family,
+        "s50": s50,
+        "s75": s75,
+        "v25": v25,
+        "v50": v50,
+        "v75": v75,
+    }
+
+
+def _clean_cool_mask(mask):
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
     )
-    cool = cv2.morphologyEx(
-        cool, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19))
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (19, 19)),
+    )
+    return mask
+
+
+def _build_hsv_seed_masks(image_bgr):
+    """
+    Return HSV masks in preferred search order.
+
+    The first mask is scene-specific.
+    Additional masks are conservative secondary searches.
+
+    The old legacy mask remains last for compatibility, but it is no longer
+    allowed to be the only way to locate the card.
+    """
+    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+    profile = _hsv_scene_profile(image_bgr)
+
+    family = profile["family"]
+    masks = []
+
+    if family == "NEUTRAL_DARK":
+        # Dark/black background:
+        # require card pixels to be brighter and somewhat saturated.
+        v_low = int(max(90, min(160, profile["v50"] + 25)))
+
+        mask = cv2.inRange(
+            hsv,
+            np.array([35, 30, v_low], dtype=np.uint8),
+            np.array([135, 255, 255], dtype=np.uint8),
+        )
+        masks.append(("neutral_dark", _clean_cool_mask(mask), 0))
+
+    elif family == "NEUTRAL_MID":
+        # Gray background:
+        # H alone is dangerous because gray pixels can carry arbitrary hue.
+        # Require both meaningful saturation and brightness separation.
+        v_low = int(max(120, min(185, profile["v50"] + 30)))
+
+        mask = cv2.inRange(
+            hsv,
+            np.array([35, 40, v_low], dtype=np.uint8),
+            np.array([135, 255, 255], dtype=np.uint8),
+        )
+        masks.append(("neutral_mid", _clean_cool_mask(mask), 0))
+
+    elif family == "NEUTRAL_LIGHT":
+        # White/light neutral background:
+        # brightness is not useful because the background is already bright.
+        # Saturation is the stronger separator.
+        s_low = int(max(35, min(90, profile["s75"] + 12)))
+
+        mask = cv2.inRange(
+            hsv,
+            np.array([35, s_low, 60], dtype=np.uint8),
+            np.array([135, 255, 255], dtype=np.uint8),
+        )
+        masks.append(("neutral_light", _clean_cool_mask(mask), 0))
+
+    else:
+        # Saturated/chromatic background such as wood/red.
+        # The historical cool range is normally meaningful because H is
+        # trustworthy when saturation is not near zero.
+        mask = cv2.inRange(
+            hsv,
+            np.array([35, 25, 60], dtype=np.uint8),
+            np.array([135, 255, 255], dtype=np.uint8),
+        )
+        masks.append(("chromatic_cool", _clean_cool_mask(mask), 0))
+
+    # Secondary stricter cool mask.
+    strict = cv2.inRange(
+        hsv,
+        np.array([35, 40, 60], dtype=np.uint8),
+        np.array([135, 255, 255], dtype=np.uint8),
+    )
+    masks.append(("strict_cool", _clean_cool_mask(strict), 1))
+
+    # Historical mask is retained only as the LAST candidate source.
+    legacy = cv2.inRange(
+        hsv,
+        np.array([35, 18, 60], dtype=np.uint8),
+        np.array([135, 255, 255], dtype=np.uint8),
+    )
+    masks.append(("legacy_cool", _clean_cool_mask(legacy), 2))
+
+    return profile, masks
+
+
+def _rough_card_candidates(image_bgr):
+    """
+    Adaptive HSV scene preflight -> rough search seeds.
+
+    Color remains only a rough locator.
+    Final truth still requires the existing four independent edge lines and
+    their theoretical intersections.
+    """
+    profile, seed_masks = _build_hsv_seed_masks(image_bgr)
+
+    all_candidates = []
+
+    for mask_name, cool, mask_priority in seed_masks:
+        h, w = cool.shape
+
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(cool, 8)
+
+        components = []
+
+        for label in range(1, n):
+            _x, _y, _cw, _ch, area = stats[label]
+
+            if area < 0.004 * h * w:
+                continue
+
+            mask = (labels == label).astype(np.uint8) * 255
+            contour = largest_contour(mask)
+
+            if contour is not None:
+                components.append((int(area), contour))
+
+        components.sort(key=lambda item: item[0], reverse=True)
+        components = components[:6]
+
+        candidates_for_mask = []
+
+        for count in range(1, min(4, len(components) + 1)):
+            for indices in itertools.combinations(
+                range(len(components)),
+                count,
+            ):
+                pts = np.vstack(
+                    [
+                        components[i][1].reshape(-1, 2)
+                        for i in indices
+                    ]
+                ).astype(np.float32)
+
+                hull = cv2.convexHull(pts)
+                rect = cv2.minAreaRect(hull)
+
+                (_, _), (rw, rh), _ = rect
+
+                if min(rw, rh) < 20:
+                    continue
+
+                ratio = max(rw, rh) / min(rw, rh)
+                area_ratio = (rw * rh) / float(h * w)
+
+                # KEEP the existing historical rough area gate for this slice.
+                # Do not mix the separate close-up / >65% issue into the HSV fix.
+                if not (0.06 <= area_ratio <= 0.65):
+                    continue
+
+                box = order_corners(
+                    cv2.boxPoints(rect).astype(np.float32)
+                )
+
+                top_len = float(
+                    np.linalg.norm(box[1] - box[0])
+                )
+                left_len = float(
+                    np.linalg.norm(box[3] - box[0])
+                )
+
+                # Search only when the licence long edge is horizontal
+                # for this orientation candidate.
+                if top_len < left_len:
+                    continue
+
+                polygon_mask = np.zeros_like(cool)
+
+                cv2.fillConvexPoly(
+                    polygon_mask,
+                    np.round(box).astype(np.int32),
+                    255,
+                )
+
+                inside = polygon_mask > 0
+
+                density = (
+                    float(np.mean(cool[inside] > 0))
+                    if inside.any()
+                    else 0.0
+                )
+
+                ratio_error = (
+                    abs(ratio - DL_ASPECT) / DL_ASPECT
+                )
+
+                historical_seed_score = (
+                    ratio_error * 4.0
+                    - density * 0.6
+                )
+
+                candidates_for_mask.append(
+                    {
+                        "seed_score": float(
+                            historical_seed_score
+                        ),
+                        "rough_box": box,
+                        "component_indices": indices,
+                        "area_ratio": float(area_ratio),
+                        "rough_ratio": float(ratio),
+                        "cool_density": float(density),
+                        "mask_name": mask_name,
+                        "mask_priority": int(mask_priority),
+                        "scene_profile": dict(profile),
+                    }
+                )
+
+        candidates_for_mask.sort(
+            key=lambda item: item["seed_score"]
+        )
+
+        # Critical:
+        # Do not allow a noisy legacy mask to crowd the good
+        # scene-specific candidates out of the global top six.
+        if mask_priority == 0:
+            keep = 4
+        elif mask_priority == 1:
+            keep = 2
+        else:
+            keep = 1
+
+        all_candidates.extend(
+            candidates_for_mask[:keep]
+        )
+
+    # Preferred scene mask first, then strict mask, then legacy.
+    # Within each mask preserve the historical seed ranking.
+    all_candidates.sort(
+        key=lambda item: (
+            item["mask_priority"],
+            item["seed_score"],
+        )
     )
 
-    h, w = cool.shape
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(cool, 8)
-
-    components = []
-    for label in range(1, n):
-        x, y, cw, ch, area = stats[label]
-        if area < 0.004 * h * w:
-            continue
-        mask = (labels == label).astype(np.uint8) * 255
-        contour = largest_contour(mask)
-        if contour is not None:
-            components.append((int(area), contour))
-
-    components.sort(key=lambda item: item[0], reverse=True)
-    components = components[:6]
-
-    candidates = []
-    for count in range(1, min(4, len(components) + 1)):
-        for indices in itertools.combinations(range(len(components)), count):
-            pts = np.vstack(
-                [components[i][1].reshape(-1, 2) for i in indices]
-            ).astype(np.float32)
-
-            hull = cv2.convexHull(pts)
-            rect = cv2.minAreaRect(hull)
-            (_, _), (rw, rh), _ = rect
-            if min(rw, rh) < 20:
-                continue
-
-            ratio = max(rw, rh) / min(rw, rh)
-            area_ratio = (rw * rh) / float(h * w)
-            if not (0.06 <= area_ratio <= 0.65):
-                continue
-
-            box = order_corners(cv2.boxPoints(rect).astype(np.float32))
-            top_len = float(np.linalg.norm(box[1] - box[0]))
-            left_len = float(np.linalg.norm(box[3] - box[0]))
-
-            # Search in an orientation where the DL's long edge is horizontal.
-            if top_len < left_len:
-                continue
-
-            polygon_mask = np.zeros_like(cool)
-            cv2.fillConvexPoly(polygon_mask, np.round(box).astype(np.int32), 255)
-            inside = polygon_mask > 0
-            density = float(np.mean(cool[inside] > 0)) if inside.any() else 0.0
-
-            ratio_error = abs(ratio - DL_ASPECT) / DL_ASPECT
-            seed_score = ratio_error * 4.0 - density * 0.6
-
-            candidates.append(
-                {
-                    "seed_score": float(seed_score),
-                    "rough_box": box,
-                    "component_indices": indices,
-                    "area_ratio": float(area_ratio),
-                    "rough_ratio": float(ratio),
-                    "cool_density": density,
-                }
-            )
-
-    candidates.sort(key=lambda item: item["seed_score"])
-    return candidates[:6]
+    return all_candidates[:7]
 
 def _gradient_magnitude(image_bgr):
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
@@ -440,6 +696,8 @@ def process_driver_license_image(
                     "corners": corners,
                     "diagnostics": diagnostics,
                     "support": support,
+                    "seed_mask": seed.get("mask_name"),
+                    "scene_profile": seed.get("scene_profile"),
                 }
 
     if best is None:
@@ -474,6 +732,9 @@ def process_driver_license_image(
         "four_edges_confirmed": True,
         "status": "FOUR_CORNERS_CONFIRMED" if post_ok else "POST_VALIDATION_FAILED",
         "orientation_used": best["orientation"],
+        "seed_mask_used": best.get("seed_mask"),
+        "hsv_scene_profile": best.get("scene_profile"),
+        "geometry_engine_version": GEOMETRY_ENGINE_VERSION,
         "corners_tl_tr_br_bl": corners.tolist(),
         "edge_inliers": best["diagnostics"].get("edge_inliers"),
         "confirm_diagnostics": best["diagnostics"],
