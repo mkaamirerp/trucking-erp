@@ -17,9 +17,13 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 import cv2
 import numpy as np
 
-PREPROCESS_VERSION = "2026-08-28-sandbox-v3"
+PREPROCESS_VERSION = "2026-08-28-sandbox-v5"
 
 MAX_OPENCV_INPUT_SIDE = 2400
+
+DocSide = Literal["front", "back"]
+BACK_MIN_EDGE_INLIERS = 38
+BACK_EDGE_GRADIENT_MIN = 18.0
 
 RECTANGLE_CORNER_TOLERANCE_DEG = 4.0
 PARALLEL_TOLERANCE_DEG = 3.0
@@ -166,6 +170,29 @@ def ensure_landscape_upright_for_dl(image_bgr: np.ndarray) -> np.ndarray:
     return out
 
 
+def ensure_landscape_upright_for_dl_back(image_bgr: np.ndarray) -> np.ndarray:
+    """Back: landscape with PDF417 barcode band in the lower portion (not photo-left heuristic)."""
+    out = image_bgr.copy()
+    if out.shape[0] > out.shape[1]:
+        out = cv2.rotate(out, cv2.ROTATE_90_CLOCKWISE)
+
+    def bottom_barcode_band_score(img: np.ndarray) -> float:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, _w = gray.shape[:2]
+        if h < 40:
+            return 0.0
+        band = gray[int(h * 0.58) :, :]
+        gx = cv2.Sobel(band, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(band, cv2.CV_32F, 0, 1, ksize=3)
+        return float(np.mean(cv2.magnitude(gx, gy)))
+
+    upright = bottom_barcode_band_score(out)
+    flipped = bottom_barcode_band_score(cv2.rotate(out, cv2.ROTATE_180))
+    if flipped > upright * 1.05:
+        out = cv2.rotate(out, cv2.ROTATE_180)
+    return out
+
+
 def line_angle_deg(line: LineParam) -> float:
     vx, vy, _, _ = line
     return float(math.degrees(math.atan2(vy, vx)))
@@ -193,7 +220,7 @@ def deviation_from_vertical_deg(angle: float) -> float:
     return abs(deviation_from_horizontal_deg(angle) - 90.0)
 
 
-def _rough_card_candidates(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
+def _rough_card_candidates_cool(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
     cool = cv2.inRange(hsv, np.array([35, 18, 60]), np.array([135, 255, 255]))
     cool = cv2.morphologyEx(cool, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
@@ -258,6 +285,67 @@ def _rough_card_candidates(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
     return candidates[:6]
 
 
+def _rough_card_candidates_edges(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
+    """Edge-based rough card seed for white/light backgrounds (typical CDL back photos)."""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 40, 120)
+    edges = cv2.dilate(edges, np.ones((5, 5), np.uint8), iterations=2)
+    edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8), iterations=2)
+
+    h, w = edges.shape
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates: List[Dict[str, Any]] = []
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:12]:
+        area = float(cv2.contourArea(contour))
+        if area < 0.06 * h * w:
+            continue
+        rect = cv2.minAreaRect(contour)
+        (_, _), (rw, rh), _ = rect
+        if min(rw, rh) < 20:
+            continue
+        ratio = max(rw, rh) / min(rw, rh)
+        area_ratio = (rw * rh) / float(h * w)
+        if not (0.06 <= area_ratio <= 0.65):
+            continue
+        box = order_corners(cv2.boxPoints(rect).astype(np.float32))
+        top_len = float(np.linalg.norm(box[1] - box[0]))
+        left_len = float(np.linalg.norm(box[3] - box[0]))
+        if top_len < left_len:
+            continue
+        ratio_error = abs(ratio - DL_ASPECT) / DL_ASPECT
+        candidates.append(
+            {
+                "seed_score": ratio_error * 4.0 + 0.15,
+                "rough_box": box,
+                "component_indices": (),
+                "area_ratio": float(area_ratio),
+                "rough_ratio": float(ratio),
+                "cool_density": 0.0,
+                "seed_source": "edges",
+            }
+        )
+    candidates.sort(key=lambda item: item["seed_score"])
+    return candidates[:6]
+
+
+def _rough_card_candidates_for_side(image_bgr: np.ndarray, side: DocSide) -> List[Dict[str, Any]]:
+    cool = _rough_card_candidates_cool(image_bgr)
+    if side == "back":
+        edge = _rough_card_candidates_edges(image_bgr)
+        merged = cool + edge
+        merged.sort(key=lambda item: item["seed_score"])
+        return merged[:8]
+    if cool:
+        return cool
+    return _rough_card_candidates_edges(image_bgr)
+
+
+def _rough_card_candidates(image_bgr: np.ndarray) -> List[Dict[str, Any]]:
+    """Legacy alias used by unit tests."""
+    return _rough_card_candidates_cool(image_bgr)
+
+
 def _gradient_magnitude(image_bgr: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -272,6 +360,8 @@ def _sample_boundary_points(
     p1: np.ndarray,
     search_px: int,
     sample_count: int = 180,
+    *,
+    min_gradient: float = 25.0,
 ) -> np.ndarray:
     mag = _gradient_magnitude(image_bgr)
     h, w = mag.shape
@@ -301,7 +391,7 @@ def _sample_boundary_points(
         scores = vals - 0.6 * np.abs(valid_offsets)
         winner = int(np.argmax(scores))
 
-        if float(vals[winner]) >= 25.0:
+        if float(vals[winner]) >= min_gradient:
             found.append(points[valid][winner])
 
     return np.asarray(found, dtype=np.float32)
@@ -361,6 +451,9 @@ def _edge_lines_from_list(lines: List[LineParam]) -> EdgeLines:
 def _confirm_all_four_corners(
     image_bgr: np.ndarray,
     rough_box: np.ndarray,
+    *,
+    min_edge_inliers: int = 50,
+    min_gradient: float = 25.0,
 ) -> Tuple[Optional[np.ndarray], Dict[str, Any], Optional[Tuple[List[np.ndarray], List[LineParam]]]]:
     side_lengths = [float(np.linalg.norm(rough_box[(i + 1) % 4] - rough_box[i])) for i in range(4)]
     short_side = min(max(side_lengths[0], side_lengths[2]), max(side_lengths[1], side_lengths[3]))
@@ -372,10 +465,10 @@ def _confirm_all_four_corners(
     for edge_index in range(4):
         p0 = rough_box[edge_index]
         p1 = rough_box[(edge_index + 1) % 4]
-        points = _sample_boundary_points(image_bgr, p0, p1, search_px)
+        points = _sample_boundary_points(image_bgr, p0, p1, search_px, min_gradient=min_gradient)
         line, inliers = _ransac_edge_line(points)
 
-        if line is None or len(inliers) < 50:
+        if line is None or len(inliers) < min_edge_inliers:
             return None, {
                 "confirmed": False,
                 "reason": f"edge_{edge_index}_not_confirmed",
@@ -427,7 +520,7 @@ def _confirm_all_four_corners(
         and 0.08 <= polygon_area <= 0.65
         and 1.25 <= ratio <= 1.95
         and max_angle_error <= 20.0
-        and min(edge_inliers) >= 50
+        and min(edge_inliers) >= min_edge_inliers
     )
 
     diagnostics = {
@@ -530,11 +623,13 @@ def resize_to_target(image_bgr: np.ndarray) -> np.ndarray:
     return cv2.resize(image_bgr, (TARGET_W, TARGET_H), interpolation=cv2.INTER_LANCZOS4)
 
 
-def finalize_processed(image_bgr: np.ndarray) -> np.ndarray:
+def finalize_processed(image_bgr: np.ndarray, side: DocSide = "front") -> np.ndarray:
+    if side == "back":
+        return ensure_landscape_upright_for_dl_back(image_bgr)
     return ensure_landscape_upright_for_dl(image_bgr)
 
 
-def apply_flat_level_crop(image_bgr: np.ndarray, corners: np.ndarray) -> np.ndarray:
+def apply_flat_level_crop(image_bgr: np.ndarray, corners: np.ndarray, side: DocSide = "front") -> np.ndarray:
     c = order_corners(corners).astype(np.float32)
     x0 = int(max(0, math.floor(float(np.min(c[:, 0])))))
     y0 = int(max(0, math.floor(float(np.min(c[:, 1])))))
@@ -543,10 +638,12 @@ def apply_flat_level_crop(image_bgr: np.ndarray, corners: np.ndarray) -> np.ndar
     if x1 <= x0 or y1 <= y0:
         raise ValueError("invalid_flat_level_bounds")
     cropped = image_bgr[y0:y1, x0:x1].copy()
-    return finalize_processed(resize_to_target(cropped))
+    return finalize_processed(resize_to_target(cropped), side)
 
 
-def apply_flat_rotated_deskew(image_bgr: np.ndarray, corners: np.ndarray, metrics: GeometryMetrics) -> np.ndarray:
+def apply_flat_rotated_deskew(
+    image_bgr: np.ndarray, corners: np.ndarray, metrics: GeometryMetrics, side: DocSide = "front"
+) -> np.ndarray:
     rotation_deg = metrics.rotation_action_deg
     c = order_corners(corners).astype(np.float32)
     center = tuple(np.mean(c, axis=0))
@@ -568,10 +665,10 @@ def apply_flat_rotated_deskew(image_bgr: np.ndarray, corners: np.ndarray, metric
     if x1 <= x0 or y1 <= y0:
         raise ValueError("invalid_rotated_crop_bounds")
     cropped = rotated[y0:y1, x0:x1].copy()
-    return finalize_processed(resize_to_target(cropped))
+    return finalize_processed(resize_to_target(cropped), side)
 
 
-def apply_perspective_warp(image_bgr: np.ndarray, corners: np.ndarray) -> np.ndarray:
+def apply_perspective_warp(image_bgr: np.ndarray, corners: np.ndarray, side: DocSide = "front") -> np.ndarray:
     src = order_corners(corners).astype(np.float32)
     dst = np.array(
         [[0, 0], [TARGET_W - 1, 0], [TARGET_W - 1, TARGET_H - 1], [0, TARGET_H - 1]],
@@ -579,7 +676,7 @@ def apply_perspective_warp(image_bgr: np.ndarray, corners: np.ndarray) -> np.nda
     )
     matrix = cv2.getPerspectiveTransform(src, dst)
     warped = cv2.warpPerspective(image_bgr, matrix, (TARGET_W, TARGET_H))
-    return finalize_processed(warped)
+    return finalize_processed(warped, side)
 
 
 def apply_geometry_correction(
@@ -587,13 +684,14 @@ def apply_geometry_correction(
     corners: np.ndarray,
     geometry_class: GeometryClass,
     metrics: GeometryMetrics,
+    side: DocSide = "front",
 ) -> Tuple[np.ndarray, str]:
     if geometry_class == "FLAT_LEVEL":
-        return apply_flat_level_crop(image_bgr, corners), "flat_level_crop"
+        return apply_flat_level_crop(image_bgr, corners, side), "flat_level_crop"
     if geometry_class == "FLAT_ROTATED":
-        return apply_flat_rotated_deskew(image_bgr, corners, metrics), f"flat_rotated_deskew_{metrics.rotation_action_deg:.1f}deg"
+        return apply_flat_rotated_deskew(image_bgr, corners, metrics, side), f"flat_rotated_deskew_{metrics.rotation_action_deg:.1f}deg"
     if geometry_class == "PERSPECTIVE":
-        return apply_perspective_warp(image_bgr, corners), "perspective_warp"
+        return apply_perspective_warp(image_bgr, corners, side), "perspective_warp"
     raise ValueError(f"no_correction_for_{geometry_class}")
 
 
@@ -631,13 +729,52 @@ def _failure_result(image_bgr: np.ndarray, report: Dict[str, Any], candidate: Ca
     )
 
 
-def process_driver_license_image(image_bgr: np.ndarray, debug_dir: Optional[Path] = None) -> Tuple[ProcessResult, np.ndarray]:
+def _try_back_edge_warp_fallback(image_bgr: np.ndarray) -> Optional[Dict[str, Any]]:
+    """When four-corner RANSAC fails on white-background backs, warp best edge seed."""
+    best: Optional[Dict[str, Any]] = None
+    for orientation_rank, orientation in enumerate(("cw90", "ccw90")):
+        oriented = rotate_image(image_bgr, orientation)
+        for candidate_rank, seed in enumerate(_rough_card_candidates_edges(oriented)[:3]):
+            try:
+                warped = apply_perspective_warp(oriented, seed["rough_box"], side="back")
+                corrected = ensure_landscape_upright_for_dl_back(warped)
+                post_ok, post_report = post_validate_processed(corrected)
+                if not post_ok:
+                    continue
+                score = float(seed["seed_score"]) + orientation_rank * 0.01 + candidate_rank * 0.001
+                if best is None or score < best["score"]:
+                    best = {
+                        "score": score,
+                        "orientation": orientation,
+                        "seed_rank": candidate_rank,
+                        "corrected": corrected,
+                        "post_report": post_report,
+                        "seed": seed,
+                    }
+            except Exception:
+                continue
+    return best
+
+
+def process_driver_license_image(
+    image_bgr: np.ndarray,
+    debug_dir: Optional[Path] = None,
+    *,
+    side: DocSide = "front",
+) -> Tuple[ProcessResult, np.ndarray]:
+    confirm_inliers = BACK_MIN_EDGE_INLIERS if side == "back" else 50
+    confirm_gradient = BACK_EDGE_GRADIENT_MIN if side == "back" else 25.0
     best: Optional[Dict[str, Any]] = None
 
     for orientation_rank, orientation in enumerate(ORIENTATION_ORDER):
         oriented = rotate_image(image_bgr, orientation)
-        for candidate_rank, seed in enumerate(_rough_card_candidates(oriented)):
-            corners, diagnostics, support = _confirm_all_four_corners(oriented, seed["rough_box"])
+        for candidate_rank, seed in enumerate(_rough_card_candidates_for_side(oriented, side)):
+            corners, diagnostics, support = _confirm_all_four_corners(
+                oriented,
+                seed["rough_box"],
+                min_edge_inliers=confirm_inliers,
+                min_gradient=confirm_gradient,
+            )
             if corners is None or support is None:
                 continue
 
@@ -667,9 +804,47 @@ def process_driver_license_image(image_bgr: np.ndarray, debug_dir: Optional[Path
                     "geometry_class": geom_class,
                 }
 
+    if best is None and side == "back":
+        fallback = _try_back_edge_warp_fallback(image_bgr)
+        if fallback is not None:
+            report: Dict[str, Any] = {
+                "four_edges_confirmed": True,
+                "status": "BACK_EDGE_WARP_FALLBACK",
+                "orientation_used": fallback["orientation"],
+                "classification": "PERSPECTIVE",
+                "correction_applied": "back_edge_warp_fallback",
+                "post_validation": fallback["post_report"],
+                "preprocess_version": PREPROCESS_VERSION,
+                "dl_side": side,
+                "fallback": True,
+                "seed_source": fallback["seed"].get("seed_source", "edges"),
+            }
+            candidate = CandidateResult(
+                fallback["orientation"],
+                fallback["seed_rank"],
+                fallback["score"],
+                "PERSPECTIVE",
+                None,
+                fallback["seed"]["rough_box"].tolist(),
+                None,
+                fallback["post_report"],
+                None,
+            )
+            corrected = fallback["corrected"]
+            ok = ProcessResult(
+                "PERSPECTIVE",
+                "back_edge_warp_fallback",
+                True,
+                fallback["post_report"],
+                candidate,
+                {"width": corrected.shape[1], "height": corrected.shape[0]},
+                report,
+            )
+            return ok, corrected
+
     if best is None:
         candidate = CandidateResult("original", 0, -999.0, "UNCONFIRMED", None, None, None, None, None)
-        report = {"four_edges_confirmed": False, "status": "FOUR_CORNERS_NOT_CONFIRMED", "preprocess_version": PREPROCESS_VERSION}
+        report = {"four_edges_confirmed": False, "status": "FOUR_CORNERS_NOT_CONFIRMED", "preprocess_version": PREPROCESS_VERSION, "dl_side": side}
         return _failure_result(image_bgr, report, candidate), image_bgr.copy()
 
     corners = best["corners"]
@@ -696,6 +871,7 @@ def process_driver_license_image(image_bgr: np.ndarray, debug_dir: Optional[Path
         "rotation_action_deg": metrics.rotation_action_deg if geom_class == "FLAT_ROTATED" else None,
         "confirm_diagnostics": diagnostics,
         "preprocess_version": PREPROCESS_VERSION,
+        "dl_side": side,
     }
 
     candidate = CandidateResult(
@@ -711,7 +887,7 @@ def process_driver_license_image(image_bgr: np.ndarray, debug_dir: Optional[Path
     )
 
     try:
-        corrected, correction = apply_geometry_correction(oriented, corners, geom_class, metrics)
+        corrected, correction = apply_geometry_correction(oriented, corners, geom_class, metrics, side)
         post_ok, post_report = post_validate_processed(corrected)
         candidate.post_validation = post_report
         report["correction_applied"] = correction
@@ -748,7 +924,17 @@ def process_driver_license_image(image_bgr: np.ndarray, debug_dir: Optional[Path
         return _failure_result(image_bgr, report, candidate), image_bgr.copy()
 
 
-def process_applicant_dl_image_path(image_path: str | Path, debug_dir: Optional[Path] = None) -> Tuple[ProcessResult, np.ndarray]:
+def _doc_side_from_label(label: str) -> DocSide:
+    return "back" if label.upper().endswith("BACK") else "front"
+
+
+def process_applicant_dl_image_path(
+    image_path: str | Path,
+    debug_dir: Optional[Path] = None,
+    *,
+    side: DocSide | str = "front",
+) -> Tuple[ProcessResult, np.ndarray]:
+    doc_side: DocSide = _doc_side_from_label(side) if isinstance(side, str) and side.upper().startswith("CDL_") else side  # type: ignore[assignment]
     path = Path(image_path)
     image = load_bgr_image_for_processing(path)
     if image is None:
@@ -756,7 +942,7 @@ def process_applicant_dl_image_path(image_path: str | Path, debug_dir: Optional[
         report = {"four_edges_confirmed": False, "status": "IMAGE_LOAD_FAILED", "preprocess_version": PREPROCESS_VERSION}
         return _failure_result(image_bgr=np.zeros((1, 1, 3), dtype=np.uint8), report=report, candidate=candidate), np.zeros((1, 1, 3), dtype=np.uint8)
 
-    result, corrected = process_driver_license_image(image, debug_dir)
+    result, corrected = process_driver_license_image(image, debug_dir, side=doc_side)
     result.report["input_path"] = str(path)
     result.report["opencv_input_shape"] = {"width": int(image.shape[1]), "height": int(image.shape[0])}
     return result, corrected

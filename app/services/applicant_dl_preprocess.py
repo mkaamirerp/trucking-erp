@@ -21,9 +21,9 @@ class ApplicantDlPreprocessOutcome:
     correction_applied: str
 
 
-def run_applicant_dl_opencv(image_path: str | Path) -> ApplicantDlPreprocessOutcome:
+def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> ApplicantDlPreprocessOutcome:
     """Run OpenCV crop/deskew/perspective. No fallback — processed JPEG only when validation passes."""
-    result, corrected = process_applicant_dl_image_path(image_path)
+    result, corrected = process_applicant_dl_image_path(image_path, side=side)
     debug = dict(result.report)
     debug["preprocess_version"] = PREPROCESS_VERSION
 

@@ -829,7 +829,7 @@ async def upload_applicant_dl(
     import asyncio
 
     with readable_path(stored.storage_key, "applicant_dl", tenant_slug) as image_path:
-        processed = await asyncio.to_thread(run_applicant_dl_opencv, str(image_path))
+        processed = await asyncio.to_thread(run_applicant_dl_opencv, str(image_path), doc_type)
 
     preprocess_debug = processed.debug
     preprocess_status = "FAILED"
