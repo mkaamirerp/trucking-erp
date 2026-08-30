@@ -85,8 +85,14 @@ mako==1.3.10
     # via alembic
 markupsafe==3.0.3
     # via mako
+numpy==2.2.6
+    # via
+    #   -r requirements.in
+    #   opencv-python-headless
 packaging==26.2
     # via pytest
+opencv-python-headless==4.11.0.86
+    # via -r requirements.in
 pillow==12.2.0
     # via -r requirements.in
 pluggy==1.6.0

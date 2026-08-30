@@ -463,14 +463,12 @@ export default function OnboardingApplicantPage() {
     }
   }
 
-  async function handleCorrectedDl(side: "front" | "back", blob: Blob, originalName: string): Promise<boolean> {
-    const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
-    const stem = originalName.replace(/\.[^.]+$/, "") || side;
-    const file = new File([blob], `${stem}_corrected.jpg`, { type: "image/jpeg" });
-    return uploadDl(docType, file);
-  }
+  async function handleDlUpload(side: "front" | "back", file: File): Promise<boolean> {
+  const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
+  return uploadDl(docType, file);
+}
 
-  async function resetSavedDraft() {
+async function resetSavedDraft() {
     if (!app) return;
     const confirmed = window.confirm("Clear all saved onboarding data for this draft and start over?");
     if (!confirmed) return;
@@ -888,7 +886,7 @@ export default function OnboardingApplicantPage() {
               backState={dlState.CDL_BACK}
               frontMessage={dlMessage.CDL_FRONT}
               backMessage={dlMessage.CDL_BACK}
-              onConfirmSide={handleCorrectedDl}
+              onUploadSide={handleDlUpload}
             />
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>

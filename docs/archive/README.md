@@ -68,15 +68,6 @@ Under `fixtures/load_lab/`:
 
 These two JSON files explicitly described themselves as illustrative expected output and were not consumed by current code/tests. The matching PDFs and `.lab_parse_response.json` golden compatibility inputs remain active under `../fixtures/load_lab/` because current tests reference them.
 
-## Archived driver-ID preprocessing prototype
-
-Under `driver_onboarding/`:
-
-- `DRIVER_ID_PREPROCESSING_LINE_INTERSECTION.md`
-- `TruckERP_Driver_ID_Preprocessor.prototype.py`
-
-This was a save-only geometry/preprocessing prototype. It was never wired into onboarding, and the documented `app/services/driver_id_preprocessing.py` module does not exist in current code. The raw prototype had been stored as an extensionless source file in the docs root; it is preserved here as historical prototype code, not a production module.
-
 ## Archived database-schema snapshots
 
 Under `db_schema/legacy_db_schema_smoke_2026_01/`:
