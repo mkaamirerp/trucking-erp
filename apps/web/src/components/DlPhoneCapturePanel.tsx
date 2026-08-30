@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import QRCode from "react-qr-code";
-import { getPersonApplicationByOnboardingToken, issueApplicantDlCaptureLink, type PersonApplication } from "../api";
+import { issueApplicantDlCaptureLink, type PersonApplication } from "../api";
 
 type DlSide = "CDL_FRONT" | "CDL_BACK";
 
@@ -9,6 +9,7 @@ type Props = {
   intake: Record<string, unknown>;
   disabled?: boolean;
   onApplicationUpdated: (app: PersonApplication) => void;
+  onRefreshApplication: () => Promise<void>;
 };
 
 function dlPreprocessStatus(intake: Record<string, unknown>, side: DlSide): "MISSING" | "FAILED" | "PROCESSED" {
@@ -32,6 +33,7 @@ export default function DlPhoneCapturePanel({
   intake,
   disabled = false,
   onApplicationUpdated,
+  onRefreshApplication,
 }: Props) {
   const [captureLink, setCaptureLink] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -67,10 +69,7 @@ export default function DlPhoneCapturePanel({
     setError(null);
     setChecking(true);
     try {
-      const data = await getPersonApplicationByOnboardingToken(onboardingToken);
-      const freshIntake = (data.intake_payload as Record<string, unknown>) || {};
-      setStatusIntake(freshIntake);
-      onApplicationUpdated(data);
+      await onRefreshApplication();
     } catch (e: unknown) {
       const message = e instanceof Error && e.message ? e.message : "Could not refresh application status.";
       setError(message);

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   getPersonApplicationByOnboardingToken,
   getPersonApplicationFileThumbnail,
+  buildApplicantApplicationEventsUrl,
   uploadPersonApplicationDlFile,
   uploadPersonApplicationDocument,
   submitPersonApplication,
@@ -354,6 +355,8 @@ export default function OnboardingApplicantPage() {
   const [agree2, setAgree2] = useState(false);
   const [agree3, setAgree3] = useState(false);
 
+  const resumeDocsOnly = documentResumeActive && submitted;
+
   // When Next is clicked and validation fails, show red borders on missing/wrong fields
   const [showValidationStep0, setShowValidationStep0] = useState(false);
   const [showValidationStep1, setShowValidationStep1] = useState(false);
@@ -476,6 +479,41 @@ export default function OnboardingApplicantPage() {
       hydrateOnboardingFormFromIntake(prev, (data.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
     );
   }
+
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+
+  const refreshApplicationOnce = useCallback(async (): Promise<void> => {
+    if (!token) return;
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
+    try {
+      do {
+        refreshPendingRef.current = false;
+        const data = await getPersonApplicationByOnboardingToken(token);
+        handlePhoneApplicationUpdated(data);
+      } while (refreshPendingRef.current);
+    } finally {
+      refreshInFlightRef.current = false;
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || resumeDocsOnly || step !== 0 || submitted) return;
+    const es = new EventSource(buildApplicantApplicationEventsUrl(token));
+    es.onopen = () => {
+      void refreshApplicationOnce();
+    };
+    es.addEventListener("application_changed", () => {
+      void refreshApplicationOnce();
+    });
+    return () => {
+      es.close();
+    };
+  }, [token, resumeDocsOnly, step, submitted, refreshApplicationOnce]);
 
   async function uploadDl(docType: DocType, file: File): Promise<boolean> {
     if (!app) return false;
@@ -904,8 +942,6 @@ export default function OnboardingApplicantPage() {
     );
   }
 
-  const resumeDocsOnly = documentResumeActive && submitted;
-
   return (
     <div className="min-h-screen bg-gray-900 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:24px_24px] p-4 sm:p-8">
       <div className="mx-auto max-w-3xl">
@@ -961,6 +997,7 @@ export default function OnboardingApplicantPage() {
                 intake={intake}
                 disabled={saving || !app}
                 onApplicationUpdated={handlePhoneApplicationUpdated}
+                onRefreshApplication={refreshApplicationOnce}
               />
             )}
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">

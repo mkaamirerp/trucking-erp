@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import hashlib
 import logging
@@ -21,6 +22,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -659,6 +661,10 @@ async def _apply_applicant_dl_upload(
     file: UploadFile,
 ) -> PersonApplication:
     """Shared DL storage + OpenCV path used by invite upload and dl-capture upload."""
+    intake_before = dict(app.intake_payload or {})
+    old_front = _dl_side_status(intake_before, "CDL_FRONT")
+    old_back = _dl_side_status(intake_before, "CDL_BACK")
+
     stored = await save_applicant_dl_upload(tenant_slug, app.id, file)
     intake = dict(app.intake_payload or {})
     files = dict(intake.get("files") or {})
@@ -708,8 +714,38 @@ async def _apply_applicant_dl_upload(
     if doc_type == "CDL_BACK" and ocr_storage_key:
         intake = await apply_stored_cdl_back_pdf417(intake, ocr_storage_key, tenant_slug)
     app.intake_payload = intake
+
+    new_front = _dl_side_status(intake, "CDL_FRONT")
+    new_back = _dl_side_status(intake, "CDL_BACK")
+    from app.services.domain_event_outbox import (
+        AGGREGATE_TYPE_PERSON_APPLICATION,
+        build_dl_licence_domain_events,
+        enqueue_domain_event,
+    )
+
+    for event_type, payload in build_dl_licence_domain_events(
+        old_front=old_front,
+        old_back=old_back,
+        new_front=new_front,
+        new_back=new_back,
+        doc_type=doc_type,
+        upload_failed=preprocess_status == "FAILED",
+    ):
+        await enqueue_domain_event(
+            db,
+            tenant_id=app.tenant_id,
+            aggregate_type=AGGREGATE_TYPE_PERSON_APPLICATION,
+            aggregate_id=str(app.id),
+            event_type=event_type,
+            payload=payload,
+        )
+
     await db.commit()
     await db.refresh(app)
+
+    from app.services.domain_event_delivery import get_domain_event_dispatcher
+
+    get_domain_event_dispatcher().wake(app.tenant_id)
     return app
 
 
@@ -804,6 +840,49 @@ async def get_applicant_application(
         and app.status in _POST_SUBMIT_DOC_RESUME_STATUSES
     )
     return _person_application_to_out(app, document_resume_active=resume_active)
+
+
+@router.get("/applicant/application/events", dependencies=_APPLICANT_SUBSCRIPTION)
+async def stream_applicant_application_events(
+    token: str = Query(..., description="Invite link token"),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """SSE: signal-only stream for invite-token application changes (DB remains authoritative)."""
+    app, access = await _get_application_and_access_by_token(db, tenant_id, token)
+    purpose = getattr(access, "purpose", None) or TOKEN_PURPOSE_INVITE
+    if purpose != TOKEN_PURPOSE_INVITE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the main application invite link can subscribe to application events",
+        )
+
+    from app.services.domain_event_delivery import format_sse_application_changed, get_domain_event_dispatcher
+
+    dispatcher = get_domain_event_dispatcher()
+    queue: asyncio.Queue[dict[str, str]] = asyncio.Queue(maxsize=32)
+    await dispatcher.registry.subscribe(tenant_id, app.id, queue)
+
+    async def event_generator():
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield format_sse_application_changed(message["event_id"], message["event_type"])
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+        finally:
+            await dispatcher.registry.unsubscribe(tenant_id, app.id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.put("/applicant/application", response_model=ApplicantApplicationOut, dependencies=_APPLICANT_SUBSCRIPTION)

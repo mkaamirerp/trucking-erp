@@ -103,6 +103,20 @@ def _log_startup():
         )
 
 
+@app.on_event("startup")
+async def _start_domain_event_dispatcher() -> None:
+    from app.services.domain_event_delivery import get_domain_event_dispatcher
+
+    await get_domain_event_dispatcher().start()
+
+
+@app.on_event("shutdown")
+async def _stop_domain_event_dispatcher() -> None:
+    from app.services.domain_event_delivery import get_domain_event_dispatcher
+
+    await get_domain_event_dispatcher().stop()
+
+
 app.add_middleware(
     TenantContextMiddleware,
     allow_paths=tenant_middleware_allow_paths(),

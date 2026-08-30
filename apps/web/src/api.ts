@@ -2460,6 +2460,16 @@ export async function getPersonApplicationByOnboardingToken(token: string): Prom
   return getApplicantApplication(token);
 }
 
+/** SSE URL for invite-token application change signals (EventSource; no custom headers). */
+export function buildApplicantApplicationEventsUrl(onboardingToken: string): string {
+  const url = new URL(
+    `${API_BASE}/driver-onboarding/applicant/application/events`,
+    window.location.origin,
+  );
+  url.searchParams.set("token", onboardingToken);
+  return url.toString().replace(window.location.origin, "");
+}
+
 /** Get person application by id and token (token is enough; appId unused). */
 export async function getPersonApplication(_appId: number, token: string): Promise<PersonApplication> {
   return getApplicantApplication(token);

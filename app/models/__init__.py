@@ -70,6 +70,7 @@ from app.models.email_ingestion import EmailThread, EmailMessage
 from app.models.email_intake_review import EmailIntakeReview, EmailIntakeReviewEvent
 from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_intake_qr_extraction import EmailIntakeQrExtraction
+from app.models.domain_event_outbox import DomainEventOutbox
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem
