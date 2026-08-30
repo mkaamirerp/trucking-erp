@@ -12,7 +12,6 @@ import {
   type PersonApplication,
 } from "../api";
 import DLUploadStep from "../components/DLUploadStep";
-import DlPhoneCapturePanel from "../components/DlPhoneCapturePanel";
 import {
   cleanIntakeText,
   hydrateOnboardingFormFromIntake,
@@ -965,12 +964,7 @@ export default function OnboardingApplicantPage() {
         {/* ── STEP 1: LICENSE UPLOAD ── */}
         {!resumeDocsOnly && step === 0 && (
           <div className="space-y-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-black text-white uppercase tracking-wide">Driver's <span className="text-orange-400">License</span></h2>
-                <p className="text-gray-400 text-sm mt-1">Upload both sides of your current valid commercial driver's license</p>
-                <p className="text-amber-300 text-xs mt-2">Each file must not exceed 10 MB.</p>
-              </div>
+            <div className="flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => void resetSavedDraft()}
@@ -980,7 +974,6 @@ export default function OnboardingApplicantPage() {
                 {saving ? "Clearing..." : "Clear Saved Data"}
               </button>
             </div>
-            <p className="text-gray-400 text-sm">Upload from this device</p>
             <DLUploadStep
               frontPreviewUrl={previewUrl.CDL_FRONT}
               backPreviewUrl={previewUrl.CDL_BACK}
@@ -990,16 +983,14 @@ export default function OnboardingApplicantPage() {
               backMessage={dlMessage.CDL_BACK}
               onUploadSide={handleDlUploadSide}
               onNormalizeError={(message) => setError(message)}
+              onboardingToken={token || undefined}
+              intake={intake}
+              disabled={saving || !app}
+              onRefreshApplication={refreshApplicationOnce}
+              onContinue={() => void saveAndNext(1)}
+              canContinue={canProceedStep0()}
+              saving={saving}
             />
-            {token && (
-              <DlPhoneCapturePanel
-                onboardingToken={token}
-                intake={intake}
-                disabled={saving || !app}
-                onApplicationUpdated={handlePhoneApplicationUpdated}
-                onRefreshApplication={refreshApplicationOnce}
-              />
-            )}
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
@@ -1137,23 +1128,11 @@ export default function OnboardingApplicantPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              {(() => {
-                const canGo = canProceedStep0();
-                return (
-                  <button
-                    onClick={() => saveAndNext(1)}
-                    disabled={saving}
-                    className="flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50 transition-all"
-                  >
-                    {saving ? "Saving…" : "Next: Personal Info →"}
-                  </button>
-                );
-              })()}
-              {!canProceedStep0() && (
-                <span className="text-amber-400 text-sm">Upload both license sides and fill all license details above to continue.</span>
-              )}
-            </div>
+            {!canProceedStep0() && (
+              <p className="text-amber-400 text-sm">
+                Upload both license sides and fill all license details above to continue.
+              </p>
+            )}
           </div>
         )}
 

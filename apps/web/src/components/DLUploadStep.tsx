@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import QRCode from "react-qr-code";
+import { issueApplicantDlCaptureLink } from "../api";
 import { normalizeDlUpload } from "../lib/normalizeDlUpload";
 
 type Side = "front" | "back";
 type UploadState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
+type DocType = "CDL_FRONT" | "CDL_BACK";
 
 type Props = {
   frontPreviewUrl: string | null;
@@ -12,11 +15,92 @@ type Props = {
   frontMessage?: string;
   backMessage?: string;
   onUploadSide: (side: Side, file: File) => Promise<boolean> | boolean;
-  /** Optional: surface browser-normalize failures through the parent error UI. */
   onNormalizeError?: (message: string) => void;
+  onboardingToken?: string;
+  intake?: Record<string, unknown>;
+  disabled?: boolean;
+  onRefreshApplication?: () => Promise<void>;
+  onContinue?: () => void;
+  canContinue?: boolean;
+  saving?: boolean;
 };
 
 type LocalPreviewState = { front: string | null; back: string | null };
+
+const inp =
+  "w-full rounded-lg border border-gray-600 bg-gray-700/50 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 mb-4">
+      <div className="w-1 h-5 bg-orange-500 rounded" />
+      <h3 className="text-orange-400 font-bold uppercase tracking-widest text-sm">{children}</h3>
+    </div>
+  );
+}
+
+function dlPreprocessStatus(intake: Record<string, unknown>, side: DocType): "MISSING" | "FAILED" | "PROCESSED" {
+  const files = intake.files as Record<string, unknown> | undefined;
+  const meta = files?.[side];
+  if (!meta || typeof meta !== "object") return "MISSING";
+  const status = (meta as { dl_preprocess_status?: string }).dl_preprocess_status;
+  if (status === "PROCESSED") return "PROCESSED";
+  if (status === "FAILED") return "FAILED";
+  return "MISSING";
+}
+
+function sideBadge(state: UploadState, preprocess: "MISSING" | "FAILED" | "PROCESSED"): {
+  label: string;
+  tone: "waiting" | "busy" | "done" | "error";
+} {
+  if (state === "UPLOADING" || state === "SCANNING") return { label: "PROCESSING", tone: "busy" };
+  if (state === "FAILED" || preprocess === "FAILED") return { label: "RETRY", tone: "error" };
+  if (state === "SUCCESS" || preprocess === "PROCESSED") return { label: "RECEIVED", tone: "done" };
+  return { label: "WAITING", tone: "waiting" };
+}
+
+function IdCardIcon({ variant }: { variant: "front" | "back" }) {
+  return (
+    <svg width="88" height="56" viewBox="0 0 120 76" fill="none" aria-hidden="true">
+      <rect x="4" y="8" width="112" height="60" rx="6" fill="#1f2937" stroke="#4b5563" strokeWidth="1.5" />
+      {variant === "front" ? (
+        <>
+          <rect x="14" y="18" width="28" height="34" rx="4" fill="#374151" />
+          <rect x="50" y="20" width="52" height="6" rx="2" fill="#f97316" />
+          <rect x="50" y="32" width="44" height="5" rx="2" fill="#4b5563" />
+          <rect x="50" y="42" width="36" height="5" rx="2" fill="#4b5563" />
+        </>
+      ) : (
+        <>
+          <rect x="14" y="22" width="92" height="8" rx="2" fill="#4b5563" />
+          <rect x="14" y="36" width="92" height="22" rx="3" fill="#374151" />
+          <rect x="18" y="40" width="4" height="14" fill="#6b7280" />
+          <rect x="24" y="40" width="2" height="14" fill="#6b7280" />
+          <rect x="28" y="40" width="3" height="14" fill="#6b7280" />
+          <rect x="34" y="40" width="2" height="14" fill="#6b7280" />
+          <rect x="38" y="40" width="4" height="14" fill="#6b7280" />
+          <rect x="44" y="40" width="2" height="14" fill="#6b7280" />
+          <rect x="48" y="40" width="3" height="14" fill="#6b7280" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function Badge({ label, tone }: { label: string; tone: "waiting" | "busy" | "done" | "error" | "accent" }) {
+  const styles: Record<string, string> = {
+    waiting: "border-gray-600 bg-gray-700/50 text-gray-500",
+    busy: "border-orange-500/40 bg-orange-500/10 text-orange-400",
+    done: "border-green-500/40 bg-green-500/10 text-green-400",
+    error: "border-rose-500/40 bg-rose-500/10 text-rose-400",
+    accent: "border-orange-500/40 bg-orange-500/10 text-orange-400",
+  };
+  return (
+    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${styles[tone]}`}>
+      {label}
+    </span>
+  );
+}
 
 export default function DLUploadStep({
   frontPreviewUrl,
@@ -27,8 +111,19 @@ export default function DLUploadStep({
   backMessage = "",
   onUploadSide,
   onNormalizeError,
+  onboardingToken,
+  intake = {},
+  disabled = false,
+  onRefreshApplication,
+  onContinue,
+  canContinue = false,
+  saving = false,
 }: Props) {
   const [localPreview, setLocalPreview] = useState<LocalPreviewState>({ front: null, back: null });
+  const [captureLink, setCaptureLink] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -49,25 +144,46 @@ export default function DLUploadStep({
     setLocalPreview((prev) => ({ ...prev, back: null }));
   }, [backPreviewUrl, localPreview.back]);
 
+  useEffect(() => {
+    if (!onboardingToken || captureLink || issuing) return;
+    let cancelled = false;
+    (async () => {
+      setIssuing(true);
+      try {
+        const resp = await issueApplicantDlCaptureLink(onboardingToken);
+        if (!cancelled) setCaptureLink(resp.link);
+      } catch {
+        /* QR loads on demand via Open on phone */
+      } finally {
+        if (!cancelled) setIssuing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [onboardingToken, captureLink, issuing]);
+
   const frontPreview = useMemo(() => {
-    if (frontState === "SUCCESS") return frontPreviewUrl;
-    if (frontState === "FAILED") return frontPreviewUrl;
+    if (frontState === "SUCCESS" || frontState === "FAILED") return frontPreviewUrl;
     if (frontState === "UPLOADING" || frontState === "SCANNING") return localPreview.front ?? frontPreviewUrl;
     return frontPreviewUrl ?? localPreview.front;
   }, [frontPreviewUrl, frontState, localPreview.front]);
 
   const backPreview = useMemo(() => {
-    if (backState === "SUCCESS") return backPreviewUrl;
-    if (backState === "FAILED") return backPreviewUrl;
+    if (backState === "SUCCESS" || backState === "FAILED") return backPreviewUrl;
     if (backState === "UPLOADING" || backState === "SCANNING") return localPreview.back ?? backPreviewUrl;
     return backPreviewUrl ?? localPreview.back;
   }, [backPreviewUrl, backState, localPreview.back]);
+
   const busy =
     frontState === "UPLOADING" ||
     frontState === "SCANNING" ||
     backState === "UPLOADING" ||
     backState === "SCANNING";
-  const canReview = Boolean(frontPreview && backPreview);
+
+  const frontPre = dlPreprocessStatus(intake, "CDL_FRONT");
+  const backPre = dlPreprocessStatus(intake, "CDL_BACK");
+  const bothProcessed = frontPre === "PROCESSED" && backPre === "PROCESSED";
 
   const handleFileSelect = async (side: Side, file: File) => {
     let normalizedFile: File;
@@ -91,7 +207,7 @@ export default function DLUploadStep({
     await onUploadSide(side, normalizedFile);
   };
 
-  const promptReplacementFile = (side: Side) => {
+  const openFilePicker = (side: Side) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -103,247 +219,306 @@ export default function DLUploadStep({
     input.click();
   };
 
-  const card = useMemo(
-    () =>
-      ({
-        background: "var(--trk-surface)",
-        border: "1px solid var(--trk-border)",
-        borderRadius: 12,
-        padding: 16,
-        cursor: "pointer",
-      }) as const,
-    [],
-  );
+  async function handleOpenOnPhone() {
+    if (!onboardingToken || issuing) return;
+    setPhoneError(null);
+    if (captureLink) {
+      window.open(captureLink, "_blank", "noopener,noreferrer");
+      return;
+    }
+    setIssuing(true);
+    try {
+      const resp = await issueApplicantDlCaptureLink(onboardingToken);
+      setCaptureLink(resp.link);
+      window.open(resp.link, "_blank", "noopener,noreferrer");
+    } catch (e: unknown) {
+      setPhoneError(e instanceof Error && e.message ? e.message : "Could not create phone capture link.");
+    } finally {
+      setIssuing(false);
+    }
+  }
 
-  const uploadStage = (
+  async function handleCheckStatus() {
+    if (!onRefreshApplication || checking || disabled) return;
+    setPhoneError(null);
+    setChecking(true);
+    try {
+      await onRefreshApplication();
+    } catch (e: unknown) {
+      setPhoneError(e instanceof Error && e.message ? e.message : "Could not refresh application status.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function renderSideCard(
     side: Side,
-    title: string,
-    subtitle: string,
-    message: string,
+    label: string,
+    hint: string,
+    preview: string | null,
     state: UploadState,
-  ) => {
+    message: string,
+    preprocess: "MISSING" | "FAILED" | "PROCESSED",
+  ) {
+    const badge = sideBadge(state, preprocess);
     const stageBusy = state === "UPLOADING" || state === "SCANNING";
+    const uploadLabel = side === "front" ? "Upload Front DL" : "Upload Back DL";
+    const received = badge.tone === "done";
+    const failed = badge.tone === "error";
+
     return (
-      <div style={card}>
+      <div
+        className={`flex flex-col rounded-xl border p-4 ${
+          received
+            ? "border-green-500/40 bg-green-500/5"
+            : failed
+              ? "border-rose-500/60 bg-rose-500/5"
+              : "border-gray-700 bg-gray-800/60"
+        }`}
+      >
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <span className="text-xs font-bold uppercase tracking-widest text-orange-400">{label}</span>
+          <Badge label={badge.label} tone={badge.tone} />
+        </div>
+
         <div
-          style={{
-            border: "2px dashed",
-            borderColor: stageBusy ? "var(--trk-heading)" : "var(--trk-border)",
-            borderRadius: 14,
-            minHeight: 320,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "0.9rem",
-            color: "var(--trk-text-muted)",
-            cursor: stageBusy ? "default" : "pointer",
-            position: "relative",
-            overflow: "hidden",
-            background: "var(--trk-bg)",
-            textAlign: "center",
-            padding: 28,
-          }}
+          className={`relative mb-3 flex min-h-[7.5rem] flex-col items-center justify-center overflow-hidden rounded-lg p-3 ${
+            received
+              ? "border border-green-500/40 bg-gray-900/40"
+              : "border-2 border-dashed border-gray-600 bg-gray-900/40"
+          }`}
         >
           {stageBusy ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, color: "var(--trk-text)" }}>
-              <div
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: "50%",
-                  border: "2px solid var(--trk-border-strong)",
-                  borderTopColor: "var(--trk-heading)",
-                  animation: "spin 0.7s linear infinite",
-                }}
-              />
-              <div style={{ fontWeight: 700 }}>{message || "Saving your licence..."}</div>
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-gray-600 border-t-orange-500" />
+              <p className="text-xs text-gray-400">{message || "Processing licence image…"}</p>
             </div>
-          ) : (
-            <div>
-              <div
-                style={{
-                  fontSize: "0.78rem",
-                  fontWeight: 800,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.12em",
-                  color: "var(--trk-heading)",
-                  marginBottom: 10,
-                }}
-              >
-                {side === "front" ? "Step 1" : "Step 2"}
-              </div>
-              <div style={{ color: "var(--trk-text)", fontSize: "1.5rem", fontWeight: 800, marginBottom: 10 }}>{title}</div>
-              <div style={{ color: "var(--trk-text-muted)", maxWidth: 420, lineHeight: 1.6 }}>{subtitle}</div>
-            </div>
-          )}
-          {!stageBusy && (
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{
-                position: "absolute",
-                inset: 0,
-                opacity: 0,
-                cursor: "pointer",
-                width: "100%",
-                height: "100%",
-                borderRadius: 14,
-              }}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void handleFileSelect(side, file);
-                event.currentTarget.value = "";
-              }}
+          ) : preview ? (
+            <img
+              src={preview}
+              alt={`${label} preview`}
+              className="max-h-[100px] w-full rounded-md object-contain"
             />
+          ) : (
+            <>
+              <IdCardIcon variant={side} />
+              <p className="mt-2 text-center text-xs font-medium text-gray-400">{hint}</p>
+              <p className="mt-1 text-center text-[10px] text-gray-500">JPG, PNG up to 10 MB</p>
+            </>
           )}
         </div>
+
+        {state === "FAILED" && (
+          <p className="mb-2 text-xs text-rose-400">{message || "Upload failed. Please try again."}</p>
+        )}
+
+        <button
+          type="button"
+          disabled={disabled || stageBusy}
+          onClick={() => openFilePicker(side)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {preview ? `Replace ${side === "front" ? "Front" : "Back"} DL` : uploadLabel}
+        </button>
+      </div>
+    );
+  }
+
+  const statusRow = (
+    sideLabel: string,
+    sub: string,
+    preprocess: "MISSING" | "FAILED" | "PROCESSED",
+    state: UploadState,
+    icon: "card" | "shield",
+  ) => {
+    const badge = sideBadge(state, preprocess);
+    const done = preprocess === "PROCESSED" || state === "SUCCESS";
+    return (
+      <div className="flex items-start gap-3 border-b border-gray-700 py-2.5 last:border-b-0">
+        <div
+          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            done ? "bg-green-500/10 text-green-400" : "bg-gray-700/50 text-orange-400"
+          }`}
+        >
+          {icon === "shield" ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <circle cx="8.5" cy="11" r="2" />
+            </svg>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-white">{sideLabel}</div>
+          <div className="text-xs text-gray-500">{sub}</div>
+        </div>
+        <Badge label={done && icon === "shield" ? "COMPLETE" : badge.label} tone={done ? "done" : badge.tone} />
       </div>
     );
   };
 
-  if (!frontPreview) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {uploadStage(
-          "front",
-          "Upload front of driver licence",
-          "Take or choose a clear photo of the front of your licence.",
-          frontMessage,
-          frontState,
-        )}
-        {frontState === "FAILED" && (
-          <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{frontMessage || "Upload failed. Please try again."}</p>
-        )}
-      </div>
-    );
-  }
-
-  if (!backPreview) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ ...card, textAlign: "center", cursor: "default" }}>
-          <div
-            style={{
-              fontSize: "0.78rem",
-              fontWeight: 800,
-              textTransform: "uppercase",
-              letterSpacing: "0.12em",
-              color: "var(--trk-success)",
-              marginBottom: 8,
-            }}
-          >
-            Front saved
-          </div>
-          <div style={{ color: "var(--trk-text-muted)", lineHeight: 1.6 }}>Continue with the back side for PDF417 barcode reading.</div>
-          <button
-            type="button"
-            onClick={() => promptReplacementFile("front")}
-            disabled={busy}
-            style={{
-              marginTop: 14,
-              background: "none",
-              border: "1px solid var(--trk-border)",
-              borderRadius: 6,
-              color: "var(--trk-heading)",
-              padding: "9px 18px",
-              fontSize: "0.8rem",
-              fontWeight: 700,
-              cursor: !busy ? "pointer" : "default",
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            Re-upload front
-          </button>
-        </div>
-        {uploadStage(
-          "back",
-          "Upload back of driver licence",
-          "Take or choose a clear photo of the back. The barcode will be read after upload.",
-          backMessage,
-          backState,
-        )}
-        {backState === "FAILED" && (
-          <p style={{ fontSize: "0.85rem", color: "var(--trk-danger)" }}>{backMessage || "Upload failed. Please try again."}</p>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {canReview && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18 }}>
-          {(
-            [
-              ["front", "Front preview", frontPreview],
-              ["back", "Back preview", backPreview],
-            ] as const
-          ).map(([side, label, preview]) => (
-            <div
-              key={side}
-              style={{
-                ...card,
-                border: "1px solid rgba(34,197,94,0.45)",
-                boxShadow: "0 0 0 1px rgba(34,197,94,0.12) inset",
-                cursor: "default",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <div
-                  style={{
-                    fontSize: "0.72rem",
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "var(--trk-success)",
-                  }}
-                >
-                  {label}
-                </div>
-                <div style={{ fontSize: "0.72rem", fontWeight: 800, color: "var(--trk-success)" }}>READY</div>
-              </div>
-              <div
-                style={{
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  border: "2px solid rgba(34,197,94,0.45)",
-                  background: "var(--trk-bg)",
-                  aspectRatio: "8 / 5",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                {preview && (
-                  <img src={preview} alt={`${label}`} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => promptReplacementFile(side)}
-                disabled={busy}
-                style={{
-                  marginTop: 10,
-                  width: "100%",
-                  background: "none",
-                  border: "1px solid var(--trk-border)",
-                  borderRadius: 6,
-                  color: "var(--trk-heading)",
-                  padding: "8px 0",
-                  fontSize: "0.78rem",
-                  fontWeight: 700,
-                  cursor: busy ? "default" : "pointer",
-                  opacity: busy ? 0.6 : 1,
-                }}
-              >
-                Re-upload {side}
-              </button>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-black text-white uppercase tracking-wide">
+          Driver&apos;s <span className="text-orange-400">License</span>
+        </h2>
+        <p className="text-gray-400 text-sm mt-1">
+          Upload clear photos of both sides of your current, valid commercial driver&apos;s license.
+        </p>
+        <p className="mt-1 text-xs text-gray-500">You can upload from this computer or use your phone.</p>
+      </div>
+
+      <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
+        <SectionTitle>License Upload</SectionTitle>
+
+        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {renderSideCard(
+            "front",
+            "Front",
+            "Upload the front of your license",
+            frontPreview,
+            frontState,
+            frontMessage,
+            frontPre,
+          )}
+          {renderSideCard(
+            "back",
+            "Back",
+            "Upload the back of your license",
+            backPreview,
+            backState,
+            backMessage,
+            backPre,
+          )}
+
+          <div className="flex flex-col rounded-xl border border-gray-700 bg-gray-900/40 p-4 sm:col-span-2 lg:col-span-1">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase tracking-widest text-orange-400">Use your phone</span>
+              <Badge label="FAST & EASY" tone="accent" />
             </div>
-          ))}
+            <p className="mb-3 text-xs text-gray-500">Scan to capture on your phone</p>
+
+            <div className="mb-3 flex min-h-[7.5rem] items-center justify-center rounded-lg border border-gray-700 bg-gray-900/40 p-2">
+              {captureLink ? (
+                <div className="rounded-lg bg-white p-2">
+                  <QRCode value={captureLink} size={104} />
+                </div>
+              ) : (
+                <div className="text-center text-xs text-gray-500">
+                  {issuing ? "Preparing QR code…" : "QR code will appear here"}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              disabled={disabled || issuing || !onboardingToken}
+              onClick={() => void handleOpenOnPhone()}
+              className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="7" y="2" width="10" height="20" rx="2" />
+                <path d="M11 18h2" strokeLinecap="round" />
+              </svg>
+              {issuing ? "Opening…" : "Open on phone"}
+            </button>
+
+            <div className="rounded-lg border border-gray-700 bg-gray-800/60 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-400">Send link via text</p>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  disabled
+                  placeholder="+1 (555) 123-4567"
+                  className={`${inp} min-w-0 flex-1 opacity-60`}
+                  title="SMS link delivery coming soon"
+                />
+                <button
+                  type="button"
+                  disabled
+                  className="shrink-0 rounded-xl bg-orange-500 px-3 py-2 text-xs font-bold uppercase tracking-widest text-black opacity-50"
+                  title="SMS link delivery coming soon"
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+
+            {phoneError && <p className="mt-2 text-xs text-rose-400">{phoneError}</p>}
+          </div>
         </div>
-      )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-gray-700 p-4">
+            <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">Upload status</span>
+            <div>
+              {statusRow("Front of license", "Upload the front side", frontPre, frontState, "card")}
+              {statusRow("Back of license", "Upload the back side", backPre, backState, "card")}
+              {statusRow(
+                "License complete",
+                "Both sides received",
+                bothProcessed ? "PROCESSED" : "MISSING",
+                bothProcessed ? "SUCCESS" : "IDLE",
+                "shield",
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-700 p-4">
+            <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">How it works</span>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                { n: "1", title: "Open on phone", sub: "Scan the QR code or open the link" },
+                { n: "2", title: "Take or choose front photo", sub: "Follow the on-screen guidance" },
+                { n: "3", title: "Take or choose back photo", sub: "Follow the on-screen guidance" },
+                { n: "4", title: "Return here and continue", sub: "We'll upload your photos automatically" },
+              ].map((step) => (
+                <div key={step.n} className="text-center">
+                  <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-sm font-bold text-black">
+                    {step.n}
+                  </div>
+                  <div className="text-xs font-semibold leading-snug text-white">{step.title}</div>
+                  <div className="mt-1 text-[10px] leading-snug text-gray-500">{step.sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4 border-t border-gray-700 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-center gap-2 text-xs text-gray-500">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            Your data is secure and encrypted. Files are used only for verification.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={disabled || checking || !onRefreshApplication}
+              onClick={() => void handleCheckStatus()}
+              className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800 disabled:opacity-50"
+            >
+              {checking ? "Checking…" : "Check status"}
+            </button>
+            <button
+              type="button"
+              disabled={saving || !canContinue || busy}
+              onClick={() => onContinue?.()}
+              className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Continue"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
