@@ -17,9 +17,11 @@ from app.services.applicant_dl_opencv import (
     process_applicant_dl_image_path,
 )
 
-# Internal working-copy only. Original upload remains untouched in storage.
-# Phone photos at full resolution often fail four-corner confirmation; sandbox
-# scale (long side ≤ 1544) matches the proven OpenCV operating range.
+# Temporary OpenCV detection working copy only — not the stored image size.
+# Browser ingestion may keep sources up to 2400px; that file stays as stored.
+# Only this working copy is scaled to 1544 when the long side exceeds 1544.
+# 1544 is the validated OpenCV detection scale (IMG6446: Canny PASS at 1544,
+# four-corner FAIL at direct 2400). Do not change without the frozen DL battery.
 WORKING_COPY_MAX_SIDE = 1544
 WORKING_COPY_PREP_VERSION = "2026-08-29-working-copy-v1"
 
