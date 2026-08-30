@@ -500,6 +500,41 @@ async def save_applicant_dl_processed_bytes(
     )
 
 
+def purge_applicant_dl_application(tenant_slug: str, application_id: int) -> int:
+    """Delete all stored applicant DL files for one application (local or S3)."""
+    import shutil
+
+    backend = get_storage()
+    prefix = f"{tenant_slug}/applicant_dl/application/{application_id}/"
+    if isinstance(backend, LocalStorageBackend):
+        dir_path = backend._key_to_path(f"{prefix}__purge__", "applicant_dl", tenant_slug).parent
+        if not dir_path.is_dir():
+            return 0
+        count = sum(1 for p in dir_path.iterdir() if p.is_file())
+        shutil.rmtree(dir_path)
+        return count
+    if isinstance(backend, S3StorageBackend):
+        full_prefix = backend._full_key(prefix, "applicant_dl", tenant_slug)
+        deleted = 0
+        token: str | None = None
+        while True:
+            kwargs: dict = {"Bucket": backend._bucket, "Prefix": full_prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = backend._client.list_objects_v2(**kwargs)
+            contents = resp.get("Contents") or []
+            if not contents:
+                break
+            keys = [{"Key": item["Key"]} for item in contents]
+            backend._client.delete_objects(Bucket=backend._bucket, Delete={"Objects": keys})
+            deleted += len(keys)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+        return deleted
+    return 0
+
+
 async def save_applicant_doc_upload(
     tenant_slug: str, application_id: int, file: UploadFile
 ) -> StoredFile:
