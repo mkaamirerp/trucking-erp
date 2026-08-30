@@ -145,10 +145,10 @@ export default function DLUploadStep({
   }, [backPreviewUrl, localPreview.back]);
 
   useEffect(() => {
-    if (!onboardingToken || captureLink || issuing) return;
+    if (!onboardingToken) return;
     let cancelled = false;
-    (async () => {
-      setIssuing(true);
+    setIssuing(true);
+    void (async () => {
       try {
         const resp = await issueApplicantDlCaptureLink(onboardingToken);
         if (!cancelled) setCaptureLink(resp.link);
@@ -161,7 +161,7 @@ export default function DLUploadStep({
     return () => {
       cancelled = true;
     };
-  }, [onboardingToken, captureLink, issuing]);
+  }, [onboardingToken]);
 
   const frontPreview = useMemo(() => {
     if (frontState === "SUCCESS" || frontState === "FAILED") return frontPreviewUrl;
