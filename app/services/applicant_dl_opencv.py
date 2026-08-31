@@ -39,6 +39,19 @@ CLOSEUP_MIN_EDGE_INLIERS = 80
 SOURCE_FRAME_MARGIN_PX = 8
 ORIENTATION_ORDER = ["original", "cw90", "ccw90", "rotate180"]
 
+# Short-side repair is a FALLBACK only. These do not loosen confirmer gates.
+# A candidate must already fail the existing 1.25–1.95 ratio band.
+SHORT_SIDE_REPAIR_RATIO_MIN = 1.95
+SHORT_SIDE_REPAIR_RATIO_MAX = 2.55
+SHORT_SIDE_REPAIR_OTHER_MIN_INLIERS = 80
+SHORT_SIDE_REPAIR_MIN_INLIER_GAP = 20
+SHORT_SIDE_REPAIR_MIN_SHORTFALL_FRAC = 0.08
+SHORT_SIDE_REPAIR_INSIDE_MARGIN_PX = 8
+SHORT_SIDE_REPAIR_SEARCH_FRAC = 0.18
+SHORT_SIDE_REPAIR_SEARCH_MIN_PX = 24
+SHORT_SIDE_REPAIR_SEARCH_MAX_PX = 70
+SHORT_SIDE_REPAIR_VERSION = "2026-08-31-short-side-repair-v1"
+
 @dataclass
 class CandidateResult:
     orientation_name: str
@@ -559,10 +572,42 @@ def _search_confirmed_seed(
     seed_fn,
     *,
     locator_name: str,
-) -> Optional[dict[str, Any]]:
-    """Run orientation loop + confirmer for one rough locator. Confirmer unchanged."""
-    best: Optional[dict[str, Any]] = None
+) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Run orientation loop + confirmer for one rough locator.
+
+    Returns (best_normal, best_repaired). Repair is never applied to a
+    candidate that already passed _confirm_all_four_corners().
+    """
+    best_normal: Optional[dict[str, Any]] = None
+    best_repaired: Optional[dict[str, Any]] = None
     source_frame_hits = 0
+
+    def _pack(orientation, orientation_rank, candidate_rank, seed, oriented, corners, diagnostics, support, repaired: bool):
+        score = (
+            seed["seed_score"]
+            + diagnostics["ratio_error_percent"] / 50.0
+            + diagnostics["max_angle_error_from_90"] / 100.0
+            + orientation_rank * 0.002
+            + candidate_rank * 0.001
+        )
+        return {
+            "score": float(score),
+            "orientation": orientation,
+            "oriented": oriented,
+            "seed_rank": candidate_rank,
+            "corners": corners,
+            "diagnostics": diagnostics,
+            "support": support,
+            "seed_mask": seed.get("mask_name"),
+            "scene_profile": seed.get("scene_profile"),
+            "is_closeup_seed": bool(seed.get("is_closeup_seed")),
+            "rough_locator": locator_name,
+            "rough_area_ratio": float(seed.get("area_ratio") or 0.0),
+            "rough_ratio": float(seed.get("rough_ratio") or 0.0),
+            "source_frame_rejected": False,
+            "source_frame_hits": int(source_frame_hits),
+            "edge_repair_applied": bool(repaired),
+        }
 
     for orientation_rank, orientation in enumerate(ORIENTATION_ORDER):
         oriented = rotate_image(image_bgr, orientation)
@@ -579,39 +624,38 @@ def _search_confirmed_seed(
                 seed["rough_box"],
                 is_closeup_seed=bool(seed.get("is_closeup_seed")),
             )
-            if corners is None:
+            if corners is not None:
+                packed = _pack(
+                    orientation, orientation_rank, candidate_rank, seed, oriented,
+                    corners, diagnostics, support, False,
+                )
+                if best_normal is None or packed["score"] < best_normal["score"]:
+                    best_normal = packed
                 continue
 
-            score = (
-                seed["seed_score"]
-                + diagnostics["ratio_error_percent"] / 50.0
-                + diagnostics["max_angle_error_from_90"] / 100.0
-                + orientation_rank * 0.002
-                + candidate_rank * 0.001
+            if best_normal is not None:
+                continue
+
+            repaired = _attempt_short_side_edge_repair(
+                oriented,
+                diagnostics,
+                support,
+                is_closeup_seed=bool(seed.get("is_closeup_seed")),
             )
+            if not repaired or repaired.get("corners") is None:
+                continue
+            packed = _pack(
+                orientation, orientation_rank, candidate_rank, seed, oriented,
+                repaired["corners"], repaired["diagnostics"], support, True,
+            )
+            if best_repaired is None or packed["score"] < best_repaired["score"]:
+                best_repaired = packed
 
-            if best is None or score < best["score"]:
-                best = {
-                    "score": float(score),
-                    "orientation": orientation,
-                    "oriented": oriented,
-                    "seed_rank": candidate_rank,
-                    "corners": corners,
-                    "diagnostics": diagnostics,
-                    "support": support,
-                    "seed_mask": seed.get("mask_name"),
-                    "scene_profile": seed.get("scene_profile"),
-                    "is_closeup_seed": bool(seed.get("is_closeup_seed")),
-                    "rough_locator": locator_name,
-                    "rough_area_ratio": float(seed.get("area_ratio") or 0.0),
-                    "rough_ratio": float(seed.get("rough_ratio") or 0.0),
-                    "source_frame_rejected": False,
-                    "source_frame_hits": int(source_frame_hits),
-                }
-
-    if best is not None:
-        best["source_frame_hits"] = int(source_frame_hits)
-    return best
+    if best_normal is not None:
+        best_normal["source_frame_hits"] = int(source_frame_hits)
+    if best_repaired is not None:
+        best_repaired["source_frame_hits"] = int(source_frame_hits)
+    return best_normal, best_repaired
 
 
 def _gradient_magnitude(image_bgr):
@@ -705,6 +749,98 @@ def _intersect_fitted_lines(a, b):
     t, _ = np.linalg.solve(matrix, vector)
     return np.array([x1 + t * vx1, y1 + t * vy1], dtype=np.float32)
 
+
+def _line_point_distance(line, pt) -> float:
+    vx, vy, x0, y0 = (float(v) for v in line)
+    relx = float(pt[0]) - x0
+    rely = float(pt[1]) - y0
+    return abs(vx * rely - vy * relx) / (float(np.hypot(vx, vy)) + 1e-6)
+
+
+def _line_unit_tangent(line) -> np.ndarray:
+    vx, vy = float(line[0]), float(line[1])
+    length = float(np.hypot(vx, vy)) + 1e-6
+    return np.array([vx / length, vy / length], dtype=np.float32)
+
+
+def _evaluate_four_edge_geometry(
+    image_bgr,
+    corners: np.ndarray,
+    edge_inliers: list[int],
+    is_closeup_seed: bool = False,
+) -> tuple[bool, dict[str, Any]]:
+    """Exact confirmer acceptance rules. Shared by the normal path and repair fallback."""
+    h, w = image_bgr.shape[:2]
+    corners = np.asarray(corners, dtype=np.float32).reshape(4, 2)
+
+    all_inside = bool(
+        np.all(
+            (corners[:, 0] >= -5)
+            & (corners[:, 0] <= w + 5)
+            & (corners[:, 1] >= -5)
+            & (corners[:, 1] <= h + 5)
+        )
+    )
+
+    tl, tr, br, bl = corners
+    top = float(np.linalg.norm(tr - tl))
+    bottom = float(np.linalg.norm(br - bl))
+    left = float(np.linalg.norm(bl - tl))
+    right = float(np.linalg.norm(br - tr))
+
+    ratio = ((top + bottom) / 2.0) / (((left + right) / 2.0) + 1e-6)
+    polygon_area = abs(float(cv2.contourArea(corners))) / float(h * w)
+
+    angles = [
+        angle_at(bl, tl, tr),
+        angle_at(tl, tr, br),
+        angle_at(tr, br, bl),
+        angle_at(br, bl, tl),
+    ]
+    max_angle_error = max(abs(value - 90.0) for value in angles)
+
+    max_polygon_area = (
+        CLOSEUP_CONFIRM_MAX_AREA_RATIO
+        if is_closeup_seed
+        else NORMAL_MAX_AREA_RATIO
+    )
+    required_min_edge_inliers = (
+        CLOSEUP_MIN_EDGE_INLIERS
+        if is_closeup_seed
+        else 50
+    )
+
+    confirmed = bool(
+        all_inside
+        and 0.08 <= polygon_area <= max_polygon_area
+        and 1.25 <= ratio <= 1.95
+        and max_angle_error <= 20.0
+        and min(edge_inliers) >= required_min_edge_inliers
+    )
+
+    diagnostics = {
+        "confirmed": confirmed,
+        "all_four_corners_inside_source": all_inside,
+        "edge_inliers": list(edge_inliers),
+        "ratio": ratio,
+        "ratio_error_percent": abs(ratio - DL_ASPECT) / DL_ASPECT * 100.0,
+        "area_percent": polygon_area * 100.0,
+        "corner_angles": angles,
+        "max_angle_error_from_90": max_angle_error,
+        "is_closeup_seed": bool(is_closeup_seed),
+        "max_polygon_area_allowed": float(max_polygon_area),
+        "required_min_edge_inliers": int(required_min_edge_inliers),
+        "long_side_length": (top + bottom) / 2.0,
+        "short_side_length": (left + right) / 2.0,
+        "corners": {
+            "TL": corners[0].tolist(),
+            "TR": corners[1].tolist(),
+            "BR": corners[2].tolist(),
+            "BL": corners[3].tolist(),
+        },
+    }
+    return confirmed, diagnostics
+
 def _confirm_all_four_corners(
     image_bgr,
     rough_box,
@@ -759,77 +895,263 @@ def _confirm_all_four_corners(
         }, None
 
     corners = order_corners(np.vstack(raw_corners).astype(np.float32))
-    h, w = image_bgr.shape[:2]
-
-    # Every corner must actually land inside the source image.
-    all_inside = bool(
-        np.all(
-            (corners[:, 0] >= -5)
-            & (corners[:, 0] <= w + 5)
-            & (corners[:, 1] >= -5)
-            & (corners[:, 1] <= h + 5)
-        )
+    confirmed, diagnostics = _evaluate_four_edge_geometry(
+        image_bgr,
+        corners,
+        edge_inliers,
+        is_closeup_seed=is_closeup_seed,
     )
-
-    tl, tr, br, bl = corners
-    top = float(np.linalg.norm(tr - tl))
-    bottom = float(np.linalg.norm(br - bl))
-    left = float(np.linalg.norm(bl - tl))
-    right = float(np.linalg.norm(br - tr))
-
-    ratio = ((top + bottom) / 2.0) / (((left + right) / 2.0) + 1e-6)
-    polygon_area = abs(float(cv2.contourArea(corners))) / float(h * w)
-
-    angles = [
-        angle_at(bl, tl, tr),
-        angle_at(tl, tr, br),
-        angle_at(tr, br, bl),
-        angle_at(br, bl, tl),
-    ]
-    max_angle_error = max(abs(value - 90.0) for value in angles)
-
-    max_polygon_area = (
-        CLOSEUP_CONFIRM_MAX_AREA_RATIO
-        if is_closeup_seed
-        else NORMAL_MAX_AREA_RATIO
-    )
-
-    required_min_edge_inliers = (
-        CLOSEUP_MIN_EDGE_INLIERS
-        if is_closeup_seed
-        else 50
-    )
-
-    confirmed = bool(
-        all_inside
-        and 0.08 <= polygon_area <= max_polygon_area
-        and 1.25 <= ratio <= 1.95
-        and max_angle_error <= 20.0
-        and min(edge_inliers) >= required_min_edge_inliers
-    )
-
-    diagnostics = {
-        "confirmed": confirmed,
-        "all_four_corners_inside_source": all_inside,
-        "edge_inliers": edge_inliers,
-        "ratio": ratio,
-        "ratio_error_percent": abs(ratio - DL_ASPECT) / DL_ASPECT * 100.0,
-        "area_percent": polygon_area * 100.0,
-        "corner_angles": angles,
-        "max_angle_error_from_90": max_angle_error,
-        "search_px": search_px,
-        "is_closeup_seed": bool(is_closeup_seed),
-        "max_polygon_area_allowed": float(max_polygon_area),
-        "required_min_edge_inliers": int(required_min_edge_inliers),
-        "corners": {
-            "TL": corners[0].tolist(),
-            "TR": corners[1].tolist(),
-            "BR": corners[2].tolist(),
-            "BL": corners[3].tolist(),
-        },
-    }
+    diagnostics["search_px"] = search_px
 
     return (corners if confirmed else None), diagnostics, (edge_points, edge_lines)
+
+
+def _map_fitted_lines_to_ordered_sides(edge_lines, corners) -> dict[str, int]:
+    """Assign each fitted line to TL-TR / TR-BR / BR-BL / BL-TL after order_corners."""
+    corners = np.asarray(corners, dtype=np.float32).reshape(4, 2)
+    sides = (
+        ("top", corners[0], corners[1]),
+        ("right", corners[1], corners[2]),
+        ("bottom", corners[2], corners[3]),
+        ("left", corners[3], corners[0]),
+    )
+    unused = list(range(len(edge_lines)))
+    mapping: dict[str, int] = {}
+    for name, p0, p1 in sides:
+        best_i = min(
+            unused,
+            key=lambda i: (
+                _line_point_distance(edge_lines[i], p0)
+                + _line_point_distance(edge_lines[i], p1)
+            ),
+        )
+        mapping[name] = best_i
+        unused.remove(best_i)
+    return mapping
+
+
+def _expected_short_length(long_side_length: float) -> float:
+    return float(long_side_length) / float(DL_ASPECT)
+
+
+def _is_short_side_repairable(
+    diagnostics: dict[str, Any],
+    edge_lines,
+    image_shape,
+    is_closeup_seed: bool = False,
+) -> tuple[bool, str, Optional[dict[str, Any]]]:
+    """Conservative eligibility for one-side short-dimension repair. Does not search."""
+    if not diagnostics or not edge_lines or len(edge_lines) != 4:
+        return False, "need_four_fitted_lines", None
+    inliers = diagnostics.get("edge_inliers") or []
+    if len(inliers) != 4:
+        return False, "need_four_edge_inliers", None
+    corners_d = diagnostics.get("corners")
+    if not isinstance(corners_d, dict) or not all(k in corners_d for k in ("TL", "TR", "BR", "BL")):
+        return False, "need_four_intersections", None
+    if not diagnostics.get("all_four_corners_inside_source"):
+        return False, "corners_not_inside_source", None
+
+    ratio = diagnostics.get("ratio")
+    if ratio is None:
+        return False, "missing_ratio", None
+    if ratio <= SHORT_SIDE_REPAIR_RATIO_MIN:
+        return False, "ratio_not_above_confirm_upper_bound", None
+    if ratio > SHORT_SIDE_REPAIR_RATIO_MAX:
+        return False, "ratio_absurdly_wide", None
+
+    corners = np.array(
+        [corners_d["TL"], corners_d["TR"], corners_d["BR"], corners_d["BL"]],
+        dtype=np.float32,
+    )
+    long_len = float(diagnostics.get("long_side_length") or 0.0)
+    short_len = float(diagnostics.get("short_side_length") or 0.0)
+    if long_len < 1 or short_len < 1:
+        return False, "missing_side_lengths", None
+    expected_short = _expected_short_length(long_len)
+    if expected_short <= 0:
+        return False, "invalid_expected_short", None
+    if short_len > expected_short * (1.0 - SHORT_SIDE_REPAIR_MIN_SHORTFALL_FRAC):
+        return False, "short_side_not_sufficiently_truncated", None
+
+    mapping = _map_fitted_lines_to_ordered_sides(edge_lines, corners)
+    # Short dimension of a landscape ID-1 polygon is the gap between the two
+    # long edges (top/bottom). Left/right are the physical short card edges.
+    short_dim_names = ("top", "bottom")
+    a_name, b_name = short_dim_names
+    a_idx, b_idx = mapping[a_name], mapping[b_name]
+    a_in, b_in = int(inliers[a_idx]), int(inliers[b_idx])
+    if a_in <= b_in:
+        suspect_name, trusted_name = a_name, b_name
+        suspect_idx, trusted_idx = a_idx, b_idx
+        suspect_in, trusted_in = a_in, b_in
+    else:
+        suspect_name, trusted_name = b_name, a_name
+        suspect_idx, trusted_idx = b_idx, a_idx
+        suspect_in, trusted_in = b_in, a_in
+
+    other_idx = [i for i in range(4) if i != suspect_idx]
+    other_inliers = [int(inliers[i]) for i in other_idx]
+    if min(other_inliers) < SHORT_SIDE_REPAIR_OTHER_MIN_INLIERS:
+        return False, "other_sides_lack_support", None
+    if trusted_in - suspect_in < SHORT_SIDE_REPAIR_MIN_INLIER_GAP:
+        return False, "suspect_not_clearly_weaker", None
+
+    centroid = corners.mean(axis=0)
+    side_pts = {
+        "top": (corners[0], corners[1]),
+        "right": (corners[1], corners[2]),
+        "bottom": (corners[2], corners[3]),
+        "left": (corners[3], corners[0]),
+    }
+    trusted_p0, trusted_p1 = side_pts[trusted_name]
+    suspect_p0, suspect_p1 = side_pts[suspect_name]
+    trusted_mid = (np.asarray(trusted_p0) + np.asarray(trusted_p1)) / 2.0
+    suspect_mid = (np.asarray(suspect_p0) + np.asarray(suspect_p1)) / 2.0
+    outward = suspect_mid - centroid
+    outward_norm = float(np.linalg.norm(outward))
+    if outward_norm < 1e-3:
+        return False, "cannot_determine_outward_direction", None
+    outward_u = outward / outward_norm
+
+    # Parallel offset from the trusted opposite line, outward through the card.
+    trusted_line = edge_lines[trusted_idx]
+    tangent = _line_unit_tangent(trusted_line)
+    n1 = np.array([-tangent[1], tangent[0]], dtype=np.float32)
+    n2 = -n1
+    n = n1 if float(np.dot(n1, outward_u)) >= float(np.dot(n2, outward_u)) else n2
+    predicted_mid = trusted_mid + n * expected_short
+    if float(np.linalg.norm(predicted_mid - centroid)) <= float(np.linalg.norm(suspect_mid - centroid)) + 1.0:
+        return False, "predicted_shift_not_outward", None
+
+    h, w = int(image_shape[0]), int(image_shape[1])
+    margin = SHORT_SIDE_REPAIR_INSIDE_MARGIN_PX
+    if not (margin <= float(predicted_mid[0]) <= w - margin and margin <= float(predicted_mid[1]) <= h - margin):
+        return False, "predicted_edge_outside_source", None
+
+    predicted_shift = float(np.linalg.norm(predicted_mid - suspect_mid))
+    search_px = int(
+        max(
+            SHORT_SIDE_REPAIR_SEARCH_MIN_PX,
+            min(SHORT_SIDE_REPAIR_SEARCH_MAX_PX, SHORT_SIDE_REPAIR_SEARCH_FRAC * expected_short),
+        )
+    )
+    ctx = {
+        "suspect_name": suspect_name,
+        "trusted_name": trusted_name,
+        "suspect_idx": int(suspect_idx),
+        "trusted_idx": int(trusted_idx),
+        "suspect_inliers": int(suspect_in),
+        "expected_short_length": float(expected_short),
+        "original_short_length": float(short_len),
+        "original_long_length": float(long_len),
+        "predicted_mid": predicted_mid.astype(np.float32),
+        "predicted_tangent": tangent,
+        "predicted_shift_px": predicted_shift,
+        "search_band_px": search_px,
+        "mapping": mapping,
+        "is_closeup_seed": bool(is_closeup_seed),
+    }
+    return True, "short_side_truncated", ctx
+
+
+def _attempt_short_side_edge_repair(
+    image_bgr,
+    diagnostics: dict[str, Any],
+    support,
+    is_closeup_seed: bool = False,
+) -> Optional[dict[str, Any]]:
+    """Search for a real missing short-dimension edge. Never synthesizes corners from aspect math."""
+    repair_meta = {
+        "edge_repair_attempted": True,
+        "edge_repair_version": SHORT_SIDE_REPAIR_VERSION,
+        "edge_repair_passed": False,
+    }
+    if not support or support[1] is None:
+        repair_meta["edge_repair_reason"] = "no_fitted_lines"
+        return {"corners": None, "diagnostics": {**(diagnostics or {}), **repair_meta}, "edge_lines": None}
+
+    edge_points, edge_lines = support
+    eligible, reason, ctx = _is_short_side_repairable(
+        diagnostics,
+        edge_lines,
+        image_bgr.shape,
+        is_closeup_seed=is_closeup_seed,
+    )
+    repair_meta["edge_repair_reason"] = reason
+    if diagnostics:
+        repair_meta["edge_repair_original_ratio"] = diagnostics.get("ratio")
+    if not eligible or ctx is None:
+        return {"corners": None, "diagnostics": {**(diagnostics or {}), **repair_meta}, "edge_lines": None}
+
+    repair_meta.update(
+        {
+            "edge_repair_suspect_edge": ctx["suspect_name"],
+            "edge_repair_expected_short_length": ctx["expected_short_length"],
+            "edge_repair_original_short_length": ctx["original_short_length"],
+            "edge_repair_predicted_shift_px": ctx["predicted_shift_px"],
+            "edge_repair_search_band_px": ctx["search_band_px"],
+        }
+    )
+
+    mid = ctx["predicted_mid"]
+    tangent = ctx["predicted_tangent"]
+    half = 0.5 * float(ctx["original_long_length"])
+    p0 = mid - tangent * half
+    p1 = mid + tangent * half
+    points = _sample_boundary_points(image_bgr, p0, p1, int(ctx["search_band_px"]))
+    new_line, new_inliers = _ransac_edge_line(points)
+    required_min = CLOSEUP_MIN_EDGE_INLIERS if is_closeup_seed else 50
+    if new_line is None or len(new_inliers) < required_min:
+        repair_meta["edge_repair_reason"] = "no_replacement_physical_line"
+        repair_meta["edge_repair_new_edge_inliers"] = int(len(new_inliers))
+        return {"corners": None, "diagnostics": {**(diagnostics or {}), **repair_meta}, "edge_lines": None}
+
+    repair_meta["edge_repair_new_edge_inliers"] = int(len(new_inliers))
+    repaired_lines = list(edge_lines)
+    repaired_inliers = list(diagnostics.get("edge_inliers") or [0, 0, 0, 0])
+    repaired_lines[ctx["suspect_idx"]] = new_line
+    repaired_inliers[ctx["suspect_idx"]] = int(len(new_inliers))
+
+    raw_corners = [
+        _intersect_fitted_lines(repaired_lines[3], repaired_lines[0]),
+        _intersect_fitted_lines(repaired_lines[0], repaired_lines[1]),
+        _intersect_fitted_lines(repaired_lines[1], repaired_lines[2]),
+        _intersect_fitted_lines(repaired_lines[2], repaired_lines[3]),
+    ]
+    if any(point is None for point in raw_corners):
+        repair_meta["edge_repair_reason"] = "repaired_intersections_unavailable"
+        return {"corners": None, "diagnostics": {**(diagnostics or {}), **repair_meta}, "edge_lines": None}
+
+    corners = order_corners(np.vstack(raw_corners).astype(np.float32))
+    confirmed, new_diag = _evaluate_four_edge_geometry(
+        image_bgr,
+        corners,
+        repaired_inliers,
+        is_closeup_seed=is_closeup_seed,
+    )
+    new_diag.update(repair_meta)
+    new_diag["edge_repair_final_ratio"] = new_diag.get("ratio")
+    new_diag["edge_repair_final_angle_error"] = new_diag.get("max_angle_error_from_90")
+    if not confirmed:
+        if not new_diag.get("all_four_corners_inside_source"):
+            new_diag["edge_repair_reason"] = "repaired_corners_outside_source"
+        elif not (1.25 <= float(new_diag.get("ratio") or 0) <= 1.95):
+            new_diag["edge_repair_reason"] = "repaired_ratio_invalid"
+        elif float(new_diag.get("max_angle_error_from_90") or 99) > 20.0:
+            new_diag["edge_repair_reason"] = "repaired_angles_invalid"
+        else:
+            new_diag["edge_repair_reason"] = "repaired_geometry_rejected"
+        return {"corners": None, "diagnostics": new_diag, "edge_lines": repaired_lines}
+
+    new_diag["edge_repair_passed"] = True
+    new_diag["edge_repair_reason"] = "repaired_and_confirmed"
+    return {
+        "corners": corners,
+        "diagnostics": new_diag,
+        "edge_lines": repaired_lines,
+        "edge_points": edge_points,
+    }
 
 def _warp_confirmed_card(image_bgr, corners):
     src = order_corners(corners).astype(np.float32)
@@ -877,17 +1199,21 @@ def process_driver_license_image(
       2) if HSV never confirms -> Canny external-contour seeds
     Final authority remains _confirm_all_four_corners().
     """
-    best = _search_confirmed_seed(
+    hsv_normal, hsv_repaired = _search_confirmed_seed(
         image_bgr,
         _rough_card_candidates,
         locator_name="HSV",
     )
+    best = hsv_normal
     if best is None:
-        best = _search_confirmed_seed(
+        canny_normal, canny_repaired = _search_confirmed_seed(
             image_bgr,
             _canny_rough_card_candidates,
             locator_name="CANNY",
         )
+        best = canny_normal or hsv_repaired or canny_repaired
+    # HSV normal never runs Canny. HSV-only repaired still allows Canny to
+    # supply a normal confirm, which always outranks repair.
 
     if best is None:
         report = {
@@ -951,6 +1277,19 @@ def process_driver_license_image(
         "confirm_diagnostics": diagnostics,
         "classification": "FOUR_CORNER_WARP",
         "correction_applied": "sandbox_four_corner_perspective_warp",
+        "edge_repair_attempted": bool(diagnostics.get("edge_repair_attempted", False)),
+        "edge_repair_applied": bool(best.get("edge_repair_applied")),
+        "edge_repair_reason": diagnostics.get("edge_repair_reason"),
+        "edge_repair_suspect_edge": diagnostics.get("edge_repair_suspect_edge"),
+        "edge_repair_original_ratio": diagnostics.get("edge_repair_original_ratio"),
+        "edge_repair_expected_short_length": diagnostics.get("edge_repair_expected_short_length"),
+        "edge_repair_original_short_length": diagnostics.get("edge_repair_original_short_length"),
+        "edge_repair_predicted_shift_px": diagnostics.get("edge_repair_predicted_shift_px"),
+        "edge_repair_search_band_px": diagnostics.get("edge_repair_search_band_px"),
+        "edge_repair_new_edge_inliers": diagnostics.get("edge_repair_new_edge_inliers"),
+        "edge_repair_final_ratio": diagnostics.get("edge_repair_final_ratio"),
+        "edge_repair_final_angle_error": diagnostics.get("edge_repair_final_angle_error"),
+        "edge_repair_passed": bool(diagnostics.get("edge_repair_passed", False)),
         "post_validation": post_report,
         "final_dimensions": {"width": int(final.shape[1]), "height": int(final.shape[0])},
         "preprocess_version": PREPROCESS_VERSION,
@@ -977,6 +1316,13 @@ def process_driver_license_image(
                 (255, 0, 0),
                 3,
             )
+        if best.get("edge_repair_applied"):
+            suspect = str(diagnostics.get("edge_repair_suspect_edge") or "")
+            side_idx = {"top": 0, "right": 1, "bottom": 2, "left": 3}.get(suspect)
+            if side_idx is not None:
+                p1 = tuple(q[side_idx])
+                p2 = tuple(q[(side_idx + 1) % 4])
+                cv2.line(dbg, p1, p2, (255, 255, 0), 7)
         cv2.imwrite(str(debug_dir / "four_confirmed_corners.jpg"), dbg)
         cv2.imwrite(str(debug_dir / "final.jpg"), final)
         (debug_dir / "report.json").write_text(
