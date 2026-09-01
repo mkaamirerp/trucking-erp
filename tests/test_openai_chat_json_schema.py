@@ -181,3 +181,12 @@ def test_module_has_no_load_lab_import_path() -> None:
     src = open(mod.__file__, encoding="utf-8").read().lower()
     assert "load_lab" not in src
     assert "sqlalchemy" not in src
+
+
+def test_openai_capability_namespace_reexports_same_callables() -> None:
+    import app.document_platform.capabilities.openai.chat_json_schema as new
+    import app.services.openai_chat_json_schema as old
+
+    assert new.openai_chat_json_schema_raw is old.openai_chat_json_schema_raw
+    assert new.extract_chat_completion_content_json is old.extract_chat_completion_content_json
+    assert new.openai_chat_json_schema_content is old.openai_chat_json_schema_content
