@@ -66,7 +66,7 @@ from app.schemas.driver_onboarding import (
 )
 from app.deps.admin import is_tenant_admin
 from app.deps.entitlements import require_tenant_subscription_active
-from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417
+from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417, pdf417_enabled_for_doc_type
 from app.constants.person_application_workflow import WORKFLOW_LANE_COMPLETE, normalize_workflow_lane
 from app.constants.person_onboarding import PERSON_SETUP_UI_COMBINED, normalize_person_setup_ui_mode
 from app.schemas.driver_compensation_setup import DriverCompensationSetupOut, DriverCompensationSetupWrite
@@ -711,8 +711,13 @@ async def _apply_applicant_dl_upload(
         files[doc_type]["enh_file_id"] = ocr_storage_key
 
     intake["files"] = files
-    if doc_type == "CDL_BACK" and ocr_storage_key:
-        intake = await apply_stored_cdl_back_pdf417(intake, ocr_storage_key, tenant_slug)
+    if pdf417_enabled_for_doc_type(doc_type):
+        intake = await apply_stored_cdl_back_pdf417(
+            intake,
+            stored.storage_key,
+            tenant_slug,
+            processed_storage_key=ocr_storage_key,
+        )
     app.intake_payload = intake
 
     new_front = _dl_side_status(intake, "CDL_FRONT")

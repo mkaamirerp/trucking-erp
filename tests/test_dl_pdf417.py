@@ -16,7 +16,11 @@ from app.services.dl_pdf417 import (
     apply_pdf417_to_intake,
     decode_pdf417_barcode_with_trace,
     meaningful_license_field_count,
+    _ZXING_TRIES_FAST,
+    _ZXING_TRIES_THOROUGH,
+    _binarizer_label,
     _build_fast_candidates,
+    _decode_loop,
     _enumerate_pdf417_image_candidates,
     _extract_field_map,
 )
@@ -196,3 +200,76 @@ def test_multiline_fallback() -> None:
     payload = aamva_intake_from_pdf417_text(text)
     assert payload.get("driver_license_number") == "12345678"
     assert payload.get("license_region") == "ON"
+
+
+def test_global_histogram_precedes_local_average() -> None:
+    thorough = [_binarizer_label(b) for b, _inv in _ZXING_TRIES_THOROUGH]
+    assert thorough.index("GlobalHistogram") < thorough.index("LocalAverage")
+    fast = [_binarizer_label(b) for b, _inv in _ZXING_TRIES_FAST]
+    assert fast[0] == "GlobalHistogram"
+    assert fast.index("GlobalHistogram") < fast.index("LocalAverage")
+
+
+def test_first_global_histogram_success_stops_later_attempts(monkeypatch, tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def fake_read(pil_image, *, binarizer, try_invert):
+        calls.append(_binarizer_label(binarizer))
+        if _binarizer_label(binarizer) == "GlobalHistogram":
+            return "ANSI_SYNTHETIC_NO_PII"
+        return None
+
+    monkeypatch.setattr("app.services.dl_pdf417._zxing_read", fake_read)
+    p = tmp_path / "blank.jpg"
+    Image.new("RGB", (80, 80), "white").save(p, "JPEG")
+    text, meta = decode_pdf417_barcode_with_trace(p, mode="applicant_two_phase")
+    assert text == "ANSI_SYNTHETIC_NO_PII"
+    assert calls == ["GlobalHistogram"]
+    assert "LocalAverage" not in calls
+    zxing_ok = [a for a in meta.attempts if a.get("engine") == "zxing"]
+    assert len(zxing_ok) == 1
+    assert zxing_ok[0].get("binarizer") == "GlobalHistogram"
+    assert zxing_ok[0].get("decoded_char_count") == len("ANSI_SYNTHETIC_NO_PII")
+    assert "ANSI_SYNTHETIC_NO_PII" not in str(meta.as_debug_dict())
+
+
+def test_budget_skips_local_average_when_remaining_too_small(monkeypatch) -> None:
+    launched: list[str] = []
+
+    def fake_read(pil_image, *, binarizer, try_invert):
+        launched.append(_binarizer_label(binarizer))
+        return None
+
+    monkeypatch.setattr("app.services.dl_pdf417._zxing_read", fake_read)
+    rgb = Image.new("RGB", (24, 24), "white")
+    attempts: list[dict] = []
+    deadline = time.monotonic() + 0.05
+    _decode_loop(
+        [("full_rgb", rgb)],
+        attempts,
+        deadline_mon=deadline,
+        zxing_tries=_ZXING_TRIES_THOROUGH,
+        run_pyzbar=False,
+        phase="thorough_fallback",
+    )
+    assert "GlobalHistogram" in launched
+    assert "LocalAverage" not in launched
+    assert any(a.get("skipped_due_to_budget") and a.get("binarizer") == "LocalAverage" for a in attempts)
+
+
+def test_successful_decode_diagnostics_omit_barcode_payload() -> None:
+    import json
+
+    text = (
+        "DLDAQH010062911981DCAF^DCSMOTORISTSAMPLE^DACJANEQA^DAD^"
+        "DBD20160715^DBA20360115^DBB19850520^DAJON^DCGCAN^"
+    )
+    out = apply_pdf417_to_intake({"step": "dl_upload"}, raw_barcode_text=text, technical_error=None)
+    dbg = out.get("license_extract_debug") or {}
+    dumped = json.dumps(dbg)
+    assert "pdf417_text" not in dbg
+    assert "H010062911981" not in dumped
+    assert "MOTORISTSAMPLE" not in dumped
+    assert dbg.get("barcode_char_length") == len(text)
+    assert dbg.get("meaningful_field_count", 0) >= 1
+    assert out.get("driver_license_number") == "H010062911981"
