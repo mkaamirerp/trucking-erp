@@ -1,6 +1,11 @@
 """
 Seed realistic dispatch board data for tenant 'demo' (tenant_id=53).
 
+LEGACY COMPATIBILITY ONLY: this script intentionally inserts historical operational
+Load.status values with raw SQL so the deprecated board/read paths can be demonstrated.
+It is not a production writer and must not be copied into API, importer, or workflow code.
+New operational execution belongs to Trip/TripLoad; normal Load writes are draft/ready only.
+
 IMPORTANT: Tenant business tables (loads, load_stops, drivers, …) live in the
 per-tenant PostgreSQL database (e.g. tenant_demo), NOT in the platform DATABASE_URL.
 This script must use TENANT_DATABASE_URL or ALEMBIC_TENANT_DATABASE_URL from the

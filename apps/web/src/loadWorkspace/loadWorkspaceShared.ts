@@ -161,6 +161,11 @@ export const LOAD_STATUSES = [
   "issue_hold",
 ] as const;
 
+/** Legacy operational statuses stay selectable only when preserving the row's current value. */
+export function isLoadStatusOptionDisabled(optionStatus: string, currentStatus: string): boolean {
+  return optionStatus !== "draft" && optionStatus !== "ready" && currentStatus !== optionStatus;
+}
+
 export type DraftStop = LoadStop & { _key: string };
 
 /** Proposed values sourced from the intake pipeline for a given email thread.

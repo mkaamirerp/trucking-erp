@@ -13,6 +13,7 @@ import type {
 } from "@/api";
 import {
   LOAD_STATUSES,
+  isLoadStatusOptionDisabled,
   docFocusForStopAddress,
   docFocusForStopAppointment,
   docFocusForStopReference,
@@ -700,8 +701,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               onChange={(e) => p.setStatus(e.target.value)}
             >
               {LOAD_STATUSES.map((s) => {
-                const legacyOperationalBlocked =
-                  s !== "draft" && s !== "ready" && p.status !== s;
+                const legacyOperationalBlocked = isLoadStatusOptionDisabled(s, p.status);
                 return (
                   <option key={s} value={s} disabled={legacyOperationalBlocked}>
                     {legacyOperationalBlocked ? `${s} (legacy — use Trip workspace)` : s}

@@ -25,7 +25,7 @@ This document is the **navigation / source-of-truth map** for:
 
 It lists **reading order**, **document classification**, **consolidated locked principles**, **what is still open**, **guardrails**, **current shipped state**, and **next workflow**. **Always open the underlying docs** for full rationale, tables, and API shapes.
 
-**Legacy dispatch cutover (Slice 1, code — e.g. `7012f40a`):** **Generic `Load` PATCH** cannot create a **new** transition into **`Load.status = dispatched`** ( **`409`**, **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`** ). **Read**/**board** compatibility and **legacy cancel** paths for **already-dispatched** loads remain; **new** execution uses **Trip**/**`TripLoad`**/**planned trip** flows per locked decisions. **Target `Load.status` and board direction** are **LOCKED** in **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**.
+**Legacy dispatch cutover (Slices 1 + Load/Trip boundary enforcement):** Generic `Load` create accepts only **`draft` / `ready`**. Generic `Load` PATCH cannot create a new transition into any legacy operational status: **`dispatched`** retains **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**, while other legacy operational values use **`LEGACY_LOAD_STATUS_WRITE_DEPRECATED`**. Unchanged legacy values remain readable/resendable for compatibility, explicit seed paths remain internal, and commercial cancellation requires its dedicated workflow. New execution uses **Trip**/**`TripLoad`** flows. The target model is locked in **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**.
 
 ---
 

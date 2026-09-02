@@ -2,10 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   buildLoadPersistPayload,
   initialManualCreateStops,
+  isLoadStatusOptionDisabled,
   newDraftStop,
   selectDraftStopsForPersist,
 } from "./loadWorkspaceShared";
 import type { DraftStop } from "./loadWorkspaceShared";
+
+describe("legacy Load status options", () => {
+  it("allows draft/ready and the row's unchanged legacy value only", () => {
+    expect(isLoadStatusOptionDisabled("draft", "assigned")).toBe(false);
+    expect(isLoadStatusOptionDisabled("ready", "assigned")).toBe(false);
+    expect(isLoadStatusOptionDisabled("assigned", "assigned")).toBe(false);
+    expect(isLoadStatusOptionDisabled("in_transit", "assigned")).toBe(true);
+    expect(isLoadStatusOptionDisabled("delivered", "ready")).toBe(true);
+  });
+});
 
 function minimalPersist(over: Partial<Parameters<typeof buildLoadPersistPayload>[0]> = {}) {
   return {

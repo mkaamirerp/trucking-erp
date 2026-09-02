@@ -889,7 +889,7 @@ Recommended sequence:
 4. **City Pickup action**: create Trip for same Load from pickup stop to yard/terminal.
 5. **Trip cancellation endpoint** separate from Load cancellation.
 6. **Load cancellation endpoint/state** separate from Trip cancellation.
-7. **Trip status transitions**: planned → assigned → dispatched → in_transit → at_pickup/at_delivery → delivered → completed.
+7. **Trip status transitions**: planned → assigned → in_progress → completed, with cancelled as the terminal negative state. Granular movement details belong to execution/custody events, not new Trip header statuses.
 8. **Load custody/location events** for yard/terminal handoff and Needs Next Trip board.
 9. **Move assignment controls from LoadWorkspacePage to TripWorkspacePage.**
 10. **Trip-based dispatch board.**

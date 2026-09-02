@@ -73,13 +73,13 @@ Workspace uses **`parseLoadWorkspaceDocument`** → `POST /api/v1/loads/parse-do
 |--------|----------------|------|
 | `/loads` | `apps/web/src/pages/LoadsListPage.tsx` | Paged list of loads; entry to open a load. |
 | `/loads/new` | `apps/web/src/pages/LoadWorkspacePage.tsx` | **Manual create** — `isManual` true (`LoadWorkspacePage.tsx` 311–318); `workspaceMode` `"manual"`; initial `draftStops` from `initialManualCreateStops()`. |
-| `/loads/:id` | `apps/web/src/pages/LoadWorkspacePage.tsx` | **Edit existing load**; `getLoad` + `hydrateFromLoad` (`755–818`, `462–514`). Optional **dispatch** context: `?dispatchAssign=1` (`337–339`). Optional **intake** context: `?intakeThread=<id>` for email side panel + intake mode (`318–333`). Query `mode=payroll` / `mode=audit` changes sections (`324–333`, `loadWorkspaceShared.ts` `SECTION_CONFIG`). |
+| `/loads/:id` | `apps/web/src/pages/LoadWorkspacePage.tsx` | **Edit existing load**; `getLoad` + `hydrateFromLoad`. Optional **intake** context: `?intakeThread=<id>` for email side panel + intake mode. Query `mode=payroll` / `mode=audit` changes sections (`loadWorkspaceShared.ts` `SECTION_CONFIG`). Operational assignment is Trip-backed; the former `?dispatchAssign=1` Load mode was removed. |
 | `/loads/lab` | *(absent)* | **No** dedicated Load Lab page in the web app; Load Lab is API-only under `/api/v1/load-lab/...`. |
 | `/inbox` and `/intake` | `apps/web/src/pages/LoadInboxPage.tsx` (both paths in `App.tsx` 167–180) | Email thread queues; **navigate to** `OPS.LOAD_WORKSPACE_INTAKE(loadId, threadId)` = `/loads/:id?intakeThread=...` (`apps/web/src/routes.ts` 31–34). |
 | `POST /email-threads/.../create-draft-load` (API) | Backend creates a **draft** `Load` without stops (`app/services/email_threads.py` 223–237) — then user opens `LoadWorkspacePage` for that id. | Influences a load by **creating** a row; **stops** are not added there. |
 | `POST /email-threads/.../link-load` (API) | Links an existing load to a thread — opens workspace with that load. | |
 
-**Related:** `apps/web/src/routes.ts` `OPS.LOAD_NEW`, `OPS.LOAD_DETAIL`, `LOAD_INTAKE_THREAD_QUERY`, `LOAD_DISPATCH_ASSIGN_QUERY`.
+**Related:** `apps/web/src/routes.ts` `OPS.LOAD_NEW`, `OPS.LOAD_DETAIL`, and `LOAD_INTAKE_THREAD_QUERY`. There is no Load dispatch-assignment query constant.
 
 ---
 

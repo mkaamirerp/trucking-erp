@@ -52,20 +52,20 @@ The following are treated as **locked** or **strongly specified** in `TRIP_CONTA
 
 | Surface | Role today | Assignment / dispatch | Driver / truck / trailer | Trip number | What must move later |
 |---------|------------|------------------------|---------------------------|-------------|----------------------|
-| **`LoadWorkspacePage`** | **Primary** create/edit for loads (manual, detail, intake, payroll view). Persists via `buildLoadPersistPayload` → API. | **Yes** — status transitions, resources; **first entry to `dispatched`** triggers backend trip mint (see §5). | Edited in workspace form (assignment section). | Shown when `load.trip_number` / active trip (e.g. header + context row). | **Operational “final commit”** and **board-equivalent** actions move toward **TripWorkspacePage**; load page keeps **commercial** edit. |
-| **`LoadWorkspaceForm`** | One canonical form for load fields + sections. | Through load save / patch. | Same. | Display-only trip context where provided on load DTO. | **Operational** fields **eventually** read/write via **trip** context or snapshots only. |
-| **`DeprecatedDispatchPage`** | **`getDispatchBoard`** — loads grouped by **`load.status`** in columns; unassigned **Assign** → navigates to `/loads/{id}?dispatchAssign=1`. | **Board is load cards**, not trip rows. | Shown on cards; assignment flow lands on **load** workspace. | Shown on card when present on `Load`. | **Pivot** to **trip**-keyed board + **open Trip** instead of (or in addition to) **Load**. |
+| **`LoadWorkspacePage`** | **Primary** commercial/readiness create/edit for loads (manual, detail, intake, payroll view). Persists via `buildLoadPersistPayload` → API. | No operational dispatch writer; **Create Planned Trip** opens the Trip-backed workflow. | Legacy Load-level fields remain visible for compatibility; commitment belongs to Trip workspace. | Shown when `load.trip_number` / active trip (e.g. header + context row). | Keep commercial editing here; Trip workspace owns operational commitment and execution. |
+| **`LoadWorkspaceForm`** | One canonical form for load fields + sections. | Generic writes allow `draft`/`ready`; noncurrent legacy operational statuses are disabled. | Historical values remain readable; new operational assignment is not written here. | Display-only trip context where provided on load DTO. | Operational fields read/write via Trip context or snapshots only. |
+| **`DeprecatedDispatchPage`** | Legacy `getDispatchBoard` view grouped by historical **`load.status`** columns; unassigned cards open `/loads/{id}` without a dispatch query mode. | **Board is legacy load cards**, not trip rows. | No assignment strip; operators continue through **Create Planned Trip**. | Shown on card when present on `Load`. | Replace with the trip-keyed board; do not restore Load-status assignment. |
 | **`LoadsListPage`** | List + navigate to `LOAD_DETAIL` / `LOAD_NEW`. | Indirect. | N/A. | N/A. | Add **trips** list / deep links when **Trip** exists. |
 | **`LoadInboxPage`** | Intake: create **draft** load, open `LoadWorkspacePage` with intake thread. | Indirect. | On workspace after open. | As on load. | Intake may later **attach** drafts to a **trip**; still use **load** form for commercial body. |
 | **`routes.ts` / `App.tsx`** | `OPS.LOAD_NEW`, `LOAD_DETAIL`, etc.; no `TripWorkspace` routes. | N/A | N/A | N/A | New **`/trips/...`** routes when built. |
 
-**Current “owner” of dispatch actions:** In practice, **status and resources** on **`PATCH /api/v1/loads/{id}`** with CAS; **UI** is **`LoadWorkspacePage`** and **`DispatchAssignmentStrip`** (unassigned + `?dispatchAssign=1`). There is **no** trip-scoped API or page.
+**Current owner of dispatch actions:** **Trip** assignment and execution APIs plus **TripWorkspacePage**. `LoadWorkspacePage` owns commercial/readiness editing only. `DispatchAssignmentStrip` and `?dispatchAssign=1` were removed; generic Load writes cannot enter legacy operational statuses.
 
 ---
 
 ## 5. Current trip-number implementation vs future Trip table
 
-**Today (code + `DISPATCH_TRIP_NUMBER_RULE.md`):**
+**Historical implementation at the time of this gap snapshot (superseded by the current Trip-first locks):**
 
 - **`dispatch_trips`** is the **canonical** row for **`trip_number`**; **`TenantDispatchNumbering`** allocates the string in the same transaction as the insert.
 - **Exactly one** target per row: `load_id` or `trailer_move_id` (trailer move reserved for future).
