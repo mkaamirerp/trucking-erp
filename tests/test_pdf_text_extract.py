@@ -5,7 +5,7 @@ from app.services.pdf_text_extract import (
     extract_text_from_pdf_bytes,
 )
 
-_PDF_READER_PATCH = "app.services.pdf_text_extract.PdfReader"
+_PDF_READER_PATCH = "app.document_platform.capabilities.pdf.text_extract.PdfReader"
 
 
 def test_pdf_capability_namespace_reexports_same_callables() -> None:
@@ -64,7 +64,7 @@ def test_extract_text_from_pdf_bytes_drops_page_texts() -> None:
     sentinel_warnings = ["w"]
 
     with patch(
-        "app.services.pdf_text_extract.extract_text_and_pages_from_pdf_bytes",
+        "app.document_platform.capabilities.pdf.text_extract.extract_text_and_pages_from_pdf_bytes",
         return_value=(sentinel_full, sentinel_pages, sentinel_warnings),
     ) as mocked:
         out = extract_text_from_pdf_bytes(b"%PDF-fake")
