@@ -30,6 +30,7 @@ from app.services.load_parser_openai_handoff_v2 import (
     build_v2_openai_user_message,
 )
 from app.services.load_parser_pdf_acquisition import acquire_load_parser_pdf_pages
+from app.services.load_parser_pdf_safety import validate_load_parser_pdf
 from app.services.load_parser_tenant_identity_exclusion import (
     get_load_parser_tenant_identity_exclusion,
 )
@@ -66,6 +67,7 @@ async def parse_pdf_bytes_to_load_document_response(
     _ = forensic_enabled
     fn = (filename or "upload.pdf")[:512]
 
+    validate_load_parser_pdf(pdf_bytes)
     acquisition = acquire_load_parser_pdf_pages(pdf_bytes)
     page_objs = list(acquisition.get("pages") or [])
     usable_texts = [
@@ -142,6 +144,8 @@ async def parse_pdf_bytes_to_load_document_response(
         user_text=build_v2_openai_user_message(handoff),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
+        input_file_bytes=pdf_bytes,
+        input_filename=fn,
     )
 
     response = _map_semantic_payload_to_response(

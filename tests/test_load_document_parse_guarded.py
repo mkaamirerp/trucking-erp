@@ -12,12 +12,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from pypdf import PdfWriter
 
 from app.core.config import settings
 from app.schemas.load_document_parse import LoadDocumentParseResponse, ParseDocumentSemanticModelOutput
 from app.services import load_document_parse_guarded
 from app.services.load_document_parse_adapter import map_lab_parse_response_to_document_contract
 from app.services.load_document_parse_guarded import parse_pdf_bytes_to_load_document_response
+from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FIXTURE_DIR = _REPO_ROOT / "docs" / "fixtures" / "load_lab"
@@ -84,6 +86,8 @@ async def test_no_injected_client_uses_default_product_openai_when_key_exists(
     assert calls
     assert calls[0]["api_key"] == "sk-test-key"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
+    assert calls[0]["input_file_bytes"] == _FIXTURE_PDF.read_bytes()
+    assert calls[0]["input_filename"] == "default.pdf"
     assert "PRODUCT_PARSE_DIAGNOSTICS" not in calls[0]["user_text"]
     assert "tenant_identity_exclusion" in calls[0]["user_text"]
 
@@ -131,6 +135,29 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
     assert "document.pages" in calls[0]["user_text"] or '"pages"' in calls[0]["user_text"]
     assert calls[0]["schema"]["type"] == "object"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
+    assert calls[0]["input_file_bytes"] == _FIXTURE_PDF.read_bytes()
+    assert calls[0]["input_filename"] == "input.pdf"
+
+
+@pytest.mark.asyncio
+async def test_unsafe_pdf_is_rejected_before_openai(tmp_path: Path) -> None:
+    unsafe_path = tmp_path / "javascript.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_js("app.alert('unsafe')")
+    writer.write(unsafe_path)
+    openai = AsyncMock()
+
+    with pytest.raises(UnsafeLoadPdfError, match="active content"):
+        await parse_pdf_bytes_to_load_document_response(
+            AsyncMock(),
+            tenant_id=1,
+            pdf_bytes=unsafe_path.read_bytes(),
+            filename="javascript.pdf",
+            openai_chat_json_schema=openai,
+        )
+
+    openai.assert_not_awaited()
 
 
 @pytest.mark.asyncio
