@@ -1,7 +1,7 @@
-"""PDF embedded-text extraction capability (Slice A).
+"""PDF embedded-text extraction capability.
 
-Re-exports the existing implementation in ``app.services.pdf_text_extract``.
-This package does not own the implementation yet.
+Implementation is owned by ``app.document_platform.capabilities.pdf.text_extract``.
+``app.services.pdf_text_extract`` remains a compatibility shim.
 """
 
 from app.document_platform.capabilities.pdf.text_extract import (
