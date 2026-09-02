@@ -2,7 +2,7 @@
 
 **Status:** **ARCHITECTURE LOCK — calling API chooses profile; profile selects capabilities; no document-type guessing.**  
 **Scope:** Shared document **capabilities** + explicit **profiles**. Not a universal pipeline that always runs every capability.  
-**Date:** 2026-08-27; current-state refresh 2026-09-01 (Slice 0 bootstrap).
+**Date:** 2026-08-27; current-state refresh 2026-09-01 (through OpenAI Slice 1C+1D).
 
 **Related current docs:**
 
@@ -11,7 +11,77 @@
 - [`CURRENT_PDF_LOAD_PATHS_AND_GAPS.md`](./CURRENT_PDF_LOAD_PATHS_AND_GAPS.md) — factual Load/PDF route map.
 - [`LOAD_LAB_WORKSPACE_PARITY_NOTE.md`](./LOAD_LAB_WORKSPACE_PARITY_NOTE.md) — Load Lab vs production Load Page boundary.
 
-**Slice 0 (this bootstrap):** `app/document_platform/` exists as the stable package home. Production code is **not** moved or rewired yet. Implementations remain in `app/services/` and current routers/frontend.
+**Current runtime checkpoint:** `2903f8f1713c3f8a8ec58785198dd64438531ca5`. OpenAI JSON-schema transport ownership has moved into Document Platform; production callers are **not** rewired. See **Current state / resume anchor** below.
+
+---
+
+## Current state / resume anchor (through OpenAI Slice 1C+1D)
+
+### Architecture rule
+
+- The calling business API selects an **explicit profile**.
+- Document Platform does **not** guess business purpose from document content.
+- The profile selects capabilities, schema, rules, and context.
+- Business posting and reconciliation remain **outside** Document Platform.
+
+### Current implemented capability ownership
+
+- OpenAI JSON-schema transport implementation now lives at:
+  `app/document_platform/capabilities/openai/chat_json_schema.py`
+- Old path `app/services/openai_chat_json_schema.py` is a **compatibility shim**.
+- Production RateCon and Load Lab callers still import the old compatibility path.
+- Caller rewiring has **not** started.
+- The Load-specific HTTP-400 fallback remains unchanged (behavior preservation).
+
+### Completed migration checkpoints
+
+| Slice | SHA | What landed |
+|---|---|---|
+| 0 | `29bd4aea02a972d2bc4f60c8e79c0fd9074e37e1` | package/profile architecture boundary |
+| 1A | `3f37829f83a58b02a30d9b94e08f0b87d58aa257` | OpenAI capability compatibility namespace |
+| 1B | `cc5008d642ee2d4b5586f672d7413863e638696d` | callable identity compatibility test |
+| 1C+1D | `2903f8f1713c3f8a8ec58785198dd64438531ca5` | physical OpenAI transport ownership move + shim + mock/test coverage repair |
+
+### Frozen Driver Licence profile composition
+
+- Browser image normalization ceiling ≤ 2400
+- Server OpenCV working copy ≤ 1544
+- Existing four-corner confirmation authority
+- Optional strict short-side repair
+- Final warp 1000×631
+- Original-first PDF417 decode
+- AAMVA → driver intake
+- Phone user confirmation
+- No OpenAI
+- No OCR
+- Driver Licence module is **completed/frozen** unless a new defect arises
+
+### Frozen Rate Confirmation profile composition
+
+- PDF text acquisition
+- Usability / OCR-required gate
+- No mechanical OCR currently
+- Tenant identity exclusion
+- RateCon field rules / schema / handoff
+- Shared OpenAI transport
+- Mechanical validation
+- Workspace hydration response
+- No Load creation / business posting inside Document Platform
+
+### Current migration boundary
+
+- **Do not** generalize DL OpenCV into a universal geometry capability.
+- PDF417 decode may later become a reusable capability; AAMVA / driver intake remains DL profile logic.
+- Do not create speculative empty Fuel / Toll / POD packages.
+- Load Lab remains separate evaluation tooling.
+
+### NEXT STEP
+
+Do not rewire OpenAI callers or begin PDF acquisition automatically.  
+First review the next micro-slice.  
+Candidate next architectural migration is **shared PDF acquisition ownership**, but it requires **REPORT-ONLY** inventory/planning before any edits.
+
+**Current runtime checkpoint:** `2903f8f1713c3f8a8ec58785198dd64438531ca5`
 
 ---
 
@@ -114,7 +184,7 @@ Must not own: which business document this is; Load/Fuel/Toll/POD/driver posting
 
 **OCR:** no engine exists today. Rate Confirmation only **gates** `ocr_required`. Do not invent an OCR implementation in bootstrap slices.
 
-**OpenAI:** one shared transport (`openai_chat_json_schema` today). The HTTP 400 `json_object` fallback currently contains Load-specific prompt text; that leak is frozen until a dedicated later slice. Happy-path schema/prompt remain Rate Confirmation–owned.
+**OpenAI:** one shared transport, now owned by `app/document_platform/capabilities/openai/chat_json_schema.py`. `app/services/openai_chat_json_schema.py` is a compatibility shim; production callers still import that old path. The HTTP 400 `json_object` fallback currently contains Load-specific prompt text; that leak is frozen until a dedicated later slice. Happy-path schema/prompt remain Rate Confirmation–owned.
 
 ### Profiles (explicit purpose)
 
@@ -141,20 +211,23 @@ Do not create `fuel` / `toll` / `pod` implementation packages until a real slice
 
 ---
 
-## 5. Package layout (Slice 0)
+## 5. Package layout (through Slice 1C+1D)
 
 ```text
 app/document_platform/
   __init__.py
   capabilities/
-    __init__.py          # shared primitives live here in later slices
+    __init__.py
+    openai/                    # JSON-schema chat transport (Slice 1C+1D)
+      __init__.py
+      chat_json_schema.py
   profiles/
-    __init__.py          # explicit profiles live here in later slices
+    __init__.py                # explicit profiles live here in later slices
 ```
 
-Later slices may add capability/profile modules **by moving existing files behind re-exports**. Slice 0 does not move `openai_chat_json_schema.py`, PDF extract, Rate Confirmation, or DL code.
+Later slices may add capability/profile modules **by moving existing files behind re-exports**. OpenAI transport ownership has moved; PDF extract, Rate Confirmation, and DL code have **not**. Production callers are not rewired.
 
-Target (later, not Slice 0):
+Target (later slices; OpenAI transport already moved):
 
 ```text
 app/document_platform/
