@@ -55,3 +55,6 @@ def test_rejects_javascript_action() -> None:
 def test_rejects_embedded_file() -> None:
     def add_attachment(writer: PdfWriter) -> None:
         writer.add_attachment("payload.bin", b"arbitrary bytes")
+
+    with pytest.raises(UnsafeLoadPdfError, match="active content|embedded file"):
+        validate_load_parser_pdf(_pdf_bytes(add_attachment))

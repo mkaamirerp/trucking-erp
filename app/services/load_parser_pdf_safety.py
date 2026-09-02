@@ -151,3 +151,22 @@ def _scan_reachable_pdf_objects(root: Any) -> int:
         if objects_scanned > MAX_PDF_OBJECTS_SCANNED:
             raise UnsafeLoadPdfError("PDF object graph is too large")
 
+        if isinstance(obj, (DictionaryObject, dict)):
+            for raw_key, value in obj.items():
+                key = str(raw_key)
+                if key in _BLOCKED_KEYS:
+                    raise UnsafeLoadPdfError(
+                        f"PDF contains blocked active content ({key})"
+                    )
+                if key == "/S" and str(value) in _BLOCKED_ACTION_TYPES:
+                    raise UnsafeLoadPdfError(
+                        f"PDF contains blocked action type ({str(value)})"
+                    )
+                if key == "/Type" and str(value) == "/EmbeddedFile":
+                    raise UnsafeLoadPdfError("PDF contains an embedded file")
+                stack.append((value, depth + 1))
+        else:
+            stack.extend((value, depth + 1) for value in obj)
+
+    return objects_scanned
+
