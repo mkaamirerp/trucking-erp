@@ -14,6 +14,7 @@ The system uses strict platform DB vs tenant DB separation.
 - **Config/infra:** Never modify docker-compose.yml, .env*, nginx config, or scripts/start_api_with_ssm.sh without explicit user request; suggest options and ask first (see .cursor/rules/05_config_and_infra_safety.md)
 - **Signup/setup/forms:** Strict on input (signup, setup, OCR); permissive on read (lists, dashboards). Never hide data; never weaken validation (see .cursor/rules/25_signup_setup_strict_input_permissive_read.md)
 - **Onboarding payload:** Step-1 data stored in platform_onboarding_payloads; Setup page prefill read-only from payload; Complete Setup writes profile once and consumes payload (see .cursor/rules/26_onboarding_payload_flow.md)
+- **Database-backed entity fields:** use the TruckERP searchable type-ahead/select standard; one visible entity field, top 10 on focus, live search while typing, selection stores entity ID. Do not use duplicate snapshot fields as normal UI inputs (see .cursor/rules/41_entity_typeahead_fields.md).
 
 ## DATABASE RULES
 - Platform DB = control plane only (tenants, users, plans, registry)
