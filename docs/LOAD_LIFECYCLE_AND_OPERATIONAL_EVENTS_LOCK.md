@@ -1,201 +1,32 @@
-# 🔒 TruckERP — Load Lifecycle & Operational Events (LOCKED)
+# TruckERP — Load Lifecycle & Operational Events
 
-**Status:** locked. Changes require explicit architecture review.
+**Status:** **SUPERSEDED — historical pointer only.**
 
----
+**Superseded by:** [`trip-foundation.md`](./trip-foundation.md), [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md), and [`TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`](./TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md).
 
-## 1) Core Principle
+This file previously described `Assigned`, `Dispatched`, `In Transit`, `Delivered`, and `Closed` as a single Load lifecycle. That model conflicts with the current Trip-first architecture and must not be used for new code or UI.
 
-- **A Load is a continuous entity.**
-- **A Trip is a temporary execution container.**
-- **A Load does not end when a trip ends.**
+## Current boundary
 
-Loads can:
+- **Load** = commercial/readiness/revenue truth.
+- **Trip** = operational/payable movement truth.
+- **TripLoad** = membership between a Load and a Trip.
+- **Custody/Audit** = physical continuity and handoff history.
+- **Dispatch Load** = an operator action involving an existing Load and a Trip; it is **not** a separate entity, table, or lifecycle.
 
-- move forward
-- split
-- partially complete
-- fail delivery
-- return to yard
-- be reassigned to new trips
+## Current status ownership
 
----
+- Target Load commercial/readiness states are `draft`, `ready`, and future explicit commercial `cancelled`.
+- Current shipped Trip lifecycle is `planned -> assigned -> in_progress -> completed`, plus `cancelled`.
+- Legacy Load values such as `assigned`, `dispatched`, `in_transit`, and `delivered` remain read/compatibility vocabulary only. They must not become new operational writes.
+- Pickup, delivery, rejection, yard return, reassignment, handoff, and trailer transfer belong to Trip execution and/or custody events—not a Load execution ladder.
 
-## 2) Load Lifecycle (High-Level Only)
+## Durable rules retained from the historical note
 
-This is the stable lifecycle (**do not overload this**):
+- A commercial Load persists across Trips until commercial completion.
+- A Trip may carry multiple Loads, and one Load may move through multiple Trips.
+- Do not duplicate a commercial Load merely because responsibility moves to another Trip.
+- Custody must remain visible and auditable; no handoff may silently disappear.
+- Trip completion does not by itself mean the commercial Load reached its final receiver.
 
-- Draft
-- Ready
-- Assigned
-- Dispatched
-- In Transit
-- Delivered
-- Closed
-
-Notes:
-
-- **Delivered** = operational completion
-- **Closed** = business/accounting completion
-- Do **not** add split/reject/yard into lifecycle
-
----
-
-## 3) Operational Events (Real-World Logic)
-
-These define what actually happens to a load.
-
-### 3.1 Pickup
-
-- **Facility → Driver**
-
-### 3.2 Delivery
-
-- **Driver → Receiver**
-
-### 3.3 Split Load 🔀
-
-Load is divided across different trips.
-
-- Load A → Trip T003 (South)
-- Load B → Trip T004 (North)
-
-Rules:
-
-- **Same load record continues**
-- **Only trip assignment changes**
-
-### 3.4 Partial Delivery
-
-Example:
-
-- Total Stops: 10
-- Delivered: 8
-- Remaining: 2
-
-System state:
-
-- Lifecycle: **In Transit**
-- Progress: **Partial Delivery**
-- Remaining Stops: **2**
-
-### 3.5 Rejected Delivery
-
-Receiver refuses freight.
-
-System result:
-
-- Custody → **Driver**
-- Status → **Problem / Hold**
-- Next → **Return to yard** OR **reattempt**
-
-### 3.6 Return to Yard (CRITICAL)
-
-Failed delivery → driver returns freight.
-
-System state:
-
-- Lifecycle: **In Transit**
-- Sub-status: **Yard Hold**
-- Custody: **Terminal / Yard / Trailer**
-
-⚠️ This is **not** Delivered.
-
-### 3.7 Reassignment
-
-Remaining freight is moved to a new trip.
-
-- Remaining Stops → New Trip T005
-- New Driver Assigned
-
-Rules:
-
-- **Do not create new load**
-- **Same load continues**
-- **Only trip changes**
-
----
-
-## 4) Combined Real Scenario (Reference)
-
-Example: **Load B — JB Hunt**
-
-- Stops: 10
-- Delivered: 8
-- Remaining: 2
-
-State:
-
-- Lifecycle: **In Transit**
-- Sub-status: **Partial Delivery / Returned to Yard**
-- Custody: **Yard (Trailer 404)**
-
-Next Action:
-
-- Reassign remaining 2 stops
-
-Result:
-
-- New Trip T005
-- Driver: new driver
-- Stops: remaining 2
-
----
-
-## 5) Design Rules (LOCK THESE)
-
-### Rule 1 — Load never splits into new loads
-
-- Always remains **one load**
-- Only trips branch
-
-### Rule 2 — Lifecycle stays simple
-
-- Do **not** mix lifecycle with operational events
-
-### Rule 3 — Events drive reality
-
-These define actual system behavior:
-
-- Split
-- Partial delivery
-- Rejection
-- Yard return
-- Reassignment
-
-### Rule 4 — Custody is always visible
-
-At any point the system must answer:
-
-- **Who has the freight right now?**
-
-Options:
-
-- Driver
-- Terminal
-- Trailer at yard
-- Facility
-- Unknown / disputed
-
-### Rule 5 — Trip is disposable
-
-- Trips start and end
-- Load persists across trips
-
----
-
-## 6) Summary (Core Model)
-
-- **Load** = persistent truth
-- **Trip** = execution layer
-- **Events** = state changes
-
-🔒 **STATUS: LOCKED ARCHITECTURE**
-
-This model must be followed for:
-
-- Dispatch UI
-- Trip system
-- Load handling
-- Future automation
-
+Use the superseding documents above for implementation details and precedence.

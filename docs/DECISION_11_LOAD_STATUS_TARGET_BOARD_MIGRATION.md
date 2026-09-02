@@ -23,6 +23,14 @@
 | **`ready`** | Verified enough for **dispatch planning**; **Ready / Unassigned Load Planning Queue** (**Decision 9**); may later join new/existing trip, combine/split, or be held. |
 | **`cancelled`** | **Commercial load** cancelled or no longer to be worked — **not** the same as **`Trip.status = cancelled`**. If a **trip** is cancelled but the **broker load** remains valid, **do not** automatically force **`Load.status = cancelled`**. |
 
+### Current generic-write enforcement
+
+- `POST /loads` accepts `draft` or `ready` only. A new Load cannot be created directly in a legacy operational state or already cancelled.
+- Generic `PATCH /loads/{id}` may transition between `draft` and `ready` only.
+- An unchanged legacy status may be re-sent while editing a historical row; this preserves compatibility without creating a new operational transition.
+- Internal seed/migration callers retain an explicit compatibility bypass for historical fixtures only.
+- `cancelled` remains the target commercial terminal state, but generic PATCH does **not** perform it. Commercial cancellation requires a separate explicit workflow that closes/removes relevant TripLoad membership and records audit context without automatically cancelling the Trip.
+
 ---
 
 ## Meanings (detail)
@@ -63,7 +71,7 @@ These **may remain temporarily** for **historical** rows, **read** compatibility
 - `delivered`
 - `issue_hold`
 
-**Important:** **`Load.status = dispatched`** **must not** be used as a **new** **execution trigger**. Slice 1 already blocks **generic PATCH** **into** **`dispatched`** with **`LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`**.
+**Important:** Legacy operational values must not be used for new Load writes. `dispatched` retains its established `LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED` error contract; other new legacy transitions use `LEGACY_LOAD_STATUS_WRITE_DEPRECATED`.
 
 **Operational state** belongs to:
 

@@ -25,7 +25,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.constants.trip_dispatch import LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED, TRIP_NUMERIC_WIDTH
+from app.constants.trip_dispatch import (
+    LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
+    LEGACY_LOAD_STATUS_WRITE_DEPRECATED,
+    TRIP_NUMERIC_WIDTH,
+)
 from app.core.db_url import to_async_pg_url
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
@@ -231,7 +235,9 @@ class TestTripNumberDispatchLifecycle:
         finally:
             await engine.dispose()
 
-    async def test_assigned_alone_does_not_mint_trip(self, client, override_auth_tenant, locked_prefix) -> None:
+    async def test_assigned_transition_is_deprecated_and_does_not_mint_trip(
+        self, client, override_auth_tenant, locked_prefix
+    ) -> None:
         ids = await self._first_driver_truck(client)
         if ids is None:
             pytest.skip("No driver/truck in tenant DB")
@@ -255,9 +261,10 @@ class TestTripNumberDispatchLifecycle:
                 "expected_concurrency_version": _cv(cr.json()),
             },
         )
-        assert up.status_code == 200
-        data = up.json()
-        assert data["status"] == "assigned"
+        assert up.status_code == 409
+        assert _detail_code(up.json()) == LEGACY_LOAD_STATUS_WRITE_DEPRECATED
+        data = (await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)).json()
+        assert data["status"] == "draft"
         assert data.get("trip_number") in (None, "")
         assert data.get("active_dispatch_trip_id") in (None,)
 
@@ -324,12 +331,9 @@ class TestTripNumberDispatchLifecycle:
         assert d3.json().get("trip_number") == tn
         assert d3.json().get("active_dispatch_trip_id") == tid
 
-    async def test_forward_in_transit_does_not_clear_trip(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
+    async def test_forward_in_transit_write_is_deprecated_and_does_not_clear_trip(
+        self, client, override_auth_tenant, locked_prefix
+    ) -> None:
         cr = await client.post(
             "/api/v1/loads",
             headers=AUTH_HEADERS,
@@ -337,17 +341,6 @@ class TestTripNumberDispatchLifecycle:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
-        asg = await client.patch(
-            f"/api/v1/loads/{load_id}",
-            headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
-        )
-        assert asg.status_code == 200, asg.text
         await self._seed_legacy_dispatched(load_id)
         r0 = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
         tn = r0.json().get("trip_number")
@@ -358,16 +351,14 @@ class TestTripNumberDispatchLifecycle:
             headers=AUTH_HEADERS,
             json={"status": "in_transit", "expected_concurrency_version": _cv(r0.json())},
         )
-        assert r1.status_code == 200, r1.text
-        assert r1.json().get("trip_number") == tn
-        assert r1.json().get("active_dispatch_trip_id") is not None
+        assert r1.status_code == 409, r1.text
+        assert _detail_code(r1.json()) == LEGACY_LOAD_STATUS_WRITE_DEPRECATED
+        unchanged = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
+        assert unchanged.json()["status"] == "dispatched"
+        assert unchanged.json().get("trip_number") == tn
+        assert unchanged.json().get("active_dispatch_trip_id") is not None
 
     async def test_back_to_ready_cancels_and_clears_read_model(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
         cr = await client.post(
             "/api/v1/loads",
             headers=AUTH_HEADERS,
@@ -375,17 +366,6 @@ class TestTripNumberDispatchLifecycle:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
-        asg = await client.patch(
-            f"/api/v1/loads/{load_id}",
-            headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
-        )
-        assert asg.status_code == 200, asg.text
         await self._seed_legacy_dispatched(load_id)
         snap = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
         assert snap.json().get("active_trip_id") is not None
@@ -402,11 +382,6 @@ class TestTripNumberDispatchLifecycle:
         assert body.get("active_trip_id") in (None,)
 
     async def test_search_finds_load_by_trip_number(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
         cr = await client.post(
             "/api/v1/loads",
             headers=AUTH_HEADERS,
@@ -414,17 +389,6 @@ class TestTripNumberDispatchLifecycle:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
-        asg = await client.patch(
-            f"/api/v1/loads/{load_id}",
-            headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
-        )
-        assert asg.status_code == 200
         await self._seed_legacy_dispatched(load_id)
         snap = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
         tn = snap.json().get("trip_number")

@@ -164,7 +164,7 @@ See `TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md` for the authoritative shipped-state
 
 ### Load status is not Trip execution truth
 
-New generic `Load.status → dispatched` writes are blocked by the legacy-dispatch cutover. Legacy Load status values remain for compatibility/read-side behavior while migration continues.
+New generic writes into legacy operational `Load.status` values are blocked by the legacy-dispatch cutover. Legacy Load status values remain for compatibility/read-side behavior while migration continues; unchanged values may be re-sent when editing historical rows.
 
 ---
 

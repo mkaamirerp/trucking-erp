@@ -1,9 +1,11 @@
 """Locked trip-number rules — see docs/DISPATCH_TRIP_NUMBER_RULE.md."""
 
-# API error code: generic Load PATCH must not create new transitions into dispatched (Slice 1+).
-# Load.status = dispatched is legacy board/mint vocabulary. New trip execution must use explicit
-# Trip assignment, TripLoad membership, and future package / execution endpoints.
+# API error codes: generic Load PATCH must not create new operational transitions (Slice 1+).
+# Load.status operational values are legacy board vocabulary. New trip execution must use explicit
+# Trip assignment, TripLoad membership, and package / execution endpoints.
 LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED = "LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED"
+LEGACY_LOAD_STATUS_WRITE_DEPRECATED = "LEGACY_LOAD_STATUS_WRITE_DEPRECATED"
+LOAD_COMMERCIAL_CANCEL_ACTION_REQUIRED = "LOAD_COMMERCIAL_CANCEL_ACTION_REQUIRED"
 
 # V1 legacy: mint path historically keyed off load entering this status (generic PATCH). Slice 1
 # blocks NEW transitions via Load PATCH; service helpers may still use this constant for docs/cancel.

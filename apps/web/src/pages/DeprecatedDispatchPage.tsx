@@ -1,7 +1,7 @@
 /**
  * DeprecatedDispatchPage — legacy load-status dispatch board (`GET /dispatch/board`).
- * Layout C (table default) + Layout B (board optional). Trip Container / future Dispatch command center is separate.
- * Ribbon + table/board; unassigned loads open `/loads/:id?dispatchAssign=1` (canonical workspace + assignment strip).
+ * Layout C (table default) + Layout B (board optional). The Trip-backed Dispatch Control Center replaces this state model.
+ * Ribbon + table/board; unassigned loads open `/loads/:id`, where the dispatcher can create a planned Trip.
  * Other statuses open the quick summary modal with a link to the full workspace.
  * Primary fields in rows/cards: Load #, Trip # (read-only), Route, Status.
  * Delivered moved to ribbon tab, not a board column.
@@ -621,7 +621,7 @@ export default function DeprecatedDispatchPage() {
   const openLoadWorkspace = useCallback(
     (load: Load) => {
       if ((load.status || "").toLowerCase() === "unassigned") {
-        navigate(`${slug}${OPS.LOAD_DETAIL(load.id)}?${OPS.LOAD_DISPATCH_ASSIGN_QUERY}=1`);
+        navigate(`${slug}${OPS.LOAD_DETAIL(load.id)}`);
         return;
       }
       setSelectedLoad(load);

@@ -75,8 +75,8 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md` | Read before changing the existing dispatch trip number implementation, shared numbering pool, or load-status-driven dispatch path. |
 | `TRIP_FIRST_DDL_CONTRACT.md` | Read before designing tenant migrations or DDL for trip-first execution/custody tables. |
 | `TRIP_CONTAINER_VS_LOAD_FOUNDATION.md` | Read when revisiting Trip vs Load boundaries and product ownership. |
-| `trip-foundation.md` | Read for earlier trip foundation context and naming/scope history. |
-| `TRIP_CONTAINER_OPERATIONAL_RULES.md` | Read before changing operational rules for Trip containers. |
+| `trip-foundation.md` | Canonical Trip / Load / TripLoad / custody meaning and operational architecture lock. |
+| `TRIP_CONTAINER_OPERATIONAL_RULES.md` | Pointer to the canonical `trip-foundation.md`; read before changing Trip-container operational rules. |
 | `PHASE1_TRIP_FOUNDATION_PLAN.md` | Historical phase-1 foundation plan; useful for why current `trips` / `trip_loads` shape exists. |
 | `TRIP_CONTAINER_ARCHITECTURE_GAP_REPORT.md` | Read before changing architecture or claiming gaps are closed. |
 | `PHASE3C_PLANNED_TRIP_IMPLEMENTATION_PROPOSAL.md` | Pre-ship proposal for planned trips; mostly superseded by module closeout, but useful for rationale. |
@@ -84,7 +84,7 @@ These docs are **not** part of the required **A–F** reading spine, but should 
 | `TRIP_CONTAINER_LOAD_PAGE_PARSER_INTEGRATION_MAP.md` | Read only if Trip work touches LoadWorkspace or parser boundaries. |
 | **Email Intake Filtering and Load Intake Safety** (`email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md`) | Cross-provider filtering/report before Load Intake (A/B/C/D/E routing, signals, human review, safety boundaries vs trips/dispatch/payroll). See also **`DOCUMENTATION_MASTER_INDEX.md`**. |
 | `PAYROLL_TRIP_TRACING.md` | Read before designing payroll, settlement, cancellation-pay, or trip tracing logic. |
-| `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Read before coupling Trip transitions to Load.status or operational load events. |
+| `LOAD_LIFECYCLE_AND_OPERATIONAL_EVENTS_LOCK.md` | Superseded historical pointer only; it redirects to the current Trip-first foundation and Decision 11. |
 | `DECISION_6_DISPATCHER_LOAD_WORKSPACE_ACTION_MODEL.md` | Read before changing **Load Workspace** dispatcher actions (**Save Draft / Ready / Assign / Assign & Send**) or **dispatch package** design. |
 | `DECISION_7_ACTIVE_EXECUTION_SIGNAL_MODEL.md` | Read before defining **when a trip is “actively executing”**, **`Trip.status = in_progress`**, execution signals, or overlap guards vs **assignment**. |
 | `DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md` — **draft** | Read when designing **Assign & Send** package **content**, **versioning**, **internal vs driver-visible** views, **financial disclosure**, or **driver-type** visibility (**not locked** until owner sign-off). |
@@ -250,7 +250,7 @@ Items **not** fully locked remain in **`PHASE3L_D_OWNER_DECISION_CHECKLIST.md`**
 - **Future `assigned_responsibility_type` / completion-expectation** field (or equivalent) — **Decision 13 §H** preserves the concept; exact naming/schema TBD.
 - **Dispatch package** persistence (tables, versioning, resend, stale-after-edit) — per **Decision 6**; **detailed design draft** in **`DECISION_8_DRIVER_DISPATCH_PACKAGE_SCHEMA.md`** (**Decision 8**, **NOT LOCKED**); schema/API TBD after sign-off.
 - **Definition of “active execution”** for overlap / queuing guards — **partially locked** in **Decision 7** (`in_progress` from first signal); **scheduling conflict** vs **future assignment** **locked** in **Decision 10**; exact **date fields**, **timezone**, and **supervisor override UX** remain TBD.
-- **Reconcile** **3L-C** granular trip-status proposal (`dispatched`, `in_transit`, `at_terminal`, etc.) with **Decision 7** **simple** `in_progress` model (mapping, sub-states, or deprecation).
+- **Granular execution detail:** Decision 7's shipped simple Trip lifecycle (`planned` / `assigned` / `in_progress` / `completed` / `cancelled`) is authoritative. Older 3L-C values such as `dispatched`, `in_transit`, and `at_terminal` are future event/sub-state design inputs only; they are not current `Trip.status` values.
 - **Save Ready / Save Draft + `Load.status` + boards:** **Planning-queue semantics** **LOCKED** in **`DECISION_9_LOAD_READINESS_PLANNING_QUEUE.md`**; **target new-write `Load.status` values** (`draft` / `ready` / `cancelled`) and **load vs trip board direction** **LOCKED** in **`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`**; **legacy** read paths and **phased** migration remain **implementation**.
 
 ---

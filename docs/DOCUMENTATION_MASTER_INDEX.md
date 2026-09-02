@@ -12,9 +12,11 @@ When documents conflict, prefer **current code + newer explicit locks/decisions*
 
 | Title | Path | Status / purpose |
 |---|---|---|
+| **Trip Container Operational Rules and Architecture Lock** | [`trip-foundation.md`](./trip-foundation.md) | Canonical Load vs Trip vs TripLoad vs custody meaning and business rules. |
 | **000 — Trip Container Is the Dispatch Control Center** | [`000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`](./000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md) | Current product/UI identity lock; route convergence is still transitional. |
 | **001 — Trip Container Accordion Wireframe** | [`001_TRIP_CONTAINER_ACCORDION_WIREFRAME.md`](./001_TRIP_CONTAINER_ACCORDION_WIREFRAME.md) | Design contract + first implementation slice shipped. |
 | **Trip execution & custody master index** | [`TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md`](./TRIP_EXECUTION_CUSTODY_MASTER_INDEX.md) | Shipped-state reading map for Trip execution/custody/assignment and Decisions 6–14. |
+| **Decision 11 — Load.status target model** | [`DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md`](./DECISION_11_LOAD_STATUS_TARGET_BOARD_MIGRATION.md) | Load commercial/readiness status ownership and legacy-board migration boundary. |
 | **Decision 14** | [`DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md`](./DECISION_14_TRIP_ASSIGNMENT_FIRST_SLICE.md) | LOCKED + SHIPPED Trip assignment slice. |
 
 ---

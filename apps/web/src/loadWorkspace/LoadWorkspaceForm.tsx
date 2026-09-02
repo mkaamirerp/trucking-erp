@@ -700,23 +700,22 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               onChange={(e) => p.setStatus(e.target.value)}
             >
               {LOAD_STATUSES.map((s) => {
-                const legacyDispatchedBlocked = s === "dispatched" && p.status !== "dispatched";
+                const legacyOperationalBlocked =
+                  s !== "draft" && s !== "ready" && p.status !== s;
                 return (
-                  <option key={s} value={s} disabled={legacyDispatchedBlocked}>
-                    {legacyDispatchedBlocked ? "dispatched (legacy — use Trip workspace)" : s}
+                  <option key={s} value={s} disabled={legacyOperationalBlocked}>
+                    {legacyOperationalBlocked ? `${s} (legacy — use Trip workspace)` : s}
                   </option>
                 );
               })}
             </select>
-            {p.status !== "dispatched" ? (
-              <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
-                Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> in the toolbar for validated
-                draft → ready (broker, reference, stops). Legacy operational statuses in the list remain for historical
-                compatibility. Driver/truck/trailer commitment lives on the{" "}
-                <span className="font-medium text-[var(--trk-text)]">trip workspace</span> — not via setting{" "}
-                <span className="font-mono text-[var(--trk-text-muted)]">Load.status</span> to dispatched.
-              </p>
-            ) : null}
+            <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
+              Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> in the toolbar for validated
+              draft → ready (broker, reference, stops). Legacy operational statuses in the list remain for historical
+              compatibility. Driver/truck/trailer commitment lives on the{" "}
+              <span className="font-medium text-[var(--trk-text)]">trip workspace</span> — not via setting{" "}
+              <span className="font-mono text-[var(--trk-text-muted)]">Load.status</span> to an operational value.
+            </p>
           </div>
           <div>
             <label className={L}>Driver</label>

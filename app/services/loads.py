@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants.trip_dispatch import (
     DISPATCH_RESOURCES_REQUIRED,
     LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
+    LEGACY_LOAD_STATUS_WRITE_DEPRECATED,
+    LOAD_COMMERCIAL_CANCEL_ACTION_REQUIRED,
     PRE_DISPATCH_TRIP_CANCEL_STATUSES,
     TRIP_ALLOCATED_AT_LOAD_STATUS,
 )
@@ -23,7 +25,16 @@ from app.models.load import Load, LoadNote, LoadStop
 from app.models.truck import Truck
 from app.models.trailer import Trailer
 from app.core.concurrency.conflicts import load_version_conflict_exception
-from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
+from app.schemas.load import (
+    ALLOWED_STATUSES,
+    DISPATCH_STATUSES,
+    GENERIC_LOAD_WRITE_STATUSES,
+    LEGACY_LOAD_OPERATIONAL_STATUSES,
+    LoadCreate,
+    LoadResponse,
+    LoadStopCreate,
+    LoadUpdate,
+)
 from app.services import dispatch_trips as dispatch_trips_service
 from app.utils.pagination import paginate
 
@@ -146,6 +157,46 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
     else:
         data = payload.model_dump(exclude_unset=True, exclude={"stops", "expected_concurrency_version"})
     return data
+
+
+def _validate_generic_load_status_transition(*, old_status: str, new_status: str, source: str) -> None:
+    """Reject new UI/API writes into legacy execution or unimplemented cancellation states.
+
+    Historical rows may re-send their unchanged legacy status while other fields are edited. Seed/migration
+    callers retain the explicit ``source="seed"`` compatibility path.
+    """
+    if source == "seed" or new_status == old_status or new_status in GENERIC_LOAD_WRITE_STATUSES:
+        return
+
+    if new_status == "cancelled":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": (
+                    "Commercial Load cancellation requires an explicit cancellation workflow; "
+                    "generic Load PATCH cannot cancel TripLoad membership safely."
+                ),
+                "code": LOAD_COMMERCIAL_CANCEL_ACTION_REQUIRED,
+            },
+        )
+
+    if new_status in LEGACY_LOAD_OPERATIONAL_STATUSES:
+        if new_status == TRIP_ALLOCATED_AT_LOAD_STATUS:
+            detail = (
+                "Load.status = dispatched is deprecated for new trip execution. "
+                "Use explicit Trip assignment / Assign & Send flow."
+            )
+            code = LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
+        else:
+            detail = (
+                f"Load.status = {new_status} is legacy operational vocabulary. "
+                "Use Trip, TripLoad, and custody/execution workflows for new operational state."
+            )
+            code = LEGACY_LOAD_STATUS_WRITE_DEPRECATED
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"detail": detail, "code": code},
+        )
 
 
 async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> Load:
@@ -318,6 +369,13 @@ async def update_load(
     data = _load_data_from_payload(payload)
     before_snapshot: dict[str, object] = {str(k): getattr(load, k, None) for k in data.keys()}
 
+    if "status" in data:
+        _validate_generic_load_status_transition(
+            old_status=old_status,
+            new_status=(data["status"] or "").strip().lower(),
+            source=source,
+        )
+
     if "driver_id" in data:
         driver_id = data["driver_id"]
         if driver_id is not None and not await _get_driver(db, tenant_id, driver_id):
@@ -369,23 +427,12 @@ async def update_load(
 
     next_aid, next_tnum, next_atid = load.active_dispatch_trip_id, load.trip_number, load.active_trip_id
 
-    # Slice 1: generic Load PATCH (source=ui) cannot create new transitions into legacy "dispatched".
-    # Internal seed/migration may pass source="seed" to allocate mirrors (legacy demo data scripts only).
+    # Internal seed/migration may still create the legacy dispatched mirror for compatibility fixtures.
+    # Generic UI/API transitions were rejected above before any related resource lookup or write.
     if (
         new_status == TRIP_ALLOCATED_AT_LOAD_STATUS
         and old_status != TRIP_ALLOCATED_AT_LOAD_STATUS
     ):
-        if source != "seed":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "detail": (
-                        "Load.status = dispatched is deprecated for new trip execution. "
-                        "Use explicit Trip assignment / Assign & Send flow."
-                    ),
-                    "code": LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
-                },
-            )
         if not merged_driver_id or not merged_truck_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -597,7 +644,7 @@ async def list_loads_for_board(
     result = await db.execute(stmt)
     loads = list(result.scalars().all())
 
-    board_statuses = [s for s in ALLOWED_STATUSES if s != "draft"]
+    board_statuses = [s for s in DISPATCH_STATUSES if s != "draft"]
     grouped: dict[str, list] = {s: [] for s in board_statuses}
     for load in loads:
         s = (load.status or "ready").strip().lower()

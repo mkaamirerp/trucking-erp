@@ -19,6 +19,7 @@ alwaysApply: true
 - **DeprecatedDispatchPage** is deprecated legacy **`Load.status`** board — **visual salvage** only.
 - **Do not** add new operational business logic to **DeprecatedDispatchPage** unless **explicitly approved**.
 - **Do not** revive **`Load.status = dispatched`**.
+- **Do not** create new writes into any legacy operational **`Load.status`** lane (`assigned`, `in_transit`, `delivered`, and related values).
 - **Do not** write **`dispatch_trips`** from **new Trip** flows.
 - **Do not** mix **parser / email-intake / dependency cleanup** into Trip / legacy-board boundary work.
 

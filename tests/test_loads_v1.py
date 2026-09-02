@@ -40,10 +40,97 @@ class TestLoadSchemaValidation:
         assert payload.facility_name == "Warehouse A"
         assert payload.city == "Dallas"
 
-    def test_draft_and_ready_in_allowed_statuses(self) -> None:
-        from app.schemas.load import ALLOWED_STATUSES
+    def test_target_and_legacy_status_sets_are_separate(self) -> None:
+        from app.schemas.load import (
+            ALLOWED_STATUSES,
+            DISPATCH_STATUSES,
+            GENERIC_LOAD_WRITE_STATUSES,
+            LEGACY_LOAD_OPERATIONAL_STATUSES,
+            LOAD_TARGET_STATUSES,
+        )
+
         assert "draft" in ALLOWED_STATUSES
         assert "ready" in ALLOWED_STATUSES
+        assert "cancelled" in LOAD_TARGET_STATUSES
+        assert "cancelled" not in DISPATCH_STATUSES
+        assert GENERIC_LOAD_WRITE_STATUSES == {"draft", "ready"}
+        assert "dispatched" in LEGACY_LOAD_OPERATIONAL_STATUSES
+
+    @pytest.mark.parametrize(
+        "legacy_status",
+        [
+            "unassigned",
+            "assigned",
+            "dispatched",
+            "arrived_pickup",
+            "in_transit",
+            "arrived_delivery",
+            "delivered",
+            "issue_hold",
+            "cancelled",
+        ],
+    )
+    def test_new_load_rejects_non_generic_write_status(self, legacy_status: str) -> None:
+        from pydantic import ValidationError
+
+        from app.schemas.load import LoadCreate
+
+        with pytest.raises(ValidationError, match="New Loads may use status draft or ready only"):
+            LoadCreate(status=legacy_status)
+
+    @pytest.mark.parametrize("legacy_status", ["assigned", "dispatched", "in_transit", "delivered"])
+    def test_load_response_preserves_legacy_read_compatibility(self, legacy_status: str) -> None:
+        from app.schemas.load import LoadResponse
+
+        response = LoadResponse(id=1, status=legacy_status)
+        assert response.status == legacy_status
+
+
+class TestLoadStatusWriteBoundary:
+    @pytest.mark.parametrize("legacy_status", ["assigned", "in_transit", "delivered", "issue_hold"])
+    def test_new_legacy_transition_is_rejected(self, legacy_status: str) -> None:
+        from fastapi import HTTPException
+
+        from app.services.loads import _validate_generic_load_status_transition
+
+        with pytest.raises(HTTPException) as exc:
+            _validate_generic_load_status_transition(
+                old_status="ready", new_status=legacy_status, source="ui"
+            )
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "LEGACY_LOAD_STATUS_WRITE_DEPRECATED"
+
+    def test_dispatched_keeps_existing_error_contract(self) -> None:
+        from fastapi import HTTPException
+
+        from app.services.loads import _validate_generic_load_status_transition
+
+        with pytest.raises(HTTPException) as exc:
+            _validate_generic_load_status_transition(
+                old_status="ready", new_status="dispatched", source="ui"
+            )
+        assert exc.value.detail["code"] == "LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED"
+
+    def test_generic_cancel_requires_explicit_commercial_workflow(self) -> None:
+        from fastapi import HTTPException
+
+        from app.services.loads import _validate_generic_load_status_transition
+
+        with pytest.raises(HTTPException) as exc:
+            _validate_generic_load_status_transition(
+                old_status="ready", new_status="cancelled", source="ui"
+            )
+        assert exc.value.detail["code"] == "LOAD_COMMERCIAL_CANCEL_ACTION_REQUIRED"
+
+    def test_unchanged_legacy_status_and_seed_transition_remain_compatible(self) -> None:
+        from app.services.loads import _validate_generic_load_status_transition
+
+        _validate_generic_load_status_transition(
+            old_status="dispatched", new_status="dispatched", source="ui"
+        )
+        _validate_generic_load_status_transition(
+            old_status="ready", new_status="in_transit", source="seed"
+        )
 
 
 # --- API tests (with DB + auth/tenant override) ---
@@ -82,6 +169,17 @@ def override_auth_tenant(test_bypass_env):
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
 class TestLoadCreateDraft:
     """Create draft load with no broker."""
+
+    @pytest.mark.parametrize("legacy_status", ["assigned", "dispatched", "in_transit", "delivered"])
+    async def test_create_rejects_legacy_operational_status(
+        self, client, override_auth_tenant, legacy_status: str
+    ) -> None:
+        resp = await client.post(
+            "/api/v1/loads",
+            json={"status": legacy_status},
+            headers=AUTH_HEADERS,
+        )
+        assert resp.status_code == 422
 
     async def test_create_draft_load_no_broker(self, client, override_auth_tenant) -> None:
         resp = await client.post(

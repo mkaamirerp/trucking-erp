@@ -1,4 +1,4 @@
-"""Load schemas. V1: draft, ready; operational: unassigned, assigned, dispatched, etc."""
+"""Load schemas: commercial/readiness writes plus legacy operational read compatibility."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -9,12 +9,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.schemas.broker import BrokerContactOut
 from app.schemas.customs_broker import CustomsBrokerSummary, LoadCustomsSnapshotOut
 
-DISPATCH_STATUSES = {
-    "draft", "ready",
-    "unassigned", "assigned", "dispatched", "arrived_pickup", "in_transit",
-    "arrived_delivery", "delivered", "issue_hold",
-}
-ALLOWED_STATUSES = DISPATCH_STATUSES
+LOAD_TARGET_STATUSES = frozenset({"draft", "ready", "cancelled"})
+GENERIC_LOAD_WRITE_STATUSES = frozenset({"draft", "ready"})
+LEGACY_LOAD_OPERATIONAL_STATUSES = frozenset(
+    {
+        "unassigned",
+        "assigned",
+        "dispatched",
+        "arrived_pickup",
+        "in_transit",
+        "arrived_delivery",
+        "delivered",
+        "issue_hold",
+    }
+)
+
+# Read/filter/response compatibility must continue to accept historical rows. New generic writes
+# are narrower: create and PATCH may use draft/ready only; commercial cancellation requires its
+# own workflow so TripLoad membership and audit can be handled explicitly.
+ALLOWED_STATUSES = LOAD_TARGET_STATUSES | LEGACY_LOAD_OPERATIONAL_STATUSES
+DISPATCH_STATUSES = frozenset({"draft", "ready"}) | LEGACY_LOAD_OPERATIONAL_STATUSES
 
 
 # --- LoadStop ---
@@ -108,6 +122,15 @@ class LoadBase(BaseModel):
 
 class LoadCreate(LoadBase):
     stops: Optional[Sequence[LoadStopCreate]] = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_create_status(cls, v: str) -> str:
+        if v not in GENERIC_LOAD_WRITE_STATUSES:
+            raise ValueError(
+                "New Loads may use status draft or ready only; operational execution belongs to Trip"
+            )
+        return v
 
     @model_validator(mode="before")
     @classmethod

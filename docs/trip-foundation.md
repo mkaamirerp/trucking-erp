@@ -2,7 +2,7 @@
 
 **Status:** Architecture rule document / implementation anchor  
 **Scope:** Trip container, Load relationship, driver assignment, city pickup, cancellation, delivery/completion, audit/accounting relationships  
-**Supersedes prior snapshot:** An earlier short “Trip foundation — movement container vs. load” note in this same path. Where any rule differed, **this document wins**. Notable expansions: five pillars, authority map, granular Trip statuses (`in_transit` / `at_pickup` / `at_delivery` / `delivered` / `problem_hold`), TripLoad `removed` vs commercial Load `cancelled`, Load `final_delivered` + custody direction, planned Trip may stay empty after sole Load cancels pre-assignment until dispatcher acts, city pickup as same-Load Trip segment, payroll/settlement and board direction.
+**Supersedes prior snapshot:** An earlier short “Trip foundation — movement container vs. load” note in this same path. Where any rule differed, **this document wins**. Notable expansions: five pillars, authority map, the shipped simple Trip lifecycle plus future execution-event direction, TripLoad `removed` vs commercial Load `cancelled`, Load `final_delivered` + custody direction, planned Trip may stay empty after sole Load cancels pre-assignment until dispatcher acts, city pickup as same-Load Trip segment, payroll/settlement and board direction.
 
 **Do not treat this as a request to immediately build all features.** This document locks business meaning and implementation direction so future code stays consistent.
 
@@ -13,6 +13,8 @@
 **Trip** — The operational movement container. It represents what a driver/team, truck, and trailer are doing under one trip number.
 
 **Load** — The commercial broker/customer contract record. It owns broker, rate confirmation, references, documents, commodity, and contractual stops.
+
+**Dispatch Load** — An operator action: commit or send an existing Load through a Trip-backed dispatch workflow. It is not a separate entity, table, or lifecycle. Operational commitment is represented by Trip assignment plus TripLoad membership; execution begins only from an accepted Trip execution signal.
 
 **TripLoad** — The relationship record connecting a Load to a Trip. It tracks whether the Load is planned, active, completed, or removed within that Trip.
 
@@ -441,27 +443,27 @@ The old rule “trip number is born only when a load enters dispatched” is no 
 
 Trip status should represent operational movement status, not commercial load status.
 
-Recommended V1 Trip statuses:
+### Current shipped lifecycle
 
 | Status | Meaning |
 |--------|---------|
 | `planned` | Trip container exists. Trip number is minted. Driver/truck/trailer may be blank. Trip may temporarily have zero Loads. |
-| `assigned` | Driver and/or equipment assignment has been planned, but the movement is not yet released/dispatched. |
-| `dispatched` | Driver has been sent/released for the work. |
-| `in_transit` | Driver/equipment is moving. |
-| `at_pickup` | Driver/equipment is at a pickup location. |
-| `at_delivery` | Driver/equipment is at a delivery/drop location for the Trip. |
-| `delivered` | The Trip reached its assigned operational destination. This does not always mean the commercial Load is finally delivered. |
+| `assigned` | Complete driver/truck/trailer assignment has been committed. Assignment or package send does not start execution. |
+| `in_progress` | The first accepted execution signal started operational execution. |
 | `completed` | Dispatcher has closed the Trip file after required documents/review. This makes the Trip eligible for payroll/settlement review. |
 | `cancelled` | Trip was cancelled. Trip number remains permanently for audit. |
-| `problem_hold` | Operational exception/hold state. |
 
-Future-compatible statuses may include:
+Current transition spine:
 
-- `arrived_terminal`
-- `handed_off`
+```text
+planned -> assigned -> in_progress -> completed
+                         \
+                          -> cancelled where product rules allow
+```
 
-These should be added when terminal/custody workflows are implemented.
+### Future execution detail
+
+Concepts such as `dispatched`, `in_transit`, `at_pickup`, `at_delivery`, `delivered`, `problem_hold`, `arrived_terminal`, and `handed_off` are useful operational detail, but they are **not current `Trip.status` values**. Model them through explicit execution/custody events or a separately approved sub-state design. Do not expand the core Trip lifecycle or revive legacy `Load.status` lanes without an explicit architecture decision.
 
 ---
 
@@ -939,7 +941,7 @@ Do not immediately:
 22. No line may silently disappear: unbroken operational and custody/audit history from booking through final delivery/close; every Trip’s work remains traceable to Load(s) and custody events.
 23. TripLoad is membership/relationship only — not the complete custody/audit timeline.
 24. Future reservation ≠ current custody ≠ execution eligibility.
-25. Open ≠ active: `removed_at IS NULL` means open membership; active membership requires `status_within_trip = active` AND `removed_at IS NULL` (§1A).
+25. Open ≠ active: open membership requires `status_within_trip IN ('planned', 'active')` AND `completed_at IS NULL` AND `removed_at IS NULL`; active membership additionally requires `status_within_trip = 'active'` (§1A).
 26. V1 per Load: max one open active + max one open planned; unlimited completed/removed history; active A + planned B is valid; two open actives or two open planneds are invalid.
 27. `loads.active_trip_id` points only to the current ACTIVE Trip (compatibility mirror); must not point at planned or arbitrary open membership.
 28. Completing active A must not auto-activate planned B; activation is explicit.
@@ -963,7 +965,7 @@ Before coding any future Trip/Load/dispatch feature, Cursor must check the work 
 11. Does this keep Load, Trip, and Audit/Custody reconcilable (no silent gaps or silent overwrites)?
 12. Does this keep TripLoad as membership only and custody events as continuity history?
 13. Does this respect future reservation ≠ current custody ≠ execution eligibility?
-14. Does this treat open (`removed_at IS NULL`) as distinct from active (`status_within_trip = active`)?
+14. Does this use the complete open-membership predicate (`planned|active` with both terminal timestamps NULL) and distinguish it from active (`status_within_trip = active` and open)?
 15. Does this enforce V1 max one open active and max one open planned per Load?
 16. Does completing a membership avoid auto-activating the next planned membership?
 
@@ -1000,4 +1002,4 @@ After docs are updated, produce a short Phase 3C implementation proposal for pla
 
 ## 25. Short canonical wording
 
-> A Load is the commercial/revenue truth. A Trip is the operational/payable work truth. Audit/Custody is the continuity truth. TripLoad is membership only. Open (`removed_at IS NULL`) ≠ active (`status_within_trip = active` AND open). V1: at most one open active and one open planned per Load; active A + planned B is valid for yard handoff; completing A does not auto-activate B. `active_trip_id` mirrors the active Trip only. The three continuity truths plus membership must remain reconcilable — no line may silently disappear. Future reservation ≠ current custody ≠ execution eligibility. City pickup is a Trip segment for the same Load, not a second Load. Trip numbers belong to Trips, can be created during planning, and are never reused. Trip completion means dispatch file closeout and payroll eligibility; Load final delivery means the commercial freight reached the broker/customer receiver. TruckERP must relate Load revenue to all connected Trips, settlements, and expenses to show true profit.
+> A Load is the commercial/revenue truth. A Trip is the operational/payable work truth. Audit/Custody is the continuity truth. TripLoad is membership only. Open (`planned|active` with `completed_at` and `removed_at` both NULL) ≠ active (`status_within_trip = active` AND open). V1: at most one open active and one open planned per Load; active A + planned B is valid for yard handoff; completing A does not auto-activate B. `active_trip_id` mirrors the active Trip only. The three continuity truths plus membership must remain reconcilable — no line may silently disappear. Future reservation ≠ current custody ≠ execution eligibility. “Dispatch Load” is an action, not a third entity. City pickup is a Trip segment for the same Load, not a second Load. Trip numbers belong to Trips, can be created during planning, and are never reused. Trip completion means dispatch file closeout and payroll eligibility; Load final delivery means the commercial freight reached the broker/customer receiver. TruckERP must relate Load revenue to all connected Trips, settlements, and expenses to show true profit.
