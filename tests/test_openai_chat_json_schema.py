@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -99,6 +100,42 @@ async def test_openai_chat_json_schema_raw_200_returns_wire_json() -> None:
     assert body["response_format"]["json_schema"]["strict"] is False
     assert body["response_format"]["json_schema"]["schema"] == {"type": "object"}
     assert post.await_args.kwargs["headers"]["Authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_json_schema_raw_attaches_pdf_as_file_input() -> None:
+    wire = {"choices": [{"message": {"content": "{}"}}]}
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = wire
+    post = AsyncMock(return_value=resp)
+    mock_client = _mock_async_client(post)
+
+    with patch(
+        "app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient",
+        return_value=mock_client,
+    ):
+        await openai_chat_json_schema_raw(
+            api_key="k",
+            model="gpt-4o-mini",
+            system="system rules",
+            user_text="json rules and schema guidance",
+            schema={"type": "object"},
+            schema_name="load_schema",
+            input_file_bytes=b"%PDF-test-bytes",
+            input_filename="Armstrong.pdf",
+        )
+
+    content = post.await_args.kwargs["json"]["messages"][1]["content"]
+    assert content[0]["type"] == "file"
+    assert content[0]["file"]["filename"] == "Armstrong.pdf"
+    assert content[0]["file"]["file_data"] == (
+        "data:application/pdf;base64,"
+        + base64.b64encode(b"%PDF-test-bytes").decode("ascii")
+    )
+    assert content[1] == {
+        "type": "text",
+        "text": "json rules and schema guidance",
+    }
 
 
 @pytest.mark.asyncio

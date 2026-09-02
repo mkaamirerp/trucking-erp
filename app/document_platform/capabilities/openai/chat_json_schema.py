@@ -5,6 +5,7 @@ Stateless: no database, Load Lab, tenant/session, routers, or parsers.
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -62,6 +63,8 @@ async def openai_chat_json_schema_raw(
     user_text: str,
     schema: dict[str, Any],
     schema_name: str,
+    input_file_bytes: bytes | None = None,
+    input_filename: str = "upload.pdf",
     url: str = OPENAI_CHAT_COMPLETIONS_URL,
     timeout_seconds: float = DEFAULT_OPENAI_CHAT_TIMEOUT_S,
 ) -> dict[str, Any]:
@@ -71,12 +74,17 @@ async def openai_chat_json_schema_raw(
     ``response_format: json_object`` (same behavior as legacy Load Lab helper).
     """
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    user_content = _build_user_content(
+        user_text=user_text,
+        input_file_bytes=input_file_bytes,
+        input_filename=input_filename,
+    )
     body_schema: dict[str, Any] = {
         "model": model,
         "temperature": 0.1,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
+            {"role": "user", "content": user_content},
         ],
         "response_format": {
             "type": "json_schema",
@@ -89,6 +97,13 @@ async def openai_chat_json_schema_raw(
             return r.json()
         err_snip = (r.text or "")[:800]
         if r.status_code == 400 and "json_schema" in err_snip.lower():
+            fallback_text = (
+                "Extract load fields. Output one JSON object with keys: document (object with "
+                "filename), extracted (broker fields, references, stops), warnings (array of "
+                "strings), field_confidence (object mapping field paths to strings, optional). "
+                "Do not include raw_text or context.\n\n---\n\n"
+                f"{user_text}"
+            )
             body_obj = {
                 "model": model,
                 "temperature": 0.1,
@@ -96,12 +111,10 @@ async def openai_chat_json_schema_raw(
                     {"role": "system", "content": system + " Respond with a single JSON object only."},
                     {
                         "role": "user",
-                        "content": (
-                            "Extract load fields. Output one JSON object with keys: document (object with "
-                            "filename), extracted (broker fields, references, stops), warnings (array of "
-                            "strings), field_confidence (object mapping field paths to strings, optional). "
-                            "Do not include raw_text or context.\n\n---\n\n"
-                            f"{user_text}"
+                        "content": _build_user_content(
+                            user_text=fallback_text,
+                            input_file_bytes=input_file_bytes,
+                            input_filename=input_filename,
                         ),
                     },
                 ],
@@ -122,6 +135,8 @@ async def openai_chat_json_schema_content(
     user_text: str,
     schema: dict[str, Any],
     schema_name: str,
+    input_file_bytes: bytes | None = None,
+    input_filename: str = "upload.pdf",
     url: str = OPENAI_CHAT_COMPLETIONS_URL,
     timeout_seconds: float = DEFAULT_OPENAI_CHAT_TIMEOUT_S,
 ) -> dict[str, Any]:
@@ -133,7 +148,31 @@ async def openai_chat_json_schema_content(
         user_text=user_text,
         schema=schema,
         schema_name=schema_name,
+        input_file_bytes=input_file_bytes,
+        input_filename=input_filename,
         url=url,
         timeout_seconds=timeout_seconds,
     )
     return extract_chat_completion_content_json(raw)
+
+
+def _build_user_content(
+    *,
+    user_text: str,
+    input_file_bytes: bytes | None,
+    input_filename: str,
+) -> str | list[dict[str, Any]]:
+    """Build a text-only or direct-file Chat Completions user message."""
+    if input_file_bytes is None:
+        return user_text
+    encoded = base64.b64encode(input_file_bytes).decode("ascii")
+    return [
+        {
+            "type": "file",
+            "file": {
+                "filename": input_filename,
+                "file_data": f"data:application/pdf;base64,{encoded}",
+            },
+        },
+        {"type": "text", "text": user_text},
+    ]
