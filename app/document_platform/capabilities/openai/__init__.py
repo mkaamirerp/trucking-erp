@@ -1,7 +1,7 @@
-"""OpenAI JSON-schema chat transport capability (Slice 1A).
+"""OpenAI JSON-schema chat transport capability.
 
-Re-exports the existing implementation in ``app.services.openai_chat_json_schema``.
-This package does not own the implementation yet.
+Implementation is owned by this Document Platform OpenAI capability.
+``app.services.openai_chat_json_schema`` remains a compatibility shim.
 """
 
 from app.document_platform.capabilities.openai.chat_json_schema import (

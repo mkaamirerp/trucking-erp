@@ -81,7 +81,7 @@ async def test_openai_chat_json_schema_raw_200_returns_wire_json() -> None:
     post = AsyncMock(return_value=resp)
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         out = await openai_chat_json_schema_raw(
             api_key="sk-test",
             model="gpt-4o-mini",
@@ -115,7 +115,7 @@ async def test_openai_chat_json_schema_raw_400_json_schema_retries_fallback() ->
     post = AsyncMock(side_effect=[resp400, resp200])
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         out = await openai_chat_json_schema_raw(
             api_key="k",
             model="m",
@@ -141,7 +141,7 @@ async def test_openai_chat_json_schema_raw_non_fallback_400_raises() -> None:
     post = AsyncMock(return_value=resp)
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(httpx.HTTPStatusError):
             await openai_chat_json_schema_raw(
                 api_key="k",
@@ -162,7 +162,7 @@ async def test_openai_chat_json_schema_content_combines_raw_and_extract() -> Non
     post = AsyncMock(return_value=resp)
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         out = await openai_chat_json_schema_content(
             api_key="k",
             model="m",
@@ -176,7 +176,7 @@ async def test_openai_chat_json_schema_content_combines_raw_and_extract() -> Non
 
 
 def test_module_has_no_load_lab_import_path() -> None:
-    import app.services.openai_chat_json_schema as mod
+    import app.document_platform.capabilities.openai.chat_json_schema as mod
 
     src = open(mod.__file__, encoding="utf-8").read().lower()
     assert "load_lab" not in src
