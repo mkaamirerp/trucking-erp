@@ -7,6 +7,7 @@ import type {
   BrokerContact,
   CustomsBroker,
   Driver,
+  LoadDocumentParseReference,
   LoadNote,
   Trailer,
   Truck,
@@ -30,6 +31,13 @@ import {
   type LoadWorkspaceMode,
   type WorkspaceSection,
 } from "./loadWorkspaceShared";
+import {
+  compactLoadReferencesForDisplay,
+  displayOperationalReferenceLabel,
+  VISIBLE_BROKER_LOAD_REFERENCE_LABEL,
+  VISIBLE_INTERNAL_LOAD_NUMBER_LABEL,
+  VISIBLE_REFERENCES_SECTION_LABEL,
+} from "./loadOperationalReferences";
 
 const L = wsLabelClass;
 const I = wsInputClass;
@@ -78,6 +86,7 @@ export type LoadWorkspaceFormProps = {
   setBrokerContactEmailSnapshot: (v: string) => void;
   brokerLoadReference: string;
   setBrokerLoadReference: (v: string) => void;
+  loadReferences: LoadDocumentParseReference[];
   freightMode: string;
   setFreightMode: (v: string) => void;
   equipmentType: string;
@@ -142,6 +151,8 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
     if (!proposedVal) return {};
     return { borderColor: "rgba(77,159,255,0.3)", backgroundColor: "rgba(77,159,255,0.04)", color: "#4d9fff" };
   }
+
+  const compactReferences = compactLoadReferencesForDisplay(p.loadReferences ?? [], p.sortedDraftStops);
 
   return (
     <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
@@ -233,13 +244,13 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             />
           </div>
           <div className="sm:col-span-2">
-            <label className={L}>Broker load reference</label>
+            <label className={L}>{VISIBLE_BROKER_LOAD_REFERENCE_LABEL}</label>
             <input
               className={I}
               value={p.brokerLoadReference}
               tabIndex={p.verificationTabIndex.get("brokerLoadReference")}
               onChange={(e) => p.setBrokerLoadReference(e.target.value)}
-              placeholder="Rate con # / load ref from broker"
+              placeholder="Load number from broker"
               onFocus={() =>
                 p.focusDoc({
                   tokens: [p.brokerLoadReference, "broker load", "load ref", "ref", "reference", "confirmation", "rate con", "bol"],
@@ -248,6 +259,19 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               }
             />
           </div>
+          {compactReferences.length > 0 ? (
+            <div className="sm:col-span-2">
+              <label className={L}>{VISIBLE_REFERENCES_SECTION_LABEL}</label>
+              <ul className="mt-1 space-y-1 rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm">
+                {compactReferences.map((r, i) => (
+                  <li key={`${r.kind}-${r.value}-${i}`} className="flex flex-wrap gap-x-2 gap-y-0.5">
+                    <span className="text-[var(--trk-text-muted)]">{displayOperationalReferenceLabel(r)}</span>
+                    <span className="font-mono text-[var(--trk-text)]">{r.value}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
         </div>
       </section>}
@@ -637,13 +661,13 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         <div className={wsSectionBody}>
         <div className={wsGrid3}>
           <div>
-            <label className={L}>Load number</label>
+            <label className={L}>{VISIBLE_INTERNAL_LOAD_NUMBER_LABEL}</label>
             <input
               className={I}
               value={p.loadNumber}
               tabIndex={p.verificationTabIndex.get("loadNumber")}
               onChange={(e) => p.setLoadNumber(e.target.value)}
-              placeholder="Internal load #"
+              placeholder="INT-..."
             />
           </div>
           <div>

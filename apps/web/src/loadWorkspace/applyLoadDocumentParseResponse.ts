@@ -3,10 +3,11 @@
  * Behavior must stay aligned with LoadWorkspacePage PDF apply — changes belong here + one call site test.
  */
 import type { Dispatch, SetStateAction } from "react";
-import type { BrokerContact, LoadDocumentParseResponse, LoadDocumentParseStop } from "@/api";
+import type { BrokerContact, LoadDocumentParseReference, LoadDocumentParseResponse, LoadDocumentParseStop } from "@/api";
 import { resolveBrokerIdentity, listBrokerContacts } from "@/api";
 import { matchBrokerContactFromParsed } from "@/utils/matchBrokerFromSnapshot";
 import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
+import { workspaceReferencesFromParse } from "@/loadWorkspace/loadOperationalReferences";
 import type { DraftStop } from "@/loadWorkspace/loadWorkspaceShared";
 
 export function extractedStopsToDraft(stops: LoadDocumentParseStop[]): DraftStop[] {
@@ -52,6 +53,7 @@ export interface ApplyLoadDocumentParseCallbacks {
   setBrokerContactPhoneSnapshot: (v: string) => void;
   setBrokerContactEmailSnapshot: (v: string) => void;
   setBrokerLoadReference: (v: string) => void;
+  setLoadReferences: (v: LoadDocumentParseReference[]) => void;
   setFreightMode: (v: string) => void;
   setEquipmentType: (v: string) => void;
   setTrailerType: (v: string) => void;
@@ -143,6 +145,7 @@ export async function applyLoadDocumentParseResponse(
     cbs.setBrokerContactEmailSnapshot(ex.broker_contact_email_snapshot.trim());
   }
   if (ex.broker_load_reference?.trim()) cbs.setBrokerLoadReference(ex.broker_load_reference.trim());
+  cbs.setLoadReferences(workspaceReferencesFromParse(ex.references));
   if (ex.mode?.trim()) cbs.setFreightMode(ex.mode.trim());
   if (ex.equipment_type?.trim()) cbs.setEquipmentType(ex.equipment_type.trim());
   if (ex.trailer_type?.trim()) cbs.setTrailerType(ex.trailer_type.trim());

@@ -37,6 +37,7 @@ import {
   type InboxMessageItem,
   type InboxThreadListItem,
   type Load,
+  type LoadDocumentParseReference,
   type LoadNote,
   type AuditEventRow,
   type Trailer,
@@ -424,6 +425,7 @@ export default function LoadWorkspacePage() {
   const [brokerContactExtensionSnapshot, setBrokerContactExtensionSnapshot] = useState("");
   const [brokerContactEmailSnapshot, setBrokerContactEmailSnapshot] = useState("");
   const [brokerLoadReference, setBrokerLoadReference] = useState("");
+  const [loadReferences, setLoadReferences] = useState<LoadDocumentParseReference[]>([]);
   const [freightMode, setFreightMode] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
   const [trailerType, setTrailerType] = useState("");
@@ -533,6 +535,7 @@ export default function LoadWorkspacePage() {
     setBrokerContactExtensionSnapshot(l.broker_contact_extension_snapshot ?? "");
     setBrokerContactEmailSnapshot(l.broker_contact_email_snapshot ?? "");
     setBrokerLoadReference(l.broker_load_reference ?? "");
+    setLoadReferences(Array.isArray(l.references) ? l.references : []);
     setFreightMode(l.mode ?? "");
     setEquipmentType(l.equipment_type ?? "");
     setTrailerType(l.trailer_type ?? "");
@@ -569,6 +572,7 @@ export default function LoadWorkspacePage() {
           brokerContactExtensionSnapshot,
           brokerContactEmailSnapshot,
           brokerLoadReference,
+          loadReferences,
           mode: freightMode,
           equipmentType,
           trailerType,
@@ -600,6 +604,7 @@ export default function LoadWorkspacePage() {
       brokerContactExtensionSnapshot,
       brokerContactEmailSnapshot,
       brokerLoadReference,
+      loadReferences,
       freightMode,
       equipmentType,
       trailerType,
@@ -695,6 +700,7 @@ export default function LoadWorkspacePage() {
           setBrokerContactPhoneSnapshot,
           setBrokerContactEmailSnapshot,
           setBrokerLoadReference,
+          setLoadReferences,
           setFreightMode,
           setEquipmentType,
           setTrailerType,
@@ -882,6 +888,7 @@ export default function LoadWorkspacePage() {
       brokerContactExtensionSnapshot,
       brokerContactEmailSnapshot,
       brokerLoadReference,
+      loadReferences,
       mode: freightMode,
       equipmentType,
       trailerType,
@@ -1310,6 +1317,7 @@ export default function LoadWorkspacePage() {
       status, loadNumber, brokerId, brokerContactId,
       brokerNameSnapshot, brokerContactNameSnapshot, brokerContactPhoneSnapshot,
       brokerContactExtensionSnapshot, brokerContactEmailSnapshot, brokerLoadReference,
+      loadReferences,
       mode: freightMode, equipmentType, trailerType, trailerSize,
       commodity, estimatedWeight, hazmat, temperatureRequirement, palletCaseCount,
       rate, customerRate, miles,
@@ -1324,9 +1332,9 @@ export default function LoadWorkspacePage() {
 
     const checks: Array<{ label: string; snapKey: keyof Load; formKey: string; money?: boolean }> = [
       { label: "Status",        snapKey: "status",                 formKey: "status" },
-      { label: "Load #",        snapKey: "load_number",            formKey: "load_number" },
+      { label: "TruckERP ID",   snapKey: "load_number",            formKey: "load_number" },
       { label: "Broker",        snapKey: "broker_name_snapshot",   formKey: "broker_name_snapshot" },
-      { label: "Broker ref",    snapKey: "broker_load_reference",  formKey: "broker_load_reference" },
+      { label: "Load Number",   snapKey: "broker_load_reference",  formKey: "broker_load_reference" },
       { label: "Rate",          snapKey: "rate",                   formKey: "rate",          money: true },
       { label: "Customer rate", snapKey: "customer_rate",          formKey: "customer_rate", money: true },
       { label: "Miles",         snapKey: "miles",                  formKey: "miles" },
@@ -1346,6 +1354,11 @@ export default function LoadWorkspacePage() {
       if (String(serverVal ?? "") !== String(formVal ?? "")) {
         diffs.push({ label, server: fmt(serverVal, money), yours: fmt(formVal, money) });
       }
+    }
+    const serverRefs = JSON.stringify(snap.references ?? []);
+    const formRefs = JSON.stringify(f.references ?? []);
+    if (serverRefs !== formRefs) {
+      diffs.push({ label: "References", server: serverRefs, yours: formRefs });
     }
     return diffs;
   }
@@ -1819,6 +1832,7 @@ export default function LoadWorkspacePage() {
             setBrokerContactEmailSnapshot={setBrokerContactEmailSnapshot}
             brokerLoadReference={brokerLoadReference}
             setBrokerLoadReference={setBrokerLoadReference}
+            loadReferences={loadReferences}
             freightMode={freightMode}
             setFreightMode={setFreightMode}
             equipmentType={equipmentType}

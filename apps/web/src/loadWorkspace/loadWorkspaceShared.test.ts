@@ -19,6 +19,7 @@ function minimalPersist(over: Partial<Parameters<typeof buildLoadPersistPayload>
     brokerContactExtensionSnapshot: "",
     brokerContactEmailSnapshot: "",
     brokerLoadReference: "",
+    loadReferences: [],
     mode: "",
     equipmentType: "",
     trailerType: "",
@@ -186,5 +187,20 @@ describe("buildLoadPersistPayload (stop safety)", () => {
     expect(p.stops?.[0].stop_type).toBe("PICKUP");
     expect(p.stops?.[1].stop_type).toBe("DELIVERY");
     expect(p.stops?.[1].city).toBe("Memphis");
+  });
+
+  it("save payload includes load-level references", () => {
+    const p = buildLoadPersistPayload(
+      minimalPersist({
+        loadReferences: [
+          { kind: "po_number", value: "PO-1", label: "PO #" },
+          { kind: "bol_number", value: "BOL-9" },
+        ],
+      }),
+    );
+    expect(p.references).toEqual([
+      { kind: "po_number", value: "PO-1", label: "PO #" },
+      { kind: "bol_number", value: "BOL-9" },
+    ]);
   });
 });

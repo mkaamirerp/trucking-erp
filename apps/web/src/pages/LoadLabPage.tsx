@@ -18,6 +18,7 @@ import {
   type BrokerContact,
   type CustomsBroker,
   type Driver,
+  type LoadDocumentParseReference,
   type Trailer,
   type Truck,
 } from "@/api";
@@ -188,6 +189,7 @@ function resetWorkspaceFormState(args: {
   setBrokerContactExtensionSnapshot: (v: string) => void;
   setBrokerContactEmailSnapshot: (v: string) => void;
   setBrokerLoadReference: (v: string) => void;
+  setLoadReferences: (v: LoadDocumentParseReference[]) => void;
   setFreightMode: (v: string) => void;
   setEquipmentType: (v: string) => void;
   setTrailerType: (v: string) => void;
@@ -218,6 +220,7 @@ function resetWorkspaceFormState(args: {
   args.setBrokerContactExtensionSnapshot("");
   args.setBrokerContactEmailSnapshot("");
   args.setBrokerLoadReference("");
+  args.setLoadReferences([]);
   args.setFreightMode("");
   args.setEquipmentType("");
   args.setTrailerType("");
@@ -278,6 +281,7 @@ export default function LoadLabPage() {
   const [brokerContactExtensionSnapshot, setBrokerContactExtensionSnapshot] = useState("");
   const [brokerContactEmailSnapshot, setBrokerContactEmailSnapshot] = useState("");
   const [brokerLoadReference, setBrokerLoadReference] = useState("");
+  const [loadReferences, setLoadReferences] = useState<LoadDocumentParseReference[]>([]);
   const [freightMode, setFreightMode] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
   const [trailerType, setTrailerType] = useState("");
@@ -365,6 +369,7 @@ export default function LoadLabPage() {
       setBrokerContactExtensionSnapshot,
       setBrokerContactEmailSnapshot,
       setBrokerLoadReference,
+      setLoadReferences,
       setFreightMode,
       setEquipmentType,
       setTrailerType,
@@ -402,6 +407,7 @@ export default function LoadLabPage() {
           setBrokerContactPhoneSnapshot,
           setBrokerContactEmailSnapshot,
           setBrokerLoadReference,
+          setLoadReferences,
           setFreightMode,
           setEquipmentType,
           setTrailerType,
@@ -760,6 +766,7 @@ export default function LoadLabPage() {
                       setBrokerContactEmailSnapshot={setBrokerContactEmailSnapshot}
                       brokerLoadReference={brokerLoadReference}
                       setBrokerLoadReference={setBrokerLoadReference}
+                      loadReferences={loadReferences}
                       freightMode={freightMode}
                       setFreightMode={setFreightMode}
                       equipmentType={equipmentType}

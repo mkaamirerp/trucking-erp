@@ -3683,6 +3683,8 @@ export type Load = {
   document_snapshot_version?: number;
   customs_snapshot?: LoadCustomsSnapshot | null;
   broker_load_reference?: string | null;
+  /** Persisted load-level operational references. API field ``references`` (DB: operational_references). */
+  references?: LoadDocumentParseReference[];
   broker_name_snapshot?: string | null;
   broker_contact_name_snapshot?: string | null;
   broker_contact_phone_snapshot?: string | null;

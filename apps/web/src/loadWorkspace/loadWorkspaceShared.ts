@@ -1,7 +1,7 @@
 /**
  * Shared helpers and UI tokens for the canonical load workspace (create + edit).
  */
-import type { Load, LoadStop, LoadStopWrite, LoadWritePayload } from "@/api";
+import type { Load, LoadDocumentParseReference, LoadStop, LoadStopWrite, LoadWritePayload } from "@/api";
 import { sortedStops as sortStops } from "@/utils/loadStops";
 import { hasUsefulStopIdentity } from "./loadParseStops";
 
@@ -62,6 +62,7 @@ export interface WorkspaceDraftFields {
   brokerContactExtensionSnapshot: string;
   brokerContactEmailSnapshot: string;
   brokerLoadReference: string;
+  loadReferences: LoadDocumentParseReference[];
   freightMode: string;
   equipmentType: string;
   trailerType: string;
@@ -94,6 +95,7 @@ export function initialWorkspaceFieldsManual(): WorkspaceDraftFields {
     brokerContactExtensionSnapshot: "",
     brokerContactEmailSnapshot: "",
     brokerLoadReference: "",
+    loadReferences: [],
     freightMode: "",
     equipmentType: "",
     trailerType: "",
@@ -127,6 +129,7 @@ export function workspaceFieldsFromLoad(l: Load): WorkspaceDraftFields {
     brokerContactExtensionSnapshot: l.broker_contact_extension_snapshot ?? "",
     brokerContactEmailSnapshot: l.broker_contact_email_snapshot ?? "",
     brokerLoadReference: l.broker_load_reference ?? "",
+    loadReferences: Array.isArray(l.references) ? l.references : [],
     freightMode: l.mode ?? "",
     equipmentType: l.equipment_type ?? "",
     trailerType: l.trailer_type ?? "",
@@ -409,6 +412,7 @@ export function buildLoadPersistPayload(params: {
   brokerContactExtensionSnapshot: string;
   brokerContactEmailSnapshot: string;
   brokerLoadReference: string;
+  loadReferences?: LoadDocumentParseReference[];
   mode: string;
   equipmentType: string;
   trailerType: string;
@@ -446,6 +450,7 @@ export function buildLoadPersistPayload(params: {
     broker_contact_extension_snapshot: params.brokerContactExtensionSnapshot.trim() || null,
     broker_contact_email_snapshot: params.brokerContactEmailSnapshot.trim() || null,
     broker_load_reference: params.brokerLoadReference.trim() || null,
+    references: params.loadReferences ?? [],
     mode: params.mode.trim() || null,
     equipment_type: params.equipmentType.trim() || null,
     trailer_type: params.trailerType.trim() || null,
@@ -486,6 +491,7 @@ export function baselineSignatureFromLoad(l: Load): string {
     brokerContactExtensionSnapshot: l.broker_contact_extension_snapshot ?? "",
     brokerContactEmailSnapshot: l.broker_contact_email_snapshot ?? "",
     brokerLoadReference: l.broker_load_reference ?? "",
+    loadReferences: Array.isArray(l.references) ? l.references : [],
     mode: l.mode ?? "",
     equipmentType: l.equipment_type ?? "",
     trailerType: l.trailer_type ?? "",
@@ -521,6 +527,7 @@ export function buildLoadPersistPayloadFromWorkspaceFields(f: WorkspaceDraftFiel
     brokerContactExtensionSnapshot: f.brokerContactExtensionSnapshot,
     brokerContactEmailSnapshot: f.brokerContactEmailSnapshot,
     brokerLoadReference: f.brokerLoadReference,
+    loadReferences: f.loadReferences,
     mode: f.freightMode,
     equipmentType: f.equipmentType,
     trailerType: f.trailerType,
