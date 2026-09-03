@@ -79,7 +79,7 @@ def test_field_rules_present_with_required_sections() -> None:
     blob = json.dumps(handoff)
     assert "observed_document_terminology" not in blob
     assert "observed_examples" not in blob
-    assert "broker_authority" not in rules
+    assert "broker_authority" in rules
     assert "equipment_type" not in rules
     assert "customer_rate_guardrail" in rules
     assert "pickup_semantics" in rules

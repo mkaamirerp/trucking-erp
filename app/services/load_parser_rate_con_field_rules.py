@@ -66,6 +66,51 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "an unrelated company.",
             ],
         },
+        "broker_authority": {
+            "product_fields": [
+                "broker_mc_number_snapshot",
+                "broker_dot_number_snapshot",
+            ],
+            "meaning": (
+                "The MC/USDOT authority numbers belonging to the freight broker/company that "
+                "tendered, arranged, or issued this load to our carrier."
+            ),
+            "possible_labels_examples": [
+                "MC",
+                "MC Number",
+                "MC #",
+                "Motor Carrier",
+                "USDOT",
+                "US DOT",
+                "DOT",
+                "DOT Number",
+                "DOT #",
+            ],
+            "examples_not_exhaustive": True,
+            "how_to_choose": (
+                "Associate each authority number with the company/entity it actually belongs to. "
+                "Prefer authority shown in the broker's company or corporate-information block, "
+                "or otherwise clearly tied to the selected broker company. Do not assign ownership "
+                "from proximity to a person or contact heading."
+            ),
+            "rules": [
+                "Authority numbers must belong to the selected broker company, not merely be nearby numbers.",
+                "Never return MC/DOT values belonging to tenant_identity_exclusion.",
+                "Never return the carrier/tenant's MC/DOT as broker authority.",
+                "If broker and carrier authorities both appear, associate each authority with its "
+                "actual company/entity.",
+                "Prefer authority shown in the broker's company/corporate-information block or "
+                "otherwise clearly tied to the broker company.",
+                "Do not transfer an MC/DOT to the broker merely because it appears near a broker "
+                "contact/person.",
+                "A load-information/contact section may contain carrier/tenant authority nearby; "
+                "proximity alone does not establish ownership.",
+                "Normalize supported MC/USDOT values to identifying digits.",
+                "If broker MC is supported but broker USDOT is absent, return MC and leave DOT null.",
+                "If authority ownership is ambiguous, return null rather than selecting another "
+                "party's number.",
+            ],
+        },
         "broker_contact": {
             "product_fields": [
                 "broker_contact_name_snapshot",
@@ -88,6 +133,17 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Exact tenant emails and company-owned tenant email domains in tenant_identity_exclusion "
                 "must not be returned as broker contact information.",
                 "Public mailbox domains by themselves do not establish company ownership.",
+                "Strong broker-contact evidence includes headings and phrases such as "
+                "'FOR LOAD INFORMATION', 'Agent Name', 'Please Sign and Email to <person>', and "
+                "'For specific information about this load, contact <person>'.",
+                "A person-specific email on the broker company's domain is strong contact evidence.",
+                "Repeated name/email/phone evidence tied to the same load strengthens the same "
+                "person-specific broker contact.",
+                "A broker contact may appear next to carrier/tenant MC/DOT information.",
+                "Contact identity and authority ownership must be evaluated separately.",
+                "Do not reject a valid broker contact merely because carrier authority numbers "
+                "are nearby.",
+                "Still never return tenant/carrier people as broker contacts.",
                 "If no supported person-specific broker contact exists, return null rather than "
                 "assigning an unrelated general contact.",
             ],
@@ -310,6 +366,7 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
 APPROVED_FIELD_RULE_KEYS: tuple[str, ...] = (
     "broker_load_reference",
     "broker_company",
+    "broker_authority",
     "broker_contact",
     "rate_broker_pay",
     "customer_rate_guardrail",
