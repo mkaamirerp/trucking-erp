@@ -42,6 +42,9 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Stop-level references, audit identifiers, signature/audit IDs, and secondary shipment "
                 "references should not replace the principal load identifier unless the document "
                 "clearly establishes them as primary.",
+                "Return only the identifier value in broker_load_reference.",
+                "Labels such as Load #, Load Number, Order #, Confirmation #, and PO # are discovery "
+                "labels only; do not include the label or prefix text in the value.",
                 "If the principal identifier is genuinely ambiguous, return null rather than inventing a choice.",
             ],
         },
@@ -146,6 +149,20 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Still never return tenant/carrier people as broker contacts.",
                 "If no supported person-specific broker contact exists, return null rather than "
                 "assigning an unrelated general contact.",
+                "When a named broker contact/person is selected, broker_contact_phone_snapshot "
+                "must be that person's direct phone.",
+                "Do not populate broker_contact_phone_snapshot with the broker company's main phone, "
+                "corporate phone, general office number, carrier-relations line, after-hours line, "
+                "tracking line, or claims/AP/payment line.",
+                "If only a company or corporate number is supported, return null for "
+                "broker_contact_phone_snapshot.",
+                "When a named person is selected, broker_contact_email_snapshot must belong to that person.",
+                "Generic company mailboxes such as carriers@, dispatch@, info@, operations@, billing@, "
+                "accounting@, and support@ must not populate a named person's email merely because they "
+                "use the broker's domain.",
+                "A matching broker-company email domain proves company association, not person association.",
+                "If only a generic or company mailbox is supported, return null for "
+                "broker_contact_email_snapshot.",
             ],
         },
         "rate_broker_pay": {

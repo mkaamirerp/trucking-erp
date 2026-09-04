@@ -15,6 +15,27 @@ _ARMSTRONG_CARRIER_MC = "1397898"
 _ARMSTRONG_CARRIER_DOT = "3842541"
 _ARMSTRONG_AGENT = "Loflin Phillips"
 _ARMSTRONG_AUDIT_RATE_CON_ID = "5506390"
+_ARMSTRONG_CORPORATE_PHONE = "877-240-1181"
+_ARMSTRONG_AGENT_PHONE = "208-751-8073"
+_ARMSTRONG_AGENT_EMAIL = "l.phillip@armstrongtransport.com"
+_ARMSTRONG_COMPANY_EMAIL = "carriers@armstrongtransport.com"
+_ARMSTRONG_LOAD_REF = "3872125-1"
+_ARMSTRONG_LOAD_REF_WITH_LABEL = "Load #3872125-1"
+
+# Slice A must not add groups.
+_SLICE_A_APPROVED_KEYS = (
+    "broker_load_reference",
+    "broker_company",
+    "broker_authority",
+    "broker_contact",
+    "rate_broker_pay",
+    "customer_rate_guardrail",
+    "stops",
+    "pickup_semantics",
+    "delivery_semantics",
+    "appointment_date_time",
+    "references",
+)
 
 
 def _rules() -> dict:
@@ -125,3 +146,88 @@ def test_references_still_exclude_audit_ids() -> None:
     assert "Rate Confirmation ID" not in blob
     assert "Highway Audit Report" not in blob
     assert "broker_authority" not in _rules()["references"]["product_fields"]
+
+
+def _production_rules_blob() -> str:
+    import json
+
+    from app.services.load_parser_rate_con_field_rules import LOAD_RATE_CON_FIELD_RULES
+
+    return json.dumps(LOAD_RATE_CON_FIELD_RULES)
+
+
+def test_slice_a_does_not_change_approved_field_rule_keys() -> None:
+    assert APPROVED_FIELD_RULE_KEYS == _SLICE_A_APPROVED_KEYS
+    assert list(_rules().keys()) == list(_SLICE_A_APPROVED_KEYS)
+
+
+def test_broker_contact_phone_is_direct_person_not_company() -> None:
+    rules = _rules()["broker_contact"]["rules"]
+    blob = " ".join(rules)
+    assert any(
+        "broker_contact_phone_snapshot must be that person's direct phone" in r for r in rules
+    )
+    assert "direct phone" in blob
+    assert any("Do not populate broker_contact_phone_snapshot with the broker company's main phone" in r for r in rules)
+    assert "corporate phone" in blob
+    assert "general office number" in blob
+    assert any(
+        "If only a company or corporate number is supported, return null for" in r for r in rules
+    )
+    assert "broker_contact_phone_snapshot" in blob
+    # Armstrong: named-agent phone vs corporate/main line — values stay out of production rules.
+    assert _ARMSTRONG_AGENT_PHONE not in blob
+    assert _ARMSTRONG_CORPORATE_PHONE not in blob
+
+
+def test_broker_contact_email_rejects_generic_company_mailbox() -> None:
+    rules = _rules()["broker_contact"]["rules"]
+    blob = " ".join(rules)
+    assert any(
+        "broker_contact_email_snapshot must belong to that person" in r for r in rules
+    )
+    assert "carriers@" in blob
+    assert "dispatch@" in blob
+    assert "info@" in blob
+    assert "operations@" in blob
+    assert "billing@" in blob
+    assert "accounting@" in blob
+    assert "support@" in blob
+    assert "must not populate a named person's email" in blob
+    assert any(
+        "proves company association, not person association" in r for r in rules
+    )
+    assert any(
+        "If only a generic or company mailbox is supported, return null for" in r for r in rules
+    )
+    assert _ARMSTRONG_AGENT_EMAIL not in blob
+    assert _ARMSTRONG_COMPANY_EMAIL not in blob
+
+
+def test_broker_load_reference_is_identifier_only() -> None:
+    rules = _rules()["broker_load_reference"]["rules"]
+    blob = " ".join(rules)
+    assert "Return only the identifier value in broker_load_reference." in rules
+    assert any("discovery labels only" in r for r in rules)
+    assert any("do not include the label or prefix text in the value" in r for r in rules)
+    assert "Load #" in blob
+    assert "Load Number" in blob
+    assert "Order #" in blob
+    assert "Confirmation #" in blob
+    assert "PO #" in blob
+    # Armstrong identifier must not be hardcoded; label-concatenated form is the defect.
+    assert _ARMSTRONG_LOAD_REF not in blob
+    assert _ARMSTRONG_LOAD_REF_WITH_LABEL not in blob
+
+
+def test_production_field_rules_contain_no_armstrong_identities() -> None:
+    blob = _production_rules_blob()
+    assert _ARMSTRONG_BROKER_COMPANY not in blob
+    assert _ARMSTRONG_AGENT not in blob
+    assert _ARMSTRONG_CORPORATE_PHONE not in blob
+    assert _ARMSTRONG_AGENT_PHONE not in blob
+    assert _ARMSTRONG_AGENT_EMAIL not in blob
+    assert _ARMSTRONG_COMPANY_EMAIL not in blob
+    assert _ARMSTRONG_LOAD_REF not in blob
+    assert _ARMSTRONG_LOAD_REF_WITH_LABEL not in blob
+    assert _ARMSTRONG_CARRIER_COMPANY not in blob
