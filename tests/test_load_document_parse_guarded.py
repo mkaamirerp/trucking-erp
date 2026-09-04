@@ -15,7 +15,8 @@ import pytest
 from pypdf import PdfWriter
 
 from app.core.config import settings
-from app.schemas.load_document_parse import LoadDocumentParseResponse, ParseDocumentSemanticModelOutput
+from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.schemas.load_document_parse_semantic import ParseDocumentSemanticModelOutput
 from app.services import load_document_parse_guarded
 from app.services.load_document_parse_adapter import map_lab_parse_response_to_document_contract
 from app.services.load_document_parse_guarded import parse_pdf_bytes_to_load_document_response
@@ -28,6 +29,42 @@ _GOLDEN_CASES = [
     ("load_lab_fixture_1pickup_3deliveries.pdf", "load_lab_fixture_1pickup_3deliveries.lab_parse_response.json"),
     ("load_lab_fixture_3pickups_1delivery.pdf", "load_lab_fixture_3pickups_1delivery.lab_parse_response.json"),
 ]
+
+
+def _lab_golden_to_semantic_openai(golden_payload: dict) -> dict:
+    """Test-only: lab goldens are product-shaped; OpenAI now returns semantic extracted."""
+    payload = dict(golden_payload)
+    ex = dict(payload.get("extracted") or {})
+    payload["extracted"] = {
+        "broker_company": {
+            "name": ex.get("broker_name_snapshot"),
+            "main_phone": ex.get("broker_phone_snapshot"),
+            "mc_number": ex.get("broker_mc_number_snapshot"),
+            "dot_number": ex.get("broker_dot_number_snapshot"),
+        },
+        "broker_agent": {
+            "name": ex.get("broker_contact_name_snapshot"),
+            "direct_phone": ex.get("broker_contact_phone_snapshot"),
+            "email": ex.get("broker_contact_email_snapshot"),
+        },
+        "principal_load_identifier": ex.get("broker_load_reference"),
+        "freight_mode": ex.get("mode"),
+        "equipment": {
+            "description": ex.get("equipment_type"),
+            "trailer_body_type": ex.get("trailer_type"),
+            "trailer_length": ex.get("trailer_size"),
+        },
+        "commodity": ex.get("commodity"),
+        "estimated_weight": ex.get("estimated_weight"),
+        "temperature_requirement": ex.get("temperature_requirement"),
+        "rate": ex.get("rate"),
+        "customer_rate": ex.get("customer_rate"),
+        "miles": ex.get("miles"),
+        "customs_broker_name": ex.get("customs_broker_name"),
+        "references": ex.get("references") or [],
+        "stops": ex.get("stops") or [],
+    }
+    return payload
 
 
 @pytest.mark.asyncio
@@ -60,7 +97,11 @@ async def test_no_injected_client_uses_default_product_openai_when_key_exists(
         calls.append(kwargs)
         return {
             "document": {"filename": "default.pdf"},
-            "extracted": {"broker_load_reference": "DEF-123", "references": [], "stops": []},
+            "extracted": {
+                "principal_load_identifier": "DEF-123",
+                "references": [],
+                "stops": [],
+            },
             "raw_text": "default raw",
             "warnings": [],
             "field_confidence": {},
@@ -101,8 +142,8 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
         return {
             "document": {"filename": "ai.pdf"},
             "extracted": {
-                "broker_load_reference": "REF-123",
-                "broker_name_snapshot": "Acme Broker",
+                "principal_load_identifier": "REF-123",
+                "broker_company": {"name": "Acme Broker"},
                 "references": [],
                 "stops": [],
             },
@@ -165,7 +206,7 @@ async def test_strips_parse_diagnostics_from_injected_payload() -> None:
     async def fake_openai(**_kwargs):
         return {
             "document": {"filename": "diag.pdf"},
-            "extracted": {"broker_load_reference": "DIAG-1", "references": [], "stops": []},
+            "extracted": {"principal_load_identifier": "DIAG-1", "references": [], "stops": []},
             "raw_text": "raw",
             "warnings": [],
             "field_confidence": {},
@@ -283,7 +324,7 @@ async def test_product_parser_maps_saved_lab_golden_without_exposing_diagnostics
     golden_payload = json.loads((_FIXTURE_DIR / json_name).read_text(encoding="utf-8"))
 
     async def fake_openai(**_kwargs):
-        return golden_payload
+        return _lab_golden_to_semantic_openai(golden_payload)
 
     product = await parse_pdf_bytes_to_load_document_response(
         AsyncMock(),

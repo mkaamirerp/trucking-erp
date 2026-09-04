@@ -498,7 +498,7 @@ def _strip_load_reference_field_label(value: str) -> str:
     labels = [
         str(label).strip()
         for label in (
-            LOAD_RATE_CON_FIELD_RULES["rules"]["broker_load_reference"].get(
+            LOAD_RATE_CON_FIELD_RULES["rules"]["principal_load_identifier"].get(
                 "possible_labels_examples"
             )
             or []

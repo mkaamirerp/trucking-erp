@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class LoadParseDocumentMeta(BaseModel):
@@ -132,35 +132,3 @@ class LoadDocumentParseResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     field_confidence: dict[str, str] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
-
-
-class ParseDocumentSemanticModelOutput(BaseModel):
-    """OpenAI ``json_schema`` output contract for the product guarded PDF parser.
-
-    Excludes ``raw_text`` and ``context`` — the server attaches PDF text and allowlisted context.
-    Extra root keys from the model are ignored (forward tolerance).
-    """
-
-    model_config = ConfigDict(extra="ignore")
-
-    document: LoadParseDocumentMeta
-    document_type: Optional[
-        Literal[
-            "rate_confirmation",
-            "driver_information_sheet",
-            "invoice",
-            "bol",
-            "other",
-        ]
-    ] = Field(
-        default=None,
-        description="Classify the PDF before filling extracted fields.",
-    )
-    classification_reasoning: Optional[str] = Field(
-        default=None,
-        max_length=1500,
-        description="Brief justification for document_type and how stops/contacts were interpreted.",
-    )
-    extracted: LoadParseExtractedFields = Field(default_factory=LoadParseExtractedFields)
-    warnings: list[str] = Field(default_factory=list)
-    field_confidence: dict[str, str] = Field(default_factory=dict)

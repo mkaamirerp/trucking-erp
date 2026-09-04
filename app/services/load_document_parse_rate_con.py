@@ -20,10 +20,11 @@ from app.schemas.load_document_parse import (
     LoadDocumentParseResponse,
     LoadParseDocumentMeta,
     LoadParseExtractedFields,
-    ParseDocumentSemanticModelOutput,
 )
+from app.schemas.load_document_parse_semantic import ParseDocumentSemanticModelOutput
 from app.services.load_document_parse_openai import parse_document_openai_chat_json_schema
 from app.services.load_parser_mechanical_validation import apply_load_parser_mechanical_validation
+from app.services.load_parser_semantic_to_product import map_semantic_extracted_to_product
 from app.services.load_parser_openai_handoff_v2 import (
     build_load_rate_con_openai_handoff_v2_payload,
     build_v2_openai_system_prompt,
@@ -213,26 +214,21 @@ def _map_semantic_payload_to_response(
     if classification_reasoning:
         context["classification_reasoning"] = str(classification_reasoning)[:2000]
 
-    payload["document"] = payload.get("document") or {"filename": filename[:512]}
-    if not isinstance(payload.get("raw_text"), str):
-        payload["raw_text"] = raw_text
-    payload["extracted"] = payload.get("extracted") or {}
-    payload["warnings"] = list(extra_warnings) + list(payload.get("warnings") or [])
-    payload["field_confidence"] = dict(payload.get("field_confidence") or {})
-    payload["context"] = context
+    doc_meta = payload.get("document") or {"filename": filename[:512]}
+    if not isinstance(doc_meta, dict):
+        doc_meta = {"filename": filename[:512]}
+    product_extracted = map_semantic_extracted_to_product(payload.get("extracted"))
+    extracted_dump = _sanitize_extracted_references(product_extracted.model_dump(mode="json"))
 
-    if isinstance(payload["extracted"], dict):
-        payload["extracted"] = _sanitize_extracted_references(payload["extracted"])
-
-    response = LoadDocumentParseResponse.model_validate(payload)
-    return response.model_copy(
-        update={
-            "document": LoadParseDocumentMeta(filename=response.document.filename[:512]),
-            "extracted": LoadParseExtractedFields.model_validate(
-                response.extracted.model_dump(mode="json")
-            ),
-            "context": context,
-        }
+    return LoadDocumentParseResponse(
+        document=LoadParseDocumentMeta(filename=str(doc_meta.get("filename") or filename)[:512]),
+        extracted=LoadParseExtractedFields.model_validate(extracted_dump),
+        raw_text=(
+            payload["raw_text"] if isinstance(payload.get("raw_text"), str) else raw_text
+        ),
+        warnings=list(extra_warnings) + list(payload.get("warnings") or []),
+        field_confidence=dict(payload.get("field_confidence") or {}),
+        context=context,
     )
 
 

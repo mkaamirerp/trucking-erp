@@ -24,10 +24,10 @@ _ARMSTRONG_LOAD_REF_WITH_LABEL = "Load #3872125-1"
 
 # Slice A must not add groups.
 _SLICE_A_APPROVED_KEYS = (
-    "broker_load_reference",
+    "principal_load_identifier",
     "broker_company",
     "broker_authority",
-    "broker_contact",
+    "broker_agent",
     "rate_broker_pay",
     "customer_rate_guardrail",
     "stops",
@@ -38,9 +38,9 @@ _SLICE_A_APPROVED_KEYS = (
 )
 _APPROVED_KEYS = _SLICE_A_APPROVED_KEYS + (
     "freight_mode",
-    "equipment_type",
-    "trailer_type",
-    "trailer_size",
+    "equipment_description",
+    "trailer_body_type",
+    "trailer_length",
 )
 
 
@@ -65,8 +65,8 @@ def test_broker_authority_exists_and_is_approved() -> None:
 def test_broker_authority_covers_mc_and_dot_snapshot_fields() -> None:
     product_fields = _rules()["broker_authority"]["product_fields"]
     assert product_fields == [
-        "broker_mc_number_snapshot",
-        "broker_dot_number_snapshot",
+        "broker_company.mc_number",
+        "broker_company.dot_number",
     ]
     meaning = _rules()["broker_authority"]["meaning"]
     assert "freight broker" in meaning.lower()
@@ -121,7 +121,7 @@ def test_broker_authority_ownership_is_entity_not_proximity() -> None:
 
 
 def test_broker_contact_covers_repeated_load_specific_agent_evidence() -> None:
-    rules = _rules()["broker_contact"]["rules"]
+    rules = _rules()["broker_agent"]["rules"]
     blob = " ".join(rules)
     assert "FOR LOAD INFORMATION" in blob
     assert "Agent Name" in blob
@@ -131,12 +131,16 @@ def test_broker_contact_covers_repeated_load_specific_agent_evidence() -> None:
     assert "Broker-domain membership alone is company association, not person ownership." in blob
     assert "Repeated name/email/phone evidence tied to the same load" in blob
     assert "Contact identity and authority ownership must be evaluated separately." in blob
+    assert "cohesive person candidate" in blob
+    assert "broker_company.main_phone" in blob
+    assert "broker_agent.direct_phone" in blob
+    assert "do not leave broker_agent empty" in blob.casefold() or "do not leave broker_agent empty" in blob
     assert any(
-        "Do not reject a valid broker contact merely because carrier authority numbers" in r
+        "Do not reject a valid broker agent merely because carrier authority numbers" in r
         for r in rules
     )
-    assert any("Still never return tenant/carrier people as broker contacts." in r for r in rules)
-    assert "Do not return tenant/carrier contacts as broker contacts." in rules
+    assert any("Still never return tenant/carrier people as broker agents." in r for r in rules)
+    assert "Do not return tenant/carrier people as broker agents." in rules
     # Armstrong expected person remains Loflin Phillips; nearby carrier MC/DOT are not contact identity.
     assert _ARMSTRONG_AGENT == "Loflin Phillips"
 
@@ -166,33 +170,36 @@ def _production_rules_blob() -> str:
 def test_approved_field_rule_keys_match_rules_dict() -> None:
     assert APPROVED_FIELD_RULE_KEYS == _APPROVED_KEYS
     assert list(_rules().keys()) == list(_APPROVED_KEYS)
-    assert "equipment_type" in APPROVED_FIELD_RULE_KEYS
+    assert "equipment_description" in APPROVED_FIELD_RULE_KEYS
+    assert "broker_agent" in APPROVED_FIELD_RULE_KEYS
+    assert "principal_load_identifier" in APPROVED_FIELD_RULE_KEYS
 
 
 def test_broker_contact_phone_is_direct_person_not_company() -> None:
-    rules = _rules()["broker_contact"]["rules"]
+    rules = _rules()["broker_agent"]["rules"]
     blob = " ".join(rules)
     assert any(
-        "broker_contact_phone_snapshot must be that person's direct phone" in r for r in rules
+        "broker_agent.direct_phone must be that person's direct phone" in r for r in rules
     )
     assert "direct phone" in blob
-    assert any("Do not populate broker_contact_phone_snapshot with the broker company's main phone" in r for r in rules)
+    assert any("Do not populate broker_agent.direct_phone with the broker company's main phone" in r for r in rules)
     assert "corporate phone" in blob
     assert "general office number" in blob
     assert any(
         "If only a company or corporate number is supported, return null for" in r for r in rules
     )
-    assert "broker_contact_phone_snapshot" in blob
+    assert "broker_agent.direct_phone" in blob
+    assert "broker_contact_phone_snapshot" not in blob
     # Armstrong: named-agent phone vs corporate/main line — values stay out of production rules.
     assert _ARMSTRONG_AGENT_PHONE not in blob
     assert _ARMSTRONG_CORPORATE_PHONE not in blob
 
 
 def test_broker_contact_email_rejects_generic_company_mailbox() -> None:
-    rules = _rules()["broker_contact"]["rules"]
+    rules = _rules()["broker_agent"]["rules"]
     blob = " ".join(rules)
     assert any(
-        "broker_contact_email_snapshot must belong to that person" in r for r in rules
+        "broker_agent.email must belong to that person" in r for r in rules
     )
     assert "carriers@" in blob
     assert "dispatch@" in blob
@@ -208,14 +215,15 @@ def test_broker_contact_email_rejects_generic_company_mailbox() -> None:
     assert any(
         "If only a generic or company mailbox is supported, return null for" in r for r in rules
     )
+    assert "broker_contact_email_snapshot" not in blob
     assert _ARMSTRONG_AGENT_EMAIL not in blob
     assert _ARMSTRONG_COMPANY_EMAIL not in blob
 
 
 def test_broker_load_reference_is_identifier_only() -> None:
-    rules = _rules()["broker_load_reference"]["rules"]
+    rules = _rules()["principal_load_identifier"]["rules"]
     blob = " ".join(rules)
-    assert "Return only the identifier value in broker_load_reference." in rules
+    assert "Return only the identifier value in principal_load_identifier." in rules
     assert any("discovery labels only" in r for r in rules)
     assert any("do not include the label or prefix text in the value" in r for r in rules)
     assert "Load #" in blob
@@ -223,6 +231,7 @@ def test_broker_load_reference_is_identifier_only() -> None:
     assert "Order #" in blob
     assert "Confirmation #" in blob
     assert "PO #" in blob
+    assert "broker_load_reference" not in blob
     # Armstrong identifier must not be hardcoded; label-concatenated form is the defect.
     assert _ARMSTRONG_LOAD_REF not in blob
     assert _ARMSTRONG_LOAD_REF_WITH_LABEL not in blob
@@ -245,7 +254,7 @@ def test_production_field_rules_contain_no_armstrong_identities() -> None:
 def test_freight_mode_group_normalizes_and_does_not_infer_from_equipment() -> None:
     assert "freight_mode" in APPROVED_FIELD_RULE_KEYS
     group = _rules()["freight_mode"]
-    assert group["product_fields"] == ["mode"]
+    assert group["product_fields"] == ["freight_mode"]
     norm = group["normalization"]
     assert norm["Full TruckLoad"] == "FTL"
     assert norm["Full Truckload"] == "FTL"
@@ -257,7 +266,7 @@ def test_freight_mode_group_normalizes_and_does_not_infer_from_equipment() -> No
     assert norm["Power Only"] == "POWER_ONLY"
     rules = group["rules"]
     blob = " ".join(rules)
-    assert any("Populate mode only from explicit load-level mode evidence." in r for r in rules)
+    assert any("Populate freight_mode only from explicit load-level mode evidence." in r for r in rules)
     assert "Do not infer mode from equipment" in blob
     assert "trailer type" in blob
     assert "trailer size" in blob
@@ -265,45 +274,45 @@ def test_freight_mode_group_normalizes_and_does_not_infer_from_equipment() -> No
     assert "number of stops" in blob
     assert "live/live" in blob.lower() or "live/live" in blob
     assert "rate" in blob
-    assert any("If mode is unsupported or ambiguous, return null." in r for r in rules)
+    assert any("If freight_mode is unsupported or ambiguous, return null." in r for r in rules)
     # Combined-source example stays in tests only.
     assert "V53" not in blob
     assert "Full TruckLoad" in blob
 
 
 def test_trailer_type_and_size_split_combined_equipment_description() -> None:
-    assert "trailer_type" in APPROVED_FIELD_RULE_KEYS
-    assert "trailer_size" in APPROVED_FIELD_RULE_KEYS
-    tt = _rules()["trailer_type"]
-    ts = _rules()["trailer_size"]
-    assert tt["product_fields"] == ["trailer_type"]
-    assert ts["product_fields"] == ["trailer_size"]
-    assert "equipment_type" in _rules()
+    assert "trailer_body_type" in APPROVED_FIELD_RULE_KEYS
+    assert "trailer_length" in APPROVED_FIELD_RULE_KEYS
+    tt = _rules()["trailer_body_type"]
+    ts = _rules()["trailer_length"]
+    assert tt["product_fields"] == ["equipment.trailer_body_type"]
+    assert ts["product_fields"] == ["equipment.trailer_length"]
+    assert "equipment_description" in _rules()
     tt_blob = " ".join(tt["rules"])
     ts_blob = " ".join(ts["rules"])
-    assert "Extract trailer body/type separately from trailer size." in tt["rules"]
-    assert "do not put length or size into trailer_type" in tt_blob
+    assert "Extract trailer body/type separately from trailer length." in tt["rules"]
+    assert "do not put length or size into equipment.trailer_body_type" in tt_blob
     assert "combined equipment description" in tt_blob
     assert any(
-        "embedded inside a broader Equipment / Equipment Type description is valid evidence for trailer_type"
+        "embedded inside a broader Equipment / Equipment Type description is valid evidence for equipment.trailer_body_type"
         in r
         for r in tt["rules"]
     )
     assert any(
-        "The broader equipment_type must remain independently source-faithful." in r
+        "The broader equipment.description must remain independently source-faithful." in r
         for r in tt["rules"]
     )
     assert "Equipment Type" not in tt.get("possible_labels_examples", [])
     assert "Equipment" not in tt.get("possible_labels_examples", [])
-    assert "Do not infer trailer type from commodity, temperature, mode, weight, or equipment" in tt_blob
+    assert "Do not infer trailer type from commodity, temperature, freight_mode, weight, or equipment" in tt_blob
     assert tt["normalization"]["Van"] == "Van"
     assert tt["normalization"]["Dry Van"] == "Dry Van"
     assert tt["normalization"]["Reefer"] == "Reefer"
     assert "Extract explicit trailer length/size separately from trailer type." in ts["rules"]
-    assert "trailer_size contains the length/size only" in ts_blob or "length/size only" in ts_blob
-    assert "Do not copy the full equipment description into trailer_size." in ts["rules"]
+    assert "equipment.trailer_length contains the length/size only" in ts_blob or "length/size only" in ts_blob
+    assert "Do not copy the full equipment description into equipment.trailer_length." in ts["rules"]
     assert any(
-        "embedded inside a broader Equipment / Equipment Type description is valid evidence for trailer_size"
+        "embedded inside a broader Equipment / Equipment Type description is valid evidence for equipment.trailer_length"
         in r
         for r in ts["rules"]
     )
@@ -320,9 +329,9 @@ def test_trailer_type_and_size_split_combined_equipment_description() -> None:
 
 
 def test_equipment_type_full_description_coexists_with_trailer_fields() -> None:
-    assert "equipment_type" in APPROVED_FIELD_RULE_KEYS
-    group = _rules()["equipment_type"]
-    assert group["product_fields"] == ["equipment_type"]
+    assert "equipment_description" in APPROVED_FIELD_RULE_KEYS
+    group = _rules()["equipment_description"]
+    assert group["product_fields"] == ["equipment.description"]
     blob = " ".join(group["rules"])
     assert any(
         "full source-faithful load-level equipment description" in r for r in group["rules"]
@@ -330,11 +339,11 @@ def test_equipment_type_full_description_coexists_with_trailer_fields() -> None:
     assert "equipment code" in blob
     assert "combined source description" in blob
     assert any(
-        "Do not remove trailer type or trailer size components from equipment_type" in r
+        "Do not remove trailer type or trailer length components from equipment.description" in r
         for r in group["rules"]
     )
     assert any(
-        "equipment_type, trailer_type, and trailer_size may all come from the same source evidence."
+        "equipment.description, equipment.trailer_body_type, and equipment.trailer_length may all come from the same source evidence."
         in r
         for r in group["rules"]
     )

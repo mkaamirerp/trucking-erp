@@ -14,8 +14,8 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
     "profile": "rate_confirmation",
     "version": "load_rate_con_field_rules_v1",
     "rules": {
-        "broker_load_reference": {
-            "product_fields": ["broker_load_reference"],
+        "principal_load_identifier": {
+            "product_fields": ["principal_load_identifier"],
             "meaning": "The broker/customer's principal identifier for this shipment/load.",
             "possible_labels_examples": [
                 "Load #",
@@ -42,14 +42,17 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Stop-level references, audit identifiers, signature/audit IDs, and secondary shipment "
                 "references should not replace the principal load identifier unless the document "
                 "clearly establishes them as primary.",
-                "Return only the identifier value in broker_load_reference.",
+                "Return only the identifier value in principal_load_identifier.",
                 "Labels such as Load #, Load Number, Order #, Confirmation #, and PO # are discovery "
                 "labels only; do not include the label or prefix text in the value.",
                 "If the principal identifier is genuinely ambiguous, return null rather than inventing a choice.",
             ],
         },
         "broker_company": {
-            "product_fields": ["broker_name_snapshot"],
+            "product_fields": [
+                "broker_company.name",
+                "broker_company.main_phone",
+            ],
             "meaning": (
                 "The freight broker/company that tendered, arranged, or issued this load to our carrier."
             ),
@@ -60,6 +63,9 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             "rules": [
                 "Never return a party matching tenant_identity_exclusion as the broker.",
                 "Broker company is a company/entity, not the individual agent handling the load.",
+                "Populate broker_company.name with the broker company/entity, not a person.",
+                "Populate broker_company.main_phone with the broker company's main/corporate phone.",
+                "Do not put a named agent's direct phone in broker_company.main_phone.",
                 "Do not confuse the freight broker with the shipper, receiver, consignee, factoring "
                 "company, payment/QuickPay provider, insurer, customs broker, carrier, tenant, or a "
                 "stop-level business.",
@@ -71,8 +77,8 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
         },
         "broker_authority": {
             "product_fields": [
-                "broker_mc_number_snapshot",
-                "broker_dot_number_snapshot",
+                "broker_company.mc_number",
+                "broker_company.dot_number",
             ],
             "meaning": (
                 "The MC/USDOT authority numbers belonging to the freight broker/company that "
@@ -114,57 +120,68 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "party's number.",
             ],
         },
-        "broker_contact": {
+        "broker_agent": {
             "product_fields": [
-                "broker_contact_name_snapshot",
-                "broker_contact_phone_snapshot",
-                "broker_contact_email_snapshot",
+                "broker_agent.name",
+                "broker_agent.direct_phone",
+                "broker_agent.email",
             ],
             "meaning": "The individual broker/agent/representative handling this specific load.",
             "examples_not_exhaustive": True,
             "how_to_choose": (
-                "Prefer a named person-specific broker contact when the document supports one. "
+                "Prefer a named person-specific broker agent when the document supports one. "
                 "Phone and email should belong to that person when supported."
             ),
             "rules": [
-                "Do not return tenant/carrier contacts as broker contacts.",
-                "Do not return driver contacts as broker contacts.",
+                "Do not return tenant/carrier people as broker agents.",
+                "Do not return driver contacts as broker agents.",
                 "Do not substitute shipper or receiver contacts.",
                 "Do not substitute after-hours numbers, general corporate numbers, tracking contacts, "
                 "claims contacts, accounts payable contacts, QuickPay contacts, payment contacts, or "
-                "generic carrier-relations contacts when a person-specific broker contact exists.",
+                "generic carrier-relations contacts when a person-specific broker agent exists.",
                 "Exact tenant emails and company-owned tenant email domains in tenant_identity_exclusion "
-                "must not be returned as broker contact information.",
+                "must not be returned as broker agent information.",
                 "Public mailbox domains by themselves do not establish company ownership.",
-                "Strong broker-contact evidence includes headings and phrases such as "
+                "Strong broker-agent evidence includes headings and phrases such as "
                 "'FOR LOAD INFORMATION', 'Agent Name', 'Please Sign and Email to <person>', and "
                 "'For specific information about this load, contact <person>'.",
+                "When a person's name, phone, and email appear together in one explicit broker "
+                "load-information, agent, or representative contact block, treat that block as one "
+                "cohesive person candidate.",
+                "Do not take the person's name from that block and then search a different corporate "
+                "block for their phone, or a company/footer mailbox for their email.",
+                "A broker-company corporate/main phone belongs in broker_company.main_phone, not "
+                "broker_agent.direct_phone.",
+                "A generic company mailbox belongs to the company context and must not become "
+                "broker_agent.email.",
+                "If a complete supported person block exists, do not leave broker_agent empty merely "
+                "because corporate company contact data also exists.",
                 "A person-specific mailbox explicitly associated with the selected person is "
                 "strong evidence. Broker-domain membership alone is company association, not "
                 "person ownership.",
                 "Repeated name/email/phone evidence tied to the same load strengthens the same "
-                "person-specific broker contact.",
-                "A broker contact may appear next to carrier/tenant MC/DOT information.",
+                "person-specific broker agent.",
+                "A broker agent may appear next to carrier/tenant MC/DOT information.",
                 "Contact identity and authority ownership must be evaluated separately.",
-                "Do not reject a valid broker contact merely because carrier authority numbers "
+                "Do not reject a valid broker agent merely because carrier authority numbers "
                 "are nearby.",
-                "Still never return tenant/carrier people as broker contacts.",
-                "If no supported person-specific broker contact exists, return null rather than "
-                "assigning an unrelated general contact.",
-                "When a named broker contact/person is selected, broker_contact_phone_snapshot "
+                "Still never return tenant/carrier people as broker agents.",
+                "If no supported person-specific broker agent exists, return null child fields on "
+                "broker_agent rather than assigning an unrelated general contact.",
+                "When a named broker agent is selected, broker_agent.direct_phone "
                 "must be that person's direct phone.",
-                "Do not populate broker_contact_phone_snapshot with the broker company's main phone, "
+                "Do not populate broker_agent.direct_phone with the broker company's main phone, "
                 "corporate phone, general office number, carrier-relations line, after-hours line, "
                 "tracking line, or claims/AP/payment line.",
                 "If only a company or corporate number is supported, return null for "
-                "broker_contact_phone_snapshot.",
-                "When a named person is selected, broker_contact_email_snapshot must belong to that person.",
+                "broker_agent.direct_phone.",
+                "When a named person is selected, broker_agent.email must belong to that person.",
                 "Generic company mailboxes such as carriers@, dispatch@, info@, operations@, billing@, "
                 "accounting@, and support@ must not populate a named person's email merely because they "
                 "use the broker's domain.",
                 "A matching broker-company email domain proves company association, not person association.",
                 "If only a generic or company mailbox is supported, return null for "
-                "broker_contact_email_snapshot.",
+                "broker_agent.email.",
             ],
         },
         "rate_broker_pay": {
@@ -365,7 +382,7 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             "examples_not_exhaustive": True,
             "how_to_choose": (
                 "Preserve meaningful secondary shipment identifiers when supported, without elevating "
-                "them automatically to the primary broker_load_reference."
+                "them automatically to the primary principal_load_identifier."
             ),
             "rules": [
                 "Do not treat every number in the document as a reference.",
@@ -380,7 +397,7 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             ],
         },
         "freight_mode": {
-            "product_fields": ["mode"],
+            "product_fields": ["freight_mode"],
             "meaning": (
                 "The transportation mode for this load, taken from explicit load-level mode evidence."
             ),
@@ -409,18 +426,18 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Power-Only": "POWER_ONLY",
             },
             "rules": [
-                "Populate mode only from explicit load-level mode evidence.",
+                "Populate freight_mode only from explicit load-level mode evidence.",
                 "Normalize Full TruckLoad, Full Truckload, Truckload, and FTL to FTL.",
                 "Normalize Less Than Truckload, Less-than-Truckload, and LTL to LTL.",
                 "Normalize Partial and Partial Truckload to PARTIAL.",
                 "Normalize Power Only and Power-Only to POWER_ONLY when that mode is explicitly supported.",
                 "Do not infer mode from equipment, trailer type, trailer size, weight, number of stops, "
                 "live/live wording, or rate.",
-                "If mode is unsupported or ambiguous, return null.",
+                "If freight_mode is unsupported or ambiguous, return null.",
             ],
         },
-        "equipment_type": {
-            "product_fields": ["equipment_type"],
+        "equipment_description": {
+            "product_fields": ["equipment.description"],
             "meaning": (
                 "Full source-faithful load-level equipment description explicitly assigned "
                 "by the broker/document."
@@ -433,23 +450,23 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             "examples_not_exhaustive": True,
             "how_to_choose": (
                 "Use the explicit load-level equipment description. Keep the full source "
-                "wording even when trailer_type and trailer_size are also populated from "
-                "the same evidence."
+                "wording even when equipment.trailer_body_type and equipment.trailer_length "
+                "are also populated from the same evidence."
             ),
             "rules": [
-                "Populate equipment_type with the full source-faithful load-level equipment description.",
-                "equipment_type may contain an equipment code, size, body/type, or a combined source description.",
-                "Do not remove trailer type or trailer size components from equipment_type merely because "
-                "trailer_type and trailer_size are also populated.",
-                "equipment_type, trailer_type, and trailer_size may all come from the same source evidence.",
+                "Populate equipment.description with the full source-faithful load-level equipment description.",
+                "equipment.description may contain an equipment code, size, body/type, or a combined source description.",
+                "Do not remove trailer type or trailer length components from equipment.description merely because "
+                "equipment.trailer_body_type and equipment.trailer_length are also populated.",
+                "equipment.description, equipment.trailer_body_type, and equipment.trailer_length may all come from the same source evidence.",
                 "Do not expand unknown equipment codes.",
                 "Do not use FTL/LTL mode, tractor number, trailer asset number, or temperature as "
-                "equipment_type.",
+                "equipment.description.",
                 "If no supported load-level equipment description exists, return null.",
             ],
         },
-        "trailer_type": {
-            "product_fields": ["trailer_type"],
+        "trailer_body_type": {
+            "product_fields": ["equipment.trailer_body_type"],
             "meaning": (
                 "The trailer body/type required for this load, separate from trailer size, equipment "
                 "asset identity, freight mode, and temperature requirement."
@@ -460,8 +477,8 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             ],
             "examples_not_exhaustive": True,
             "how_to_choose": (
-                "Extract the trailer body/type. When type and size appear together in a broader "
-                "equipment description, put only the body/type in trailer_type."
+                "Extract the trailer body/type. When type and length appear together in a broader "
+                "equipment description, put only the body/type in equipment.trailer_body_type."
             ),
             "normalization": {
                 "Van": "Van",
@@ -470,23 +487,23 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Refrigerated": "Reefer",
             },
             "rules": [
-                "Extract trailer body/type separately from trailer size.",
+                "Extract trailer body/type separately from trailer length.",
                 "A trailer body type or explicit length embedded inside a broader Equipment / "
-                "Equipment Type description is valid evidence for trailer_type.",
-                "The broader equipment_type must remain independently source-faithful.",
-                "A broader equipment_type value may remain source-faithful when a combined equipment "
-                "description is present; trailer_type must contain only the supported body/type.",
-                "When type and size appear together, do not put length or size into trailer_type.",
+                "Equipment Type description is valid evidence for equipment.trailer_body_type.",
+                "The broader equipment.description must remain independently source-faithful.",
+                "A broader equipment.description value may remain source-faithful when a combined equipment "
+                "description is present; equipment.trailer_body_type must contain only the supported body/type.",
+                "When type and length appear together, do not put length or size into equipment.trailer_body_type.",
                 "Normalize only clear synonyms such as Van, Dry Van, and Reefer.",
                 "If the broker explicitly permits more than one trailer type, preserve the alternatives "
                 "rather than arbitrarily selecting one.",
-                "Do not infer trailer type from commodity, temperature, mode, weight, or equipment "
+                "Do not infer trailer type from commodity, temperature, freight_mode, weight, or equipment "
                 "asset IDs.",
                 "If trailer type is unsupported, return null.",
             ],
         },
-        "trailer_size": {
-            "product_fields": ["trailer_size"],
+        "trailer_length": {
+            "product_fields": ["equipment.trailer_length"],
             "meaning": (
                 "The explicit trailer length or size required for this load, separate from trailer "
                 "body/type and from the full equipment description."
@@ -499,7 +516,7 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             "examples_not_exhaustive": True,
             "how_to_choose": (
                 "Extract explicit trailer length/size only. Do not copy the full equipment description "
-                "into trailer_size."
+                "into equipment.trailer_length."
             ),
             "normalization": {
                 "53'": "53 ft",
@@ -508,11 +525,11 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             "rules": [
                 "Extract explicit trailer length/size separately from trailer type.",
                 "A trailer body type or explicit length embedded inside a broader Equipment / "
-                "Equipment Type description is valid evidence for trailer_size.",
-                "The broader equipment_type must remain independently source-faithful.",
-                "A combined equipment description may supply both type and size; trailer_size contains "
+                "Equipment Type description is valid evidence for equipment.trailer_length.",
+                "The broader equipment.description must remain independently source-faithful.",
+                "A combined equipment description may supply both type and length; equipment.trailer_length contains "
                 "the length/size only.",
-                "Do not copy the full equipment description into trailer_size.",
+                "Do not copy the full equipment description into equipment.trailer_length.",
                 "Normalize clear length evidence to a consistent form such as 53' to 53 ft and "
                 "53 feet to 53 ft. Apply the same pattern to other explicit lengths.",
                 "Do not infer a size from a cryptic equipment code unless the source explicitly "
@@ -524,10 +541,10 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
 }
 
 APPROVED_FIELD_RULE_KEYS: tuple[str, ...] = (
-    "broker_load_reference",
+    "principal_load_identifier",
     "broker_company",
     "broker_authority",
-    "broker_contact",
+    "broker_agent",
     "rate_broker_pay",
     "customer_rate_guardrail",
     "stops",
@@ -536,9 +553,9 @@ APPROVED_FIELD_RULE_KEYS: tuple[str, ...] = (
     "appointment_date_time",
     "references",
     "freight_mode",
-    "equipment_type",
-    "trailer_type",
-    "trailer_size",
+    "equipment_description",
+    "trailer_body_type",
+    "trailer_length",
 )
 
 

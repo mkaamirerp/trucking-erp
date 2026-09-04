@@ -182,7 +182,7 @@ def build_proposed_openai_request_body_v2(
     if schema is not None:
         use_schema = schema
     else:
-        from app.schemas.load_document_parse import ParseDocumentSemanticModelOutput
+        from app.schemas.load_document_parse_semantic import ParseDocumentSemanticModelOutput
 
         use_schema = ParseDocumentSemanticModelOutput.model_json_schema()
     return {
