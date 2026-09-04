@@ -72,7 +72,7 @@ def _exclusion(**overrides: Any) -> dict[str, Any]:
         "mc_numbers": ["1397898"],
         "usdot_numbers": ["3842541"],
         "phones": ["6472419696"],
-        "emails": ["info@iklogistics.com"],
+        "emails": ["fleet@iklogistics.com"],
         "email_domains": ["iklogistics.com"],
         "addresses": [],
     }
@@ -110,7 +110,7 @@ def test_no_fuzzy_company_match() -> None:
 
 
 def test_tenant_email_match_nulls() -> None:
-    res = _base_response(extracted={"broker_contact_email_snapshot": "INFO@IKLOGISTICS.COM"})
+    res = _base_response(extracted={"broker_contact_email_snapshot": "FLEET@IKLOGISTICS.COM"})
     out = apply_load_parser_mechanical_validation(res, tenant_identity_exclusion=_exclusion())
     assert out.extracted.broker_contact_email_snapshot is None
     assert "tenant_identity_match: broker_contact_email_snapshot" in out.warnings
@@ -166,6 +166,47 @@ def test_valid_contact_preserved() -> None:
     assert out.extracted.broker_contact_name_snapshot == "Loflin Phillips"
     assert out.extracted.broker_contact_email_snapshot == "l.phillips@armstrongtransport.com"
     assert out.extracted.broker_contact_phone_snapshot == "208-751-8073"
+
+
+def test_named_contact_generic_carriers_mailbox_nulled() -> None:
+    res = _base_response(
+        extracted={
+            "broker_contact_name_snapshot": "Jane Agent",
+            "broker_contact_email_snapshot": "carriers@example.com",
+            "broker_contact_phone_snapshot": "208-751-8073",
+        }
+    )
+    out = apply_load_parser_mechanical_validation(res)
+    assert out.extracted.broker_contact_email_snapshot is None
+    assert "generic_company_mailbox: broker_contact_email_snapshot" in out.warnings
+    assert out.extracted.broker_contact_phone_snapshot == "208-751-8073"
+    assert out.extracted.broker_contact_name_snapshot == "Jane Agent"
+
+
+def test_named_contact_generic_dispatch_mailbox_nulled() -> None:
+    res = _base_response(
+        extracted={
+            "broker_contact_name_snapshot": "Jane Agent",
+            "broker_contact_email_snapshot": "dispatch@example.com",
+        }
+    )
+    out = apply_load_parser_mechanical_validation(res)
+    assert out.extracted.broker_contact_email_snapshot is None
+    assert "generic_company_mailbox: broker_contact_email_snapshot" in out.warnings
+
+
+def test_named_contact_person_email_preserved() -> None:
+    res = _base_response(
+        extracted={
+            "broker_contact_name_snapshot": "Jane Agent",
+            "broker_contact_email_snapshot": "person.name@example.com",
+            "broker_contact_phone_snapshot": "208-751-8073",
+        }
+    )
+    out = apply_load_parser_mechanical_validation(res)
+    assert out.extracted.broker_contact_email_snapshot == "person.name@example.com"
+    assert out.extracted.broker_contact_phone_snapshot == "208-751-8073"
+    assert not any("generic_company_mailbox" in w for w in out.warnings)
 
 
 # --- Numeric ---

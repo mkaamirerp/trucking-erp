@@ -126,7 +126,8 @@ def test_broker_contact_covers_repeated_load_specific_agent_evidence() -> None:
     assert "Agent Name" in blob
     assert "Please Sign and Email to" in blob
     assert "For specific information about this load, contact" in blob
-    assert "person-specific email on the broker company's domain" in blob
+    assert "person-specific mailbox explicitly associated with the selected person" in blob
+    assert "Broker-domain membership alone is company association, not person ownership." in blob
     assert "Repeated name/email/phone evidence tied to the same load" in blob
     assert "Contact identity and authority ownership must be evaluated separately." in blob
     assert any(

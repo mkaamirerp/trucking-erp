@@ -139,7 +139,9 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Strong broker-contact evidence includes headings and phrases such as "
                 "'FOR LOAD INFORMATION', 'Agent Name', 'Please Sign and Email to <person>', and "
                 "'For specific information about this load, contact <person>'.",
-                "A person-specific email on the broker company's domain is strong contact evidence.",
+                "A person-specific mailbox explicitly associated with the selected person is "
+                "strong evidence. Broker-domain membership alone is company association, not "
+                "person ownership.",
                 "Repeated name/email/phone evidence tied to the same load strengthens the same "
                 "person-specific broker contact.",
                 "A broker contact may appear next to carrier/tenant MC/DOT information.",
