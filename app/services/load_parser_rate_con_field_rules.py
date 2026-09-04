@@ -419,6 +419,35 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "If mode is unsupported or ambiguous, return null.",
             ],
         },
+        "equipment_type": {
+            "product_fields": ["equipment_type"],
+            "meaning": (
+                "Full source-faithful load-level equipment description explicitly assigned "
+                "by the broker/document."
+            ),
+            "possible_labels_examples": [
+                "Equipment",
+                "Equipment Type",
+                "Equipment Required",
+            ],
+            "examples_not_exhaustive": True,
+            "how_to_choose": (
+                "Use the explicit load-level equipment description. Keep the full source "
+                "wording even when trailer_type and trailer_size are also populated from "
+                "the same evidence."
+            ),
+            "rules": [
+                "Populate equipment_type with the full source-faithful load-level equipment description.",
+                "equipment_type may contain an equipment code, size, body/type, or a combined source description.",
+                "Do not remove trailer type or trailer size components from equipment_type merely because "
+                "trailer_type and trailer_size are also populated.",
+                "equipment_type, trailer_type, and trailer_size may all come from the same source evidence.",
+                "Do not expand unknown equipment codes.",
+                "Do not use FTL/LTL mode, tractor number, trailer asset number, or temperature as "
+                "equipment_type.",
+                "If no supported load-level equipment description exists, return null.",
+            ],
+        },
         "trailer_type": {
             "product_fields": ["trailer_type"],
             "meaning": (
@@ -427,10 +456,7 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             ),
             "possible_labels_examples": [
                 "Trailer Type",
-                "Equipment Type",
-                "Equipment",
                 "Trailer",
-                "Equipment Required",
             ],
             "examples_not_exhaustive": True,
             "how_to_choose": (
@@ -445,6 +471,9 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             },
             "rules": [
                 "Extract trailer body/type separately from trailer size.",
+                "A trailer body type or explicit length embedded inside a broader Equipment / "
+                "Equipment Type description is valid evidence for trailer_type.",
+                "The broader equipment_type must remain independently source-faithful.",
                 "A broader equipment_type value may remain source-faithful when a combined equipment "
                 "description is present; trailer_type must contain only the supported body/type.",
                 "When type and size appear together, do not put length or size into trailer_type.",
@@ -465,7 +494,6 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             "possible_labels_examples": [
                 "Trailer Size",
                 "Trailer Length",
-                "Equipment Size",
                 "Length",
             ],
             "examples_not_exhaustive": True,
@@ -479,6 +507,9 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
             },
             "rules": [
                 "Extract explicit trailer length/size separately from trailer type.",
+                "A trailer body type or explicit length embedded inside a broader Equipment / "
+                "Equipment Type description is valid evidence for trailer_size.",
+                "The broader equipment_type must remain independently source-faithful.",
                 "A combined equipment description may supply both type and size; trailer_size contains "
                 "the length/size only.",
                 "Do not copy the full equipment description into trailer_size.",
@@ -505,6 +536,7 @@ APPROVED_FIELD_RULE_KEYS: tuple[str, ...] = (
     "appointment_date_time",
     "references",
     "freight_mode",
+    "equipment_type",
     "trailer_type",
     "trailer_size",
 )

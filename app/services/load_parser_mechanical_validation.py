@@ -21,6 +21,7 @@ from datetime import date, datetime
 from typing import Any
 
 from app.schemas.load_document_parse import LoadDocumentParseResponse, LoadParseExtractedFields
+from app.services.load_parser_rate_con_field_rules import LOAD_RATE_CON_FIELD_RULES
 from app.services.load_parser_tenant_identity_exclusion import (
     normalize_authority_id,
     normalize_email,
@@ -485,6 +486,41 @@ def _is_suspicious_load_reference(value: str) -> bool:
     return False
 
 
+def _strip_load_reference_field_label(value: str) -> str:
+    """Remove a leading discovery label when a field separator is present.
+
+    Separator-gated only: glued identifiers such as PO12345 are preserved.
+    Does not select a different identifier.
+    """
+    text = (value or "").strip()
+    if not text:
+        return text
+    labels = [
+        str(label).strip()
+        for label in (
+            LOAD_RATE_CON_FIELD_RULES["rules"]["broker_load_reference"].get(
+                "possible_labels_examples"
+            )
+            or []
+        )
+        if str(label).strip()
+    ]
+    labels.sort(key=len, reverse=True)
+    for raw in labels:
+        if raw.endswith("#"):
+            stem = raw[:-1].strip()
+            pat = re.compile(rf"^{re.escape(stem)}\s*#\s*", re.IGNORECASE)
+        else:
+            pat = re.compile(rf"^{re.escape(raw)}\s*[:#]\s*", re.IGNORECASE)
+        match = pat.match(text)
+        if match:
+            rest = text[match.end() :].strip()
+            if raw.endswith("#") and rest.startswith(":"):
+                rest = rest[1:].strip()
+            return rest
+    return text
+
+
 def _validate_broker_load_reference(
     extracted: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str], dict[str, str]]:
@@ -507,6 +543,7 @@ def _validate_broker_load_reference(
         return out, warnings, fc
 
     trimmed = _WHITESPACE_RE.sub(" ", ref).strip()
+    trimmed = _strip_load_reference_field_label(trimmed)
     if not trimmed:
         warnings.extend(
             _null_field(

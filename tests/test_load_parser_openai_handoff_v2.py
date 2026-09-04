@@ -83,7 +83,7 @@ def test_field_rules_present_with_required_sections() -> None:
     assert "freight_mode" in rules
     assert "trailer_type" in rules
     assert "trailer_size" in rules
-    assert "equipment_type" not in rules
+    assert "equipment_type" in rules
     assert "customer_rate_guardrail" in rules
     assert "pickup_semantics" in rules
     assert "delivery_semantics" in rules

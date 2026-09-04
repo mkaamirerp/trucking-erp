@@ -270,6 +270,36 @@ def test_valid_reference_preserved_and_whitespace_normalized() -> None:
     assert out.extracted.broker_load_reference == "3872125-1"
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Load #3872125-1", "3872125-1"),
+        ("Load Number: ABC-123", "ABC-123"),
+        ("Order # 12345", "12345"),
+        ("PO # 34307972", "34307972"),
+        ("Confirmation #: ABC-123", "ABC-123"),
+        ("Freight Bill # 9459258", "9459258"),
+        ("Reference # XYZ-9", "XYZ-9"),
+    ],
+)
+def test_load_reference_strips_separator_gated_field_label(raw: str, expected: str) -> None:
+    out = apply_load_parser_mechanical_validation(
+        _base_response(extracted={"broker_load_reference": raw})
+    )
+    assert out.extracted.broker_load_reference == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["PO12345", "EL6596031", "ABC-123"],
+)
+def test_load_reference_preserves_glued_or_unlabeled_identifier(raw: str) -> None:
+    out = apply_load_parser_mechanical_validation(
+        _base_response(extracted={"broker_load_reference": raw})
+    )
+    assert out.extracted.broker_load_reference == raw
+
+
 def test_suspicious_instruction_token_rejected() -> None:
     res = _base_response(extracted={"broker_load_reference": "Information"})
     out = apply_load_parser_mechanical_validation(res)

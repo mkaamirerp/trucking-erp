@@ -38,6 +38,7 @@ _SLICE_A_APPROVED_KEYS = (
 )
 _APPROVED_KEYS = _SLICE_A_APPROVED_KEYS + (
     "freight_mode",
+    "equipment_type",
     "trailer_type",
     "trailer_size",
 )
@@ -165,7 +166,7 @@ def _production_rules_blob() -> str:
 def test_approved_field_rule_keys_match_rules_dict() -> None:
     assert APPROVED_FIELD_RULE_KEYS == _APPROVED_KEYS
     assert list(_rules().keys()) == list(_APPROVED_KEYS)
-    assert "equipment_type" not in APPROVED_FIELD_RULE_KEYS
+    assert "equipment_type" in APPROVED_FIELD_RULE_KEYS
 
 
 def test_broker_contact_phone_is_direct_person_not_company() -> None:
@@ -277,12 +278,23 @@ def test_trailer_type_and_size_split_combined_equipment_description() -> None:
     ts = _rules()["trailer_size"]
     assert tt["product_fields"] == ["trailer_type"]
     assert ts["product_fields"] == ["trailer_size"]
-    assert "equipment_type" not in _rules()
+    assert "equipment_type" in _rules()
     tt_blob = " ".join(tt["rules"])
     ts_blob = " ".join(ts["rules"])
     assert "Extract trailer body/type separately from trailer size." in tt["rules"]
     assert "do not put length or size into trailer_type" in tt_blob
     assert "combined equipment description" in tt_blob
+    assert any(
+        "embedded inside a broader Equipment / Equipment Type description is valid evidence for trailer_type"
+        in r
+        for r in tt["rules"]
+    )
+    assert any(
+        "The broader equipment_type must remain independently source-faithful." in r
+        for r in tt["rules"]
+    )
+    assert "Equipment Type" not in tt.get("possible_labels_examples", [])
+    assert "Equipment" not in tt.get("possible_labels_examples", [])
     assert "Do not infer trailer type from commodity, temperature, mode, weight, or equipment" in tt_blob
     assert tt["normalization"]["Van"] == "Van"
     assert tt["normalization"]["Dry Van"] == "Dry Van"
@@ -290,6 +302,12 @@ def test_trailer_type_and_size_split_combined_equipment_description() -> None:
     assert "Extract explicit trailer length/size separately from trailer type." in ts["rules"]
     assert "trailer_size contains the length/size only" in ts_blob or "length/size only" in ts_blob
     assert "Do not copy the full equipment description into trailer_size." in ts["rules"]
+    assert any(
+        "embedded inside a broader Equipment / Equipment Type description is valid evidence for trailer_size"
+        in r
+        for r in ts["rules"]
+    )
+    assert "Equipment Size" not in ts.get("possible_labels_examples", [])
     assert ts["normalization"]["53'"] == "53 ft"
     assert ts["normalization"]["53 feet"] == "53 ft"
     assert "cryptic equipment code" in ts_blob
@@ -299,3 +317,34 @@ def test_trailer_type_and_size_split_combined_equipment_description() -> None:
     assert "V53" not in ts_blob
     assert "V53, 53' Van" not in tt_blob
     assert "V53, 53' Van" not in ts_blob
+
+
+def test_equipment_type_full_description_coexists_with_trailer_fields() -> None:
+    assert "equipment_type" in APPROVED_FIELD_RULE_KEYS
+    group = _rules()["equipment_type"]
+    assert group["product_fields"] == ["equipment_type"]
+    blob = " ".join(group["rules"])
+    assert any(
+        "full source-faithful load-level equipment description" in r for r in group["rules"]
+    )
+    assert "equipment code" in blob
+    assert "combined source description" in blob
+    assert any(
+        "Do not remove trailer type or trailer size components from equipment_type" in r
+        for r in group["rules"]
+    )
+    assert any(
+        "equipment_type, trailer_type, and trailer_size may all come from the same source evidence."
+        in r
+        for r in group["rules"]
+    )
+    assert "Do not expand unknown equipment codes." in group["rules"]
+    assert "FTL/LTL" in blob
+    assert "tractor number" in blob
+    assert "trailer asset number" in blob
+    assert "temperature" in blob
+    labels = group["possible_labels_examples"]
+    assert "Equipment" in labels
+    assert "Equipment Type" in labels
+    assert "V53" not in blob
+    assert "X53" not in blob
