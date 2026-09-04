@@ -326,9 +326,13 @@ def test_handoff_and_schema_audit_replaces_affected_storage_names() -> None:
     assert "principal_load_identifier" in extracted_blob
     assert "principal_load_identifier" in rules_blob
     assert "equipment.description" in rules_blob
-    assert "cohesive person candidate" in rules_blob
-    assert "cohesive person candidate" in user
     assert "broker_company.main_phone" in rules_blob
+    assert "ownership_precedence" in rules_blob
+    assert "Entity and role ownership outrank adjacency and contact-tuple cohesion." in rules_blob
+    assert "not a broker_agent" in rules_blob
+    assert "carrier-owned block" in rules_blob
+    assert "Entity and role ownership outrank adjacency and contact-tuple cohesion." in user
+    assert "not a broker_agent" in user
 
 
 def test_product_extracted_schema_still_uses_storage_names() -> None:
