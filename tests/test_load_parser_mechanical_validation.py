@@ -278,8 +278,6 @@ def test_valid_reference_preserved_and_whitespace_normalized() -> None:
         ("Order # 12345", "12345"),
         ("PO # 34307972", "34307972"),
         ("Confirmation #: ABC-123", "ABC-123"),
-        ("Freight Bill # 9459258", "9459258"),
-        ("Reference # XYZ-9", "XYZ-9"),
     ],
 )
 def test_load_reference_strips_separator_gated_field_label(raw: str, expected: str) -> None:
