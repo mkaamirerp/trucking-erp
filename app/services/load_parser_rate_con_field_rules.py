@@ -377,6 +377,116 @@ LOAD_RATE_CON_FIELD_RULES: dict[str, Any] = {
                 "Do not invent reference values.",
             ],
         },
+        "freight_mode": {
+            "product_fields": ["mode"],
+            "meaning": (
+                "The transportation mode for this load, taken from explicit load-level mode evidence."
+            ),
+            "possible_labels_examples": [
+                "Mode",
+                "Freight Mode",
+                "Service Type",
+                "Shipment Type",
+            ],
+            "examples_not_exhaustive": True,
+            "how_to_choose": (
+                "Use an explicit load-level Mode, Freight Mode, Service Type, Shipment Type, or "
+                "equivalent field. Do not infer mode from equipment or stop behavior."
+            ),
+            "normalization": {
+                "Full TruckLoad": "FTL",
+                "Full Truckload": "FTL",
+                "Truckload": "FTL",
+                "FTL": "FTL",
+                "Less Than Truckload": "LTL",
+                "Less-than-Truckload": "LTL",
+                "LTL": "LTL",
+                "Partial": "PARTIAL",
+                "Partial Truckload": "PARTIAL",
+                "Power Only": "POWER_ONLY",
+                "Power-Only": "POWER_ONLY",
+            },
+            "rules": [
+                "Populate mode only from explicit load-level mode evidence.",
+                "Normalize Full TruckLoad, Full Truckload, Truckload, and FTL to FTL.",
+                "Normalize Less Than Truckload, Less-than-Truckload, and LTL to LTL.",
+                "Normalize Partial and Partial Truckload to PARTIAL.",
+                "Normalize Power Only and Power-Only to POWER_ONLY when that mode is explicitly supported.",
+                "Do not infer mode from equipment, trailer type, trailer size, weight, number of stops, "
+                "live/live wording, or rate.",
+                "If mode is unsupported or ambiguous, return null.",
+            ],
+        },
+        "trailer_type": {
+            "product_fields": ["trailer_type"],
+            "meaning": (
+                "The trailer body/type required for this load, separate from trailer size, equipment "
+                "asset identity, freight mode, and temperature requirement."
+            ),
+            "possible_labels_examples": [
+                "Trailer Type",
+                "Equipment Type",
+                "Equipment",
+                "Trailer",
+                "Equipment Required",
+            ],
+            "examples_not_exhaustive": True,
+            "how_to_choose": (
+                "Extract the trailer body/type. When type and size appear together in a broader "
+                "equipment description, put only the body/type in trailer_type."
+            ),
+            "normalization": {
+                "Van": "Van",
+                "Dry Van": "Dry Van",
+                "Reefer": "Reefer",
+                "Refrigerated": "Reefer",
+            },
+            "rules": [
+                "Extract trailer body/type separately from trailer size.",
+                "A broader equipment_type value may remain source-faithful when a combined equipment "
+                "description is present; trailer_type must contain only the supported body/type.",
+                "When type and size appear together, do not put length or size into trailer_type.",
+                "Normalize only clear synonyms such as Van, Dry Van, and Reefer.",
+                "If the broker explicitly permits more than one trailer type, preserve the alternatives "
+                "rather than arbitrarily selecting one.",
+                "Do not infer trailer type from commodity, temperature, mode, weight, or equipment "
+                "asset IDs.",
+                "If trailer type is unsupported, return null.",
+            ],
+        },
+        "trailer_size": {
+            "product_fields": ["trailer_size"],
+            "meaning": (
+                "The explicit trailer length or size required for this load, separate from trailer "
+                "body/type and from the full equipment description."
+            ),
+            "possible_labels_examples": [
+                "Trailer Size",
+                "Trailer Length",
+                "Equipment Size",
+                "Length",
+            ],
+            "examples_not_exhaustive": True,
+            "how_to_choose": (
+                "Extract explicit trailer length/size only. Do not copy the full equipment description "
+                "into trailer_size."
+            ),
+            "normalization": {
+                "53'": "53 ft",
+                "53 feet": "53 ft",
+            },
+            "rules": [
+                "Extract explicit trailer length/size separately from trailer type.",
+                "A combined equipment description may supply both type and size; trailer_size contains "
+                "the length/size only.",
+                "Do not copy the full equipment description into trailer_size.",
+                "Normalize clear length evidence to a consistent form such as 53' to 53 ft and "
+                "53 feet to 53 ft. Apply the same pattern to other explicit lengths.",
+                "Do not infer a size from a cryptic equipment code unless the source explicitly "
+                "establishes the mapping.",
+                "If no explicit supported size is present, return null.",
+            ],
+        },
     },
 }
 
@@ -392,6 +502,9 @@ APPROVED_FIELD_RULE_KEYS: tuple[str, ...] = (
     "delivery_semantics",
     "appointment_date_time",
     "references",
+    "freight_mode",
+    "trailer_type",
+    "trailer_size",
 )
 
 

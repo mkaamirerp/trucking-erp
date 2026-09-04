@@ -80,6 +80,9 @@ def test_field_rules_present_with_required_sections() -> None:
     assert "observed_document_terminology" not in blob
     assert "observed_examples" not in blob
     assert "broker_authority" in rules
+    assert "freight_mode" in rules
+    assert "trailer_type" in rules
+    assert "trailer_size" in rules
     assert "equipment_type" not in rules
     assert "customer_rate_guardrail" in rules
     assert "pickup_semantics" in rules

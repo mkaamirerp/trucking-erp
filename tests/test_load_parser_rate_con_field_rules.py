@@ -36,6 +36,11 @@ _SLICE_A_APPROVED_KEYS = (
     "appointment_date_time",
     "references",
 )
+_APPROVED_KEYS = _SLICE_A_APPROVED_KEYS + (
+    "freight_mode",
+    "trailer_type",
+    "trailer_size",
+)
 
 
 def _rules() -> dict:
@@ -156,9 +161,10 @@ def _production_rules_blob() -> str:
     return json.dumps(LOAD_RATE_CON_FIELD_RULES)
 
 
-def test_slice_a_does_not_change_approved_field_rule_keys() -> None:
-    assert APPROVED_FIELD_RULE_KEYS == _SLICE_A_APPROVED_KEYS
-    assert list(_rules().keys()) == list(_SLICE_A_APPROVED_KEYS)
+def test_approved_field_rule_keys_match_rules_dict() -> None:
+    assert APPROVED_FIELD_RULE_KEYS == _APPROVED_KEYS
+    assert list(_rules().keys()) == list(_APPROVED_KEYS)
+    assert "equipment_type" not in APPROVED_FIELD_RULE_KEYS
 
 
 def test_broker_contact_phone_is_direct_person_not_company() -> None:
@@ -231,3 +237,64 @@ def test_production_field_rules_contain_no_armstrong_identities() -> None:
     assert _ARMSTRONG_LOAD_REF not in blob
     assert _ARMSTRONG_LOAD_REF_WITH_LABEL not in blob
     assert _ARMSTRONG_CARRIER_COMPANY not in blob
+    assert "V53" not in blob
+
+
+def test_freight_mode_group_normalizes_and_does_not_infer_from_equipment() -> None:
+    assert "freight_mode" in APPROVED_FIELD_RULE_KEYS
+    group = _rules()["freight_mode"]
+    assert group["product_fields"] == ["mode"]
+    norm = group["normalization"]
+    assert norm["Full TruckLoad"] == "FTL"
+    assert norm["Full Truckload"] == "FTL"
+    assert norm["Truckload"] == "FTL"
+    assert norm["FTL"] == "FTL"
+    assert norm["Less Than Truckload"] == "LTL"
+    assert norm["LTL"] == "LTL"
+    assert norm["Partial"] == "PARTIAL"
+    assert norm["Power Only"] == "POWER_ONLY"
+    rules = group["rules"]
+    blob = " ".join(rules)
+    assert any("Populate mode only from explicit load-level mode evidence." in r for r in rules)
+    assert "Do not infer mode from equipment" in blob
+    assert "trailer type" in blob
+    assert "trailer size" in blob
+    assert "weight" in blob
+    assert "number of stops" in blob
+    assert "live/live" in blob.lower() or "live/live" in blob
+    assert "rate" in blob
+    assert any("If mode is unsupported or ambiguous, return null." in r for r in rules)
+    # Combined-source example stays in tests only.
+    assert "V53" not in blob
+    assert "Full TruckLoad" in blob
+
+
+def test_trailer_type_and_size_split_combined_equipment_description() -> None:
+    assert "trailer_type" in APPROVED_FIELD_RULE_KEYS
+    assert "trailer_size" in APPROVED_FIELD_RULE_KEYS
+    tt = _rules()["trailer_type"]
+    ts = _rules()["trailer_size"]
+    assert tt["product_fields"] == ["trailer_type"]
+    assert ts["product_fields"] == ["trailer_size"]
+    assert "equipment_type" not in _rules()
+    tt_blob = " ".join(tt["rules"])
+    ts_blob = " ".join(ts["rules"])
+    assert "Extract trailer body/type separately from trailer size." in tt["rules"]
+    assert "do not put length or size into trailer_type" in tt_blob
+    assert "combined equipment description" in tt_blob
+    assert "Do not infer trailer type from commodity, temperature, mode, weight, or equipment" in tt_blob
+    assert tt["normalization"]["Van"] == "Van"
+    assert tt["normalization"]["Dry Van"] == "Dry Van"
+    assert tt["normalization"]["Reefer"] == "Reefer"
+    assert "Extract explicit trailer length/size separately from trailer type." in ts["rules"]
+    assert "trailer_size contains the length/size only" in ts_blob or "length/size only" in ts_blob
+    assert "Do not copy the full equipment description into trailer_size." in ts["rules"]
+    assert ts["normalization"]["53'"] == "53 ft"
+    assert ts["normalization"]["53 feet"] == "53 ft"
+    assert "cryptic equipment code" in ts_blob
+    assert any("If no explicit supported size is present, return null." in r for r in ts["rules"])
+    # Armstrong combined equipment string is test evidence only.
+    assert "V53" not in tt_blob
+    assert "V53" not in ts_blob
+    assert "V53, 53' Van" not in tt_blob
+    assert "V53, 53' Van" not in ts_blob
