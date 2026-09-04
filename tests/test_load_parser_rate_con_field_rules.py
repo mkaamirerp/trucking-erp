@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import json
+
 from app.services.load_parser_rate_con_field_rules import (
     APPROVED_FIELD_RULE_KEYS,
+    LOAD_RATE_CON_FIELD_RULES,
     get_load_rate_con_field_rules,
 )
 
-# Armstrong live-parse evidence (tests only — not hardcoded in field_rules).
+# Armstrong live-parse evidence (tests only — not hardcoded as tenant/broker identity).
 _ARMSTRONG_BROKER_COMPANY = "Armstrong Transport Group"
 _ARMSTRONG_CORPORATE_MC = "555609"
 _ARMSTRONG_CARRIER_COMPANY = "9582479 CANADA INC DBA IK LOGISTICS"
 _ARMSTRONG_CARRIER_MC = "1397898"
 _ARMSTRONG_CARRIER_DOT = "3842541"
 _ARMSTRONG_AGENT = "Loflin Phillips"
+_ARMSTRONG_CARRIER_ATTN = "Imran Khan"
+_ARMSTRONG_CARRIER_PHONE = "647-248-4699"
+_ARMSTRONG_CARRIER_EMAIL = "khanahmad73@hotmail.com"
 _ARMSTRONG_AUDIT_RATE_CON_ID = "5506390"
 _ARMSTRONG_CORPORATE_PHONE = "877-240-1181"
 _ARMSTRONG_AGENT_PHONE = "208-751-8073"
@@ -22,25 +28,26 @@ _ARMSTRONG_COMPANY_EMAIL = "carriers@armstrongtransport.com"
 _ARMSTRONG_LOAD_REF = "3872125-1"
 _ARMSTRONG_LOAD_REF_WITH_LABEL = "Load #3872125-1"
 
-# Slice A must not add groups.
-_SLICE_A_APPROVED_KEYS = (
-    "principal_load_identifier",
+_EXPECTED_KEYS = (
     "broker_company",
     "broker_authority",
     "broker_agent",
+    "principal_load_identifier",
     "rate_broker_pay",
     "customer_rate_guardrail",
+    "freight_mode",
+    "equipment_description",
+    "trailer_body_type",
+    "trailer_length",
+    "commodity",
+    "estimated_weight",
+    "temperature_requirement",
+    "miles",
     "stops",
     "pickup_semantics",
     "delivery_semantics",
     "appointment_date_time",
     "references",
-)
-_APPROVED_KEYS = _SLICE_A_APPROVED_KEYS + (
-    "freight_mode",
-    "equipment_description",
-    "trailer_body_type",
-    "trailer_length",
 )
 
 
@@ -48,193 +55,77 @@ def _rules() -> dict:
     return get_load_rate_con_field_rules()["rules"]
 
 
-def _joined(group: str) -> str:
-    blob = _rules()[group]
-    parts = [str(blob.get("meaning") or ""), str(blob.get("how_to_choose") or "")]
-    parts.extend(str(r) for r in blob.get("rules") or [])
-    return " ".join(parts)
-
-
-def test_broker_authority_exists_and_is_approved() -> None:
-    assert "broker_authority" in APPROVED_FIELD_RULE_KEYS
-    rules = _rules()
-    assert "broker_authority" in rules
-    assert list(rules.keys()) == list(APPROVED_FIELD_RULE_KEYS)
-
-
-def test_broker_authority_covers_mc_and_dot_snapshot_fields() -> None:
-    product_fields = _rules()["broker_authority"]["product_fields"]
-    assert product_fields == [
-        "broker_company.mc_number",
-        "broker_company.dot_number",
-    ]
-    meaning = _rules()["broker_authority"]["meaning"]
-    assert "freight broker" in meaning.lower()
-    assert "MC" in meaning or "USDOT" in meaning
-
-
-def test_broker_authority_excludes_tenant_and_carrier_mc_dot() -> None:
-    text = _joined("broker_authority")
-    assert "tenant_identity_exclusion" in text
-    assert "Never return the carrier/tenant's MC/DOT as broker authority." in _rules()[
-        "broker_authority"
-    ]["rules"]
-    # Armstrong carrier/tenant pair must not be treated as broker authority.
-    assert _ARMSTRONG_CARRIER_MC != _ARMSTRONG_CORPORATE_MC
-    assert _ARMSTRONG_CARRIER_COMPANY != _ARMSTRONG_BROKER_COMPANY
-    assert _ARMSTRONG_CARRIER_MC not in text
-    assert _ARMSTRONG_CARRIER_DOT not in text
-
-
-def test_broker_authority_allows_mc_while_dot_remains_null() -> None:
-    rules = _rules()["broker_authority"]["rules"]
-    assert any(
-        "If broker MC is supported but broker USDOT is absent, return MC and leave DOT null."
-        in r
-        for r in rules
-    )
-    # Armstrong corporate block: MC present, no broker USDOT.
-    assert _ARMSTRONG_CORPORATE_MC == "555609"
-
-
-def test_broker_authority_ownership_is_entity_not_proximity() -> None:
-    rules = _rules()["broker_authority"]["rules"]
-    assert any(
-        "must belong to the selected broker company, not merely be nearby numbers" in r
-        for r in rules
-    )
-    assert any(
-        "Do not transfer an MC/DOT to the broker merely because it appears near a broker" in r
-        for r in rules
-    )
-    assert any(
-        "proximity alone does not establish ownership" in r for r in rules
-    )
-    assert any(
-        "associate each authority with its actual company/entity" in r for r in rules
-    )
-    text = _joined("broker_authority")
-    assert "corporate-information" in text or "corporate information" in text.lower()
-    # Armstrong: corporate MC 555609 is broker; 1397898/3842541 near the agent are carrier.
-    assert _ARMSTRONG_CORPORATE_MC == "555609"
-    assert _ARMSTRONG_CARRIER_DOT == "3842541"
-
-
-def test_broker_contact_covers_repeated_load_specific_agent_evidence() -> None:
-    rules = _rules()["broker_agent"]["rules"]
-    blob = " ".join(rules)
-    assert "FOR LOAD INFORMATION" in blob
-    assert "Agent Name" in blob
-    assert "Please Sign and Email to" in blob
-    assert "For specific information about this load, contact" in blob
-    assert "person-specific mailbox explicitly associated with the selected person" in blob
-    assert "Broker-domain membership alone is company association, not person ownership." in blob
-    assert "Repeated name/email/phone evidence tied to the same load" in blob
-    assert "Contact identity and authority ownership must be evaluated separately." in blob
-    assert "cohesive person candidate" in blob
-    assert "broker_company.main_phone" in blob
-    assert "broker_agent.direct_phone" in blob
-    assert "do not leave broker_agent empty" in blob.casefold() or "do not leave broker_agent empty" in blob
-    assert any(
-        "Do not reject a valid broker agent merely because carrier authority numbers" in r
-        for r in rules
-    )
-    assert any("Still never return tenant/carrier people as broker agents." in r for r in rules)
-    assert "Do not return tenant/carrier people as broker agents." in rules
-    # Armstrong expected person remains Loflin Phillips; nearby carrier MC/DOT are not contact identity.
-    assert _ARMSTRONG_AGENT == "Loflin Phillips"
-
-
-def test_references_still_exclude_audit_ids() -> None:
-    rules = _rules()["references"]["rules"]
-    blob = " ".join(rules)
-    assert "audit" in blob.lower()
-    assert "IDs" in blob or "audit IDs" in blob
-    assert "Do not treat every number in the document as a reference." in rules
-    # Armstrong Highway Audit Report Rate Confirmation ID must stay out of references[].
-    assert _ARMSTRONG_AUDIT_RATE_CON_ID == "5506390"
-    assert _ARMSTRONG_AUDIT_RATE_CON_ID not in blob
-    assert "Rate Confirmation ID" not in blob
-    assert "Highway Audit Report" not in blob
-    assert "broker_authority" not in _rules()["references"]["product_fields"]
-
-
 def _production_rules_blob() -> str:
-    import json
-
-    from app.services.load_parser_rate_con_field_rules import LOAD_RATE_CON_FIELD_RULES
-
     return json.dumps(LOAD_RATE_CON_FIELD_RULES)
 
 
-def test_approved_field_rule_keys_match_rules_dict() -> None:
-    assert APPROVED_FIELD_RULE_KEYS == _APPROVED_KEYS
-    assert list(_rules().keys()) == list(_APPROVED_KEYS)
-    assert "equipment_description" in APPROVED_FIELD_RULE_KEYS
-    assert "broker_agent" in APPROVED_FIELD_RULE_KEYS
-    assert "principal_load_identifier" in APPROVED_FIELD_RULE_KEYS
+def test_canonical_contract_shape() -> None:
+    fr = get_load_rate_con_field_rules()
+    assert fr["profile"] == "rate_confirmation"
+    assert fr["version"] == "load_rate_con_field_rules_v2_full_canonical_semantics"
+    assert isinstance(fr["global_rules"], list) and len(fr["global_rules"]) == 9
+    assert APPROVED_FIELD_RULE_KEYS == _EXPECTED_KEYS
+    assert list(_rules().keys()) == list(_EXPECTED_KEYS)
 
 
-def test_broker_contact_phone_is_direct_person_not_company() -> None:
-    rules = _rules()["broker_agent"]["rules"]
-    blob = " ".join(rules)
-    assert any(
-        "broker_agent.direct_phone must be that person's direct phone" in r for r in rules
-    )
-    assert "direct phone" in blob
-    assert any("Do not populate broker_agent.direct_phone with the broker company's main phone" in r for r in rules)
-    assert "corporate phone" in blob
-    assert "general office number" in blob
-    assert any(
-        "If only a company or corporate number is supported, return null for" in r for r in rules
-    )
-    assert "broker_agent.direct_phone" in blob
-    assert "broker_contact_phone_snapshot" not in blob
-    # Armstrong: named-agent phone vs corporate/main line — values stay out of production rules.
-    assert _ARMSTRONG_AGENT_PHONE not in blob
-    assert _ARMSTRONG_CORPORATE_PHONE not in blob
+def test_semantic_product_fields() -> None:
+    rules = _rules()
+    assert rules["broker_company"]["product_fields"] == [
+        "broker_company.name",
+        "broker_company.main_phone",
+    ]
+    assert rules["broker_authority"]["product_fields"] == [
+        "broker_company.mc_number",
+        "broker_company.dot_number",
+    ]
+    assert rules["broker_agent"]["product_fields"] == [
+        "broker_agent.name",
+        "broker_agent.direct_phone",
+        "broker_agent.email",
+    ]
+    assert rules["principal_load_identifier"]["product_fields"] == [
+        "principal_load_identifier"
+    ]
+    assert rules["freight_mode"]["product_fields"] == ["freight_mode"]
+    assert rules["equipment_description"]["product_fields"] == ["equipment.description"]
+    assert rules["trailer_body_type"]["product_fields"] == ["equipment.trailer_body_type"]
+    assert rules["trailer_length"]["product_fields"] == ["equipment.trailer_length"]
+    assert rules["commodity"]["product_fields"] == ["commodity"]
+    assert rules["estimated_weight"]["product_fields"] == ["estimated_weight"]
+    assert rules["temperature_requirement"]["product_fields"] == ["temperature_requirement"]
+    assert rules["miles"]["product_fields"] == ["miles"]
 
 
-def test_broker_contact_email_rejects_generic_company_mailbox() -> None:
-    rules = _rules()["broker_agent"]["rules"]
-    blob = " ".join(rules)
-    assert any(
-        "broker_agent.email must belong to that person" in r for r in rules
-    )
-    assert "carriers@" in blob
-    assert "dispatch@" in blob
-    assert "info@" in blob
-    assert "operations@" in blob
-    assert "billing@" in blob
-    assert "accounting@" in blob
-    assert "support@" in blob
-    assert "must not populate a named person's email" in blob
-    assert any(
-        "proves company association, not person association" in r for r in rules
-    )
-    assert any(
-        "If only a generic or company mailbox is supported, return null for" in r for r in rules
-    )
-    assert "broker_contact_email_snapshot" not in blob
-    assert _ARMSTRONG_AGENT_EMAIL not in blob
-    assert _ARMSTRONG_COMPANY_EMAIL not in blob
+def test_rate_is_primary_freight_not_total_compensation() -> None:
+    group = _rules()["rate_broker_pay"]
+    blob = json.dumps(group)
+    assert "agreed freight rate only" in group["core_principle"]
+    assert "Do not automatically trust a field labeled Total Carrier Pay" in blob
+    assert group["output"]["include_accessorials"] is False
+    assert group["output"]["calculate_net_pay"] is False
 
 
-def test_broker_load_reference_is_identifier_only() -> None:
-    rules = _rules()["principal_load_identifier"]["rules"]
-    blob = " ".join(rules)
-    assert "Return only the identifier value in principal_load_identifier." in rules
-    assert any("discovery labels only" in r for r in rules)
-    assert any("do not include the label or prefix text in the value" in r for r in rules)
-    assert "Load #" in blob
-    assert "Load Number" in blob
-    assert "Order #" in blob
-    assert "Confirmation #" in blob
-    assert "PO #" in blob
+def test_principal_load_identifier_uses_strong_labels() -> None:
+    group = _rules()["principal_load_identifier"]
+    labels = group["strong_labels"]
+    assert "Load #" in labels
+    assert "Broker Load #" in labels
+    assert "PO #" in labels
+    blob = json.dumps(group)
     assert "broker_load_reference" not in blob
-    # Armstrong identifier must not be hardcoded; label-concatenated form is the defect.
     assert _ARMSTRONG_LOAD_REF not in blob
     assert _ARMSTRONG_LOAD_REF_WITH_LABEL not in blob
+
+
+def test_broker_agent_cohesion_and_generic_mailbox() -> None:
+    blob = json.dumps(_rules()["broker_agent"])
+    assert "broker_agent_contact_cohesion" in blob
+    assert "carriers@" in blob
+    assert "FOR LOAD INFORMATION" in blob
+    assert "broker_contact_phone_snapshot" not in blob
+    assert _ARMSTRONG_AGENT not in blob
+    assert _ARMSTRONG_AGENT_PHONE not in blob
+    assert _ARMSTRONG_AGENT_EMAIL not in blob
 
 
 def test_production_field_rules_contain_no_armstrong_identities() -> None:
@@ -248,112 +139,105 @@ def test_production_field_rules_contain_no_armstrong_identities() -> None:
     assert _ARMSTRONG_LOAD_REF not in blob
     assert _ARMSTRONG_LOAD_REF_WITH_LABEL not in blob
     assert _ARMSTRONG_CARRIER_COMPANY not in blob
-    assert "V53" not in blob
+    assert _ARMSTRONG_CORPORATE_MC not in blob
+    assert _ARMSTRONG_CARRIER_MC not in blob
+    assert _ARMSTRONG_CARRIER_DOT not in blob
+    assert _ARMSTRONG_AUDIT_RATE_CON_ID not in blob
+    assert _ARMSTRONG_CARRIER_ATTN not in blob
+    assert _ARMSTRONG_CARRIER_PHONE not in blob
+    assert _ARMSTRONG_CARRIER_EMAIL not in blob
 
 
-def test_freight_mode_group_normalizes_and_does_not_infer_from_equipment() -> None:
-    assert "freight_mode" in APPROVED_FIELD_RULE_KEYS
-    group = _rules()["freight_mode"]
-    assert group["product_fields"] == ["freight_mode"]
-    norm = group["normalization"]
-    assert norm["Full TruckLoad"] == "FTL"
-    assert norm["Full Truckload"] == "FTL"
-    assert norm["Truckload"] == "FTL"
-    assert norm["FTL"] == "FTL"
-    assert norm["Less Than Truckload"] == "LTL"
-    assert norm["LTL"] == "LTL"
-    assert norm["Partial"] == "PARTIAL"
-    assert norm["Power Only"] == "POWER_ONLY"
-    rules = group["rules"]
-    blob = " ".join(rules)
-    assert any("Populate freight_mode only from explicit load-level mode evidence." in r for r in rules)
-    assert "Do not infer mode from equipment" in blob
-    assert "trailer type" in blob
-    assert "trailer size" in blob
-    assert "weight" in blob
-    assert "number of stops" in blob
-    assert "live/live" in blob.lower() or "live/live" in blob
-    assert "rate" in blob
-    assert any("If freight_mode is unsupported or ambiguous, return null." in r for r in rules)
-    # Combined-source example stays in tests only.
-    assert "V53" not in blob
-    assert "Full TruckLoad" in blob
+def test_broker_agent_carrier_owned_tuple_is_not_broker_agent() -> None:
+    agent = _rules()["broker_agent"]
+    blob = json.dumps(agent)
+    prec = agent["ownership_precedence"]
+    assert "carrier contact, not a broker_agent" in prec["carrier_owned_person_is_not_broker_agent"]
+    assert "Do not take a person's name, phone, or email from a carrier-owned block" in prec[
+        "do_not_emit_carrier_tuple_as_broker_agent"
+    ]
+    assert "reject_carrier_owned_people" in blob
+    assert "person in a Carrier Name, Carrier Information, Carrier Signature, carrier Attn" in blob
+    assert "A cohesive name-phone-email tuple inside a Carrier Name" in blob
 
 
-def test_trailer_type_and_size_split_combined_equipment_description() -> None:
-    assert "trailer_body_type" in APPROVED_FIELD_RULE_KEYS
-    assert "trailer_length" in APPROVED_FIELD_RULE_KEYS
-    tt = _rules()["trailer_body_type"]
-    ts = _rules()["trailer_length"]
-    assert tt["product_fields"] == ["equipment.trailer_body_type"]
-    assert ts["product_fields"] == ["equipment.trailer_length"]
-    assert "equipment_description" in _rules()
-    tt_blob = " ".join(tt["rules"])
-    ts_blob = " ".join(ts["rules"])
-    assert "Extract trailer body/type separately from trailer length." in tt["rules"]
-    assert "do not put length or size into equipment.trailer_body_type" in tt_blob
-    assert "combined equipment description" in tt_blob
-    assert any(
-        "embedded inside a broader Equipment / Equipment Type description is valid evidence for equipment.trailer_body_type"
-        in r
-        for r in tt["rules"]
-    )
-    assert any(
-        "The broader equipment.description must remain independently source-faithful." in r
-        for r in tt["rules"]
-    )
-    assert "Equipment Type" not in tt.get("possible_labels_examples", [])
-    assert "Equipment" not in tt.get("possible_labels_examples", [])
-    assert "Do not infer trailer type from commodity, temperature, freight_mode, weight, or equipment" in tt_blob
-    assert tt["normalization"]["Van"] == "Van"
-    assert tt["normalization"]["Dry Van"] == "Dry Van"
-    assert tt["normalization"]["Reefer"] == "Reefer"
-    assert "Extract explicit trailer length/size separately from trailer type." in ts["rules"]
-    assert "equipment.trailer_length contains the length/size only" in ts_blob or "length/size only" in ts_blob
-    assert "Do not copy the full equipment description into equipment.trailer_length." in ts["rules"]
-    assert any(
-        "embedded inside a broader Equipment / Equipment Type description is valid evidence for equipment.trailer_length"
-        in r
-        for r in ts["rules"]
-    )
-    assert "Equipment Size" not in ts.get("possible_labels_examples", [])
-    assert ts["normalization"]["53'"] == "53 ft"
-    assert ts["normalization"]["53 feet"] == "53 ft"
-    assert "cryptic equipment code" in ts_blob
-    assert any("If no explicit supported size is present, return null." in r for r in ts["rules"])
-    # Armstrong combined equipment string is test evidence only.
-    assert "V53" not in tt_blob
-    assert "V53" not in ts_blob
-    assert "V53, 53' Van" not in tt_blob
-    assert "V53, 53' Van" not in ts_blob
+def test_broker_agent_ownership_outranks_name_phone_email_cohesion() -> None:
+    agent = _rules()["broker_agent"]
+    prec = agent["ownership_precedence"]
+    cohesion = agent["broker_agent_name"]["broker_agent_contact_cohesion"]
+    assert prec["priority"] == "Entity and role ownership outrank adjacency and contact-tuple cohesion."
+    for label in (
+        "Carrier Name",
+        "Carrier Information",
+        "Carrier Signature",
+        "carrier Attn block",
+    ):
+        assert label in prec["carrier_owned_blocks"]
+    assert cohesion["applies_only_after"] == "entity_role_ownership"
+    assert "does not override carrier ownership" in cohesion["rule"]
+    assert any("cleanest name-phone-email tuple" in item for item in cohesion["must_not_do"])
+    assert any("carrier-owned block and emit it as broker_agent" in item for item in cohesion["must_not_do"])
+    assert "name-phone-email cohesion" in json.dumps(agent["flattened_pdf_ownership_rules"])
 
 
-def test_equipment_type_full_description_coexists_with_trailer_fields() -> None:
-    assert "equipment_description" in APPROVED_FIELD_RULE_KEYS
-    group = _rules()["equipment_description"]
-    assert group["product_fields"] == ["equipment.description"]
-    blob = " ".join(group["rules"])
-    assert any(
-        "full source-faithful load-level equipment description" in r for r in group["rules"]
-    )
-    assert "equipment code" in blob
-    assert "combined source description" in blob
-    assert any(
-        "Do not remove trailer type or trailer length components from equipment.description" in r
-        for r in group["rules"]
-    )
-    assert any(
-        "equipment.description, equipment.trailer_body_type, and equipment.trailer_length may all come from the same source evidence."
-        in r
-        for r in group["rules"]
-    )
-    assert "Do not expand unknown equipment codes." in group["rules"]
-    assert "FTL/LTL" in blob
-    assert "tractor number" in blob
-    assert "trailer asset number" in blob
-    assert "temperature" in blob
-    labels = group["possible_labels_examples"]
-    assert "Equipment" in labels
-    assert "Equipment Type" in labels
-    assert "V53" not in blob
-    assert "X53" not in blob
+def test_broker_agent_positive_broker_owned_labels_remain() -> None:
+    evidence = _rules()["broker_agent"]["broker_agent_name"]["positive_broker_person_evidence"]
+    labels = evidence["labels"]
+    for label in (
+        "Agent Name",
+        "Broker Representative",
+        "Broker Contact",
+        "For Load Information",
+        "Please contact",
+        "Please sign and email to",
+    ):
+        assert label in labels
+    assert "belongs to the broker rather than the carrier" in evidence["rule"]
+    assert "keep them together as one broker_agent" in evidence["keep_broker_owned_tuple_together"]
+    assert "Do not pull a replacement phone or email from a different corporate or carrier block" in evidence[
+        "keep_broker_owned_tuple_together"
+    ]
+    strong = json.dumps(_rules()["broker_agent"]["broker_agent_name"]["strong_evidence"])
+    assert "Agent Name in a broker-owned section" in strong
+    assert "For Load Information" in strong
+
+
+def test_broker_authority_binds_corporate_mc_to_selected_broker() -> None:
+    auth = _rules()["broker_authority"]
+    prec = auth["ownership_precedence"]
+    steps = {item["action"]: item["rule"] for item in auth["before_populating"]}
+    assert "Corporate Information" in prec["bind_to_selected_broker"]
+    assert "belongs to that broker when ownership is clear" in prec["bind_to_selected_broker"]
+    assert "bind_selected_broker_corporate_authority" in steps
+    assert "Corporate Information" in steps["bind_selected_broker_corporate_authority"]
+    assert "issuer/header company block" in steps["bind_selected_broker_corporate_authority"]
+
+
+def test_broker_authority_carrier_mc_does_not_make_broker_authority_ambiguous() -> None:
+    auth = _rules()["broker_authority"]
+    prec = auth["ownership_precedence"]
+    steps = {item["action"]: item["rule"] for item in auth["before_populating"]}
+    blob = json.dumps(auth["rules"])
+    assert "Carrier Name" in prec["carrier_authority_is_separate"]
+    assert "not a reason to null the selected broker's authority" in prec["carrier_authority_is_separate"]
+    assert "isolate_carrier_authority" in steps
+    assert "must not create ambiguity about the selected broker's authority" in steps["isolate_carrier_authority"]
+    assert "presence of carrier MC/DOT does not make selected-broker authority ambiguous" in blob
+
+
+def test_broker_authority_multiple_clear_authorities_must_not_force_null() -> None:
+    auth = _rules()["broker_authority"]
+    prec = auth["ownership_precedence"]
+    blob = json.dumps(auth["rules"])
+    assert "Do not return null merely because multiple authority numbers exist" in prec["multiple_authorities"]
+    assert "ownership itself is genuinely ambiguous" in prec["multiple_authorities"]
+    assert "Do not return null merely because multiple authorities exist on the page" in blob
+    assert "when entity ownership is clearly distinguishable" in blob
+
+
+def test_field_rules_factory_is_independent_copy() -> None:
+    a = get_load_rate_con_field_rules()
+    b = get_load_rate_con_field_rules()
+    a["rules"]["broker_company"]["meaning"] = "MUTATED"
+    assert b["rules"]["broker_company"]["meaning"] != "MUTATED"
+    assert LOAD_RATE_CON_FIELD_RULES["rules"]["broker_company"]["meaning"] != "MUTATED"

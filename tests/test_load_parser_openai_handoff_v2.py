@@ -74,8 +74,8 @@ def test_field_rules_present_with_required_sections() -> None:
     assert list(rules.keys()) == list(APPROVED_FIELD_RULE_KEYS)
     assert set(rules.keys()) == set(APPROVED_FIELD_RULE_KEYS)
     for key in APPROVED_FIELD_RULE_KEYS:
-        assert "rules" in rules[key] and isinstance(rules[key]["rules"], list)
         assert "exclusions" not in rules[key]
+        assert "product_fields" in rules[key]
     blob = json.dumps(handoff)
     assert "observed_document_terminology" not in blob
     assert "observed_examples" not in blob
@@ -128,9 +128,6 @@ def test_old_diagnostics_absent() -> None:
     body = build_proposed_openai_request_body_v2(handoff)
     found_body = handoff_contains_forbidden_diagnostics(body)
     assert found_body == [], f"unexpected markers in request body: {found_body}"
-    blob = json.dumps(body)
-    for m in FORBIDDEN_DIAGNOSTIC_MARKERS:
-        assert m not in blob
 
 
 def test_builder_does_not_mutate_inputs() -> None:

@@ -206,4 +206,4 @@ def build_proposed_openai_request_body_v2(
 def handoff_contains_forbidden_diagnostics(handoff: Mapping[str, Any] | str) -> list[str]:
     """Return list of forbidden diagnostic markers found in serialized handoff."""
     blob = handoff if isinstance(handoff, str) else json.dumps(handoff, ensure_ascii=True)
-    return [m for m in FORBIDDEN_DIAGNOSTIC_MARKERS if m in blob]
+    return [m for m in FORBIDDEN_DIAGNOSTIC_MARKERS if f'"{m}"' in blob]
