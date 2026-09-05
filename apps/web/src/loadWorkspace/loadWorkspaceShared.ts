@@ -187,19 +187,43 @@ export const inputClass =
   "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:ring-indigo-500";
 export const grid2 = "grid grid-cols-1 gap-4 sm:grid-cols-2";
 
-/** Load workspace form — compact card rhythm (light theme, mockup-inspired hierarchy). */
-export const wsSectionCard = "rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden";
+/** Load workspace form — condensed card rhythm (TruckERP tokens). */
+export const wsSectionCard =
+  "rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] overflow-hidden";
 export const wsSectionHeader =
-  "flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3.5 py-2";
-export const wsSectionTitle = "text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]";
-export const wsSectionBody = "px-3.5 py-3";
+  "flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-3 py-2";
+export const wsSectionTitle =
+  "text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-heading)]";
+export const wsSectionBody = "px-3 py-2.5";
 export const wsSectionMeta = "text-[10px] font-medium text-[var(--trk-text-muted)]";
 export const wsLabelClass =
   "block text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] mb-1";
 export const wsInputClass =
-  "w-full rounded-md border border-[var(--trk-border)] bg-[#1a1e2a] px-2.5 py-1.5 text-sm text-[var(--trk-text)] shadow-sm placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500/25";
+  "w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-[13px] text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/25";
 export const wsGrid2 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2";
 export const wsGrid3 = "grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3";
+
+/** Header glance for linehaul — bound to the load `rate` field, never a hardcoded label. */
+export function formatLinehaulDisplay(rate: string): string | null {
+  const t = rate.trim();
+  if (!t) return null;
+  const n = Number(t.replace(/[$,]/g, ""));
+  if (Number.isFinite(n) && t.replace(/[$,]/g, "") !== "") {
+    return n.toLocaleString(undefined, { style: "currency", currency: "USD" });
+  }
+  return t.startsWith("$") ? t : `$${t}`;
+}
+
+/** Broker-header chip: trailer/equipment plus temperature from load fields. */
+export function formatEquipmentTempChip(
+  trailerType: string,
+  equipmentType: string,
+  temperatureRequirement: string,
+): string {
+  const equip = trailerType.trim() || equipmentType.trim() || "Equipment";
+  const temp = temperatureRequirement.trim();
+  return temp ? `${equip} · ${temp}` : `${equip} · No temp set`;
+}
 
 export function stopToPayload(s: DraftStop, sequence: number): LoadStopWrite {
   return {

@@ -17,8 +17,9 @@ import {
   docFocusForStopAddress,
   docFocusForStopAppointment,
   docFocusForStopReference,
+  formatEquipmentTempChip,
+  formatLinehaulDisplay,
   wsGrid2,
-  wsGrid3,
   wsInputClass,
   wsLabelClass,
   wsSectionBody,
@@ -31,6 +32,7 @@ import {
   type LoadWorkspaceMode,
   type WorkspaceSection,
 } from "./loadWorkspaceShared";
+import { formatRouteFromStops } from "@/utils/loadStops";
 import {
   compactLoadReferencesForDisplay,
   displayOperationalReferenceLabel,
@@ -134,6 +136,8 @@ export type LoadWorkspaceFormProps = {
   editableSections?: WorkspaceSection[];
   /** When true, all controls are disabled (e.g. Load Lab read-only preview). Uses a disabled fieldset. */
   readOnly?: boolean;
+  /** When false, Notes render outside this form (page sidebar). Default true. */
+  renderNotes?: boolean;
 };
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
@@ -156,14 +160,14 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
 
   return (
     <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
-    <div className="flex flex-col gap-2.5 pb-4">
+    <div className="grid grid-cols-1 gap-3 pb-4 lg:grid-cols-2">
       {/* Broker — WorkspaceSection: Parties */}
       {vis("Parties") && <section className={wsSectionCard} data-editable={editable("Parties")}>
-        <div className={wsSectionHeader}>
+        <div className={`${wsSectionHeader} py-3`}>
           <span className={wsSectionTitle}>Broker</span>
-          {!modeCreate && p.brokerNameSnapshot.trim() ? (
-            <span className="text-[10px] font-medium text-sky-400">Snapshot · {p.brokerNameSnapshot.trim()}</span>
-          ) : null}
+          <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--trk-text-muted)]">
+            {formatEquipmentTempChip(p.trailerType, p.equipmentType, p.temperatureRequirement)}
+          </span>
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
@@ -276,12 +280,172 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </div>
       </section>}
 
-      {/* Stops — WorkspaceSection: Stops */}
-      {vis("Stops") && <section className={wsSectionCard} data-editable={editable("Stops")}>
+      {(vis("Equipment") || vis("Assignment")) && (
+        <div className="flex flex-col gap-3">
+      {/* Financials — WorkspaceSection: Equipment (financial/cargo parameters travel together) */}
+      {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
+        <div className={`${wsSectionHeader} py-3`}>
+          <span className={wsSectionTitle}>Financials</span>
+          <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 font-mono text-sm font-bold text-[var(--trk-success)]">
+            {formatLinehaulDisplay(p.rate) ?? "—"}
+          </span>
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid2}>
+          <div>
+            <label className={L}>{VISIBLE_INTERNAL_LOAD_NUMBER_LABEL}</label>
+            <input
+              className={I}
+              value={p.loadNumber}
+              tabIndex={p.verificationTabIndex.get("loadNumber")}
+              onChange={(e) => p.setLoadNumber(e.target.value)}
+              placeholder="INT-..."
+            />
+          </div>
+          <div>
+            <label className={L}>Linehaul rate</label>
+            <input
+              className={I}
+              inputMode="decimal"
+              value={p.rate}
+              tabIndex={p.verificationTabIndex.get("rate")}
+              onChange={(e) => p.setRate(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [p.rate, "rate", "linehaul", "$", "total", "amount"],
+                  fallbackToken: "rate",
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={L}>Customer rate</label>
+            <input
+              className={I}
+              inputMode="decimal"
+              value={p.customerRate}
+              onChange={(e) => p.setCustomerRate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={L}>Miles (loaded)</label>
+            <input
+              className={I}
+              inputMode="numeric"
+              value={p.miles}
+              onChange={(e) => p.setMiles(e.target.value)}
+            />
+          </div>
+        </div>
+        </div>
+      </section>}
+
+      {/* Assignment — WorkspaceSection: Assignment */}
+      {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
         <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Stops</span>
-          <span className={wsSectionMeta}>
-            {p.sortedDraftStops.length} stop{p.sortedDraftStops.length === 1 ? "" : "s"}
+          <span className={wsSectionTitle}>Assignment &amp; status</span>
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid2}>
+          <div>
+            <label className={L}>Status</label>
+            <select
+              className={I}
+              value={p.status}
+              onChange={(e) => p.setStatus(e.target.value)}
+            >
+              {LOAD_STATUSES.map((s) => {
+                const legacyDispatchedBlocked = s === "dispatched" && p.status !== "dispatched";
+                return (
+                  <option key={s} value={s} disabled={legacyDispatchedBlocked}>
+                    {legacyDispatchedBlocked ? "dispatched (legacy — use Trip workspace)" : s}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <div>
+            <label className={L}>Driver</label>
+            <select
+              className={I}
+              value={p.driverId ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                p.setDriverId(v === "" ? null : Number(v));
+              }}
+            >
+              <option value="">— Unassigned —</option>
+              {p.drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.first_name} {d.last_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={L}>Truck</label>
+            <select
+              className={I}
+              value={p.truckId ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                p.setTruckId(v === "" ? null : Number(v));
+              }}
+            >
+              <option value="">— None —</option>
+              {p.trucks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.unit_number}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={L}>Trailer</label>
+            <select
+              className={I}
+              value={p.trailerAssetId ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                p.setTrailerAssetId(v === "" ? null : Number(v));
+              }}
+            >
+              <option value="">— None —</option>
+              {p.trailers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.unit_number}{t.trailer_type ? ` · ${t.trailer_type}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="mt-2 text-[11px] leading-snug text-[var(--trk-text-muted)]">
+          Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> for draft → ready. Driver/truck/trailer
+          commitment lives on the trip workspace.
+        </p>
+        {p.activeTripId != null && p.activeTripId > 0 ? (
+          <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
+            This load is on a trip — use{" "}
+            <span className="font-medium text-[var(--trk-text)]">View / Assign on Trip</span> in the header to set driver,
+            truck, and trailer.
+          </p>
+        ) : null}
+        </div>
+      </section>}
+        </div>
+      )}
+
+      {/* Stops — WorkspaceSection: Stops */}
+      {vis("Stops") && <section className={`${wsSectionCard} lg:col-span-2`} data-editable={editable("Stops")}>
+        <div className={`${wsSectionHeader} py-3`}>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className={wsSectionTitle}>Stops</span>
+            <span className={wsSectionMeta}>
+              {p.sortedDraftStops.length} stop{p.sortedDraftStops.length === 1 ? "" : "s"}
+            </span>
+          </span>
+          <span className="text-[13px] font-semibold text-[var(--trk-text)]">
+            {formatRouteFromStops(p.sortedDraftStops)}
           </span>
         </div>
         <div className={wsSectionBody}>
@@ -295,30 +459,73 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             Intake context: {ip.pickupDeliverySummary}
           </p>
         ) : null}
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {p.sortedDraftStops.length === 0 ? (
-            <p className="py-4 text-center text-xs text-[var(--trk-text-muted)]">No stops yet — add pickup and delivery.</p>
+            <p className="py-4 text-center text-xs text-[var(--trk-text-muted)] md:col-span-2 xl:col-span-3">No stops yet — add pickup and delivery.</p>
           ) : (
             p.sortedDraftStops.map((stop, idx) => {
               const u = (stop.stop_type || "").toUpperCase();
               const isPu = u === "PICKUP";
               const isDr = u === "DELIVERY" || u === "DROP";
-              const edge = isPu ? "border-l-emerald-500" : isDr ? "border-l-rose-500" : "border-l-slate-300";
+              const dateBits = [
+                stop.appointment_date && stop.appointment_date.length >= 10
+                  ? stop.appointment_date.slice(0, 10)
+                  : stop.appointment_date,
+                stop.appointment_time_text,
+              ].filter(Boolean);
               return (
               <div
                 key={stop._key}
-                className={`rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface-2)] py-2.5 pl-2.5 pr-3 shadow-sm border-l-[3px] ${edge}`}
+                className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2.5 py-2.5"
               >
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span
                     className={`inline-block rounded px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                      isPu ? "bg-emerald-900/40 text-emerald-400" : isDr ? "bg-rose-900/40 text-rose-400" : "bg-[var(--trk-border)] text-[var(--trk-text-muted)]"
+                      isPu
+                        ? "border border-emerald-800 bg-emerald-950/50 text-emerald-400"
+                        : isDr
+                          ? "border border-sky-800 bg-sky-950/40 text-sky-300"
+                          : "border border-[var(--trk-border)] bg-[var(--trk-surface-2)] text-[var(--trk-text-muted)]"
                     }`}
                   >
-                    {stop.stop_type || "STOP"} · {idx + 1}
+                    {idx + 1} · {isPu ? "Pickup" : isDr ? "Dropoff" : stop.stop_type || "Stop"}
                     {stop.id <= 0 ? <span className="ml-1 font-normal normal-case text-[var(--trk-text-muted)]">· new</span> : null}
                   </span>
-                  <div className="flex flex-wrap gap-1">
+                  <span className="text-[11px] text-[var(--trk-text-muted)]">{dateBits.join(" · ") || "—"}</span>
+                </div>
+                <div className="mb-1 text-[13px] font-semibold text-[var(--trk-text)]">
+                  {stop.facility_name?.trim() || "—"}
+                </div>
+                <div className="mb-2 text-[11.5px] leading-snug text-[var(--trk-text-muted)]">
+                  {[stop.street, [stop.city, stop.state_or_province].filter(Boolean).join(", "), stop.postal_code]
+                    .filter(Boolean)
+                    .join(", ") || "—"}
+                </div>
+                {(() => {
+                  const foot: string[] = [];
+                  const notes = stop.commodity_notes?.trim();
+                  if (notes) foot.push(notes);
+                  if (p.commodity.trim() && idx === 0) foot.push(p.commodity.trim());
+                  if (p.estimatedWeight.trim() && idx === 0) {
+                    const w = Number(p.estimatedWeight.replace(/,/g, ""));
+                    foot.push(
+                      Number.isFinite(w)
+                        ? `${w.toLocaleString()} lb`
+                        : `${p.estimatedWeight.trim()} lb`,
+                    );
+                  }
+                  const ref = stop.reference_number?.trim();
+                  if (ref) foot.push(`Ref ${ref}`);
+                  if (!foot.length) return null;
+                  return (
+                    <div className="mb-2 flex flex-wrap gap-x-2.5 gap-y-0.5 border-t border-[var(--trk-border)] pt-1.5 text-[11px] text-[var(--trk-text-muted)]">
+                      {foot.map((bit) => (
+                        <span key={bit}>{bit}</span>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div className="mb-2 flex flex-wrap gap-1">
                     <Button
                       variant="secondary"
                       type="button"
@@ -345,7 +552,6 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                     >
                       Remove
                     </Button>
-                  </div>
                 </div>
                 <div className={wsGrid2}>
                   <div>
@@ -653,160 +859,6 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </div>
       </section>}
 
-      {/* Financials — WorkspaceSection: Equipment (financial/cargo parameters travel together) */}
-      {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
-        <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Financials</span>
-        </div>
-        <div className={wsSectionBody}>
-        <div className={wsGrid3}>
-          <div>
-            <label className={L}>{VISIBLE_INTERNAL_LOAD_NUMBER_LABEL}</label>
-            <input
-              className={I}
-              value={p.loadNumber}
-              tabIndex={p.verificationTabIndex.get("loadNumber")}
-              onChange={(e) => p.setLoadNumber(e.target.value)}
-              placeholder="INT-..."
-            />
-          </div>
-          <div>
-            <label className={L}>Linehaul rate</label>
-            <input
-              className={I}
-              inputMode="decimal"
-              value={p.rate}
-              tabIndex={p.verificationTabIndex.get("rate")}
-              onChange={(e) => p.setRate(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [p.rate, "rate", "linehaul", "$", "total", "amount"],
-                  fallbackToken: "rate",
-                })
-              }
-            />
-          </div>
-          <div>
-            <label className={L}>Customer rate</label>
-            <input
-              className={I}
-              inputMode="decimal"
-              value={p.customerRate}
-              onChange={(e) => p.setCustomerRate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={L}>Miles (loaded)</label>
-            <input
-              className={I}
-              inputMode="numeric"
-              value={p.miles}
-              onChange={(e) => p.setMiles(e.target.value)}
-            />
-          </div>
-        </div>
-        </div>
-      </section>}
-
-      {/* Assignment — WorkspaceSection: Assignment */}
-      {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
-        <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Assignment & status</span>
-          <span className={wsSectionMeta}>Planning & load record — trip workspace owns movement assignment</span>
-        </div>
-        <div className={wsSectionBody}>
-        <div className={wsGrid2}>
-          <div>
-            <label className={L}>Status</label>
-            <select
-              className={I}
-              value={p.status}
-              onChange={(e) => p.setStatus(e.target.value)}
-            >
-              {LOAD_STATUSES.map((s) => {
-                const legacyDispatchedBlocked = s === "dispatched" && p.status !== "dispatched";
-                return (
-                  <option key={s} value={s} disabled={legacyDispatchedBlocked}>
-                    {legacyDispatchedBlocked ? "dispatched (legacy — use Trip workspace)" : s}
-                  </option>
-                );
-              })}
-            </select>
-            {p.status !== "dispatched" ? (
-              <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
-                Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> in the toolbar for validated
-                draft → ready (broker, reference, stops). Legacy operational statuses in the list remain for historical
-                compatibility. Driver/truck/trailer commitment lives on the{" "}
-                <span className="font-medium text-[var(--trk-text)]">trip workspace</span> — not via setting{" "}
-                <span className="font-mono text-[var(--trk-text-muted)]">Load.status</span> to dispatched.
-              </p>
-            ) : null}
-          </div>
-          <div>
-            <label className={L}>Driver</label>
-            <select
-              className={I}
-              value={p.driverId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setDriverId(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">— Unassigned —</option>
-              {p.drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.first_name} {d.last_name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={L}>Truck</label>
-            <select
-              className={I}
-              value={p.truckId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setTruckId(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">— None —</option>
-              {p.trucks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.unit_number}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={L}>Trailer</label>
-            <select
-              className={I}
-              value={p.trailerAssetId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setTrailerAssetId(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">— None —</option>
-              {p.trailers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.unit_number}{t.trailer_type ? ` · ${t.trailer_type}` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        {p.activeTripId != null && p.activeTripId > 0 ? (
-          <p className="mt-3 text-[10px] leading-snug text-[var(--trk-text-muted)]">
-            This load is on a trip — use{" "}
-            <span className="font-medium text-[var(--trk-text)]">View / Assign on Trip</span> in the header to set driver,
-            truck, and trailer.
-          </p>
-        ) : null}
-        </div>
-      </section>}
-
       {/* Customs — WorkspaceSection: Documents */}
       {vis("Documents") && <section className={wsSectionCard} data-editable={editable("Documents")}>
         <div className={wsSectionHeader}>
@@ -864,11 +916,47 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
       </section>}
 
       {/* Notes & documents — WorkspaceSection: Notes */}
-      {vis("Notes") && <section className={wsSectionCard} data-editable={editable("Notes")}>
-        <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Notes & documents</span>
-        </div>
-        <div className={wsSectionBody}>
+      {vis("Notes") && p.renderNotes !== false ? (
+        <LoadWorkspaceNotesPanel
+          className="lg:col-span-2"
+          dataEditable={editable("Notes")}
+          internalNotes={p.internalNotes}
+          setInternalNotes={p.setInternalNotes}
+          showOperationalNotesTimeline={p.showOperationalNotesTimeline}
+          loadNotes={p.loadNotes}
+          newNoteBody={p.newNoteBody}
+          setNewNoteBody={p.setNewNoteBody}
+          onAddNote={p.onAddNote}
+          saving={p.saving}
+        />
+      ) : null}
+
+      <p className="text-center text-[10px] text-[var(--trk-text-muted)]">UI bundle {__UI_BUILD_ID__}</p>
+    </div>
+    </fieldset>
+  );
+}
+
+export type LoadWorkspaceNotesPanelProps = {
+  internalNotes: string;
+  setInternalNotes: (v: string) => void;
+  showOperationalNotesTimeline: boolean;
+  loadNotes: LoadNote[];
+  newNoteBody: string;
+  setNewNoteBody: (v: string) => void;
+  onAddNote: () => void;
+  saving: boolean;
+  className?: string;
+  dataEditable?: boolean;
+};
+
+export function LoadWorkspaceNotesPanel(p: LoadWorkspaceNotesPanelProps) {
+  return (
+    <section className={`${wsSectionCard} ${p.className ?? ""}`} data-editable={p.dataEditable}>
+      <div className={wsSectionHeader}>
+        <span className={wsSectionTitle}>Notes & documents</span>
+      </div>
+      <div className={wsSectionBody}>
         <div>
           <label className={L}>Internal notes (load)</label>
           <textarea
@@ -894,9 +982,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 ))
               )}
             </ul>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-col gap-2">
               <input
-                className={`${I} min-w-[12rem] flex-1`}
+                className={I}
                 placeholder="Add operational note…"
                 value={p.newNoteBody}
                 onChange={(e) => p.setNewNoteBody(e.target.value)}
@@ -913,11 +1001,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             </div>
           </div>
         ) : null}
-        </div>
-      </section>}
-
-      <p className="text-center text-[10px] text-[var(--trk-text-muted)]">UI bundle {__UI_BUILD_ID__}</p>
-    </div>
-    </fieldset>
+      </div>
+    </section>
   );
 }

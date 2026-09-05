@@ -181,6 +181,190 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
 
 
 @pytest.mark.asyncio
+async def test_digital_pdf_does_not_invoke_ocr(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import load_document_parse_rate_con
+
+    def boom(_pdf_bytes: bytes):
+        raise AssertionError("OCR must not run on a digital PDF")
+
+    monkeypatch.setattr(load_document_parse_rate_con, "ocr_load_parser_pdf_pages", boom)
+
+    async def fake_openai(**kwargs):
+        assert kwargs["input_file_bytes"] == _FIXTURE_PDF.read_bytes()
+        return {
+            "document": {"filename": "digital.pdf"},
+            "extracted": {"principal_load_identifier": "D-1", "references": [], "stops": []},
+            "warnings": [],
+            "field_confidence": {},
+            "context": {},
+        }
+
+    out = await parse_pdf_bytes_to_load_document_response(
+        AsyncMock(),
+        tenant_id=1,
+        pdf_bytes=_FIXTURE_PDF.read_bytes(),
+        filename="digital.pdf",
+        openai_chat_json_schema=fake_openai,
+    )
+    assert out.extracted.broker_load_reference == "D-1"
+    assert out.context.get("requires_ocr") is False
+
+
+def _blank_pdf_bytes() -> bytes:
+    from io import BytesIO
+
+    buf = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    writer.write(buf)
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_scanned_image_sends_ocr_text_not_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import load_document_parse_rate_con
+
+    scanned = _blank_pdf_bytes()
+    calls: list[dict] = []
+
+    def fake_ocr(_pdf_bytes: bytes):
+        return (
+            [
+                {"page_number": 1, "text": "AGRICULTURE OCR PAGE 1 LOAD 123"},
+                {"page_number": 2, "text": "AGRICULTURE OCR PAGE 2 STOP A"},
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(load_document_parse_rate_con, "ocr_load_parser_pdf_pages", fake_ocr)
+
+    async def fake_openai(**kwargs):
+        calls.append(kwargs)
+        return {
+            "document": {"filename": "scanned.pdf"},
+            "extracted": {"principal_load_identifier": "OCR-1", "references": [], "stops": []},
+            "warnings": [],
+            "field_confidence": {},
+            "context": {},
+        }
+
+    out = await parse_pdf_bytes_to_load_document_response(
+        AsyncMock(),
+        tenant_id=1,
+        pdf_bytes=scanned,
+        filename="scanned.pdf",
+        openai_chat_json_schema=fake_openai,
+    )
+
+    assert calls
+    assert calls[0]["input_file_bytes"] is None
+    assert "AGRICULTURE OCR PAGE 1" in calls[0]["user_text"]
+    assert "field_rules" in calls[0]["user_text"]
+    assert "tenant_identity_exclusion" in calls[0]["user_text"]
+    assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
+    assert out.extracted.broker_load_reference == "OCR-1"
+    assert out.context["requires_ocr"] is True
+    assert out.context["semantic_input"] == "ocr_text"
+
+
+@pytest.mark.asyncio
+async def test_mixed_pdf_still_blocks_without_ocr_or_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import load_document_parse_rate_con
+
+    def boom(_pdf_bytes: bytes):
+        raise AssertionError("OCR must not run on mixed PDFs")
+
+    monkeypatch.setattr(load_document_parse_rate_con, "ocr_load_parser_pdf_pages", boom)
+    monkeypatch.setattr(
+        load_document_parse_rate_con,
+        "acquire_load_parser_pdf_pages",
+        lambda _b: {
+            "pdf_type": "mixed",
+            "page_count": 2,
+            "requires_ocr": True,
+            "pages": [
+                {
+                    "page_number": 1,
+                    "source": "embedded_text",
+                    "usable_embedded_text": True,
+                    "requires_ocr": False,
+                    "text": "Load confirmation page one with enough alphanumeric content here.",
+                },
+                {
+                    "page_number": 2,
+                    "source": "ocr_required",
+                    "usable_embedded_text": False,
+                    "requires_ocr": True,
+                    "text": "",
+                },
+            ],
+            "warnings": [],
+        },
+    )
+    openai = AsyncMock()
+    out = await parse_pdf_bytes_to_load_document_response(
+        AsyncMock(),
+        tenant_id=1,
+        pdf_bytes=_FIXTURE_PDF.read_bytes(),
+        filename="mixed.pdf",
+        openai_chat_json_schema=openai,
+    )
+    openai.assert_not_awaited()
+    assert out.context["semantic_outcome"] == "blocked_ocr_required"
+    assert out.context["pdf_type"] == "mixed"
+
+
+@pytest.mark.asyncio
+async def test_agriculture_pdf_ocr_path_uses_text_not_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Agriculture.pdf is scanned_image. OCR is mocked; OpenAI is injected (no live call)."""
+    from app.services import load_document_parse_rate_con
+
+    agriculture = Path("/tmp/Agriculture.pdf")
+    if not agriculture.is_file():
+        pytest.skip("Agriculture.pdf not present")
+
+    calls: list[dict] = []
+
+    def fake_ocr(pdf_bytes: bytes):
+        assert pdf_bytes == agriculture.read_bytes()
+        return (
+            [
+                {"page_number": 1, "text": "AG PAGE 1"},
+                {"page_number": 2, "text": "AG PAGE 2"},
+                {"page_number": 3, "text": "AG PAGE 3"},
+                {"page_number": 4, "text": "AG PAGE 4"},
+            ],
+            [],
+        )
+
+    monkeypatch.setattr(load_document_parse_rate_con, "ocr_load_parser_pdf_pages", fake_ocr)
+
+    async def fake_openai(**kwargs):
+        calls.append(kwargs)
+        return {
+            "document": {"filename": "Agriculture.pdf"},
+            "extracted": {"principal_load_identifier": "AG-12345", "references": [], "stops": []},
+            "warnings": [],
+            "field_confidence": {},
+            "context": {},
+        }
+
+    out = await parse_pdf_bytes_to_load_document_response(
+        AsyncMock(),
+        tenant_id=1,
+        pdf_bytes=agriculture.read_bytes(),
+        filename="Agriculture.pdf",
+        openai_chat_json_schema=fake_openai,
+    )
+
+    assert calls[0]["input_file_bytes"] is None
+    assert "AG PAGE 1" in calls[0]["user_text"]
+    assert "field_rules" in calls[0]["user_text"]
+    assert out.extracted.broker_load_reference == "AG-12345"
+
+
+@pytest.mark.asyncio
 async def test_unsafe_pdf_is_rejected_before_openai(tmp_path: Path) -> None:
     unsafe_path = tmp_path / "javascript.pdf"
     writer = PdfWriter()

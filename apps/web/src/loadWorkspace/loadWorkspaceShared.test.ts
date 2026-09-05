@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLoadPersistPayload,
+  formatEquipmentTempChip,
+  formatLinehaulDisplay,
   initialManualCreateStops,
   newDraftStop,
   selectDraftStopsForPersist,
@@ -202,5 +204,20 @@ describe("buildLoadPersistPayload (stop safety)", () => {
       { kind: "po_number", value: "PO-1", label: "PO #" },
       { kind: "bol_number", value: "BOL-9" },
     ]);
+  });
+});
+
+describe("load workspace header glances", () => {
+  it("formats linehaul from the live rate field", () => {
+    expect(formatLinehaulDisplay("1800")).toMatch(/1,800\.00/);
+    expect(formatLinehaulDisplay("1800")?.startsWith("$") || formatLinehaulDisplay("1800")?.includes("USD")).toBeTruthy();
+    expect(formatLinehaulDisplay("")).toBeNull();
+    expect(formatLinehaulDisplay("  ")).toBeNull();
+  });
+
+  it("formats equipment/temp chip from load fields", () => {
+    expect(formatEquipmentTempChip("Van", "V53", "")).toBe("Van · No temp set");
+    expect(formatEquipmentTempChip("Reefer", "", "-10")).toBe("Reefer · -10");
+    expect(formatEquipmentTempChip("", "", "")).toBe("Equipment · No temp set");
   });
 });
