@@ -1,6 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "/api/v1";
 const PUBLIC_API_BASE = import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1/public";
 
+export { API_BASE };
+
 /** Tenant is resolved server-side from the request Host (workspace subdomain). Do not send X-Tenant-* from the browser. */
 function withTenantHeaders(init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers as HeadersInit | undefined);
@@ -1718,57 +1720,6 @@ export async function getTruckSuggestedTrailer(truckId: number) {
   return handle<{ trailer_id: number | null }>(res);
 }
 
-export async function createDriverOnboardingSubmission(payload: DriverOnboardingSubmissionCreate) {
-  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return handle<DriverOnboardingCreateResponse>(res);
-}
-
-export async function getMyDriverOnboardingSubmission() {
-  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/me`);
-  return handle<DriverOnboardingSubmission | null>(res);
-}
-
-export async function listDriverOnboardingSubmissions(params: {
-  status?: string;
-  limit?: number;
-  offset?: number;
-} = {}) {
-  const url = new URL(`${API_BASE}/driver-onboarding/submissions`, window.location.origin);
-  if (params.status) url.searchParams.set("status", params.status);
-  if (params.limit) url.searchParams.set("limit", String(params.limit));
-  if (params.offset) url.searchParams.set("offset", String(params.offset));
-  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
-  return handle<DriverOnboardingSubmission[]>(res);
-}
-
-export async function getDriverOnboardingSubmission(id: number) {
-  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}`);
-  return handle<DriverOnboardingSubmission>(res);
-}
-
-export async function submitDriverOnboardingSubmission(id: number) {
-  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}/submit`, { method: "POST" });
-  return handle<DriverOnboardingSubmission>(res);
-}
-
-export async function approveDriverOnboardingSubmission(id: number) {
-  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}/approve`, { method: "POST" });
-  return handle<DriverOnboardingApproveResponse>(res);
-}
-
-export async function rejectDriverOnboardingSubmission(id: number, rejection_reason: string) {
-  const res = await fetchWithTenant(`${API_BASE}/driver-onboarding/submissions/${id}/reject`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rejection_reason }),
-  });
-  return handle<DriverOnboardingSubmission>(res);
-}
-
 /** Applicant (invite-link token) flow: no session required. */
 export type PersonApplicationRejectRequest = {
   rejection_reason: string;
@@ -2458,6 +2409,16 @@ export async function getPersonApplicationByOnboardingToken(token: string): Prom
   return getApplicantApplication(token);
 }
 
+/** SSE URL for invite-token application change signals (EventSource; no custom headers). */
+export function buildApplicantApplicationEventsUrl(onboardingToken: string): string {
+  const url = new URL(
+    `${API_BASE}/driver-onboarding/applicant/application/events`,
+    window.location.origin,
+  );
+  url.searchParams.set("token", onboardingToken);
+  return url.toString().replace(window.location.origin, "");
+}
+
 /** Get person application by id and token (token is enough; appId unused). */
 export async function getPersonApplication(_appId: number, token: string): Promise<PersonApplication> {
   return getApplicantApplication(token);
@@ -2519,6 +2480,41 @@ export async function resetPersonApplicationDraft(params: {
     method: "POST",
   });
   return handle<PersonApplication>(res);
+}
+
+export type DlCaptureLinkResult = {
+  application_id: number;
+  token: string;
+  link: string;
+  expires_at: string;
+  emailed?: boolean;
+  email_error?: string | null;
+};
+
+/** Issue restricted phone DL capture link (applicant invite token auth). */
+export async function issueApplicantDlCaptureLink(onboardingToken: string): Promise<DlCaptureLinkResult> {
+  const url = new URL(
+    `${API_BASE}/driver-onboarding/applicant/application/dl-capture-link`,
+    window.location.origin,
+  );
+  url.searchParams.set("token", onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+  });
+  return handle<DlCaptureLinkResult>(res);
+}
+
+/** Issue a new restricted capture token and email it to PersonApplication.email. */
+export async function emailApplicantDlCaptureLink(onboardingToken: string): Promise<DlCaptureLinkResult> {
+  const url = new URL(
+    `${API_BASE}/driver-onboarding/applicant/application/dl-capture-link/email`,
+    window.location.origin,
+  );
+  url.searchParams.set("token", onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+  });
+  return handle<DlCaptureLinkResult>(res);
 }
 
 /** Upload DL file (front or back) for applicant; returns updated application with intake_payload. */
@@ -2587,20 +2583,6 @@ export async function uploadPersonApplicationDocument(params: {
     body: form,
   });
   return handle<PersonApplication>(res);
-}
-
-/** Stub: not implemented. Used by DriverOnboardingPage. */
-export async function uploadDriverLicense(
-  _submissionId: number,
-  _frontFile: File,
-  _backFile: File | null
-): Promise<unknown> {
-  throw new Error("Driver license upload not implemented");
-}
-
-/** Stub: not implemented. Used by DriverOnboardingPage. */
-export async function swapDriverLicenseFrontBack(_submissionId: number): Promise<unknown> {
-  throw new Error("Swap driver license front/back not implemented");
 }
 
 /** Create onboarding invite link (admin). Returns link and optional email_sent/email_error. */
@@ -3651,6 +3633,8 @@ export type Load = {
   document_snapshot_version?: number;
   customs_snapshot?: LoadCustomsSnapshot | null;
   broker_load_reference?: string | null;
+  /** Persisted load-level operational references. API field ``references`` (DB: operational_references). */
+  references?: LoadDocumentParseReference[];
   broker_name_snapshot?: string | null;
   broker_contact_name_snapshot?: string | null;
   broker_contact_phone_snapshot?: string | null;
@@ -3756,69 +3740,3 @@ export type Driver = {
   license_expiry_date?: string | null;
 };
 
-export type DriverOnboardingSubmission = {
-  id: number;
-  tenant_id: number;
-  created_by_user_id: number;
-  status: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
-  source: string;
-  submitted_at?: string | null;
-  reviewed_at?: string | null;
-  reviewed_by_user_id?: number | null;
-  rejection_reason?: string | null;
-  first_name: string;
-  last_name: string;
-  phone?: string | null;
-  email?: string | null;
-  address_street?: string | null;
-  address_city?: string | null;
-  address_region?: string | null;
-  address_postal?: string | null;
-  zip_code?: string | null;
-  address_country?: string | null;
-  driver_license_number?: string | null;
-  license_region?: string | null;
-  license_expiry?: string | null;
-  notes?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type DriverOnboardingSubmissionCreate = {
-  first_name: string;
-  last_name: string;
-  phone?: string;
-  email?: string;
-  address_street?: string;
-  address_city?: string;
-  address_region?: string;
-  address_postal?: string;
-  zip_code?: string;
-  address_country?: string;
-  driver_license_number?: string;
-  license_region?: string;
-  license_expiry?: string;
-  notes?: string;
-  submit?: boolean;
-};
-
-export type DriverOnboardingCreateResponse = {
-  submission: DriverOnboardingSubmission;
-  missing_required_documents: string[];
-};
-
-/** Person record returned on approve (matches backend PersonOut). */
-export type DriverOnboardingPersonOut = {
-  id: number;
-  tenant_id: number;
-  onboarding_status: string;
-  first_name: string;
-  last_name: string;
-  phone?: string | null;
-  email?: string | null;
-};
-
-export type DriverOnboardingApproveResponse = {
-  submission: DriverOnboardingSubmission;
-  person: DriverOnboardingPersonOut;
-};

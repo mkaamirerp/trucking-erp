@@ -21,6 +21,7 @@ from datetime import date, datetime
 from typing import Any
 
 from app.schemas.load_document_parse import LoadDocumentParseResponse, LoadParseExtractedFields
+from app.services.load_parser_rate_con_field_rules import LOAD_RATE_CON_FIELD_RULES
 from app.services.load_parser_tenant_identity_exclusion import (
     normalize_authority_id,
     normalize_email,
@@ -56,6 +57,19 @@ _SUSPICIOUS_REFERENCE_VALUES = frozenset(
 )
 
 _ALLOWED_STOP_TYPES = frozenset({"pickup", "delivery", "drop", "other"})
+
+# Frozen generic company mailbox local-parts (rejection backstop only; no replacement).
+_GENERIC_COMPANY_MAILBOX_LOCALS = frozenset(
+    {
+        "carriers",
+        "dispatch",
+        "info",
+        "operations",
+        "billing",
+        "accounting",
+        "support",
+    }
+)
 
 # Keys that must never leak into the public response context.
 _CONTEXT_LEAK_KEYS = frozenset(
@@ -103,6 +117,11 @@ def apply_load_parser_mechanical_validation(
 
     # Contact syntactic shape.
     extracted, w, fc = _validate_contact_shapes(extracted)
+    warnings.extend(w)
+    field_confidence.update(fc)
+
+    # Named-person + generic company mailbox: reject email only (no replacement).
+    extracted, w, fc = _reject_generic_company_mailbox(extracted)
     warnings.extend(w)
     field_confidence.update(fc)
 
@@ -258,6 +277,34 @@ def _validate_contact_shapes(
             )
         )
 
+    return out, warnings, fc
+
+
+def _reject_generic_company_mailbox(
+    extracted: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], dict[str, str]]:
+    """Null a named agent's email when the local-part is a frozen generic company mailbox."""
+    out = dict(extracted)
+    warnings: list[str] = []
+    fc: dict[str, str] = {}
+
+    name = str(out.get("broker_contact_name_snapshot") or "").strip()
+    email = str(out.get("broker_contact_email_snapshot") or "").strip()
+    if not name or not email or "@" not in email:
+        return out, warnings, fc
+
+    local = email.split("@", 1)[0].strip().casefold()
+    if local not in _GENERIC_COMPANY_MAILBOX_LOCALS:
+        return out, warnings, fc
+
+    warnings.extend(
+        _null_field(
+            out,
+            "broker_contact_email_snapshot",
+            warning="generic_company_mailbox: broker_contact_email_snapshot",
+            field_confidence=fc,
+        )
+    )
     return out, warnings, fc
 
 
@@ -439,6 +486,41 @@ def _is_suspicious_load_reference(value: str) -> bool:
     return False
 
 
+def _strip_load_reference_field_label(value: str) -> str:
+    """Remove a leading discovery label when a field separator is present.
+
+    Separator-gated only: glued identifiers such as PO12345 are preserved.
+    Does not select a different identifier.
+    """
+    text = (value or "").strip()
+    if not text:
+        return text
+    labels = [
+        str(label).strip()
+        for label in (
+            LOAD_RATE_CON_FIELD_RULES["rules"]["principal_load_identifier"].get(
+                "strong_labels"
+            )
+            or []
+        )
+        if str(label).strip()
+    ]
+    labels.sort(key=len, reverse=True)
+    for raw in labels:
+        if raw.endswith("#"):
+            stem = raw[:-1].strip()
+            pat = re.compile(rf"^{re.escape(stem)}\s*#\s*", re.IGNORECASE)
+        else:
+            pat = re.compile(rf"^{re.escape(raw)}\s*[:#]\s*", re.IGNORECASE)
+        match = pat.match(text)
+        if match:
+            rest = text[match.end() :].strip()
+            if raw.endswith("#") and rest.startswith(":"):
+                rest = rest[1:].strip()
+            return rest
+    return text
+
+
 def _validate_broker_load_reference(
     extracted: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str], dict[str, str]]:
@@ -461,6 +543,7 @@ def _validate_broker_load_reference(
         return out, warnings, fc
 
     trimmed = _WHITESPACE_RE.sub(" ", ref).strip()
+    trimmed = _strip_load_reference_field_label(trimmed)
     if not trimmed:
         warnings.extend(
             _null_field(

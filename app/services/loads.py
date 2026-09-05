@@ -25,6 +25,7 @@ from app.models.trailer import Trailer
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services import dispatch_trips as dispatch_trips_service
+from app.services.load_operational_references import sanitize_load_operational_references
 from app.utils.pagination import paginate
 
 
@@ -140,11 +141,14 @@ async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_numb
 
 
 def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
-    """Exclude stops from data passed to Load model."""
+    """Exclude stops from data passed to Load model. Map API ``references`` → ORM ``operational_references``."""
     if isinstance(payload, LoadCreate):
-        data = payload.model_dump(exclude={"stops"})
-    else:
-        data = payload.model_dump(exclude_unset=True, exclude={"stops", "expected_concurrency_version"})
+        data = payload.model_dump(exclude={"stops", "references"})
+        data["operational_references"] = sanitize_load_operational_references(payload.references)
+        return data
+    data = payload.model_dump(exclude_unset=True, exclude={"stops", "expected_concurrency_version", "references"})
+    if "references" in payload.model_fields_set:
+        data["operational_references"] = sanitize_load_operational_references(payload.references or [])
     return data
 
 

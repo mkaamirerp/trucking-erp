@@ -18,6 +18,8 @@ PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC = 4.0
 PDF417_APPLICANT_THREAD_TIMEOUT_SEC = (
     PDF417_APPLICANT_FAST_BUDGET_SEC + PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC + 0.75
 )
+# LocalAverage on large stills can overrun the remaining slice; do not start it below this.
+PDF417_LOCAL_AVERAGE_MIN_REMAINING_SEC = 0.75
 
 _FIELD_CODES = (
     "DAQ", "DCS", "DAC", "DAD", "DAA",
@@ -32,16 +34,19 @@ _FIELD_CODE_RE = re.compile("|".join(re.escape(c) for c in _FIELD_CODES))
 PDF417_INTAKE_METADATA_KEYS: frozenset[str] = frozenset({"field_sources", "pdf417_text"})
 
 _MAX_DEBUG_ATTEMPTS = 120
-# FAST (applicant): LocalAverage only — two passes; responsive UI.
+# FAST (applicant): GlobalHistogram first (Ontario-back winner), LocalAverage after.
 _ZXING_TRIES_FAST = (
-    (zxingcpp.Binarizer.LocalAverage, True),
-    (zxingcpp.Binarizer.LocalAverage, False),
-)
-# THOROUGH: add GlobalHistogram for hard photos / ops / debug script.
-_ZXING_TRIES_THOROUGH = (
-    (zxingcpp.Binarizer.LocalAverage, True),
-    (zxingcpp.Binarizer.LocalAverage, False),
     (zxingcpp.Binarizer.GlobalHistogram, False),
+    (zxingcpp.Binarizer.GlobalHistogram, True),
+    (zxingcpp.Binarizer.LocalAverage, False),
+    (zxingcpp.Binarizer.LocalAverage, True),
+)
+# THOROUGH: same cheap-first order so the 4s budget can reach GlobalHistogram.
+_ZXING_TRIES_THOROUGH = (
+    (zxingcpp.Binarizer.GlobalHistogram, False),
+    (zxingcpp.Binarizer.GlobalHistogram, True),
+    (zxingcpp.Binarizer.LocalAverage, False),
+    (zxingcpp.Binarizer.LocalAverage, True),
 )
 
 
@@ -83,6 +88,8 @@ class Pdf417DecodeMeta:
     thorough_elapsed_ms: float | None = None
     fast_candidate_count: int = 0
     thorough_candidate_count: int = 0
+    source_width: int | None = None
+    source_height: int | None = None
 
     def as_debug_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +102,8 @@ class Pdf417DecodeMeta:
             "decode_thorough_elapsed_ms": self.thorough_elapsed_ms,
             "decode_fast_candidate_count": self.fast_candidate_count,
             "decode_thorough_candidate_count": self.thorough_candidate_count,
+            "source_width": self.source_width,
+            "source_height": self.source_height,
         }
 
 
@@ -236,6 +245,67 @@ def _budget_hit(deadline_mon: float | None) -> bool:
     return deadline_mon is not None and time.monotonic() >= deadline_mon
 
 
+def _remaining_sec(deadline_mon: float | None) -> float | None:
+    if deadline_mon is None:
+        return None
+    return deadline_mon - time.monotonic()
+
+
+def _is_expensive_binarizer(binarizer: zxingcpp.Binarizer) -> bool:
+    return binarizer == zxingcpp.Binarizer.LocalAverage
+
+
+def _should_skip_expensive(binarizer: zxingcpp.Binarizer, deadline_mon: float | None) -> bool:
+    if not _is_expensive_binarizer(binarizer):
+        return False
+    remaining = _remaining_sec(deadline_mon)
+    if remaining is None:
+        return False
+    return remaining < PDF417_LOCAL_AVERAGE_MIN_REMAINING_SEC
+
+
+def _record_attempt(
+    attempts: list[dict[str, Any]],
+    *,
+    phase: str,
+    decoder: str,
+    ok: bool,
+    loop_t0: float,
+    elapsed_ms: float = 0.0,
+    candidate: str | None = None,
+    binarizer: str | None = None,
+    invert: bool | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    decoded_char_count: int = 0,
+    skipped_due_to_budget: bool = False,
+    note: str | None = None,
+) -> None:
+    row: dict[str, Any] = {
+        "phase": phase,
+        "decoder": decoder,
+        "engine": decoder,
+        "ok": ok,
+        "elapsed_ms": round(elapsed_ms, 1),
+        "cumulative_ms": round((time.monotonic() - loop_t0) * 1000, 1),
+        "decoded_char_count": decoded_char_count if ok else 0,
+        "skipped_due_to_budget": skipped_due_to_budget,
+    }
+    if candidate is not None:
+        row["candidate"] = candidate
+    if binarizer is not None:
+        row["binarizer"] = binarizer
+    if invert is not None:
+        row["invert"] = invert
+    if width is not None:
+        row["width"] = width
+    if height is not None:
+        row["height"] = height
+    if note is not None:
+        row["note"] = note
+    attempts.append(row)
+
+
 def _decode_loop(
     candidates: list[tuple[str, Image.Image]],
     attempts: list[dict[str, Any]],
@@ -244,34 +314,101 @@ def _decode_loop(
     zxing_tries: tuple[tuple[zxingcpp.Binarizer, bool], ...],
     run_pyzbar: bool,
     phase: str,
+    loop_t0: float | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """Return ``(text, winning_candidate, engine)``."""
+    t0 = loop_t0 if loop_t0 is not None else time.monotonic()
     for cname, pil_im in candidates:
         if _budget_hit(deadline_mon):
-            attempts.append({"phase": phase, "engine": "none", "ok": False, "note": "budget_exhausted"})
+            _record_attempt(
+                attempts,
+                phase=phase,
+                decoder="none",
+                ok=False,
+                loop_t0=t0,
+                skipped_due_to_budget=True,
+                note="budget_exhausted",
+            )
             break
+        cw, ch = pil_im.size
         for binarizer, try_inv in zxing_tries:
             if _budget_hit(deadline_mon):
-                attempts.append({"phase": phase, "engine": "none", "ok": False, "note": "budget_exhausted"})
+                _record_attempt(
+                    attempts,
+                    phase=phase,
+                    decoder="none",
+                    ok=False,
+                    loop_t0=t0,
+                    candidate=cname,
+                    width=cw,
+                    height=ch,
+                    skipped_due_to_budget=True,
+                    note="budget_exhausted",
+                )
                 return None, None, None
+            if _should_skip_expensive(binarizer, deadline_mon):
+                _record_attempt(
+                    attempts,
+                    phase=phase,
+                    decoder="zxing",
+                    ok=False,
+                    loop_t0=t0,
+                    candidate=cname,
+                    binarizer=_binarizer_label(binarizer),
+                    invert=try_inv,
+                    width=cw,
+                    height=ch,
+                    skipped_due_to_budget=True,
+                    note="skipped_due_to_budget",
+                )
+                continue
+            t_att = time.monotonic()
             text = _zxing_read(pil_im, binarizer=binarizer, try_invert=try_inv)
-            attempts.append({
-                "phase": phase,
-                "candidate": cname,
-                "engine": "zxing",
-                "ok": bool(text),
-                "invert": try_inv,
-                "binarizer": _binarizer_label(binarizer),
-            })
+            _record_attempt(
+                attempts,
+                phase=phase,
+                decoder="zxing",
+                ok=bool(text),
+                loop_t0=t0,
+                elapsed_ms=(time.monotonic() - t_att) * 1000,
+                candidate=cname,
+                binarizer=_binarizer_label(binarizer),
+                invert=try_inv,
+                width=cw,
+                height=ch,
+                decoded_char_count=len(text) if text else 0,
+            )
             if text:
                 return text, cname, "zxing"
     if run_pyzbar:
         for cname, pil_im in candidates:
             if _budget_hit(deadline_mon):
-                attempts.append({"phase": phase, "engine": "pyzbar", "ok": False, "note": "budget_exhausted"})
+                _record_attempt(
+                    attempts,
+                    phase=phase,
+                    decoder="pyzbar",
+                    ok=False,
+                    loop_t0=t0,
+                    candidate=cname,
+                    skipped_due_to_budget=True,
+                    note="budget_exhausted",
+                )
                 break
+            cw, ch = pil_im.size
+            t_att = time.monotonic()
             text = _try_pyzbar_pdf417(pil_im)
-            attempts.append({"phase": phase, "candidate": cname, "engine": "pyzbar", "ok": bool(text)})
+            _record_attempt(
+                attempts,
+                phase=phase,
+                decoder="pyzbar",
+                ok=bool(text),
+                loop_t0=t0,
+                elapsed_ms=(time.monotonic() - t_att) * 1000,
+                candidate=cname,
+                width=cw,
+                height=ch,
+                decoded_char_count=len(text) if text else 0,
+            )
             if text:
                 return text, cname, "pyzbar"
     return None, None, None
@@ -341,6 +478,31 @@ def decode_pdf417_barcode_with_trace(
         attempts.append({"candidate": "__open__", "engine": "none", "ok": False, "error": type(exc).__name__})
         return None, Pdf417DecodeMeta(None, None, attempts, pipeline="open_error")
 
+    src_w, src_h = rgb.size
+
+    def _meta(
+        winner: str | None,
+        engine: str | None,
+        *,
+        pipeline: str,
+        fast_elapsed_ms: float | None = None,
+        thorough_elapsed_ms: float | None = None,
+        fast_candidate_count: int = 0,
+        thorough_candidate_count: int = 0,
+    ) -> Pdf417DecodeMeta:
+        return Pdf417DecodeMeta(
+            winner,
+            engine,
+            attempts,
+            pipeline=pipeline,
+            fast_elapsed_ms=fast_elapsed_ms,
+            thorough_elapsed_ms=thorough_elapsed_ms,
+            fast_candidate_count=fast_candidate_count,
+            thorough_candidate_count=thorough_candidate_count,
+            source_width=src_w,
+            source_height=src_h,
+        )
+
     if mode == "fast_only":
         t0 = time.monotonic()
         deadline = t0 + PDF417_APPLICANT_FAST_BUDGET_SEC
@@ -352,24 +514,17 @@ def decode_pdf417_barcode_with_trace(
             zxing_tries=_ZXING_TRIES_FAST,
             run_pyzbar=False,
             phase="fast",
+            loop_t0=t0,
         )
         elapsed_ms = (time.monotonic() - t0) * 1000
         if text:
-            return text, Pdf417DecodeMeta(
-                winner,
-                engine,
-                attempts,
-                pipeline="fast",
-                fast_elapsed_ms=elapsed_ms,
-                fast_candidate_count=len(fast_c),
+            return text, _meta(
+                winner, engine, pipeline="fast",
+                fast_elapsed_ms=elapsed_ms, fast_candidate_count=len(fast_c),
             )
-        return None, Pdf417DecodeMeta(
-            None,
-            None,
-            attempts,
-            pipeline="fast",
-            fast_elapsed_ms=elapsed_ms,
-            fast_candidate_count=len(fast_c),
+        return None, _meta(
+            None, None, pipeline="fast",
+            fast_elapsed_ms=elapsed_ms, fast_candidate_count=len(fast_c),
         )
 
     if mode == "applicant_two_phase":
@@ -383,21 +538,18 @@ def decode_pdf417_barcode_with_trace(
             zxing_tries=_ZXING_TRIES_FAST,
             run_pyzbar=False,
             phase="fast",
+            loop_t0=t_fast,
         )
         fast_ms = (time.monotonic() - t_fast) * 1000
         if text:
-            return text, Pdf417DecodeMeta(
-                winner,
-                engine,
-                attempts,
-                pipeline="fast",
-                fast_elapsed_ms=fast_ms,
-                fast_candidate_count=len(fast_c),
+            return text, _meta(
+                winner, engine, pipeline="fast",
+                fast_elapsed_ms=fast_ms, fast_candidate_count=len(fast_c),
             )
 
+        thorough_c = _enumerate_pdf417_image_candidates(rgb)
         t_th = time.monotonic()
         deadline_th = t_th + PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC
-        thorough_c = _enumerate_pdf417_image_candidates(rgb)
         text2, winner2, engine2 = _decode_loop(
             thorough_c,
             attempts,
@@ -405,28 +557,19 @@ def decode_pdf417_barcode_with_trace(
             zxing_tries=_ZXING_TRIES_THOROUGH,
             run_pyzbar=True,
             phase="thorough_fallback",
+            loop_t0=t_th,
         )
         thorough_ms = (time.monotonic() - t_th) * 1000
         if text2:
-            return text2, Pdf417DecodeMeta(
-                winner2,
-                engine2,
-                attempts,
-                pipeline="fast+thorough_fallback",
-                fast_elapsed_ms=fast_ms,
-                thorough_elapsed_ms=thorough_ms,
-                fast_candidate_count=len(fast_c),
-                thorough_candidate_count=len(thorough_c),
+            return text2, _meta(
+                winner2, engine2, pipeline="fast+thorough_fallback",
+                fast_elapsed_ms=fast_ms, thorough_elapsed_ms=thorough_ms,
+                fast_candidate_count=len(fast_c), thorough_candidate_count=len(thorough_c),
             )
-        return None, Pdf417DecodeMeta(
-            None,
-            None,
-            attempts,
-            pipeline="fast+thorough_fallback",
-            fast_elapsed_ms=fast_ms,
-            thorough_elapsed_ms=thorough_ms,
-            fast_candidate_count=len(fast_c),
-            thorough_candidate_count=len(thorough_c),
+        return None, _meta(
+            None, None, pipeline="fast+thorough_fallback",
+            fast_elapsed_ms=fast_ms, thorough_elapsed_ms=thorough_ms,
+            fast_candidate_count=len(fast_c), thorough_candidate_count=len(thorough_c),
         )
 
     # mode == "thorough" — ops / debug: full sweep, no time budget, pyzbar last
@@ -441,6 +584,7 @@ def decode_pdf417_barcode_with_trace(
             except Exception:
                 pass
 
+    t_th = time.monotonic()
     text, winner, engine = _decode_loop(
         candidates,
         attempts,
@@ -448,20 +592,15 @@ def decode_pdf417_barcode_with_trace(
         zxing_tries=_ZXING_TRIES_THOROUGH,
         run_pyzbar=True,
         phase="thorough",
+        loop_t0=t_th,
     )
     if text:
-        return text, Pdf417DecodeMeta(
-            winner,
-            engine,
-            attempts,
-            pipeline="thorough",
+        return text, _meta(
+            winner, engine, pipeline="thorough",
             thorough_candidate_count=len(candidates),
         )
-    return None, Pdf417DecodeMeta(
-        None,
-        None,
-        attempts,
-        pipeline="thorough",
+    return None, _meta(
+        None, None, pipeline="thorough",
         thorough_candidate_count=len(candidates),
     )
 

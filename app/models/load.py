@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, BigInteger, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, BigInteger, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -19,6 +21,10 @@ class Load(Base):
             ["customs_brokers.tenant_id", "customs_brokers.id"],
             ondelete="SET NULL",
             name="fk_loads_customs_broker_tenant",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(operational_references) = 'array'",
+            name="ck_loads_operational_references_is_array",
         ),
     )
 
@@ -56,6 +62,12 @@ class Load(Base):
     broker_contact_extension_snapshot: Mapped[str | None] = mapped_column(String(20), nullable=True)
     broker_contact_email_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
     broker_load_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    #: Persisted parse/workspace references collection. Public API field is ``references``.
+    operational_references: Mapped[list[Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
     #: Intake-only: how broker snapshot was chosen (exact_known_sender, domain, alias, fallback_tenant_default, …).
     broker_match_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     broker_match_confidence_tier: Mapped[str | None] = mapped_column(String(8), nullable=True)
@@ -106,6 +118,12 @@ class Load(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+    @property
+    def references(self) -> list[Any]:
+        """Public API mapping: ORM ``operational_references`` → response ``references``."""
+        val = self.operational_references
+        return val if isinstance(val, list) else []
 
     broker = relationship("Broker", back_populates="loads")
     broker_contact = relationship("BrokerContact", backref="loads")

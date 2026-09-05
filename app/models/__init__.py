@@ -8,7 +8,6 @@ from app.models.fleet_document import FleetDocument
 
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
-from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
 from app.models.driver_person_extension import DriverPersonExtension
 from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember
@@ -70,6 +69,7 @@ from app.models.email_ingestion import EmailThread, EmailMessage
 from app.models.email_intake_review import EmailIntakeReview, EmailIntakeReviewEvent
 from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_intake_qr_extraction import EmailIntakeQrExtraction
+from app.models.domain_event_outbox import DomainEventOutbox
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem

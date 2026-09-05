@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -81,7 +82,7 @@ async def test_openai_chat_json_schema_raw_200_returns_wire_json() -> None:
     post = AsyncMock(return_value=resp)
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         out = await openai_chat_json_schema_raw(
             api_key="sk-test",
             model="gpt-4o-mini",
@@ -102,6 +103,42 @@ async def test_openai_chat_json_schema_raw_200_returns_wire_json() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_chat_json_schema_raw_attaches_pdf_as_file_input() -> None:
+    wire = {"choices": [{"message": {"content": "{}"}}]}
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = wire
+    post = AsyncMock(return_value=resp)
+    mock_client = _mock_async_client(post)
+
+    with patch(
+        "app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient",
+        return_value=mock_client,
+    ):
+        await openai_chat_json_schema_raw(
+            api_key="k",
+            model="gpt-4o-mini",
+            system="system rules",
+            user_text="json rules and schema guidance",
+            schema={"type": "object"},
+            schema_name="load_schema",
+            input_file_bytes=b"%PDF-test-bytes",
+            input_filename="Armstrong.pdf",
+        )
+
+    content = post.await_args.kwargs["json"]["messages"][1]["content"]
+    assert content[0]["type"] == "file"
+    assert content[0]["file"]["filename"] == "Armstrong.pdf"
+    assert content[0]["file"]["file_data"] == (
+        "data:application/pdf;base64,"
+        + base64.b64encode(b"%PDF-test-bytes").decode("ascii")
+    )
+    assert content[1] == {
+        "type": "text",
+        "text": "json rules and schema guidance",
+    }
+
+
+@pytest.mark.asyncio
 async def test_openai_chat_json_schema_raw_400_json_schema_retries_fallback() -> None:
     resp400 = MagicMock()
     resp400.status_code = 400
@@ -115,7 +152,7 @@ async def test_openai_chat_json_schema_raw_400_json_schema_retries_fallback() ->
     post = AsyncMock(side_effect=[resp400, resp200])
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         out = await openai_chat_json_schema_raw(
             api_key="k",
             model="m",
@@ -141,7 +178,7 @@ async def test_openai_chat_json_schema_raw_non_fallback_400_raises() -> None:
     post = AsyncMock(return_value=resp)
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(httpx.HTTPStatusError):
             await openai_chat_json_schema_raw(
                 api_key="k",
@@ -162,7 +199,7 @@ async def test_openai_chat_json_schema_content_combines_raw_and_extract() -> Non
     post = AsyncMock(return_value=resp)
     mock_client = _mock_async_client(post)
 
-    with patch("app.services.openai_chat_json_schema.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient", return_value=mock_client):
         out = await openai_chat_json_schema_content(
             api_key="k",
             model="m",
@@ -176,8 +213,17 @@ async def test_openai_chat_json_schema_content_combines_raw_and_extract() -> Non
 
 
 def test_module_has_no_load_lab_import_path() -> None:
-    import app.services.openai_chat_json_schema as mod
+    import app.document_platform.capabilities.openai.chat_json_schema as mod
 
     src = open(mod.__file__, encoding="utf-8").read().lower()
     assert "load_lab" not in src
     assert "sqlalchemy" not in src
+
+
+def test_openai_capability_namespace_reexports_same_callables() -> None:
+    import app.document_platform.capabilities.openai.chat_json_schema as new
+    import app.services.openai_chat_json_schema as old
+
+    assert new.openai_chat_json_schema_raw is old.openai_chat_json_schema_raw
+    assert new.extract_chat_completion_content_json is old.extract_chat_completion_content_json
+    assert new.openai_chat_json_schema_content is old.openai_chat_json_schema_content

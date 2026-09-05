@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import Layout from "./components/Layout";
 import PayPeriodsPage from "./pages/PayPeriodsPage";
 import PayRunsPage from "./pages/PayRunsPage";
@@ -24,11 +25,11 @@ import TripWorkspacePage from "./pages/TripWorkspacePage";
 import TripContainerPage from "./pages/trip-container/TripContainerPage";
 import TripsListPage from "./pages/TripsListPage";
 import LoadLabPage from "./pages/LoadLabPage";
-import DriverOnboardingPage from "./pages/DriverOnboardingPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
 import PeopleWorkspacePage from "./pages/PeopleWorkspacePage";
 import OnboardingApplicantPage from "./pages/OnboardingApplicantPage";
+const DlCapturePage = lazy(() => import("./pages/DlCapturePage"));
 import ToolsDiagnosticsPage from "./pages/ToolsDiagnosticsPage";
 import AdminLayout from "./components/AdminLayout";
 import AdminCompanyProfilePage from "./pages/AdminCompanyProfilePage";
@@ -76,7 +77,6 @@ function App() {
     /^\/brokers/.test(location.pathname) ||
     /^\/loads/.test(location.pathname) ||
     /^\/trips/.test(location.pathname) ||
-    /^\/driver-onboarding/.test(location.pathname) ||
     /^\/operations/.test(location.pathname) ||
     /^\/admin/.test(location.pathname) ||
     /^\/profile/.test(location.pathname);
@@ -142,6 +142,14 @@ function App() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/accept-invite" element={<AcceptInvitePage />} />
       <Route path="/onboarding" element={<OnboardingApplicantPage />} />
+      <Route
+        path="/dl-capture/:token"
+        element={
+          <Suspense fallback={<div className="min-h-screen bg-gray-900 p-6 text-gray-200">Loading…</div>}>
+            <DlCapturePage />
+          </Suspense>
+        }
+      />
       <Route path="/company-setup" element={<CompanySetupPage />} />
       <Route path="/account-setup" element={<CompanySetupPage />} />
       <Route
@@ -287,14 +295,6 @@ function App() {
         element={
           <Layout>
             <DocumentsPage />
-          </Layout>
-        }
-      />
-      <Route
-        path="/driver-onboarding"
-        element={
-          <Layout>
-            <DriverOnboardingPage />
           </Layout>
         }
       />

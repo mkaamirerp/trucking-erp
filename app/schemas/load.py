@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.broker import BrokerContactOut
 from app.schemas.customs_broker import CustomsBrokerSummary, LoadCustomsSnapshotOut
+from app.schemas.load_document_parse import LoadParseReferenceItem
 
 DISPATCH_STATUSES = {
     "draft", "ready",
@@ -96,6 +97,8 @@ class LoadBase(BaseModel):
     customer_rate: Optional[float] = Field(default=None, ge=0)
     miles: Optional[int] = Field(default=None, ge=0)
     status: str = Field(default="draft", max_length=32)
+    #: Public API collection. ORM/DB column is ``operational_references``.
+    references: list[LoadParseReferenceItem] = Field(default_factory=list, max_length=40)
 
     @field_validator("status")
     @classmethod
@@ -116,6 +119,8 @@ class LoadCreate(LoadBase):
             for k in ("trip_number", "active_dispatch_trip_id", "active_trip_id"):
                 if k in data:
                     raise ValueError(f"{k} is read-only (set by dispatch trip allocation)")
+            if "operational_references" in data:
+                raise ValueError("Use 'references'; operational_references is not a public API field")
         return data
 
 
@@ -151,6 +156,9 @@ class LoadUpdate(BaseModel):
     miles: Optional[int] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, max_length=32)
     stops: Optional[Sequence[LoadStopCreate]] = None
+    #: Present in model_fields_set only when the client sent ``references``.
+    #: Omitted → preserve DB value; ``[]`` → clear; list → replace. Null is rejected.
+    references: Optional[list[LoadParseReferenceItem]] = Field(default=None, max_length=40)
 
     @model_validator(mode="before")
     @classmethod
@@ -159,6 +167,10 @@ class LoadUpdate(BaseModel):
             for k in ("trip_number", "active_dispatch_trip_id", "active_trip_id"):
                 if k in data:
                     raise ValueError(f"{k} is read-only (set by dispatch trip allocation)")
+            if "operational_references" in data:
+                raise ValueError("Use 'references'; operational_references is not a public API field")
+            if "references" in data and data["references"] is None:
+                raise ValueError("references cannot be null; send [] to clear")
         return data
 
     @field_validator("status")
@@ -244,3 +256,14 @@ class LoadResponse(LoadBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_operational_references_from_dict(cls, data):
+        """Dict input: copy ORM column name to public ``references``; never expose both."""
+        if isinstance(data, dict):
+            if "references" not in data:
+                raw = data.get("operational_references")
+                data = {**data, "references": raw if isinstance(raw, list) else []}
+            data.pop("operational_references", None)
+        return data

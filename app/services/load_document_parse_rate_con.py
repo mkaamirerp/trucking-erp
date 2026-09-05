@@ -2,7 +2,10 @@
 
 Wired as the product ``parse_pdf_bytes_to_load_document_response`` implementation.
 Does **not** embed PRODUCT_PARSE_DIAGNOSTICS or run semantic guardrail repairs.
-OCR is not implemented — OCR-required PDFs return a controlled response without OpenAI.
+
+Digital PDFs: original bytes + existing v2 JSON rules/schema → OpenAI (unchanged).
+Image-only/scanned PDFs: OCR pages, then OCR text + the same JSON rules/schema → OpenAI
+(no original PDF attachment). Mixed PDFs remain blocked.
 """
 
 from __future__ import annotations
@@ -20,16 +23,19 @@ from app.schemas.load_document_parse import (
     LoadDocumentParseResponse,
     LoadParseDocumentMeta,
     LoadParseExtractedFields,
-    ParseDocumentSemanticModelOutput,
 )
+from app.schemas.load_document_parse_semantic import ParseDocumentSemanticModelOutput
 from app.services.load_document_parse_openai import parse_document_openai_chat_json_schema
 from app.services.load_parser_mechanical_validation import apply_load_parser_mechanical_validation
+from app.services.load_parser_semantic_to_product import map_semantic_extracted_to_product
 from app.services.load_parser_openai_handoff_v2 import (
     build_load_rate_con_openai_handoff_v2_payload,
     build_v2_openai_system_prompt,
     build_v2_openai_user_message,
 )
-from app.services.load_parser_pdf_acquisition import acquire_load_parser_pdf_pages
+from app.services.load_parser_pdf_acquisition import PDF_SCANNED, acquire_load_parser_pdf_pages
+from app.services.load_parser_pdf_ocr import ocr_load_parser_pdf_pages
+from app.services.load_parser_pdf_safety import validate_load_parser_pdf
 from app.services.load_parser_tenant_identity_exclusion import (
     get_load_parser_tenant_identity_exclusion,
 )
@@ -39,9 +45,10 @@ _PARSE_PATH = "load_rate_con_v2"
 _SCHEMA_NAME = "load_document_parse_guarded_truckerjson_v1"
 _SKIPPED_WARNING = "[rate_con_v2] OpenAI client not supplied; extraction skipped."
 _OCR_REQUIRED_WARNING = (
-    "ocr_required: one or more PDF pages lack usable embedded text; "
-    "OCR is not implemented yet — semantic parse was not attempted."
+    "ocr_required: mixed digital/scanned PDF; OCR fallback applies only to "
+    "image-only PDFs with no usable embedded text — semantic parse was not attempted."
 )
+_OCR_FAILED_WARNING = "ocr_failed: image-only PDF could not be OCR'd — semantic parse was not attempted."
 _EMPTY_EXCLUSION: dict[str, Any] = {
     "names": [],
     "mc_numbers": [],
@@ -66,6 +73,7 @@ async def parse_pdf_bytes_to_load_document_response(
     _ = forensic_enabled
     fn = (filename or "upload.pdf")[:512]
 
+    validate_load_parser_pdf(pdf_bytes)
     acquisition = acquire_load_parser_pdf_pages(pdf_bytes)
     page_objs = list(acquisition.get("pages") or [])
     usable_texts = [
@@ -81,7 +89,7 @@ async def parse_pdf_bytes_to_load_document_response(
     raw_text = "\n".join(usable_texts)
     base_warnings = list(acquisition.get("warnings") or [])
 
-    if acquisition.get("requires_ocr"):
+    if acquisition.get("requires_ocr") and acquisition.get("pdf_type") != PDF_SCANNED:
         return LoadDocumentParseResponse(
             document=LoadParseDocumentMeta(filename=fn),
             extracted=LoadParseExtractedFields(),
@@ -100,6 +108,17 @@ async def parse_pdf_bytes_to_load_document_response(
                 ],
                 "semantic_outcome": "blocked_ocr_required",
             },
+        )
+
+    if acquisition.get("pdf_type") == PDF_SCANNED:
+        return await _parse_scanned_image_with_ocr(
+            db,
+            tenant_id=int(tenant_id),
+            pdf_bytes=pdf_bytes,
+            filename=fn,
+            acquisition=acquisition,
+            base_warnings=base_warnings,
+            openai_chat_json_schema=openai_chat_json_schema,
         )
 
     exclusion, excl_warnings = await _load_tenant_identity_exclusion(
@@ -142,6 +161,8 @@ async def parse_pdf_bytes_to_load_document_response(
         user_text=build_v2_openai_user_message(handoff),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
+        input_file_bytes=pdf_bytes,
+        input_filename=fn,
     )
 
     response = _map_semantic_payload_to_response(
@@ -151,6 +172,114 @@ async def parse_pdf_bytes_to_load_document_response(
         acquisition=acquisition,
         extra_warnings=base_warnings,
     )
+    response = apply_load_parser_mechanical_validation(
+        response,
+        tenant_identity_exclusion=exclusion,
+        page_texts=[str(p.get("text") or "") for p in handoff_pages],
+    )
+    return await _canonicalize_broker_snapshot_from_tenant_registry(
+        db, tenant_id=int(tenant_id), response=response
+    )
+
+
+async def _parse_scanned_image_with_ocr(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    pdf_bytes: bytes,
+    filename: str,
+    acquisition: dict[str, Any],
+    base_warnings: list[str],
+    openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None,
+) -> LoadDocumentParseResponse:
+    """Image-only PDF: OCR pages, then same v2 JSON rules/schema → OpenAI (no PDF bytes)."""
+    ocr_pages, ocr_warnings = ocr_load_parser_pdf_pages(pdf_bytes)
+    warnings = list(base_warnings) + list(ocr_warnings)
+    if not ocr_pages:
+        return LoadDocumentParseResponse(
+            document=LoadParseDocumentMeta(filename=filename),
+            extracted=LoadParseExtractedFields(),
+            raw_text="",
+            warnings=warnings + [_OCR_FAILED_WARNING],
+            field_confidence={},
+            context={
+                "parse_path": _PARSE_PATH,
+                "requires_ocr": True,
+                "pdf_type": acquisition.get("pdf_type"),
+                "page_count": acquisition.get("page_count"),
+                "ocr_engine": "tesseract+pdftoppm",
+                "semantic_outcome": "ocr_failed",
+            },
+        )
+
+    handoff_pages = [
+        {
+            "page_number": int(p.get("page_number") or i + 1),
+            "text": str(p.get("text") or ""),
+        }
+        for i, p in enumerate(ocr_pages)
+    ]
+    raw_text = "\n".join(str(p.get("text") or "") for p in handoff_pages)
+
+    exclusion, excl_warnings = await _load_tenant_identity_exclusion(
+        tenant_db=db, tenant_id=int(tenant_id)
+    )
+    warnings.extend(excl_warnings)
+
+    handoff = build_load_rate_con_openai_handoff_v2_payload(
+        tenant_identity_exclusion=exclusion,
+        pages=handoff_pages,
+        filename=filename,
+        extraction_method="product_pdf_ocr",
+        content_type="application/pdf",
+        size_bytes=len(pdf_bytes),
+        acquisition_method="scanned_image_ocr",
+    )
+
+    api_key = (settings.openai_api_key or "").strip()
+    if openai_chat_json_schema is None and not api_key:
+        return LoadDocumentParseResponse(
+            document=LoadParseDocumentMeta(filename=filename),
+            extracted=LoadParseExtractedFields(),
+            raw_text=raw_text,
+            warnings=warnings + [_SKIPPED_WARNING],
+            field_confidence={},
+            context={
+                "parse_path": _PARSE_PATH,
+                "requires_ocr": True,
+                "pdf_type": acquisition.get("pdf_type"),
+                "page_count": acquisition.get("page_count"),
+                "ocr_engine": "tesseract+pdftoppm",
+                "semantic_outcome": "skipped_missing_client",
+            },
+        )
+
+    client = openai_chat_json_schema or parse_document_openai_chat_json_schema
+    ai_payload = await client(
+        api_key=api_key,
+        model=(settings.openai_extraction_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
+        system=build_v2_openai_system_prompt(),
+        user_text=build_v2_openai_user_message(handoff),
+        schema=ParseDocumentSemanticModelOutput.model_json_schema(),
+        schema_name=_SCHEMA_NAME,
+        input_file_bytes=None,
+        input_filename=filename,
+    )
+
+    response = _map_semantic_payload_to_response(
+        filename=filename,
+        raw_text=raw_text,
+        ai_payload=ai_payload,
+        acquisition=acquisition,
+        extra_warnings=warnings,
+    )
+    payload = response.model_dump(mode="json")
+    context = dict(payload.get("context") or {})
+    context["requires_ocr"] = True
+    context["ocr_engine"] = "tesseract+pdftoppm"
+    context["semantic_input"] = "ocr_text"
+    payload["context"] = context
+    response = LoadDocumentParseResponse.model_validate(payload)
     response = apply_load_parser_mechanical_validation(
         response,
         tenant_identity_exclusion=exclusion,
@@ -209,26 +338,21 @@ def _map_semantic_payload_to_response(
     if classification_reasoning:
         context["classification_reasoning"] = str(classification_reasoning)[:2000]
 
-    payload["document"] = payload.get("document") or {"filename": filename[:512]}
-    if not isinstance(payload.get("raw_text"), str):
-        payload["raw_text"] = raw_text
-    payload["extracted"] = payload.get("extracted") or {}
-    payload["warnings"] = list(extra_warnings) + list(payload.get("warnings") or [])
-    payload["field_confidence"] = dict(payload.get("field_confidence") or {})
-    payload["context"] = context
+    doc_meta = payload.get("document") or {"filename": filename[:512]}
+    if not isinstance(doc_meta, dict):
+        doc_meta = {"filename": filename[:512]}
+    product_extracted = map_semantic_extracted_to_product(payload.get("extracted"))
+    extracted_dump = _sanitize_extracted_references(product_extracted.model_dump(mode="json"))
 
-    if isinstance(payload["extracted"], dict):
-        payload["extracted"] = _sanitize_extracted_references(payload["extracted"])
-
-    response = LoadDocumentParseResponse.model_validate(payload)
-    return response.model_copy(
-        update={
-            "document": LoadParseDocumentMeta(filename=response.document.filename[:512]),
-            "extracted": LoadParseExtractedFields.model_validate(
-                response.extracted.model_dump(mode="json")
-            ),
-            "context": context,
-        }
+    return LoadDocumentParseResponse(
+        document=LoadParseDocumentMeta(filename=str(doc_meta.get("filename") or filename)[:512]),
+        extracted=LoadParseExtractedFields.model_validate(extracted_dump),
+        raw_text=(
+            payload["raw_text"] if isinstance(payload.get("raw_text"), str) else raw_text
+        ),
+        warnings=list(extra_warnings) + list(payload.get("warnings") or []),
+        field_confidence=dict(payload.get("field_confidence") or {}),
+        context=context,
     )
 
 

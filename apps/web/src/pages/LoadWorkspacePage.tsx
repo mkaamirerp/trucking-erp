@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import Button from "@/components/Button";
-import StatusBadge from "@/components/StatusBadge";
 import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
@@ -37,6 +36,7 @@ import {
   type InboxMessageItem,
   type InboxThreadListItem,
   type Load,
+  type LoadDocumentParseReference,
   type LoadNote,
   type AuditEventRow,
   type Trailer,
@@ -44,9 +44,9 @@ import {
 } from "@/api";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
-import { formatRouteFromStops, sortedStops as sortStops } from "@/utils/loadStops";
+import { sortedStops as sortStops } from "@/utils/loadStops";
 import { DispatchAssignmentStrip } from "@/loadWorkspace/DispatchAssignmentStrip";
-import { LoadWorkspaceForm } from "@/loadWorkspace/LoadWorkspaceForm";
+import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
   baselineSignatureFromLoad,
   buildLoadPersistPayload,
@@ -105,36 +105,6 @@ function recipientPreview(raw: unknown): string {
     return values.length ? values.join(", ") : "—";
   }
   return "—";
-}
-
-function WorkspaceModeReadout({ mode }: { mode: LoadWorkspaceMode }) {
-  const items: { id: LoadWorkspaceMode; label: string }[] = [
-    { id: "manual", label: "Manual" },
-    { id: "intake", label: "Intake" },
-    { id: "detail", label: "Detail" },
-  ];
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Mode</span>
-      <div
-        className="inline-flex rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] p-0.5"
-        role="group"
-        aria-label="Workspace mode (determined by route, not clickable)"
-      >
-        {items.map((x) => (
-          <span
-            key={x.id}
-            className={`rounded px-2.5 py-1 text-[11px] font-semibold ${
-              mode === x.id ? "bg-amber-500 text-[var(--trk-btn-text)] shadow-sm" : "text-[var(--trk-text-muted)]"
-            }`}
-            aria-current={mode === x.id ? "true" : undefined}
-          >
-            {x.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function IntakeEmailRail({
@@ -222,8 +192,8 @@ function ReferenceTextRail({
   activeDocLine: number | null;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--trk-surface)]">
-      <div className="shrink-0 border-b border-[var(--trk-border)] px-3.5 py-2.5">
+    <div className="flex min-h-0 max-h-[200px] flex-col bg-[var(--trk-surface)]">
+      <div className="shrink-0 border-b border-[var(--trk-border)] px-3 py-2">
         <span className={wsSectionTitle}>{title}</span>
         <p className="mt-1 text-[11px] leading-snug text-[var(--trk-text-muted)]">{hint}</p>
       </div>
@@ -231,7 +201,7 @@ function ReferenceTextRail({
         {docLines.length ? (
           <div
             ref={docScrollRef}
-            className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
+            className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
           >
             {docLines.map((line, i) => (
               <div
@@ -247,8 +217,8 @@ function ReferenceTextRail({
             ))}
           </div>
         ) : (
-          <p className="rounded-md border border-dashed border-[var(--trk-border)] bg-[var(--trk-surface)]/50 px-3 py-6 text-center text-xs text-[var(--trk-text-muted)]">
-            Nothing to show yet — use internal notes in the form.
+          <p className="rounded-md border border-dashed border-[var(--trk-border)] bg-[var(--trk-bg)]/50 px-3 py-6 text-center text-xs text-[var(--trk-text-muted)]">
+            Nothing to show yet — add text in Notes below.
           </p>
         )}
       </div>
@@ -424,6 +394,7 @@ export default function LoadWorkspacePage() {
   const [brokerContactExtensionSnapshot, setBrokerContactExtensionSnapshot] = useState("");
   const [brokerContactEmailSnapshot, setBrokerContactEmailSnapshot] = useState("");
   const [brokerLoadReference, setBrokerLoadReference] = useState("");
+  const [loadReferences, setLoadReferences] = useState<LoadDocumentParseReference[]>([]);
   const [freightMode, setFreightMode] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
   const [trailerType, setTrailerType] = useState("");
@@ -533,6 +504,7 @@ export default function LoadWorkspacePage() {
     setBrokerContactExtensionSnapshot(l.broker_contact_extension_snapshot ?? "");
     setBrokerContactEmailSnapshot(l.broker_contact_email_snapshot ?? "");
     setBrokerLoadReference(l.broker_load_reference ?? "");
+    setLoadReferences(Array.isArray(l.references) ? l.references : []);
     setFreightMode(l.mode ?? "");
     setEquipmentType(l.equipment_type ?? "");
     setTrailerType(l.trailer_type ?? "");
@@ -569,6 +541,7 @@ export default function LoadWorkspacePage() {
           brokerContactExtensionSnapshot,
           brokerContactEmailSnapshot,
           brokerLoadReference,
+          loadReferences,
           mode: freightMode,
           equipmentType,
           trailerType,
@@ -600,6 +573,7 @@ export default function LoadWorkspacePage() {
       brokerContactExtensionSnapshot,
       brokerContactEmailSnapshot,
       brokerLoadReference,
+      loadReferences,
       freightMode,
       equipmentType,
       trailerType,
@@ -695,6 +669,7 @@ export default function LoadWorkspacePage() {
           setBrokerContactPhoneSnapshot,
           setBrokerContactEmailSnapshot,
           setBrokerLoadReference,
+          setLoadReferences,
           setFreightMode,
           setEquipmentType,
           setTrailerType,
@@ -882,6 +857,7 @@ export default function LoadWorkspacePage() {
       brokerContactExtensionSnapshot,
       brokerContactEmailSnapshot,
       brokerLoadReference,
+      loadReferences,
       mode: freightMode,
       equipmentType,
       trailerType,
@@ -1290,16 +1266,9 @@ export default function LoadWorkspacePage() {
   }
 
   const confirmed = Boolean(load?.document_snapshot_confirmed_at);
-  const routeSubtitle = load ? formatRouteFromStops(load.stops) : "—";
   const hasActiveDispatchTrip = load?.active_dispatch_trip_id != null;
 
   const lidLabel = workspaceMode === "manual" ? "#NEW" : load ? `#${load.id}` : "#—";
-  const headerTitle =
-    workspaceMode === "manual"
-      ? "New load"
-      : `${loadNumber || load!.load_number || "Load"}${
-          brokerNameSnapshot.trim() ? ` · ${brokerNameSnapshot.trim()}` : ""
-        }`;
   const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
   const toolBtnSecondary =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
@@ -1310,6 +1279,7 @@ export default function LoadWorkspacePage() {
       status, loadNumber, brokerId, brokerContactId,
       brokerNameSnapshot, brokerContactNameSnapshot, brokerContactPhoneSnapshot,
       brokerContactExtensionSnapshot, brokerContactEmailSnapshot, brokerLoadReference,
+      loadReferences,
       mode: freightMode, equipmentType, trailerType, trailerSize,
       commodity, estimatedWeight, hazmat, temperatureRequirement, palletCaseCount,
       rate, customerRate, miles,
@@ -1324,9 +1294,9 @@ export default function LoadWorkspacePage() {
 
     const checks: Array<{ label: string; snapKey: keyof Load; formKey: string; money?: boolean }> = [
       { label: "Status",        snapKey: "status",                 formKey: "status" },
-      { label: "Load #",        snapKey: "load_number",            formKey: "load_number" },
+      { label: "TruckERP ID",   snapKey: "load_number",            formKey: "load_number" },
       { label: "Broker",        snapKey: "broker_name_snapshot",   formKey: "broker_name_snapshot" },
-      { label: "Broker ref",    snapKey: "broker_load_reference",  formKey: "broker_load_reference" },
+      { label: "Load Number",   snapKey: "broker_load_reference",  formKey: "broker_load_reference" },
       { label: "Rate",          snapKey: "rate",                   formKey: "rate",          money: true },
       { label: "Customer rate", snapKey: "customer_rate",          formKey: "customer_rate", money: true },
       { label: "Miles",         snapKey: "miles",                  formKey: "miles" },
@@ -1347,114 +1317,50 @@ export default function LoadWorkspacePage() {
         diffs.push({ label, server: fmt(serverVal, money), yours: fmt(formVal, money) });
       }
     }
+    const serverRefs = JSON.stringify(snap.references ?? []);
+    const formRefs = JSON.stringify(f.references ?? []);
+    if (serverRefs !== formRefs) {
+      diffs.push({ label: "References", server: serverRefs, yours: formRefs });
+    }
     return diffs;
   }
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--trk-bg)] text-[var(--trk-text)]">
       <header className="z-10 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
             <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
               ← Loads
             </button>
-            <div className="min-w-0 flex-1">
-              <div className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</div>
-              <h1 className="truncate text-[15px] font-semibold tracking-tight text-[var(--trk-text)]">{headerTitle}</h1>
-              {workspaceMode === "detail" && load ? (
-                <p className="mt-0.5 max-w-2xl text-[10px] leading-snug text-[var(--trk-text-muted)]">
-                  Load page: verify commercial data and readiness.{" "}
-                  <span className="font-medium text-[var(--trk-text)]">Trip workspace</span> owns driver/truck/trailer
-                  assignment — <span className="font-medium text-[var(--trk-text)]">Load.status</span> does not dispatch
-                  trips.
-                </p>
-              ) : null}
-              {workspaceMode === "detail" && load ? (
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--trk-text-muted)]">
-                  {load.trip_number?.trim() ? (
-                    <span>
-                      Trip <span className="font-mono text-[var(--trk-text-muted)]">{load.trip_number.trim()}</span>
-                    </span>
-                  ) : (
-                    <span className="italic">No trip number</span>
-                  )}
-                  {load.active_trip_id != null ? (
-                    <>
-                      <span>·</span>
-                      <Link
-                        to={OPS.TRIP_DETAIL(load.active_trip_id)}
-                        className="font-medium text-[var(--trk-heading)] hover:underline"
-                      >
-                        View / Assign on Trip
-                      </Link>
-                      <span className="text-[var(--trk-text-muted)]">
-                        Driver/truck/trailer assignment is managed on the trip workspace.
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span>·</span>
-                      <button
-                        type="button"
-                        disabled={createPlannedTripBusy}
-                        title="Creates the trip container and opens the trip workspace to assign equipment."
-                        onClick={() => void onCreatePlannedTrip()}
-                        className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--trk-heading)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {createPlannedTripBusy ? "Creating trip…" : "Create Planned Trip"}
-                      </button>
-                      <span className="text-[10px] text-[var(--trk-text-muted)]">
-                        (opens trip workspace — assign driver/truck/trailer there)
-                      </span>
-                    </>
-                  )}
-                  <span>·</span>
-                  <span>{hasActiveDispatchTrip ? "Dispatch linked" : "No dispatch trip"}</span>
-                  {routeSubtitle !== "—" ? (
-                    <>
-                      <span>·</span>
-                      <span className="max-w-[240px] truncate sm:max-w-md">{routeSubtitle}</span>
-                    </>
-                  ) : null}
-                  {(load.created_at || load.updated_at) && (
-                    <>
-                      <span>·</span>
-                      <span className="text-[10px] text-[var(--trk-text-muted)]">
-                        {load.created_at ? `Created ${new Date(load.created_at).toLocaleString()}` : ""}
-                        {load.created_at && load.updated_at ? " · " : ""}
-                        {load.updated_at ? `Updated ${new Date(load.updated_at).toLocaleString()}` : ""}
-                      </span>
-                    </>
-                  )}
-                </div>
-              ) : null}
-              {workspaceMode === "detail" && load && createPlannedTripError ? (
-                <p className="mt-1 text-[11px] text-red-700">{createPlannedTripError}</p>
-              ) : null}
-              {workspaceMode === "manual" ? (
-                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">
-                  New manual loads start as <span className="font-medium text-[var(--trk-text)]">draft</span>. Create saves
-                  and opens the load for edits — change status if needed.
-                </p>
-              ) : workspaceMode === "intake" ? (
-                <p className="mt-0.5 text-[11px] text-[var(--trk-text-muted)]">Source rail + save updates this load.</p>
-              ) : null}
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</span>
+              <h1 className="truncate text-[14px] font-semibold tracking-tight text-[var(--trk-heading)]">
+                {workspaceMode === "manual" ? "New load" : loadNumber || load?.load_number || "Load"}
+              </h1>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {workspaceMode !== "manual" && load ? <StatusBadge status={status} /> : null}
+              {workspaceMode !== "manual" && load ? (
+                <span className="rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
+                  {status || "draft"}
+                </span>
+              ) : (
+                <span className="rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
+                  draft
+                </span>
+              )}
+              {workspaceMode === "detail" ? (
+                <span className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-400">
+                  DETAIL
+                </span>
+              ) : null}
               {workspaceMode === "manual" ? (
-                <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]">
+                <span className="rounded bg-[var(--trk-btn-primary)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--trk-btn-text)]">
                   Manual
                 </span>
               ) : null}
               {workspaceMode === "intake" ? (
-                <span className="rounded border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800">
+                <span className="rounded border border-sky-800 bg-sky-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
                   Intake
-                </span>
-              ) : null}
-              {workspaceMode === "detail" ? (
-                <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
-                  Detail
                 </span>
               ) : null}
               {showDispatchAssignmentStrip ? (
@@ -1463,9 +1369,131 @@ export default function LoadWorkspacePage() {
                 </span>
               ) : null}
             </div>
-          </div>
-          <WorkspaceModeReadout mode={workspaceMode} />
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
+            Load directory
+          </button>
+          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.DISPATCH)}>
+            Dispatch
+          </button>
+          {workspaceMode === "intake" ? (
+            <button type="button" className={toolBtnSecondary} onClick={() => navigate(intakeQueueUrl)}>
+              Intake queue
+            </button>
+          ) : null}
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            aria-hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) void onParseWorkspacePdf(f);
+            }}
+          />
+          {canWorkspaceParsePdf ? (
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={saving || markReadyBusy || parseBusy || loading}
+              onClick={() => pdfInputRef.current?.click()}
+            >
+              {parseBusy ? "Parsing…" : "Upload & parse PDF"}
+            </Button>
+          ) : null}
+          {workspaceMode === "manual" ? (
+            <Button
+              variant="primary"
+              type="button"
+              disabled={saving || markReadyBusy}
+              onClick={() => void onCreate()}
+            >
+              {saving ? "Creating…" : "Create load"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="primary"
+                type="button"
+                disabled={saving || markReadyBusy}
+                onClick={() => void onSave()}
+              >
+                {saving ? "Saving…" : "Save load"}
+              </Button>
+              {showMarkReadyAction ? (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  className="!border-[var(--trk-btn-primary)] !bg-[var(--trk-btn-primary)] !text-[var(--trk-btn-text)] hover:!bg-amber-400"
+                  disabled={saving || markReadyBusy || loading || parseBusy}
+                  title="Saves your edits, then marks this load ready when broker, load reference, and pickup + delivery stops are set."
+                  onClick={() => void onMarkReady()}
+                >
+                  {markReadyBusy ? "Marking ready…" : "Mark ready"}
+                </Button>
+              ) : null}
+            </>
+          )}
+          {toolbarMessage ? (
+            <span
+              className={clsx(
+                "max-w-full text-[11px] sm:max-w-md",
+                workspaceToolbarToneClassName(toolbarMessage.tone),
+              )}
+            >
+              {toolbarMessage.text}
+            </span>
+          ) : null}
+            </div>
         </div>
+        {workspaceMode === "detail" && load ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-[var(--trk-border)] bg-[var(--trk-bg)] px-4 py-1.5 text-[11.5px] text-[var(--trk-text-muted)]">
+            <span>
+              <span className="font-medium text-[var(--trk-text)]">Trip</span>{" "}
+              {load.trip_number?.trim() ? (
+                <span className="font-mono">{load.trip_number.trim()}</span>
+              ) : (
+                "No trip number"
+              )}
+            </span>
+            <span className="text-[var(--trk-border-strong)]">·</span>
+            {load.active_trip_id != null ? (
+              <Link
+                to={OPS.TRIP_DETAIL(load.active_trip_id)}
+                className="font-semibold text-[var(--trk-heading)] hover:underline"
+              >
+                View / Assign on Trip →
+              </Link>
+            ) : (
+              <button
+                type="button"
+                disabled={createPlannedTripBusy}
+                title="Creates the trip container and opens the trip workspace to assign equipment."
+                onClick={() => void onCreatePlannedTrip()}
+                className="font-semibold text-[var(--trk-heading)] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {createPlannedTripBusy ? "Creating trip…" : "Create Planned Trip →"}
+              </button>
+            )}
+            <span className="text-[var(--trk-border-strong)]">·</span>
+            <span>{hasActiveDispatchTrip ? "Dispatch linked" : "No dispatch trip"}</span>
+            {(load.created_at || load.updated_at) && (
+              <>
+                <span className="text-[var(--trk-border-strong)]">·</span>
+                <span>
+                  {load.created_at ? `Created ${new Date(load.created_at).toLocaleString()}` : ""}
+                  {load.created_at && load.updated_at ? " · " : ""}
+                  {load.updated_at ? `Updated ${new Date(load.updated_at).toLocaleString()}` : ""}
+                </span>
+              </>
+            )}
+          </div>
+        ) : null}
+        {workspaceMode === "detail" && load && createPlannedTripError ? (
+          <p className="border-t border-[var(--trk-border)] px-4 py-1 text-[11px] text-red-700">{createPlannedTripError}</p>
+        ) : null}
         {serverConflict && workspaceMode !== "manual" ? (
           <div className="border-t border-amber-900/50 bg-amber-950/25 px-4 py-2.5">
             <div className="mx-auto flex max-w-[1600px] flex-wrap items-start justify-between gap-3">
@@ -1520,89 +1548,10 @@ export default function LoadWorkspacePage() {
         />
       ) : null}
 
+      {parseWarnings.length > 0 || (lastParseAppliedLabels && lastParseAppliedLabels.length > 0) ? (
       <div className="shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-4 py-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Workspace</span>
-          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
-            Load directory
-          </button>
-          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.DISPATCH)}>
-            Dispatch
-          </button>
-          {workspaceMode === "intake" ? (
-            <button type="button" className={toolBtnSecondary} onClick={() => navigate(intakeQueueUrl)}>
-              Intake queue
-            </button>
-          ) : null}
-          <span className="mx-1 hidden h-5 w-px bg-[var(--trk-border)] sm:inline-block" aria-hidden />
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Actions</span>
-          <input
-            ref={pdfInputRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            className="hidden"
-            aria-hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = "";
-              if (f) void onParseWorkspacePdf(f);
-            }}
-          />
-          {canWorkspaceParsePdf ? (
-            <Button
-              variant="secondary"
-              type="button"
-              disabled={saving || markReadyBusy || parseBusy || loading}
-              onClick={() => pdfInputRef.current?.click()}
-            >
-              {parseBusy ? "Parsing…" : "Upload & parse PDF"}
-            </Button>
-          ) : null}
-          {workspaceMode === "manual" ? (
-            <Button
-              variant="primary"
-              type="button"
-              disabled={saving || markReadyBusy}
-              onClick={() => void onCreate()}
-            >
-              {saving ? "Creating…" : "Create load"}
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="primary"
-                type="button"
-                disabled={saving || markReadyBusy}
-                onClick={() => void onSave()}
-              >
-                {saving ? "Saving…" : "Save load"}
-              </Button>
-              {showMarkReadyAction ? (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  disabled={saving || markReadyBusy || loading || parseBusy}
-                  title="Saves your edits, then marks this load ready when broker, load reference, and pickup + delivery stops are set."
-                  onClick={() => void onMarkReady()}
-                >
-                  {markReadyBusy ? "Marking ready…" : "Mark ready"}
-                </Button>
-              ) : null}
-            </>
-          )}
-          {toolbarMessage ? (
-            <span
-              className={clsx(
-                "ml-auto max-w-full text-[11px] sm:max-w-md",
-                workspaceToolbarToneClassName(toolbarMessage.tone),
-              )}
-            >
-              {toolbarMessage.text}
-            </span>
-          ) : null}
-        </div>
         {parseWarnings.length > 0 ? (
-          <div className="mx-auto max-w-[1600px] border-t border-[var(--trk-border)] px-4 py-2">
+          <div className="mx-auto max-w-[1600px] px-4 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-200/90">
               Parse notes
             </div>
@@ -1631,29 +1580,32 @@ export default function LoadWorkspacePage() {
           </div>
         ) : null}
       </div>
+      ) : null}
 
-      <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col overflow-hidden lg:flex-row">
-        <aside className="flex max-h-[38vh] min-h-0 shrink-0 flex-col border-b border-[var(--trk-border)] bg-[var(--trk-surface)] lg:max-h-none lg:w-[320px] lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]">
+      <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
+        <aside className="flex max-h-[42vh] min-h-0 flex-col gap-3 overflow-y-auto border-b border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 lg:sticky lg:top-0 lg:max-h-[calc(100vh-7rem)] lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]">
           {workspaceMode === "intake" && hasIntakeThread ? (
+            <div className="min-h-[160px] overflow-hidden rounded-lg border border-[var(--trk-border)]">
             <IntakeEmailRail
               threadId={intakeThreadId}
               loading={intakeLoading}
               error={intakeError}
               messages={intakeMessages}
             />
+            </div>
           ) : (
+            <div className="overflow-hidden rounded-lg border border-[var(--trk-border)]">
             <ReferenceTextRail
               title={workspaceMode === "manual" ? "Rate confirmation" : "Source document"}
               hint={
                 workspaceMode === "manual" ? (
                   <>
-                    Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code> from the form.
+                    Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
                     Tab fields to highlight lines.
                   </>
                 ) : (
                   <>
-                    Text from <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit under
-                    Notes in the form.
+                    Text from <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
                   </>
                 )
               }
@@ -1662,7 +1614,20 @@ export default function LoadWorkspacePage() {
               docLineRefs={docLineRefs}
               activeDocLine={activeDocLine}
             />
+            </div>
           )}
+          {sectionConfig.visible.includes("Notes") ? (
+            <LoadWorkspaceNotesPanel
+              internalNotes={internalNotes}
+              setInternalNotes={setInternalNotes}
+              showOperationalNotesTimeline={workspaceMode !== "manual"}
+              loadNotes={workspaceMode === "manual" ? [] : loadNotes}
+              newNoteBody={workspaceMode === "manual" ? "" : newNoteBody}
+              setNewNoteBody={workspaceMode === "manual" ? () => {} : setNewNoteBody}
+              onAddNote={workspaceMode === "manual" ? () => {} : () => void onAddNote()}
+              saving={saving || markReadyBusy}
+            />
+          ) : null}
         </aside>
 
         <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--trk-bg)] p-3 lg:p-4">
@@ -1797,6 +1762,7 @@ export default function LoadWorkspacePage() {
             newNoteBody={workspaceMode === "manual" ? "" : newNoteBody}
             setNewNoteBody={workspaceMode === "manual" ? () => {} : setNewNoteBody}
             onAddNote={workspaceMode === "manual" ? () => {} : () => void onAddNote()}
+            renderNotes={false}
             focusDoc={focusDoc}
             verificationTabIndex={verificationTabIndex}
             status={status}
@@ -1819,6 +1785,7 @@ export default function LoadWorkspacePage() {
             setBrokerContactEmailSnapshot={setBrokerContactEmailSnapshot}
             brokerLoadReference={brokerLoadReference}
             setBrokerLoadReference={setBrokerLoadReference}
+            loadReferences={loadReferences}
             freightMode={freightMode}
             setFreightMode={setFreightMode}
             equipmentType={equipmentType}

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   getPersonApplicationByOnboardingToken,
   getPersonApplicationFileThumbnail,
+  buildApplicantApplicationEventsUrl,
   uploadPersonApplicationDlFile,
   uploadPersonApplicationDocument,
   submitPersonApplication,
@@ -108,6 +109,54 @@ function resolveDlThumbFileId(docType: DocType, intake: Record<string, any>): st
 
 function hasStoredDlSide(docType: DocType, intake: Record<string, any>): boolean {
   return resolveDlThumbFileId(docType, intake) != null;
+}
+
+function dlUiStateFromIntake(intake: Record<string, any>, docType: DocType): DlUiState {
+  const meta = intake.files?.[docType];
+  if (meta?.dl_preprocess_status === "PROCESSED") return "SUCCESS";
+  if (meta?.dl_preprocess_status === "FAILED") return "FAILED";
+  if (hasStoredDlSide(docType, intake)) return "SUCCESS";
+  return "IDLE";
+}
+
+function applyApplicationDlRefresh(
+  data: PersonApplication,
+  token: string,
+  setPreviewUrl: Dispatch<SetStateAction<Record<DocType, string | null>>>,
+): { intake: Record<string, any>; dlState: Record<DocType, DlUiState> } {
+  const intake = (data.intake_payload as Record<string, any>) || {};
+  const dlState: Record<DocType, DlUiState> = {
+    CDL_FRONT: dlUiStateFromIntake(intake, "CDL_FRONT"),
+    CDL_BACK: dlUiStateFromIntake(intake, "CDL_BACK"),
+  };
+  void (async () => {
+    const updates: Partial<Record<DocType, string>> = {};
+    for (const docType of ["CDL_FRONT", "CDL_BACK"] as DocType[]) {
+      const fid = resolveDlThumbFileId(docType, intake);
+      if (!fid) continue;
+      try {
+        const url = await getPersonApplicationFileThumbnail({ appId: data.id, fileId: fid, onboardingToken: token });
+        updates[docType] = url;
+      } catch {
+        /* preview optional */
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      setPreviewUrl((prev) => {
+        const next = { ...prev };
+        (["CDL_FRONT", "CDL_BACK"] as DocType[]).forEach((d) => {
+          const u = updates[d];
+          if (u != null) {
+            const old = prev[d];
+            if (old?.startsWith("blob:")) URL.revokeObjectURL(old);
+            next[d] = u;
+          }
+        });
+        return next;
+      });
+    }
+  })();
+  return { intake, dlState };
 }
 
 function parseOnboardingStep(raw: unknown): Step | null {
@@ -305,6 +354,8 @@ export default function OnboardingApplicantPage() {
   const [agree2, setAgree2] = useState(false);
   const [agree3, setAgree3] = useState(false);
 
+  const resumeDocsOnly = documentResumeActive && submitted;
+
   // When Next is clicked and validation fails, show red borders on missing/wrong fields
   const [showValidationStep0, setShowValidationStep0] = useState(false);
   const [showValidationStep1, setShowValidationStep1] = useState(false);
@@ -347,8 +398,8 @@ export default function OnboardingApplicantPage() {
           return { CDL_FRONT: null, CDL_BACK: null };
         });
         setDlState({
-          CDL_FRONT: hasStoredDlSide("CDL_FRONT", intake) ? "SUCCESS" : "IDLE",
-          CDL_BACK: hasStoredDlSide("CDL_BACK", intake) ? "SUCCESS" : "IDLE",
+          CDL_FRONT: dlUiStateFromIntake(intake, "CDL_FRONT"),
+          CDL_BACK: dlUiStateFromIntake(intake, "CDL_BACK"),
         });
         setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
         if (typeof intake.agree_info_accurate === "boolean") setAgree1(intake.agree_info_accurate);
@@ -418,6 +469,51 @@ export default function OnboardingApplicantPage() {
   const sources = useMemo(() => (intake.field_sources || {}) as Record<string, any>, [intake]);
   const edited = useMemo(() => (intake.user_edited_fields || {}) as Record<string, boolean>, [intake]);
 
+  function handlePhoneApplicationUpdated(data: PersonApplication) {
+    setApp(data);
+    const { dlState: nextDlState } = applyApplicationDlRefresh(data, token, setPreviewUrl);
+    setDlState(nextDlState);
+    setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
+    setForm((prev) =>
+      hydrateOnboardingFormFromIntake(prev, (data.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
+    );
+  }
+
+  const refreshInFlightRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+
+  const refreshApplicationOnce = useCallback(async (): Promise<void> => {
+    if (!token) return;
+    if (refreshInFlightRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshInFlightRef.current = true;
+    try {
+      do {
+        refreshPendingRef.current = false;
+        const data = await getPersonApplicationByOnboardingToken(token);
+        handlePhoneApplicationUpdated(data);
+      } while (refreshPendingRef.current);
+    } finally {
+      refreshInFlightRef.current = false;
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || resumeDocsOnly || step !== 0 || submitted) return;
+    const es = new EventSource(buildApplicantApplicationEventsUrl(token));
+    es.onopen = () => {
+      void refreshApplicationOnce();
+    };
+    es.addEventListener("application_changed", () => {
+      void refreshApplicationOnce();
+    });
+    return () => {
+      es.close();
+    };
+  }, [token, resumeDocsOnly, step, submitted, refreshApplicationOnce]);
+
   async function uploadDl(docType: DocType, file: File): Promise<boolean> {
     if (!app) return false;
     setError(null);
@@ -427,21 +523,27 @@ export default function OnboardingApplicantPage() {
       setDlState(s => s[docType] === "UPLOADING" ? { ...s, [docType]: "SCANNING" } : s);
       setDlMessage(m => ({
         ...m,
-        [docType]: docType === "CDL_BACK" ? "Reading PDF417 barcode..." : "Saving your licence...",
+        [docType]: docType === "CDL_BACK" ? "Processing licence and reading PDF417..." : "Processing licence image...",
       }));
     }, 600);
     try {
       const resp = await uploadPersonApplicationDlFile({ appId: app.id, onboardingToken: token, docType, file });
       window.clearTimeout(timer);
-      const ok = resp.file_id != null;
+      const fileMeta = (resp.intake_payload as any)?.files?.[docType];
+      const ok = resp.file_id != null && fileMeta?.dl_preprocess_status === "PROCESSED";
       setDlState(s => ({ ...s, [docType]: ok ? "SUCCESS" : "FAILED" }));
       setDlMessage(m => ({
         ...m,
-        [docType]: ok ? "" : "We could not save this corrected image. Please try again.",
+        [docType]: ok ? "" : "We could not process this licence image. Please try again.",
       }));
       setApp(prev => prev ? { ...prev, intake_payload: resp.intake_payload ?? prev.intake_payload } : prev);
       if (ok) {
-        const thumbFileId = resp.sanitized_file_id ?? (resp.intake_payload as any)?.files?.[docType]?.enh_file_id ?? resp.file_id!;
+        const files = (resp.intake_payload as any)?.files ?? {};
+        const thumbFileId =
+          files[docType]?.enh_file_id ??
+          files[`${docType}_PROCESSED`]?.storage_key ??
+          resp.sanitized_file_id ??
+          resp.file_id!;
         try {
           const thumbUrl = await getPersonApplicationFileThumbnail({ appId: app.id, fileId: thumbFileId, onboardingToken: token });
           setPreviewUrl(prev => {
@@ -463,10 +565,8 @@ export default function OnboardingApplicantPage() {
     }
   }
 
-  async function handleCorrectedDl(side: "front" | "back", blob: Blob, originalName: string): Promise<boolean> {
+  async function handleDlUploadSide(side: "front" | "back", file: File): Promise<boolean> {
     const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
-    const stem = originalName.replace(/\.[^.]+$/, "") || side;
-    const file = new File([blob], `${stem}_corrected.jpg`, { type: "image/jpeg" });
     return uploadDl(docType, file);
   }
 
@@ -841,8 +941,6 @@ export default function OnboardingApplicantPage() {
     );
   }
 
-  const resumeDocsOnly = documentResumeActive && submitted;
-
   return (
     <div className="min-h-screen bg-gray-900 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:24px_24px] p-4 sm:p-8">
       <div className="mx-auto max-w-3xl">
@@ -866,21 +964,6 @@ export default function OnboardingApplicantPage() {
         {/* ── STEP 1: LICENSE UPLOAD ── */}
         {!resumeDocsOnly && step === 0 && (
           <div className="space-y-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-black text-white uppercase tracking-wide">Driver's <span className="text-orange-400">License</span></h2>
-                <p className="text-gray-400 text-sm mt-1">Upload both sides of your current valid commercial driver's license</p>
-                <p className="text-amber-300 text-xs mt-2">Each file must not exceed 10 MB.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void resetSavedDraft()}
-                disabled={saving}
-                className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
-              >
-                {saving ? "Clearing..." : "Clear Saved Data"}
-              </button>
-            </div>
             <DLUploadStep
               frontPreviewUrl={previewUrl.CDL_FRONT}
               backPreviewUrl={previewUrl.CDL_BACK}
@@ -888,7 +971,14 @@ export default function OnboardingApplicantPage() {
               backState={dlState.CDL_BACK}
               frontMessage={dlMessage.CDL_FRONT}
               backMessage={dlMessage.CDL_BACK}
-              onConfirmSide={handleCorrectedDl}
+              onUploadSide={handleDlUploadSide}
+              onNormalizeError={(message) => setError(message)}
+              onboardingToken={token || undefined}
+              intake={intake}
+              disabled={saving || !app}
+              onRefreshApplication={refreshApplicationOnce}
+              onClearSavedData={() => void resetSavedDraft()}
+              saving={saving}
             />
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>
@@ -1027,22 +1117,27 @@ export default function OnboardingApplicantPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              {(() => {
-                const canGo = canProceedStep0();
-                return (
-                  <button
-                    onClick={() => saveAndNext(1)}
-                    disabled={saving}
-                    className="flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50 transition-all"
-                  >
-                    {saving ? "Saving…" : "Next: Personal Info →"}
-                  </button>
-                );
-              })()}
-              {!canProceedStep0() && (
-                <span className="text-amber-400 text-sm">Upload both license sides and fill all license details above to continue.</span>
-              )}
+            {!canProceedStep0() && (
+              <p className="text-amber-400 text-sm">
+                Upload both license sides and fill all license details above to continue.
+              </p>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void saveAndNext(1)}
+                disabled={
+                  saving ||
+                  dlState.CDL_FRONT === "UPLOADING" ||
+                  dlState.CDL_FRONT === "SCANNING" ||
+                  dlState.CDL_BACK === "UPLOADING" ||
+                  dlState.CDL_BACK === "SCANNING"
+                }
+                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Continue"}
+              </button>
             </div>
           </div>
         )}

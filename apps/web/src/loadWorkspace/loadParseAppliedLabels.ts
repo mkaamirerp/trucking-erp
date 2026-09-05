@@ -1,5 +1,6 @@
 import type { LoadDocumentParseExtracted } from "../api";
 import { filterMeaningfulParsedStops } from "./loadParseStops";
+import { VISIBLE_BROKER_LOAD_REFERENCE_LABEL } from "./loadOperationalReferences";
 
 export type WorkspacePdfParseResolutionSummary = {
   /** True iff `mcSnap || dotSnap` branch ran in `onParseWorkspacePdf`. */
@@ -52,7 +53,7 @@ export function buildWorkspacePdfParseAppliedLabels(
   }
 
   if (trimNonEmpty(ex.broker_load_reference)) {
-    labels.push("Broker load reference");
+    labels.push(VISIBLE_BROKER_LOAD_REFERENCE_LABEL);
   }
   if (trimNonEmpty(ex.mode)) {
     labels.push("Mode");
@@ -87,6 +88,10 @@ export function buildWorkspacePdfParseAppliedLabels(
 
   if (filterMeaningfulParsedStops(ex.stops ?? []).length > 0) {
     labels.push("Stops");
+  }
+
+  if ((ex.references ?? []).some((r) => (r.kind || "").trim() && (r.value || "").trim())) {
+    labels.push("References");
   }
 
   let notesBody = (rawText ?? "").trim() || "";

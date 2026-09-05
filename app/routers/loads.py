@@ -21,6 +21,7 @@ from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapsho
 from app.services import loads as loads_service
 from app.services import load_custody as custody_service
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
+from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
 
 router = APIRouter(prefix="/loads", tags=["loads"])
 
@@ -96,15 +97,21 @@ async def parse_load_workspace_document(
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
     if not data.startswith(b"%PDF-"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
-    return await parse_load_workspace_document_orchestrated(
-        data,
-        filename=file.filename or "upload.pdf",
-        email_thread_id=email_thread_id,
-        load_id=load_id,
-        openai_chat_json_schema=None,
-        tenant_id=tenant_id,
-        db=db,
-    )
+    try:
+        return await parse_load_workspace_document_orchestrated(
+            data,
+            filename=file.filename or "upload.pdf",
+            email_thread_id=email_thread_id,
+            load_id=load_id,
+            openai_chat_json_schema=None,
+            tenant_id=tenant_id,
+            db=db,
+        )
+    except UnsafeLoadPdfError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/{load_id}", response_model=LoadResponse)

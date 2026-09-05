@@ -84,6 +84,20 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
+    async def save_bytes(
+        self,
+        tenant_slug: str,
+        module: str,
+        entity_type: str,
+        entity_id: str | int,
+        body: bytes,
+        *,
+        filename_hint: str,
+        content_type: str | None = None,
+    ) -> StoredFile:
+        ...
+
+    @abstractmethod
     def read_bytes(
         self,
         storage_key: str,
@@ -181,6 +195,31 @@ class LocalStorageBackend(StorageBackend):
             content_type=file.content_type,
             file_size_bytes=size,
             sha256=h.hexdigest(),
+        )
+
+    async def save_bytes(
+        self,
+        tenant_slug: str,
+        module: str,
+        entity_type: str,
+        entity_id: str | int,
+        body: bytes,
+        *,
+        filename_hint: str,
+        content_type: str | None = None,
+    ) -> StoredFile:
+        original = _safe_filename(filename_hint)
+        ext = Path(original).suffix.lower()[:10] or ".bin"
+        key = build_storage_key(tenant_slug, module, entity_type, entity_id, f"{uuid.uuid4().hex}{ext}")
+        dest = self._storage_root() / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+        return StoredFile(
+            storage_key=key,
+            original_filename=original,
+            content_type=content_type,
+            file_size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
         )
 
     def read_bytes(
@@ -291,6 +330,33 @@ class S3StorageBackend(StorageBackend):
             content_type=file.content_type,
             file_size_bytes=len(body),
             sha256=h.hexdigest(),
+        )
+
+    async def save_bytes(
+        self,
+        tenant_slug: str,
+        module: str,
+        entity_type: str,
+        entity_id: str | int,
+        body: bytes,
+        *,
+        filename_hint: str,
+        content_type: str | None = None,
+    ) -> StoredFile:
+        original = _safe_filename(filename_hint)
+        ext = Path(original).suffix.lower()[:10] or ".bin"
+        key = build_storage_key(tenant_slug, module, entity_type, entity_id, f"{uuid.uuid4().hex}{ext}")
+        full_key = self._full_key(key, module, tenant_slug)
+        extra = {}
+        if content_type:
+            extra["ContentType"] = content_type
+        self._client.put_object(Bucket=self._bucket, Key=full_key, Body=body, **extra)
+        return StoredFile(
+            storage_key=key,
+            original_filename=original,
+            content_type=content_type,
+            file_size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
         )
 
     def read_bytes(
@@ -413,6 +479,60 @@ async def save_applicant_dl_upload(
     return await get_storage().save_upload(
         tenant_slug, "applicant_dl", "application", application_id, file
     )
+
+
+async def save_applicant_dl_processed_bytes(
+    tenant_slug: str,
+    application_id: int,
+    body: bytes,
+    *,
+    original_storage_key: str,
+) -> StoredFile:
+    stem = Path(original_storage_key).name.rsplit(".", 1)[0]
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "applicant_dl",
+        "application",
+        application_id,
+        body,
+        filename_hint=f"{stem}_processed.jpg",
+        content_type="image/jpeg",
+    )
+
+
+def purge_applicant_dl_application(tenant_slug: str, application_id: int) -> int:
+    """Delete all stored applicant DL files for one application (local or S3)."""
+    import shutil
+
+    backend = get_storage()
+    prefix = f"{tenant_slug}/applicant_dl/application/{application_id}/"
+    if isinstance(backend, LocalStorageBackend):
+        dir_path = backend._key_to_path(f"{prefix}__purge__", "applicant_dl", tenant_slug).parent
+        if not dir_path.is_dir():
+            return 0
+        count = sum(1 for p in dir_path.iterdir() if p.is_file())
+        shutil.rmtree(dir_path)
+        return count
+    if isinstance(backend, S3StorageBackend):
+        full_prefix = backend._full_key(prefix, "applicant_dl", tenant_slug)
+        deleted = 0
+        token: str | None = None
+        while True:
+            kwargs: dict = {"Bucket": backend._bucket, "Prefix": full_prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = backend._client.list_objects_v2(**kwargs)
+            contents = resp.get("Contents") or []
+            if not contents:
+                break
+            keys = [{"Key": item["Key"]} for item in contents]
+            backend._client.delete_objects(Bucket=backend._bucket, Delete={"Objects": keys})
+            deleted += len(keys)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+        return deleted
+    return 0
 
 
 async def save_applicant_doc_upload(

@@ -20,7 +20,8 @@ ENV TRUCKERP_APP_GIT_SHA=${TRUCKERP_APP_GIT_SHA}
 WORKDIR /app
 
 # Runtime libs and migration wrapper tooling: libpq5, curl, jq, ca-certificates,
-# postgresql-client for psql preflight checks, and git for repo drift proof.
+# postgresql-client for psql preflight checks, git for repo drift proof,
+# tesseract-ocr + poppler-utils for image-only PDF OCR fallback.
 # Workaround for CI/sandbox: allow insecure repos if apt GPG verification fails.
 RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         -o Acquire::AllowInsecureRepositories=true \
@@ -33,6 +34,8 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         git \
         postgresql-client \
         ca-certificates \
+        tesseract-ocr \
+        poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /wheels /wheels

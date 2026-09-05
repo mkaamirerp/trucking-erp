@@ -96,16 +96,30 @@ describe("buildWorkspacePdfParseAppliedLabels", () => {
     expect(labels).not.toContain("Stops");
   });
 
-  it("ignores references array (not mapped by handler)", () => {
+  it("includes References when parser extracted references", () => {
     const ex: LoadDocumentParseExtracted = {
       ...emptyEx(),
-      references: [{ kind: "PO", value: "X1" }],
+      references: [{ kind: "po_number", value: "X1" }],
     };
     const labels = buildWorkspacePdfParseAppliedLabels(ex, "", {
       mcOrDotAttempted: false,
       resolvedBrokerId: null,
       brokerContactMatched: false,
     });
-    expect(labels.length).toBe(0);
+    expect(labels).toEqual(["References"]);
+  });
+
+  it("uses Load Number for broker_load_reference applied label", () => {
+    const ex: LoadDocumentParseExtracted = {
+      ...emptyEx(),
+      broker_load_reference: "3872125-1",
+    };
+    const labels = buildWorkspacePdfParseAppliedLabels(ex, "", {
+      mcOrDotAttempted: false,
+      resolvedBrokerId: null,
+      brokerContactMatched: false,
+    });
+    expect(labels).toContain("Load Number");
+    expect(labels).not.toContain("Broker load reference");
   });
 });
