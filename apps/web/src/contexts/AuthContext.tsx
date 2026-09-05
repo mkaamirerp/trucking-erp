@@ -55,7 +55,6 @@ function isAppRoutePath(pathname: string): boolean {
     /^\/inbox/.test(pathname) ||
     /^\/fleet/.test(pathname) ||
     /^\/loads/.test(pathname) ||
-    /^\/driver-onboarding/.test(pathname) ||
     /^\/operations/.test(pathname) ||
     /^\/admin/.test(pathname)
   );

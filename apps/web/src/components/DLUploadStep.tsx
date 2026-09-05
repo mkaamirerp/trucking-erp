@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "react-qr-code";
-import { issueApplicantDlCaptureLink } from "../api";
+import { issueApplicantDlCaptureLink, emailApplicantDlCaptureLink } from "../api";
 import { normalizeDlUpload } from "../lib/normalizeDlUpload";
+import {
+  copyTextToClipboard,
+  NO_APPLICANT_EMAIL_MESSAGE,
+  parseApiErrorDetail,
+  QR_ISSUE_FAILED_MESSAGE,
+  applyEmailCaptureLinkResponse,
+  DL_CAPTURE_EMAIL_HANDOFF_ENABLED,
+} from "../lib/dlCaptureHandoff";
 
 type Side = "front" | "back";
 type UploadState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
@@ -20,24 +28,11 @@ type Props = {
   intake?: Record<string, unknown>;
   disabled?: boolean;
   onRefreshApplication?: () => Promise<void>;
-  onContinue?: () => void;
-  canContinue?: boolean;
+  onClearSavedData?: () => void;
   saving?: boolean;
 };
 
 type LocalPreviewState = { front: string | null; back: string | null };
-
-const inp =
-  "w-full rounded-lg border border-gray-600 bg-gray-700/50 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 mb-4">
-      <div className="w-1 h-5 bg-orange-500 rounded" />
-      <h3 className="text-orange-400 font-bold uppercase tracking-widest text-sm">{children}</h3>
-    </div>
-  );
-}
 
 function dlPreprocessStatus(intake: Record<string, unknown>, side: DocType): "MISSING" | "FAILED" | "PROCESSED" {
   const files = intake.files as Record<string, unknown> | undefined;
@@ -115,8 +110,7 @@ export default function DLUploadStep({
   intake = {},
   disabled = false,
   onRefreshApplication,
-  onContinue,
-  canContinue = false,
+  onClearSavedData,
   saving = false,
 }: Props) {
   const [localPreview, setLocalPreview] = useState<LocalPreviewState>({ front: null, back: null });
@@ -124,6 +118,11 @@ export default function DLUploadStep({
   const [issuing, setIssuing] = useState(false);
   const [checking, setChecking] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [issueError, setIssueError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const [emailNote, setEmailNote] = useState<string | null>(null);
+  const [emailFailed, setEmailFailed] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -145,15 +144,23 @@ export default function DLUploadStep({
   }, [backPreviewUrl, localPreview.back]);
 
   useEffect(() => {
-    if (!onboardingToken) return;
+    if (!onboardingToken) {
+      setCaptureLink(null);
+      setIssueError(null);
+      return;
+    }
     let cancelled = false;
     setIssuing(true);
+    setIssueError(null);
     void (async () => {
       try {
         const resp = await issueApplicantDlCaptureLink(onboardingToken);
         if (!cancelled) setCaptureLink(resp.link);
-      } catch {
-        /* QR loads on demand via Open on phone */
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setCaptureLink(null);
+          setIssueError(parseApiErrorDetail(e, QR_ISSUE_FAILED_MESSAGE));
+        }
       } finally {
         if (!cancelled) setIssuing(false);
       }
@@ -174,12 +181,6 @@ export default function DLUploadStep({
     if (backState === "UPLOADING" || backState === "SCANNING") return localPreview.back ?? backPreviewUrl;
     return backPreviewUrl ?? localPreview.back;
   }, [backPreviewUrl, backState, localPreview.back]);
-
-  const busy =
-    frontState === "UPLOADING" ||
-    frontState === "SCANNING" ||
-    backState === "UPLOADING" ||
-    backState === "SCANNING";
 
   const frontPre = dlPreprocessStatus(intake, "CDL_FRONT");
   const backPre = dlPreprocessStatus(intake, "CDL_BACK");
@@ -219,7 +220,22 @@ export default function DLUploadStep({
     input.click();
   };
 
-  async function handleOpenOnPhone() {
+  async function retryQr() {
+    if (!onboardingToken || issuing) return;
+    setIssuing(true);
+    setIssueError(null);
+    try {
+      const resp = await issueApplicantDlCaptureLink(onboardingToken);
+      setCaptureLink(resp.link);
+    } catch (e: unknown) {
+      setCaptureLink(null);
+      setIssueError(parseApiErrorDetail(e, QR_ISSUE_FAILED_MESSAGE));
+    } finally {
+      setIssuing(false);
+    }
+  }
+
+  async function handleOpenCapture() {
     if (!onboardingToken || issuing) return;
     setPhoneError(null);
     if (captureLink) {
@@ -232,9 +248,41 @@ export default function DLUploadStep({
       setCaptureLink(resp.link);
       window.open(resp.link, "_blank", "noopener,noreferrer");
     } catch (e: unknown) {
-      setPhoneError(e instanceof Error && e.message ? e.message : "Could not create phone capture link.");
+      setIssueError(parseApiErrorDetail(e, QR_ISSUE_FAILED_MESSAGE));
     } finally {
       setIssuing(false);
+    }
+  }
+
+  async function handleCopyLink() {
+    if (!captureLink) return;
+    const ok = await copyTextToClipboard(captureLink);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } else {
+      setPhoneError("Could not copy the capture link.");
+    }
+  }
+
+  async function handleEmailCaptureLink() {
+    if (!DL_CAPTURE_EMAIL_HANDOFF_ENABLED) return;
+    if (!onboardingToken || emailing) return;
+    setEmailNote(null);
+    setEmailFailed(false);
+    setEmailing(true);
+    try {
+      const resp = await emailApplicantDlCaptureLink(onboardingToken);
+      const next = applyEmailCaptureLinkResponse(resp);
+      setCaptureLink(next.captureLink);
+      setEmailNote(next.emailNote);
+      setEmailFailed(next.emailFailed);
+    } catch (e: unknown) {
+      const detail = parseApiErrorDetail(e, "Could not email the capture link.");
+      setEmailNote(detail.includes("No applicant email") ? NO_APPLICANT_EMAIL_MESSAGE : detail);
+      setEmailFailed(true);
+    } finally {
+      setEmailing(false);
     }
   }
 
@@ -297,7 +345,7 @@ export default function DLUploadStep({
             <img
               src={preview}
               alt={`${label} preview`}
-              className="max-h-[100px] w-full rounded-md object-contain"
+              className="max-h-[140px] w-full rounded-md object-contain"
             />
           ) : (
             <>
@@ -364,161 +412,186 @@ export default function DLUploadStep({
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-black text-white uppercase tracking-wide">
-          Driver&apos;s <span className="text-orange-400">License</span>
-        </h2>
-        <p className="text-gray-400 text-sm mt-1">
-          Upload clear photos of both sides of your current, valid commercial driver&apos;s license.
-        </p>
-        <p className="mt-1 text-xs text-gray-500">You can upload from this computer or use your phone.</p>
+    <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="w-1 h-5 shrink-0 bg-orange-500 rounded" />
+            <h2 className="text-xl font-black text-white uppercase tracking-wide">
+              Driver&apos;s <span className="text-orange-400">License</span>
+            </h2>
+          </div>
+          <p className="mt-1 text-sm text-gray-400 sm:ml-3">
+            Upload clear photos of both sides of your current, valid commercial driver&apos;s license.
+            You can upload from this computer or use your phone.
+          </p>
+        </div>
+        {onClearSavedData && (
+          <button
+            type="button"
+            onClick={() => onClearSavedData()}
+            disabled={saving}
+            className="shrink-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
+          >
+            {saving ? "Clearing..." : "Clear Saved Data"}
+          </button>
+        )}
       </div>
 
-      <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
-        <SectionTitle>License Upload</SectionTitle>
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+        {renderSideCard(
+          "front",
+          "Front",
+          "Upload the front of your license",
+          frontPreview,
+          frontState,
+          frontMessage,
+          frontPre,
+        )}
+        {renderSideCard(
+          "back",
+          "Back",
+          "Upload the back of your license",
+          backPreview,
+          backState,
+          backMessage,
+          backPre,
+        )}
+      </div>
 
-        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {renderSideCard(
-            "front",
-            "Front",
-            "Upload the front of your license",
-            frontPreview,
-            frontState,
-            frontMessage,
-            frontPre,
-          )}
-          {renderSideCard(
-            "back",
-            "Back",
-            "Upload the back of your license",
-            backPreview,
-            backState,
-            backMessage,
-            backPre,
-          )}
-
-          <div className="flex flex-col rounded-xl border border-gray-700 bg-gray-900/40 p-4 sm:col-span-2 lg:col-span-1">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-xs font-bold uppercase tracking-widest text-orange-400">Use your phone</span>
-              <Badge label="FAST & EASY" tone="accent" />
+      <div className="flex flex-col gap-4 rounded-xl border border-gray-700 bg-gray-900/40 p-4 sm:flex-row sm:items-center">
+        <div className="flex shrink-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-900/40 p-2">
+          {captureLink ? (
+            <div className="rounded-lg bg-white p-2">
+              <QRCode value={captureLink} size={112} />
             </div>
-            <p className="mb-3 text-xs text-gray-500">Scan to capture on your phone</p>
-
-            <div className="mb-3 flex min-h-[7.5rem] items-center justify-center rounded-lg border border-gray-700 bg-gray-900/40 p-2">
-              {captureLink ? (
-                <div className="rounded-lg bg-white p-2">
-                  <QRCode value={captureLink} size={104} />
-                </div>
-              ) : (
-                <div className="text-center text-xs text-gray-500">
-                  {issuing ? "Preparing QR code…" : "QR code will appear here"}
-                </div>
-              )}
+          ) : (
+            <div className="flex h-[128px] w-[128px] items-center justify-center px-2 text-center text-xs text-gray-500">
+              {issuing ? "Preparing QR code…" : issueError ? "QR unavailable" : "QR code will appear here"}
             </div>
+          )}
+        </div>
 
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-orange-400">Use your phone</span>
+            <Badge label="FAST & EASY" tone="accent" />
+          </div>
+          <p className="mb-3 text-xs text-gray-500">
+            {DL_CAPTURE_EMAIL_HANDOFF_ENABLED
+              ? "Scan the QR code, copy the link, or email it to the applicant address on file."
+              : "Scan the QR code, copy the link, or open capture on this device."}
+          </p>
+
+          {issueError && (
+            <div className="mb-3">
+              <p className="text-xs text-rose-400">{issueError}</p>
+              <button
+                type="button"
+                disabled={disabled || issuing || !onboardingToken}
+                onClick={() => void retryQr()}
+                className="mt-2 rounded-lg border border-rose-500/40 px-3 py-2 text-xs font-medium text-rose-300 hover:border-rose-400 disabled:opacity-50"
+              >
+                {issuing ? "Retrying…" : "Retry QR"}
+              </button>
+            </div>
+          )}
+
+          {!onboardingToken && (
+            <p className="mb-3 text-xs text-gray-500">Phone capture is unavailable without an application invite.</p>
+          )}
+
+          <div className="mb-3 flex flex-wrap gap-2">
             <button
               type="button"
               disabled={disabled || issuing || !onboardingToken}
-              onClick={() => void handleOpenOnPhone()}
-              className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void handleOpenCapture()}
+              className="flex items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="7" y="2" width="10" height="20" rx="2" />
                 <path d="M11 18h2" strokeLinecap="round" />
               </svg>
-              {issuing ? "Opening…" : "Open on phone"}
+              {issuing ? "Opening…" : "Open capture"}
             </button>
-
-            <div className="rounded-lg border border-gray-700 bg-gray-800/60 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-400">Send link via text</p>
-              <div className="flex gap-2">
-                <input
-                  type="tel"
-                  disabled
-                  placeholder="+1 (555) 123-4567"
-                  className={`${inp} min-w-0 flex-1 opacity-60`}
-                  title="SMS link delivery coming soon"
-                />
-                <button
-                  type="button"
-                  disabled
-                  className="shrink-0 rounded-xl bg-orange-500 px-3 py-2 text-xs font-bold uppercase tracking-widest text-black opacity-50"
-                  title="SMS link delivery coming soon"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
-
-            {phoneError && <p className="mt-2 text-xs text-rose-400">{phoneError}</p>}
-          </div>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-gray-700 p-4">
-            <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">Upload status</span>
-            <div>
-              {statusRow("Front of license", "Upload the front side", frontPre, frontState, "card")}
-              {statusRow("Back of license", "Upload the back side", backPre, backState, "card")}
-              {statusRow(
-                "License complete",
-                "Both sides received",
-                bothProcessed ? "PROCESSED" : "MISSING",
-                bothProcessed ? "SUCCESS" : "IDLE",
-                "shield",
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-gray-700 p-4">
-            <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">How it works</span>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {[
-                { n: "1", title: "Open on phone", sub: "Scan the QR code or open the link" },
-                { n: "2", title: "Take or choose front photo", sub: "Follow the on-screen guidance" },
-                { n: "3", title: "Take or choose back photo", sub: "Follow the on-screen guidance" },
-                { n: "4", title: "Return here and continue", sub: "We'll upload your photos automatically" },
-              ].map((step) => (
-                <div key={step.n} className="text-center">
-                  <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-sm font-bold text-black">
-                    {step.n}
-                  </div>
-                  <div className="text-xs font-semibold leading-snug text-white">{step.title}</div>
-                  <div className="mt-1 text-[10px] leading-snug text-gray-500">{step.sub}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-4 border-t border-gray-700 pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="flex items-center gap-2 text-xs text-gray-500">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-            Your data is secure and encrypted. Files are used only for verification.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={disabled || !captureLink}
+              onClick={() => void handleCopyLink()}
+              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
+            >
+              {copied ? "Copied" : "Copy link"}
+            </button>
+            {DL_CAPTURE_EMAIL_HANDOFF_ENABLED && (
+            <button
+              type="button"
+              disabled={disabled || emailing || !onboardingToken}
+              onClick={() => void handleEmailCaptureLink()}
+              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
+            >
+              {emailing ? "Sending…" : "Email capture link"}
+            </button>
+            )}
             <button
               type="button"
               disabled={disabled || checking || !onRefreshApplication}
               onClick={() => void handleCheckStatus()}
-              className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800 disabled:opacity-50"
+              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
             >
               {checking ? "Checking…" : "Check status"}
             </button>
-            <button
-              type="button"
-              disabled={saving || !canContinue || busy}
-              onClick={() => onContinue?.()}
-              className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Continue"}
-            </button>
+          </div>
+
+          {emailNote && (
+            <p className={`mb-2 text-xs ${emailFailed ? "text-rose-400" : "text-green-400"}`}>{emailNote}</p>
+          )}
+          {phoneError && <p className="mt-2 text-xs text-rose-400">{phoneError}</p>}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-gray-700 p-4">
+          <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">Upload status</span>
+          <div>
+            {statusRow("Front of license", "Upload the front side", frontPre, frontState, "card")}
+            {statusRow("Back of license", "Upload the back side", backPre, backState, "card")}
+            {statusRow(
+              "License complete",
+              "Both sides received",
+              bothProcessed ? "PROCESSED" : "MISSING",
+              bothProcessed ? "SUCCESS" : "IDLE",
+              "shield",
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-gray-700 p-4">
+          <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">How it works</span>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+                { n: "1", title: "Scan or copy link", sub: DL_CAPTURE_EMAIL_HANDOFF_ENABLED ? "QR, copy, email, or open capture" : "QR, copy, or open capture" },
+              { n: "2", title: "Take or choose front photo", sub: "Follow the on-screen guidance" },
+              { n: "3", title: "Take or choose back photo", sub: "Follow the on-screen guidance" },
+              { n: "4", title: "Return here and continue", sub: "We'll upload your photos automatically" },
+            ].map((step) => (
+              <div key={step.n} className="text-center">
+                <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-sm font-bold text-black">
+                  {step.n}
+                </div>
+                <div className="text-xs font-semibold leading-snug text-white">{step.title}</div>
+                <div className="mt-1 text-[10px] leading-snug text-gray-500">{step.sub}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
+
+      <p className="flex items-center gap-2 text-xs text-gray-500">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
+        Your data is secure and encrypted. Files are used only for verification.
+      </p>
     </div>
   );
 }

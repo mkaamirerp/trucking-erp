@@ -691,6 +691,32 @@ Good frame    → auto capture after brief stability
 
 These signals assist capture only. Final acceptance remains server-side.
 
+### Legacy deployed capture path — scale observation (non-PII)
+
+Observed on the **currently deployed legacy/native capture path**, not on the new `GuidedDocumentCapture` / `getUserMedia` implementation (that path has not yet been run on the user's phone).
+
+No licence image or screenshot is stored in Git.
+
+- Sharp around 12–14 inches
+- Estimated document width ~29–30% of the camera image
+- Estimated visible card area ~4% of the camera image
+- Server returned `FOUR_CORNERS_NOT_CONFIRMED`
+- Normal rough-candidate admission currently begins around `0.06`
+
+The screenshot-derived ~4% is an estimate of the visible physical card area. The server `0.06` threshold applies to its actual rough candidate. Those are related but are not yet the same measured quantity.
+
+The observation is consistent with the DL being below the server rough operating scale and may explain `FOUR_CORNERS_NOT_CONFIRMED`.
+
+Do not treat the cause as proven until a guided-capture run records:
+
+- actual uploaded source dimensions
+- actual detector candidate `area_ratio`
+- locator diagnostics
+
+`targetWidthRatio = 0.72` on the new DRIVER_LICENCE profile is an **unvalidated starting preference**. Do not tune it from this legacy observation.
+
+Do not lower the `0.06` threshold, change `WORKING_COPY_MAX_SIDE` 1544, or weaken the four-corner confirmer from this note.
+
 ---
 
 ## 19. Tenant-based mobile capture link — planned

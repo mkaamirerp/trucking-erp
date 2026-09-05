@@ -1830,7 +1830,7 @@ export default function DriverOnboardingAdminDetailPage() {
             <div style={{ background: "rgba(245,166,35,0.06)", border: `1px solid ${C.accent}44`, borderRadius: 12, padding: "16px 18px" }}>
               <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 13, letterSpacing: 2, color: C.accent, marginBottom: 6 }}>Review Flow</div>
               <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: isSubmitted ? 14 : 0 }}>
-                `PersonApplication` is now the canonical admin review object. Legacy `DriverOnboardingSubmission` approval remains in place temporarily for compatibility only.
+                Review and approve this person application. Invite-link onboarding is the only intake path.
               </div>
               {approveCombinedBlocked && approveReadiness?.detail && (
                 <div

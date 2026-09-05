@@ -964,16 +964,6 @@ export default function OnboardingApplicantPage() {
         {/* ── STEP 1: LICENSE UPLOAD ── */}
         {!resumeDocsOnly && step === 0 && (
           <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => void resetSavedDraft()}
-                disabled={saving}
-                className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
-              >
-                {saving ? "Clearing..." : "Clear Saved Data"}
-              </button>
-            </div>
             <DLUploadStep
               frontPreviewUrl={previewUrl.CDL_FRONT}
               backPreviewUrl={previewUrl.CDL_BACK}
@@ -987,8 +977,7 @@ export default function OnboardingApplicantPage() {
               intake={intake}
               disabled={saving || !app}
               onRefreshApplication={refreshApplicationOnce}
-              onContinue={() => void saveAndNext(1)}
-              canContinue={canProceedStep0()}
+              onClearSavedData={() => void resetSavedDraft()}
               saving={saving}
             />
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
@@ -1133,6 +1122,23 @@ export default function OnboardingApplicantPage() {
                 Upload both license sides and fill all license details above to continue.
               </p>
             )}
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void saveAndNext(1)}
+                disabled={
+                  saving ||
+                  dlState.CDL_FRONT === "UPLOADING" ||
+                  dlState.CDL_FRONT === "SCANNING" ||
+                  dlState.CDL_BACK === "UPLOADING" ||
+                  dlState.CDL_BACK === "SCANNING"
+                }
+                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Continue"}
+              </button>
+            </div>
           </div>
         )}
 

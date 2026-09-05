@@ -8,7 +8,6 @@ from app.models.fleet_document import FleetDocument
 
 from app.models.driver_document import DriverDocument
 from app.models.driver_document_file import DriverDocumentFile
-from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
 from app.models.driver_person_extension import DriverPersonExtension
 from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember

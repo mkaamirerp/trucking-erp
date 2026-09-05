@@ -16,10 +16,17 @@ type CaptureSession = {
   back_status: SideStatus;
   front_preview_file_id?: string | null;
   back_preview_file_id?: string | null;
+  front_confirmed?: boolean;
+  back_confirmed?: boolean;
   message?: string | null;
 };
 
 type UiPhase = "LOADING" | "INVALID" | "READY" | "UPLOADING" | "SCANNING";
+
+export const DL_CAPTURE_UPLOAD_TIMEOUT_MS = 30_000;
+export const DL_CAPTURE_UPLOAD_TIMEOUT_MESSAGE = "The upload took too long. Please try again.";
+export const DL_CAPTURE_UPLOAD_NETWORK_MESSAGE =
+  "We could not upload your license right now. Please try again.";
 
 const INVALID_CAPTURE_TITLE = "Invalid or expired capture link";
 const INVALID_CAPTURE_BODY =
@@ -45,14 +52,36 @@ async function loadSession(token: string): Promise<CaptureSession> {
   return (await res.json()) as CaptureSession;
 }
 
+function tryCloseCaptureTab(): void {
+  try {
+    window.close();
+  } catch {
+    /* Safari blocks close for tabs not opened by script. */
+  }
+}
+
+function isConfirmingProcessed(session: CaptureSession): boolean {
+  if (session.step === "COMPLETE") return false;
+  if (session.step === "FRONT") return session.front_status === "PROCESSED";
+  return session.back_status === "PROCESSED";
+}
+
 export default function DlCapturePage() {
   const { token = "" } = useParams<{ token: string }>();
   const [phase, setPhase] = useState<UiPhase>("LOADING");
   const [session, setSession] = useState<CaptureSession | null>(null);
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const takeInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const sessionRef = useRef<CaptureSession | null>(null);
+  const localPreviewRef = useRef<string | null>(null);
+  const uploadGenerationRef = useRef(0);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+
+  sessionRef.current = session;
+  localPreviewRef.current = localPreview;
 
   const refresh = useCallback(async () => {
     if (!token) {
@@ -80,19 +109,31 @@ export default function DlCapturePage() {
     };
   }, [localPreview]);
 
+  useEffect(() => {
+    return () => {
+      uploadGenerationRef.current += 1;
+      uploadAbortRef.current?.abort();
+    };
+  }, []);
+
+  const clearLocalPreview = () => {
+    const blob = localPreviewRef.current;
+    if (blob) URL.revokeObjectURL(blob);
+    setLocalPreview(null);
+  };
+
   const previewSrc = (() => {
     if (localPreview) return localPreview;
     if (!session || !token) return null;
     const fileId =
-      session.step === "BACK"
-        ? session.back_preview_file_id || session.front_preview_file_id
-        : session.front_preview_file_id;
+      session.step === "BACK" ? session.back_preview_file_id : session.front_preview_file_id;
     if (!fileId) return null;
     return `${captureUrl(token, "/file")}?file_id=${encodeURIComponent(fileId)}`;
   })();
 
   const handleFile = async (file: File) => {
-    if (!token || !session || session.step === "COMPLETE") return;
+    const current = sessionRef.current;
+    if (!token || !current || current.step === "COMPLETE") return;
     setError(null);
     let normalized: File;
     try {
@@ -106,15 +147,34 @@ export default function DlCapturePage() {
       return;
     }
 
+    uploadGenerationRef.current += 1;
+    const generation = uploadGenerationRef.current;
+    uploadAbortRef.current?.abort();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+
     const url = URL.createObjectURL(normalized);
     setLocalPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return url;
     });
 
-    const docType = session.step === "FRONT" ? "CDL_FRONT" : "CDL_BACK";
+    const startedStep = current.step;
+    const docType = startedStep === "FRONT" ? "CDL_FRONT" : "CDL_BACK";
     setPhase("UPLOADING");
-    const timer = window.setTimeout(() => setPhase("SCANNING"), 600);
+    const scanningTimer = window.setTimeout(() => {
+      if (generation !== uploadGenerationRef.current) return;
+      setPhase("SCANNING");
+    }, 600);
+    const abortTimer = window.setTimeout(() => {
+      controller.abort();
+      if (generation !== uploadGenerationRef.current) return;
+      setError(DL_CAPTURE_UPLOAD_TIMEOUT_MESSAGE);
+      setPhase("READY");
+    }, DL_CAPTURE_UPLOAD_TIMEOUT_MS);
+
+    const isStale = () => generation !== uploadGenerationRef.current;
+
     try {
       const form = new FormData();
       form.append("doc_type", docType);
@@ -122,14 +182,16 @@ export default function DlCapturePage() {
       const res = await fetchWithTenant(captureUrl(token, "/upload"), {
         method: "POST",
         body: form,
+        signal: controller.signal,
       });
-      window.clearTimeout(timer);
+      if (isStale() || controller.signal.aborted) return;
       if (isInvalidCaptureLinkStatus(res.status)) {
         setPhase("INVALID");
         return;
       }
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
+        if (isStale() || controller.signal.aborted) return;
         setError(
           typeof detail?.detail === "string"
             ? detail.detail
@@ -139,18 +201,71 @@ export default function DlCapturePage() {
         return;
       }
       const next = (await res.json()) as CaptureSession;
+      if (isStale() || controller.signal.aborted) return;
       setSession(next);
+      sessionRef.current = next;
       if (next.message) setError(next.message);
       else setError(null);
-      if (next.step !== session.step || next.step === "COMPLETE") {
-        if (localPreview) URL.revokeObjectURL(localPreview);
-        setLocalPreview(null);
+      const processed =
+        (startedStep === "FRONT" && next.front_status === "PROCESSED") ||
+        (startedStep === "BACK" && next.back_status === "PROCESSED");
+      if (processed || next.step === "COMPLETE") {
+        clearLocalPreview();
       }
       setPhase("READY");
     } catch {
-      window.clearTimeout(timer);
-      setError("We could not upload your license right now. Please try again.");
+      if (isStale()) return;
+      if (controller.signal.aborted) {
+        setError(DL_CAPTURE_UPLOAD_TIMEOUT_MESSAGE);
+        setPhase("READY");
+        return;
+      }
+      setError(DL_CAPTURE_UPLOAD_NETWORK_MESSAGE);
       setPhase("READY");
+    } finally {
+      window.clearTimeout(scanningTimer);
+      window.clearTimeout(abortTimer);
+    }
+  };
+
+  const handleConfirm = async () => {
+    const current = sessionRef.current;
+    if (!token || !current || current.step === "COMPLETE" || confirmBusy) return;
+    if (!isConfirmingProcessed(current)) return;
+    const docType = current.step === "FRONT" ? "CDL_FRONT" : "CDL_BACK";
+    setConfirmBusy(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("doc_type", docType);
+      const res = await fetchWithTenant(captureUrl(token, "/confirm"), {
+        method: "POST",
+        body: form,
+      });
+      if (isInvalidCaptureLinkStatus(res.status)) {
+        setPhase("INVALID");
+        return;
+      }
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        setError(
+          typeof detail?.detail === "string"
+            ? detail.detail
+            : "Could not confirm this photo. Please try again.",
+        );
+        return;
+      }
+      const next = (await res.json()) as CaptureSession;
+      setSession(next);
+      sessionRef.current = next;
+      clearLocalPreview();
+      if (next.step === "COMPLETE") {
+        tryCloseCaptureTab();
+      }
+    } catch {
+      setError(DL_CAPTURE_UPLOAD_NETWORK_MESSAGE);
+    } finally {
+      setConfirmBusy(false);
     }
   };
 
@@ -225,13 +340,18 @@ export default function DlCapturePage() {
           <p style={{ margin: 0, lineHeight: 1.55, color: "var(--trk-text-muted, #94a3b8)" }}>
             You can return to the other device.
           </p>
+          <button type="button" style={primary} onClick={() => tryCloseCaptureTab()}>
+            Close
+          </button>
         </div>
       </div>
     );
   }
 
-  const busy = phase === "UPLOADING" || phase === "SCANNING";
+  const busy = phase === "UPLOADING" || phase === "SCANNING" || confirmBusy;
+  const confirming = isConfirmingProcessed(session);
   const stepLabel = session.step === "FRONT" ? "Front Driver Licence" : "Back Driver Licence";
+  const takeLabel = session.step === "FRONT" ? "Take Front DL" : "Take Back DL";
   const failed =
     (session.step === "FRONT" && session.front_status === "FAILED") ||
     (session.step === "BACK" && session.back_status === "FAILED");
@@ -271,7 +391,7 @@ export default function DlCapturePage() {
             marginBottom: 8,
           }}
         >
-          {busy ? (
+          {busy && !confirmBusy ? (
             <div style={{ textAlign: "center", padding: 24 }}>
               <div style={{ fontWeight: 700 }}>
                 {phase === "SCANNING" ? "Processing licence image…" : "Uploading…"}
@@ -315,12 +435,35 @@ export default function DlCapturePage() {
           onChange={onInputFile}
         />
 
-        <button type="button" style={primary} disabled={busy} onClick={() => takeInputRef.current?.click()}>
-          Take Photo
-        </button>
-        <button type="button" style={btn} disabled={busy} onClick={() => uploadInputRef.current?.click()}>
-          Choose Existing Photo
-        </button>
+        {confirming ? (
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button
+              type="button"
+              style={{ ...btn, flex: 1, marginTop: 0 }}
+              disabled={busy}
+              onClick={() => takeInputRef.current?.click()}
+            >
+              Retake
+            </button>
+            <button
+              type="button"
+              style={{ ...primary, flex: 1, marginTop: 0 }}
+              disabled={busy}
+              onClick={() => void handleConfirm()}
+            >
+              Use This Photo
+            </button>
+          </div>
+        ) : (
+          <>
+            <button type="button" style={primary} disabled={busy} onClick={() => takeInputRef.current?.click()}>
+              {takeLabel}
+            </button>
+            <button type="button" style={btn} disabled={busy} onClick={() => uploadInputRef.current?.click()}>
+              Choose Existing Photo
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -46,7 +46,6 @@ def validate_tenant_schema(tenant_db_url: str) -> list[str]:
             "people",
             "person_roles",
             "driver_profiles",
-            "driver_onboarding_submissions",
         }
         missing_tables = required_tables - tables
         if missing_tables:
