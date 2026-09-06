@@ -25,7 +25,7 @@ from app.deps.tenant import require_tenant
 
 def install_host_aligned_current_user_and_tenant(app: Any, *, role: str = "TENANT_ADMIN") -> None:
     """
-    Overrides get_current_user + require_tenant for TEST_BYPASS + subdomain Host (e.g. demo).
+    Overrides get_current_user + require_tenant for TEST_BYPASS + subdomain Host (e.g. pytest).
 
     Entitlement deps (admin_sensitive, email_inbox, …) read CurrentUser.tenant_id — it must match
     the subscription row for the same workspace as request.state.tenant_id.
@@ -35,15 +35,18 @@ def install_host_aligned_current_user_and_tenant(app: Any, *, role: str = "TENAN
         tid = getattr(request.state, "tenant_id", None)
         if tid is None:
             raise RuntimeError(
-                "request.state.tenant_id missing — use TEST_BYPASS_AUTH=1 and a tenant Host header (e.g. demo.truckerp.me)"
+                "request.state.tenant_id missing — use TEST_BYPASS_AUTH=1 and a tenant Host header "
+                "(e.g. pytest.truckerp.me)"
             )
         fake_user = MagicMock()
-        fake_user.user_id = "test-user-id"
+        # Integer id: loads/audit_events.actor_user_id is BIGINT.
+        fake_user.user_id = 1
         fake_user.email = "test@example.com"
         fake_user.tenant_id = int(tid)
         fake_user.role = role
         # Admin onboarding routes (e.g. PersonApplication approve) persist reviewed_by / approved_by.
         fake_user.member_id = 1
+        fake_user.tenant_user = None
         return fake_user
 
     def _tenant_from_request(request: Request) -> int:
@@ -63,13 +66,14 @@ def install_mutable_tenant_current_user_and_tenant(
     holder: dict[str, int],
     *,
     role: str = "TENANT_ADMIN",
-    user_id: str = "test-user-id",
+    user_id: int | str = 1,
     email: str = "test@example.com",
 ) -> None:
     """
     Same as host-aligned, but tenant id comes from holder[\"tenant_id\"] (cross-tenant isolation tests).
 
-    Request Host can stay demo; dependency layer simulates a different workspace id.
+    Request Host should be the dedicated integration host (pytest); dependency layer may simulate
+    a different workspace id.
     """
 
     async def _fake_current_user(request: Request) -> MagicMock:
@@ -80,6 +84,7 @@ def install_mutable_tenant_current_user_and_tenant(
         fake_user.tenant_id = tid
         fake_user.role = role
         fake_user.member_id = 1
+        fake_user.tenant_user = None
         return fake_user
 
     def _tenant_from_holder(request: Request) -> int:  # noqa: ARG001

@@ -18,6 +18,19 @@ import pytest
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 
 
+def pytest_sessionstart(session):  # noqa: ARG001
+    """Fail loudly if tenant URL env still points at live demo / non-dedicated DB."""
+    from tests.support.integration_isolation import (
+        IntegrationIsolationError,
+        pytest_enforce_tenant_database_env,
+    )
+
+    try:
+        pytest_enforce_tenant_database_env()
+    except IntegrationIsolationError as exc:
+        pytest.exit(f"INTEGRATION ISOLATION GATE: {exc}", returncode=2)
+
+
 @pytest.fixture(scope="module")
 def app():
     """FastAPI app for TestClient (lazy import so skipped tests don't load Settings)."""

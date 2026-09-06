@@ -19,10 +19,22 @@ from app.core.db_url import to_async_pg_url
 
 
 def _tenant_async_url() -> str:
+    from tests.support.integration_isolation import (
+        IntegrationIsolationError,
+        assert_tenant_database_url_allowed,
+        require_integration_tenant_database_url,
+    )
+
     raw = os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL")
     if not raw:
         pytest.skip("TENANT_DATABASE_URL or ALEMBIC_TENANT_DATABASE_URL required to mutate numbering row")
-    return to_async_pg_url(raw)
+    # Present URL that points at demo/shared DB must fail loudly (never skip).
+    try:
+        return to_async_pg_url(require_integration_tenant_database_url(context="dispatch_numbering_test_utils"))
+    except IntegrationIsolationError:
+        assert_tenant_database_url_allowed(raw, context="dispatch_numbering_test_utils")
+        raise
+
 
 
 @asynccontextmanager

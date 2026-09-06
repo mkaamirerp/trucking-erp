@@ -1,6 +1,8 @@
 """Test-only: put a load into legacy dispatched state without generic Load PATCH (Slice 1+).
 
 Uses the same ensure_active_trip_for_freight_load path historical PATCH used, then sets status + mirrors.
+
+Hard isolation: refuses demo / tenant_demo / non-dedicated integration tenant before mutation.
 """
 
 from __future__ import annotations
@@ -10,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.load import Load
 from app.services import dispatch_trips as dispatch_trips_service
+from tests.support.integration_isolation import assert_mutating_integration_allowed
 
 
 async def seed_load_dispatched_legacy_state(db: AsyncSession, tenant_id: int, load_id: int) -> None:
+    await assert_mutating_integration_allowed(tenant_id=tenant_id, context="seed_load_dispatched_legacy_state")
     load_row = await db.scalar(select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id))
     if load_row is None:
         raise ValueError("load not found")

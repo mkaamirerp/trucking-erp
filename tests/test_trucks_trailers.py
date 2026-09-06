@@ -142,12 +142,12 @@ class TestTrucksAPIAuth:
         resp = client.post(
             "/api/v1/trucks",
             json={"unit_number": "101", "vin": "1HGBH41JXMN109186"},
-            headers={"Host": "demo.truckerp.me"},
+            headers={"Host": "pytest.truckerp.me"},
         )
         assert resp.status_code in (401, 400, 403)
 
     def test_list_trucks_401_without_auth(self, client) -> None:
-        resp = client.get("/api/v1/trucks", headers={"Host": "demo.truckerp.me"})
+        resp = client.get("/api/v1/trucks", headers={"Host": "pytest.truckerp.me"})
         assert resp.status_code in (401, 400, 403)
 
 
@@ -156,7 +156,7 @@ class TestTrailersAPIAuth:
         resp = client.post(
             "/api/v1/trailers",
             json={"unit_number": "T01", "trailer_type": "dry_van"},
-            headers={"Host": "demo.truckerp.me"},
+            headers={"Host": "pytest.truckerp.me"},
         )
         assert resp.status_code in (401, 400, 403)
 
@@ -169,7 +169,7 @@ def test_truck_tenant_isolation_list(client) -> None:
     """List trucks must only return trucks for the resolved tenant (via middleware)."""
     resp = client.get(
         "/api/v1/trucks",
-        headers={"host": "demo.truckerp.me"},
+        headers={"host": "pytest.truckerp.me"},
     )
     if resp.status_code == 401:
         pytest.skip("Auth required - run with valid session")

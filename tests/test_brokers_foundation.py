@@ -20,7 +20,7 @@ from tests.support.integration_auth import (
 from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 @pytest.fixture(autouse=True)
@@ -52,8 +52,8 @@ def tenant_resolver():
 
 @pytest.fixture
 async def demo_tid():
-    """Platform id for slug=demo (same DB `get_tenant_db` uses under demo.truckerp.me)."""
-    return await platform_tenant_id_for_slug("demo")
+    """Platform id for slug=pytest (same DB `get_tenant_db` uses under pytest.truckerp.me)."""
+    return await platform_tenant_id_for_slug()
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")

@@ -20,7 +20,7 @@ from tests.support.integration_auth import (
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 
 # Auth bypass: TEST_BYPASS_AUTH=1 + tenant subdomain in Host (demo slug must exist in platform DB)
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 # --- Schema (no DB) ---
@@ -51,7 +51,7 @@ class TestLoadSchemaValidation:
 
 @pytest.fixture(autouse=True)
 def test_bypass_env():
-    """Enable middleware test bypass for Load V1 API tests (demo.truckerp.me must resolve in platform DB)."""
+    """Enable middleware test bypass for Load V1 API tests (pytest.truckerp.me must resolve in platform DB)."""
     old = os.environ.get("TEST_BYPASS_AUTH")
     os.environ["TEST_BYPASS_AUTH"] = "1"
     yield

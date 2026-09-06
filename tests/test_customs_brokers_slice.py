@@ -16,7 +16,7 @@ from tests.support.integration_auth import (
 )
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 @pytest.fixture(autouse=True)

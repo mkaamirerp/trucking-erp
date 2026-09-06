@@ -21,7 +21,7 @@ from app.schemas.driver_onboarding import DriverOnboardingStatus
 from app.routers import driver_onboarding as ro
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 def _tenant_async_url() -> str | None:
@@ -119,7 +119,7 @@ async def client():
 async def demo_tenant_id():
     from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 
-    return await platform_tenant_id_for_slug("demo")
+    return await platform_tenant_id_for_slug()
 
 
 @pytest.fixture

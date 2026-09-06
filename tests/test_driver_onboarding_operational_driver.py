@@ -42,7 +42,7 @@ def _tenant_async_url() -> str | None:
 
 REQUIRES_TENANT_DB = _tenant_async_url() is None
 
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +71,7 @@ def override_auth_tenant(test_bypass_env):
 
 @pytest.fixture
 async def demo_tenant_id():
-    return await platform_tenant_id_for_slug("demo")
+    return await platform_tenant_id_for_slug()
 
 
 @pytest.fixture

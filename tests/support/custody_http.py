@@ -13,10 +13,21 @@ def _tenant_async_url() -> str | None:
     from app.core.db_url import to_async_pg_url
     import os
 
+    from tests.support.integration_isolation import (
+        IntegrationIsolationError,
+        assert_tenant_database_url_allowed,
+        require_integration_tenant_database_url,
+    )
+
     raw = os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL")
     if not raw:
         return None
-    return to_async_pg_url(raw)
+    try:
+        safe = require_integration_tenant_database_url(context="custody_http")
+    except IntegrationIsolationError:
+        assert_tenant_database_url_allowed(raw, context="custody_http")
+        raise
+    return to_async_pg_url(safe)
 
 
 async def reset_custody_to_unknown(load_id: int) -> None:

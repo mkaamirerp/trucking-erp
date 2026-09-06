@@ -46,7 +46,7 @@ class TestPayDocumentTenantIsolation:
         """Requesting a document by ID with wrong tenant context returns 404 (doc not found)."""
         resp = client.get(
             "/api/v1/payroll/documents/99999/download",
-            headers={"host": "demo.truckerp.me"},
+            headers={"host": "pytest.truckerp.me"},
         )
         assert resp.status_code in (404, 422)
 
@@ -60,6 +60,6 @@ class TestApplicantFileTenantIsolation:
         resp = client.get(
             "/api/v1/driver-onboarding/applicant/application/file",
             params={"token": "invalid-token-xyz", "file_id": "any"},
-            headers={"host": "demo.truckerp.me"},
+            headers={"host": "pytest.truckerp.me"},
         )
         assert resp.status_code == 404

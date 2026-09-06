@@ -36,7 +36,7 @@ from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 def _tenant_async_url() -> str | None:
@@ -220,7 +220,7 @@ class TestTripNumberDispatchLifecycle:
         url = _tenant_async_url()
         if url is None:
             pytest.skip("TENANT_DATABASE_URL required to seed legacy dispatched state")
-        tenant_id = await platform_tenant_id_for_slug("demo")
+        tenant_id = await platform_tenant_id_for_slug()
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
         engine = create_async_engine(url, pool_pre_ping=True)

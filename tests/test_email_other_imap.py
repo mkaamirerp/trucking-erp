@@ -41,7 +41,7 @@ except Exception:
 TENANT_ID = 53
 # Valid platform tenant id ≠ TENANT_ID for cross-tenant secret negative test (FK to platform_tenants).
 _WRONG_SECRET_TENANT_ID = 62
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 @pytest.fixture

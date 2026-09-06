@@ -34,7 +34,7 @@ from tests.support.integration_auth import (
 from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +72,7 @@ def override_auth_tenant(test_bypass_env):
 
 @pytest.fixture
 async def demo_tid():
-    return await platform_tenant_id_for_slug("demo")
+    return await platform_tenant_id_for_slug()
 
 
 async def _cleanup_tenant_rows(tenant_id: int, external_suffix: str) -> None:

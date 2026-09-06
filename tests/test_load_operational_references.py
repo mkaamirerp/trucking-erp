@@ -231,7 +231,7 @@ class TestLoadOperationalReferencesApi:
         clear_current_user_and_tenant_overrides(app)
 
     async def test_create_get_patch_references_lifecycle(self, client, override_auth_tenant) -> None:
-        headers = {"host": "demo.truckerp.me"}
+        headers = {"host": "pytest.truckerp.me"}
         refs = [
             {"kind": "po_number", "value": "PO-KEEP", "label": "PO #", "confidence": "high"},
             {"kind": "pickup_number", "value": "PU-9"},

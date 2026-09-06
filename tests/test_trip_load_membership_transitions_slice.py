@@ -36,7 +36,7 @@ from tests.support.custody_http import (
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 _SLICE2_TERMINAL: int | None = None
 
 

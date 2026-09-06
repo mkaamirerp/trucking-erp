@@ -188,12 +188,48 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         if os.environ.get("TEST_BYPASS_AUTH") == "1" and settings.allows_tenant_resolution_shortcuts():
             bypass_slug = self._slug_from_host(request)
             if bypass_slug:
+                # Hard isolation: never bind TEST_BYPASS to the live demo tenant.
+                from app.core.integration_db_guard import (
+                    IntegrationIsolationError,
+                    assert_integration_tenant_slug_allowed,
+                )
+
+                try:
+                    assert_integration_tenant_slug_allowed(
+                        bypass_slug, context="TEST_BYPASS_AUTH host resolution"
+                    )
+                except IntegrationIsolationError as exc:
+                    response = JSONResponse(
+                        status_code=403,
+                        content={"detail": str(exc), "code": "INTEGRATION_ISOLATION_FORBIDDEN_TENANT"},
+                    )
+                    set_request_id(response)
+                    log("test_bypass_forbidden_tenant", level="error")
+                    return response
                 try:
                     async with AsyncSessionLocal() as session:
                         row = await session.scalar(
                             select(PlatformTenant).where(PlatformTenant.slug == bypass_slug.lower()).limit(1)
                         )
                     if row and row.status == "ACTIVE" and row.db_status == "READY":
+                        from app.core.integration_db_guard import assert_integration_db_name_allowed
+
+                        try:
+                            assert_integration_db_name_allowed(
+                                row.db_name, context="TEST_BYPASS_AUTH tenant db_name"
+                            )
+                        except IntegrationIsolationError as exc:
+                            response = JSONResponse(
+                                status_code=403,
+                                content={
+                                    "detail": str(exc),
+                                    "code": "INTEGRATION_ISOLATION_FORBIDDEN_TENANT_DB",
+                                },
+                            )
+                            set_request_id(response)
+                            log("test_bypass_forbidden_db", level="error")
+                            return response
+
                         request.state.tenant_id = int(row.id)
                         request.state.tenant_slug = row.slug
                         request.state.user_id = "test-bypass-user"

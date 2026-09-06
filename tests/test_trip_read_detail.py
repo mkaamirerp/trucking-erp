@@ -69,7 +69,7 @@ async def tenant_session():
         await engine.dispose()
 
 
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 @pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB required")

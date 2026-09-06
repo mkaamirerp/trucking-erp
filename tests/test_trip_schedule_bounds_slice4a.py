@@ -25,7 +25,7 @@ from tests.support.integration_auth import (
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 
 START_AT = "2026-09-01T14:00:00+00:00"

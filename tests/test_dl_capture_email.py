@@ -15,7 +15,7 @@ async def test_send_dl_capture_link_email_uses_restricted_url(monkeypatch: pytes
     monkeypatch.setattr(email_mod, "send_email", fake_send_email)
     await email_mod.send_dl_capture_link_email(
         to="applicant@example.test",
-        capture_link="https://demo.truckerp.me/dl-capture/restricted-only",
+        capture_link="https://pytest.truckerp.me/dl-capture/restricted-only",
     )
     assert captured["to"] == "applicant@example.test"
     assert "dl-capture/restricted-only" in captured["body"]

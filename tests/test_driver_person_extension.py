@@ -39,7 +39,7 @@ def _tenant_async_url() -> str | None:
 REQUIRES_TENANT_DB = _tenant_async_url() is None
 # Integration tests also resolve demo tenant via platform DB (DATABASE_URL).
 REQUIRES_INTEGRATION_DB = REQUIRES_TENANT_DB or not (os.environ.get("DATABASE_URL") or "").strip()
-AUTH_HEADERS = {"host": "demo.truckerp.me"}
+AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 
 
 def _valid_body(**overrides):
@@ -131,7 +131,7 @@ def override_auth_tenant(test_bypass_env):
 
 @pytest.fixture
 async def demo_tenant_id():
-    return await platform_tenant_id_for_slug("demo")
+    return await platform_tenant_id_for_slug()
 
 
 @pytest.fixture
