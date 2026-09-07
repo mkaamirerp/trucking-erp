@@ -229,6 +229,9 @@ export default function DLUploadStep({
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
+      input.setAttribute("capture", "environment");
+    }
     input.onchange = () => {
       const file = input.files?.[0];
       if (file) void handleFileSelect(side, file);
@@ -395,12 +398,12 @@ export default function DLUploadStep({
         )}
 
         {awaitingConfirm ? (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               disabled={disabled || stageBusy}
               onClick={() => openFilePicker(side)}
-              className="flex flex-1 items-center justify-center rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Retake
             </button>
@@ -408,7 +411,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || stageBusy}
               onClick={() => void handleConfirm(side)}
-              className="flex flex-1 items-center justify-center rounded-lg bg-orange-500 px-3 py-2 text-xs font-bold text-black transition-all hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg bg-orange-500 px-3 py-2.5 text-sm font-bold text-black transition-all hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {confirmBusy === side ? "Saving…" : "Use This Photo"}
             </button>
@@ -418,7 +421,7 @@ export default function DLUploadStep({
           type="button"
           disabled={disabled || stageBusy}
           onClick={() => openFilePicker(side)}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" strokeLinecap="round" strokeLinejoin="round" />
@@ -431,12 +434,12 @@ export default function DLUploadStep({
   }
 
   return (
-    <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-6 rounded-2xl border border-gray-700 bg-gray-800/60 p-4 sm:p-6">
+      <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <div className="w-1 h-5 shrink-0 bg-orange-500 rounded" />
-            <h2 className="text-xl font-black text-white uppercase tracking-wide">
+            <div className="h-5 w-1 shrink-0 rounded bg-orange-500" />
+            <h2 className="text-lg font-black uppercase tracking-wide text-white sm:text-xl">
               Driver&apos;s <span className="text-orange-400">License</span>
             </h2>
           </div>
@@ -450,7 +453,7 @@ export default function DLUploadStep({
             type="button"
             onClick={() => onClearSavedData()}
             disabled={saving}
-            className="shrink-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
+            className="min-h-[44px] shrink-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
           >
             {saving ? "Clearing..." : "Clear Saved Data"}
           </button>
@@ -522,12 +525,12 @@ export default function DLUploadStep({
             <p className="mb-3 text-xs text-gray-500">Phone capture is unavailable without an application invite.</p>
           )}
 
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <button
               type="button"
               disabled={disabled || issuing || !onboardingToken}
               onClick={() => void handleOpenCapture()}
-              className="flex items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="7" y="2" width="10" height="20" rx="2" />
@@ -539,7 +542,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || !captureLink}
               onClick={() => void handleCopyLink()}
-              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
+              className="min-h-[44px] flex-1 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50 sm:flex-none"
             >
               {copied ? "Copied" : "Copy link"}
             </button>
@@ -548,7 +551,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || emailing || !onboardingToken}
               onClick={() => void handleEmailCaptureLink()}
-              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
+              className="min-h-[44px] flex-1 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50 sm:flex-none"
             >
               {emailing ? "Sending…" : "Email capture link"}
             </button>
@@ -557,7 +560,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || checking || !onRefreshApplication}
               onClick={() => void handleCheckStatus()}
-              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
+              className="min-h-[44px] flex-1 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50 sm:flex-none"
             >
               {checking ? "Checking…" : "Check status"}
             </button>

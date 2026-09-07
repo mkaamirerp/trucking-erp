@@ -35,6 +35,14 @@ type RefEntry = {
 };
 
 const STEPS = ["LICENSE UPLOAD", "PERSONAL INFO", "WORK HISTORY & REFS", "DOCUMENTS"] as const;
+const STEP_LABELS_SHORT = ["License", "Personal", "Work", "Docs"] as const;
+
+const ONBOARDING_BG =
+  "bg-gray-900 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:24px_24px]";
+const ONBOARDING_SHELL = `onboarding-shell ${ONBOARDING_BG} pt-4 sm:p-8 sm:pt-8`;
+const ONBOARDING_CARD = "rounded-2xl border border-gray-700 bg-gray-800/60 p-4 sm:p-6 space-y-6";
+const FORM_GRID = "grid grid-cols-1 sm:grid-cols-2 gap-4";
+const FORM_GRID_TIGHT = "grid grid-cols-1 sm:grid-cols-2 gap-3";
 
 const EMPTY_JOB: JobEntry = {
   company_name: "", position_title: "", start_date: "", end_date: "",
@@ -260,22 +268,25 @@ function userFacingErrorMessage(error: unknown, fallback: string): string {
 
 function ProgressBar({ step }: { step: Step }) {
   return (
-    <div className="flex items-start gap-0 mb-10 relative">
-      <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-700 z-0" />
+    <div className="relative mb-8 flex items-start gap-0 sm:mb-10">
+      <div className="absolute top-4 left-4 right-4 z-0 h-0.5 bg-gray-700 sm:top-5 sm:left-5 sm:right-5" />
       <div
-        className="absolute top-5 left-5 h-0.5 bg-gradient-to-r from-orange-500 to-red-600 z-10 transition-all duration-500"
+        className="absolute top-4 left-4 z-10 h-0.5 bg-gradient-to-r from-orange-500 to-red-600 transition-all duration-500 sm:top-5 sm:left-5"
         style={{ width: step === 0 ? "0%" : step === 1 ? "33%" : step === 2 ? "66%" : "99%" }}
       />
       {STEPS.map((label, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-2 relative z-20">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 ${
+        <div key={i} className="relative z-20 flex flex-1 flex-col items-center gap-1.5 sm:gap-2">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-all duration-300 sm:h-10 sm:w-10 sm:text-sm ${
             i < step ? "bg-green-500 text-black" : i === step ? "bg-orange-500 text-black shadow-lg shadow-orange-500/40" : "bg-gray-800 border border-gray-600 text-gray-400"
           }`}>
             {i < step ? "✓" : i + 1}
           </div>
-          <span className={`text-center text-xs font-semibold tracking-wide uppercase ${
+          <span className={`hidden text-center text-[10px] font-semibold uppercase tracking-wide sm:block ${
             i === step ? "text-orange-400" : i < step ? "text-green-400" : "text-gray-500"
-          }`} style={{ fontSize: 10 }}>{label}</span>
+          }`}>{label}</span>
+          <span className={`text-center text-[9px] font-semibold uppercase tracking-wide sm:hidden ${
+            i === step ? "text-orange-400" : i < step ? "text-green-400" : "text-gray-500"
+          }`}>{STEP_LABELS_SHORT[i]}</span>
         </div>
       ))}
     </div>
@@ -291,18 +302,24 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Field({ label, children, half }: { label: string; children: React.ReactNode; half?: boolean }) {
+function Field({ label, children, full }: { label: string; children: React.ReactNode; half?: boolean; full?: boolean }) {
   return (
-    <div className={half ? "col-span-1" : "col-span-2 sm:col-span-1"}>
-      <label className="block text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">{label}</label>
+    <div className={full ? "col-span-1 sm:col-span-2" : "col-span-1"}>
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-widest text-gray-400">{label}</label>
       {children}
     </div>
   );
 }
 
-const inp = "w-full rounded-lg border border-gray-600 bg-gray-700/50 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
+const inp =
+  "w-full min-h-[44px] rounded-lg border border-gray-600 bg-gray-700/50 px-3 py-2.5 text-base sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
 const inpErr = "border-rose-500 ring-2 ring-rose-500/50 focus:ring-rose-500 focus:border-rose-500";
 const sel = inp + " appearance-none";
+const btnTouch = "inline-flex min-h-[44px] items-center justify-center";
+const btnPrimary = `${btnTouch} w-full rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50 sm:w-auto`;
+const btnSubmit = `${btnTouch} w-full rounded-xl bg-green-500 px-8 py-3 text-sm font-bold uppercase tracking-widest text-black shadow-lg shadow-green-500/20 transition-all hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto`;
+const btnSecondary = `${btnTouch} w-full rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800 sm:w-auto`;
+const navRow = "flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between";
 
 function TypedDateInput({
   value,
@@ -822,13 +839,13 @@ export default function OnboardingApplicantPage() {
   function setJob(i: number, key: keyof JobEntry, val: string) { setJobs(j => j.map((x, idx) => idx === i ? { ...x, [key]: val } : x)); }
   function setRef(i: number, key: keyof RefEntry, val: string) { setRefs(r => r.map((x, idx) => idx === i ? { ...x, [key]: val } : x)); }
 
-  if (loading) return <div className="min-h-screen bg-gray-900 flex items-center justify-center text-gray-400">Loading…</div>;
+  if (loading) return <div className={`${ONBOARDING_SHELL} flex items-center justify-center text-gray-400`}>Loading…</div>;
 
   const isDriver = (app?.application_type || "DRIVER") === "DRIVER";
   const appTitle = isDriver ? "Driver Onboarding" : `${app?.application_type || "Application"} Application`;
 
   if (error && !app) return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
+    <div className={`${ONBOARDING_SHELL} flex items-center justify-center p-6`}>
       <div className="max-w-md w-full rounded-xl border border-gray-600 bg-gray-800 p-6">
         <h1 className="text-lg font-semibold text-white">Application</h1>
         <p className="mt-2 text-sm text-rose-400">{error}</p>
@@ -837,7 +854,7 @@ export default function OnboardingApplicantPage() {
   );
 
   if (submitted && !documentResumeActive) return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6">
+    <div className={`${ONBOARDING_SHELL} flex items-center justify-center p-6`}>
       <div className="text-center max-w-md">
         <div className="text-7xl mb-6">{isDriver ? "🚛" : "✓"}</div>
         <h2 className="text-4xl font-black text-green-400 uppercase tracking-widest mb-4">Application Submitted!</h2>
@@ -918,18 +935,18 @@ export default function OnboardingApplicantPage() {
 
   if (!isDriver) {
     return (
-      <div className="min-h-screen bg-gray-900 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:24px_24px] p-4 sm:p-8">
+      <div className={ONBOARDING_SHELL}>
         <div className="mx-auto max-w-2xl">
           <div className="mb-8">
-            <h1 className="text-3xl font-black uppercase tracking-widest text-white">
+            <h1 className="text-2xl font-black uppercase tracking-widest text-white sm:text-3xl">
               <span className="text-orange-400">{app?.application_type || "Application"}</span> Application
             </h1>
             <p className="text-gray-500 text-sm mt-1">Complete your application details</p>
           </div>
           {error && <div className="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">{error}</div>}
-          <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
+          <div className={ONBOARDING_CARD}>
             <SectionTitle>Contact &amp; Address</SectionTitle>
-            <div className="grid grid-cols-2 gap-4">
+            <div className={FORM_GRID}>
               <Field label="First Name">
                 <input className={`${inp} ${showValidationStep1 && !(form.first_name || "").trim() ? inpErr : ""}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
               </Field>
@@ -942,7 +959,7 @@ export default function OnboardingApplicantPage() {
               <Field label="Phone">
                 <input className={`${inp} ${showValidationStep1 && !(form.phone || "").trim() ? inpErr : ""}`} type="tel" value={form.phone} onChange={e => setF("phone", e.target.value)} placeholder="(555) 000-0000" />
               </Field>
-              <div className="col-span-2">
+              <div className="col-span-1 sm:col-span-2">
                 <Field label="Street Address">
                   <input className={`${inp} ${showValidationStep1 && !(form.address_street || "").trim() ? inpErr : ""}`} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
                 </Field>
@@ -963,17 +980,17 @@ export default function OnboardingApplicantPage() {
               <Field label="Country">
                 <input className={`${inp} ${showValidationStep1 && !(form.address_country || "").trim() ? inpErr : ""}`} value={form.address_country} onChange={e => setF("address_country", e.target.value)} placeholder="e.g. US" />
               </Field>
-              <div className="col-span-2">
+              <div className="col-span-1 sm:col-span-2">
                 <Field label="Notes (optional)">
                   <textarea className={inp} rows={2} value={form.notes} onChange={e => setF("notes", e.target.value)} placeholder="Any additional notes" />
                 </Field>
               </div>
             </div>
-            <div className="flex gap-3 pt-4">
-              <button onClick={handleMinimalSave} disabled={saving} className="rounded-xl border border-gray-600 px-4 py-3 text-sm font-medium text-gray-400 hover:bg-gray-800 disabled:opacity-50">
+            <div className={`${navRow} pt-4`}>
+              <button onClick={handleMinimalSave} disabled={saving} className={btnSecondary}>
                 {saving ? "Saving…" : "Save draft"}
               </button>
-              <button onClick={handleMinimalSubmit} disabled={saving} className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50">
+              <button onClick={handleMinimalSubmit} disabled={saving} className={btnPrimary}>
                 {saving ? "Submitting…" : "Submit application"}
               </button>
             </div>
@@ -984,10 +1001,10 @@ export default function OnboardingApplicantPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 bg-[linear-gradient(rgba(255,255,255,.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.02)_1px,transparent_1px)] bg-[size:24px_24px] p-4 sm:p-8">
+    <div className={ONBOARDING_SHELL}>
       <div className="mx-auto max-w-3xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-black uppercase tracking-widest text-white">Driver <span className="text-orange-400">Onboarding</span></h1>
+          <h1 className="text-2xl font-black uppercase tracking-widest text-white sm:text-3xl">Driver <span className="text-orange-400">Onboarding</span></h1>
           <p className="text-gray-500 text-sm mt-1">
             {resumeDocsOnly ? "Upload requested documents and resubmit" : "Complete all steps to submit your application"}
           </p>
@@ -1023,12 +1040,12 @@ export default function OnboardingApplicantPage() {
               onClearSavedData={() => void resetSavedDraft()}
               saving={saving}
             />
-            <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
+            <div className={`${ONBOARDING_CARD} mt-4`}>
               <SectionTitle>License Details</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={FORM_GRID}>
 
                 {/* Country selector — always shown first */}
-                <div className="col-span-2">
+                <div className="col-span-1 sm:col-span-2">
                   <Field label="Country">
                     <select className={sel} value={form.address_country}
                       onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("license_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
@@ -1102,9 +1119,9 @@ export default function OnboardingApplicantPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
+            <div className={`${ONBOARDING_CARD} mt-4`}>
               <SectionTitle>Applicant Details From DL</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={FORM_GRID}>
                 <Field label="First Name">
                   <input className={`${inp} ${dlReviewAccent(sources.first_name, edited.first_name, form.first_name)}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
                 </Field>
@@ -1135,7 +1152,7 @@ export default function OnboardingApplicantPage() {
                   <input className={`${inp} ${dlReviewAccent(sources.address_city, edited.address_city, form.address_city)}`} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
                 </Field>
                 <Field label={form.address_country === "CA" ? "Province / Postal Code" : "State / ZIP Code"}>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className={FORM_GRID_TIGHT}>
                     <input className={`${inp} ${dlReviewAccent(sources.address_region, edited.address_region, form.address_region)}`} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder={form.address_country === "CA" ? "Province" : "State"} />
                     {form.address_country === "CA" ? (
                       <input className={`${inp} ${dlReviewAccent(sources.address_postal, edited.address_postal, form.address_postal)}`} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
@@ -1153,7 +1170,7 @@ export default function OnboardingApplicantPage() {
               </p>
             )}
 
-            <div className="flex justify-end">
+            <div className={navRow}>
               <button
                 type="button"
                 onClick={() => void saveAndNext(1)}
@@ -1164,7 +1181,7 @@ export default function OnboardingApplicantPage() {
                   dlState.CDL_BACK === "UPLOADING" ||
                   dlState.CDL_BACK === "SCANNING"
                 }
-                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50"
+                className={btnPrimary}
               >
                 {saving ? "Saving…" : "Continue"}
               </button>
@@ -1183,9 +1200,9 @@ export default function OnboardingApplicantPage() {
               All required fields (name, email, phone, full address) must be filled before you can continue to the next step.
             </div>
 
-            <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
+            <div className={ONBOARDING_CARD}>
               <SectionTitle>Basic Information</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={FORM_GRID}>
                 <Field label="First Name">
                   <input className={`${inp} ${dlReviewAccent(sources.first_name, edited.first_name, form.first_name)} ${showValidationStep1 && !(form.first_name || "").trim() ? inpErr : ""}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
                 </Field>
@@ -1224,14 +1241,14 @@ export default function OnboardingApplicantPage() {
               </div>
 
               <SectionTitle>Contact Information</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={FORM_GRID}>
                 <Field label="Email">
                   <input className={`${inp} ${showValidationStep1 && !(form.email || "").trim() ? inpErr : ""}`} type="email" value={form.email} onChange={e => setF("email", e.target.value)} placeholder="you@email.com" />
                 </Field>
                 <Field label="Phone">
                   <input className={`${inp} ${showValidationStep1 && !(form.phone || "").trim() ? inpErr : ""}`} type="tel" value={form.phone} onChange={e => setF("phone", e.target.value)} placeholder="(555) 000-0000" />
                 </Field>
-                <div className="col-span-2">
+                <div className="col-span-1 sm:col-span-2">
                   <Field label="Street Address">
                     <input className={`${inp} ${showValidationStep1 && !(form.address_street || "").trim() ? inpErr : ""}`} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
                   </Field>
@@ -1264,7 +1281,7 @@ export default function OnboardingApplicantPage() {
               </div>
 
               <SectionTitle>Driving Experience</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={FORM_GRID}>
                 <Field label="DOT Medical Card Expiry">
                   <input className={inp} type="date" value={form.dot_medical_card_expiry} onChange={e => setF("dot_medical_card_expiry", e.target.value)} />
                 </Field>
@@ -1301,7 +1318,7 @@ export default function OnboardingApplicantPage() {
               </div>
 
               <SectionTitle>Emergency Contact</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={FORM_GRID}>
                 <Field label="Contact Name">
                   <input className={inp} value={form.emergency_contact_name} onChange={e => setF("emergency_contact_name", e.target.value)} placeholder="Full Name" />
                 </Field>
@@ -1314,10 +1331,9 @@ export default function OnboardingApplicantPage() {
               </div>
             </div>
 
-            <div className="flex gap-3">
-              <button onClick={() => { setStep(0); setShowValidationStep1(false); }} className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800">← Back</button>
-              <button onClick={() => saveAndNext(2)} disabled={saving}
-                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50">
+            <div className={navRow}>
+              <button onClick={() => { setStep(0); setShowValidationStep1(false); }} className={btnSecondary}>← Back</button>
+              <button onClick={() => saveAndNext(2)} disabled={saving} className={btnPrimary}>
                 {saving ? "Saving…" : "Next: Work History →"}
               </button>
             </div>
@@ -1347,7 +1363,7 @@ export default function OnboardingApplicantPage() {
                     <span className="text-xs font-bold uppercase tracking-widest text-orange-400">Employer {i + 1}</span>
                     {jobs.length > 1 && <button onClick={() => setJobs(j => j.filter((_, idx) => idx !== i))} className="text-xs text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded px-2 py-1">Remove</button>}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className={FORM_GRID_TIGHT}>
                     <Field label="Company Name"><input className={`${inp} ${err("company_name")}`} value={job.company_name} onChange={e => setJob(i, "company_name", e.target.value)} placeholder="Company Name" /></Field>
                     <Field label="Position / Title"><input className={`${inp} ${err("position_title")}`} value={job.position_title} onChange={e => setJob(i, "position_title", e.target.value)} placeholder="e.g. OTR Driver" /></Field>
                     <Field label="Start Date"><input className={`${inp} ${err("start_date")}`} type="date" value={job.start_date} onChange={e => setJob(i, "start_date", e.target.value)} /></Field>
@@ -1386,7 +1402,7 @@ export default function OnboardingApplicantPage() {
                 return (
                 <div key={i} className={`rounded-2xl border p-5 transition-colors ${showRefErr ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60"}`}>
                   <span className="text-xs font-bold uppercase tracking-widest text-orange-400 block mb-4">Reference {i + 1}</span>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className={FORM_GRID_TIGHT}>
                     <Field label="Full Name"><input className={`${inp} ${refNameErr}`} value={ref.full_name} onChange={e => setRef(i, "full_name", e.target.value)} placeholder="Full Name" /></Field>
                     <Field label="Relationship"><input className={inp} value={ref.relationship} onChange={e => setRef(i, "relationship", e.target.value)} placeholder="e.g. Former Supervisor" /></Field>
                     <Field label="Company"><input className={inp} value={ref.company} onChange={e => setRef(i, "company", e.target.value)} placeholder="Company Name" /></Field>
@@ -1399,10 +1415,9 @@ export default function OnboardingApplicantPage() {
               })}
             </div>
 
-            <div className="flex gap-3">
-              <button onClick={() => { setStep(1); setShowValidationStep2(false); }} className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800">← Back</button>
-              <button onClick={() => saveAndNext(3)} disabled={saving}
-                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-orange-400 disabled:opacity-50">
+            <div className={navRow}>
+              <button onClick={() => { setStep(1); setShowValidationStep2(false); }} className={btnSecondary}>← Back</button>
+              <button onClick={() => saveAndNext(3)} disabled={saving} className={btnPrimary}>
                 {saving ? "Saving…" : "Next: Documents →"}
               </button>
             </div>
@@ -1474,12 +1489,11 @@ export default function OnboardingApplicantPage() {
               ))}
             </div>
 
-            <div className="flex gap-3">
+            <div className={navRow}>
               {!resumeDocsOnly && (
-                <button type="button" onClick={() => setStep(2)} className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800">← Back</button>
+                <button type="button" onClick={() => setStep(2)} className={btnSecondary}>← Back</button>
               )}
-              <button onClick={handleSubmit} disabled={saving || !agree1 || !agree2 || !agree3}
-                className="rounded-xl bg-green-500 px-8 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-green-500/20">
+              <button onClick={handleSubmit} disabled={saving || !agree1 || !agree2 || !agree3} className={btnSubmit}>
                 {saving ? "Submitting…" : resumeDocsOnly ? "Resubmit documents ✓" : "Submit Application ✓"}
               </button>
             </div>
