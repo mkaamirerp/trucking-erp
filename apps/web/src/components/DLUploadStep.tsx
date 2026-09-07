@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "react-qr-code";
-import { issueApplicantDlCaptureLink, emailApplicantDlCaptureLink } from "../api";
+import { issueApplicantDlCaptureLink } from "../api";
 import { normalizeDlUpload } from "../lib/normalizeDlUpload";
 import {
   copyTextToClipboard,
@@ -9,6 +9,7 @@ import {
   QR_ISSUE_FAILED_MESSAGE,
   applyEmailCaptureLinkResponse,
   DL_CAPTURE_EMAIL_HANDOFF_ENABLED,
+  emailApplicantDlCaptureLink,
 } from "../lib/dlCaptureHandoff";
 
 type Side = "front" | "back";
@@ -23,6 +24,7 @@ type Props = {
   frontMessage?: string;
   backMessage?: string;
   onUploadSide: (side: Side, file: File) => Promise<boolean> | boolean;
+  onConfirmSide?: (side: Side) => Promise<boolean> | boolean;
   onNormalizeError?: (message: string) => void;
   onboardingToken?: string;
   intake?: Record<string, unknown>;
@@ -34,6 +36,13 @@ type Props = {
 
 type LocalPreviewState = { front: string | null; back: string | null };
 
+function dlUserConfirmed(intake: Record<string, unknown>, side: DocType): boolean {
+  const files = intake.files as Record<string, unknown> | undefined;
+  const meta = files?.[side];
+  if (!meta || typeof meta !== "object") return false;
+  return (meta as { dl_user_confirmed?: boolean }).dl_user_confirmed === true;
+}
+
 function dlPreprocessStatus(intake: Record<string, unknown>, side: DocType): "MISSING" | "FAILED" | "PROCESSED" {
   const files = intake.files as Record<string, unknown> | undefined;
   const meta = files?.[side];
@@ -44,13 +53,18 @@ function dlPreprocessStatus(intake: Record<string, unknown>, side: DocType): "MI
   return "MISSING";
 }
 
-function sideBadge(state: UploadState, preprocess: "MISSING" | "FAILED" | "PROCESSED"): {
+function sideBadge(
+  state: UploadState,
+  preprocess: "MISSING" | "FAILED" | "PROCESSED",
+  confirmed: boolean,
+): {
   label: string;
   tone: "waiting" | "busy" | "done" | "error";
 } {
   if (state === "UPLOADING" || state === "SCANNING") return { label: "PROCESSING", tone: "busy" };
   if (state === "FAILED" || preprocess === "FAILED") return { label: "RETRY", tone: "error" };
-  if (state === "SUCCESS" || preprocess === "PROCESSED") return { label: "RECEIVED", tone: "done" };
+  if (preprocess === "PROCESSED" && confirmed) return { label: "RECEIVED", tone: "done" };
+  if (state === "SUCCESS" || preprocess === "PROCESSED") return { label: "REVIEW", tone: "busy" };
   return { label: "WAITING", tone: "waiting" };
 }
 
@@ -105,6 +119,7 @@ export default function DLUploadStep({
   frontMessage = "",
   backMessage = "",
   onUploadSide,
+  onConfirmSide,
   onNormalizeError,
   onboardingToken,
   intake = {},
@@ -123,6 +138,7 @@ export default function DLUploadStep({
   const [emailing, setEmailing] = useState(false);
   const [emailNote, setEmailNote] = useState<string | null>(null);
   const [emailFailed, setEmailFailed] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState<Side | null>(null);
 
   useEffect(() => {
     return () => {
@@ -184,7 +200,9 @@ export default function DLUploadStep({
 
   const frontPre = dlPreprocessStatus(intake, "CDL_FRONT");
   const backPre = dlPreprocessStatus(intake, "CDL_BACK");
-  const bothProcessed = frontPre === "PROCESSED" && backPre === "PROCESSED";
+  const frontConfirmed = dlUserConfirmed(intake, "CDL_FRONT");
+  const backConfirmed = dlUserConfirmed(intake, "CDL_BACK");
+  const bothConfirmed = frontConfirmed && backConfirmed;
 
   const handleFileSelect = async (side: Side, file: File) => {
     let normalizedFile: File;
@@ -212,13 +230,22 @@ export default function DLUploadStep({
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
-    input.capture = "environment";
     input.onchange = () => {
       const file = input.files?.[0];
       if (file) void handleFileSelect(side, file);
     };
     input.click();
   };
+
+  async function handleConfirm(side: Side) {
+    if (!onConfirmSide || confirmBusy) return;
+    setConfirmBusy(side);
+    try {
+      await onConfirmSide(side);
+    } finally {
+      setConfirmBusy(null);
+    }
+  }
 
   async function retryQr() {
     if (!onboardingToken || issuing) return;
@@ -307,11 +334,13 @@ export default function DLUploadStep({
     state: UploadState,
     message: string,
     preprocess: "MISSING" | "FAILED" | "PROCESSED",
+    confirmed: boolean,
   ) {
-    const badge = sideBadge(state, preprocess);
-    const stageBusy = state === "UPLOADING" || state === "SCANNING";
+    const badge = sideBadge(state, preprocess, confirmed);
+    const stageBusy = state === "UPLOADING" || state === "SCANNING" || Boolean(confirmBusy);
+    const awaitingConfirm = preprocess === "PROCESSED" && !confirmed && !stageBusy && Boolean(onConfirmSide);
     const uploadLabel = side === "front" ? "Upload Front DL" : "Upload Back DL";
-    const received = badge.tone === "done";
+    const received = confirmed;
     const failed = badge.tone === "error";
 
     return (
@@ -359,7 +388,33 @@ export default function DLUploadStep({
         {state === "FAILED" && (
           <p className="mb-2 text-xs text-rose-400">{message || "Upload failed. Please try again."}</p>
         )}
+        {awaitingConfirm && message && (
+          <p className="mb-2 text-xs text-rose-400">{message}</p>
+        )}
+        {confirmed && message && (
+          <p className="mb-2 text-xs text-rose-400">{message}</p>
+        )}
 
+        {awaitingConfirm ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={disabled || stageBusy}
+              onClick={() => openFilePicker(side)}
+              className="flex flex-1 items-center justify-center rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Retake
+            </button>
+            <button
+              type="button"
+              disabled={disabled || stageBusy}
+              onClick={() => void handleConfirm(side)}
+              className="flex flex-1 items-center justify-center rounded-lg bg-orange-500 px-3 py-2 text-xs font-bold text-black transition-all hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {confirmBusy === side ? "Saving…" : "Use This Photo"}
+            </button>
+          </div>
+        ) : (
         <button
           type="button"
           disabled={disabled || stageBusy}
@@ -371,6 +426,7 @@ export default function DLUploadStep({
           </svg>
           {preview ? `Replace ${side === "front" ? "Front" : "Back"} DL` : uploadLabel}
         </button>
+        )}
       </div>
     );
   }
@@ -381,9 +437,10 @@ export default function DLUploadStep({
     preprocess: "MISSING" | "FAILED" | "PROCESSED",
     state: UploadState,
     icon: "card" | "shield",
+    confirmed: boolean,
   ) => {
-    const badge = sideBadge(state, preprocess);
-    const done = preprocess === "PROCESSED" || state === "SUCCESS";
+    const badge = sideBadge(state, preprocess, confirmed);
+    const done = confirmed || (icon === "shield" && bothConfirmed);
     return (
       <div className="flex items-start gap-3 border-b border-gray-700 py-2.5 last:border-b-0">
         <div
@@ -447,6 +504,7 @@ export default function DLUploadStep({
           frontState,
           frontMessage,
           frontPre,
+          frontConfirmed,
         )}
         {renderSideCard(
           "back",
@@ -456,6 +514,7 @@ export default function DLUploadStep({
           backState,
           backMessage,
           backPre,
+          backConfirmed,
         )}
       </div>
 
@@ -553,14 +612,15 @@ export default function DLUploadStep({
         <div className="rounded-xl border border-gray-700 p-4">
           <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">Upload status</span>
           <div>
-            {statusRow("Front of license", "Upload the front side", frontPre, frontState, "card")}
-            {statusRow("Back of license", "Upload the back side", backPre, backState, "card")}
+            {statusRow("Front of license", "Upload the front side", frontPre, frontState, "card", frontConfirmed)}
+            {statusRow("Back of license", "Upload the back side", backPre, backState, "card", backConfirmed)}
             {statusRow(
               "License complete",
-              "Both sides received",
-              bothProcessed ? "PROCESSED" : "MISSING",
-              bothProcessed ? "SUCCESS" : "IDLE",
+              "Both sides confirmed",
+              bothConfirmed ? "PROCESSED" : "MISSING",
+              bothConfirmed ? "SUCCESS" : "IDLE",
               "shield",
+              bothConfirmed,
             )}
           </div>
         </div>
@@ -572,7 +632,7 @@ export default function DLUploadStep({
                 { n: "1", title: "Scan or copy link", sub: DL_CAPTURE_EMAIL_HANDOFF_ENABLED ? "QR, copy, email, or open capture" : "QR, copy, or open capture" },
               { n: "2", title: "Take or choose front photo", sub: "Follow the on-screen guidance" },
               { n: "3", title: "Take or choose back photo", sub: "Follow the on-screen guidance" },
-              { n: "4", title: "Return here and continue", sub: "We'll upload your photos automatically" },
+              { n: "4", title: "Confirm each photo", sub: "Use This Photo after you review the crop" },
             ].map((step) => (
               <div key={step.n} className="text-center">
                 <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-sm font-bold text-black">

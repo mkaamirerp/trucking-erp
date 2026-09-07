@@ -17,6 +17,7 @@ import {
   hydrateOnboardingFormFromIntake,
   mergeIntakeForSave,
 } from "../core/hydrateOnboardingFormFromIntake";
+import { confirmPersonApplicationDlSide } from "../lib/applicantDlConfirm";
 
 type Step = 0 | 1 | 2 | 3;
 type DlUiState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
@@ -117,6 +118,10 @@ function dlUiStateFromIntake(intake: Record<string, any>, docType: DocType): DlU
   if (meta?.dl_preprocess_status === "FAILED") return "FAILED";
   if (hasStoredDlSide(docType, intake)) return "SUCCESS";
   return "IDLE";
+}
+
+function dlSideConfirmed(intake: Record<string, any>, docType: DocType): boolean {
+  return intake?.files?.[docType]?.dl_user_confirmed === true;
 }
 
 function applyApplicationDlRefresh(
@@ -473,7 +478,15 @@ export default function OnboardingApplicantPage() {
     setApp(data);
     const { dlState: nextDlState } = applyApplicationDlRefresh(data, token, setPreviewUrl);
     setDlState(nextDlState);
-    setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
+    const extract = (data.intake_payload as Record<string, unknown> | undefined)?.license_extract_status;
+    const backConfirmed = dlSideConfirmed((data.intake_payload as Record<string, any>) || {}, "CDL_BACK");
+    setDlMessage({
+      CDL_FRONT: "",
+      CDL_BACK:
+        backConfirmed && extract && extract !== "SUCCESS"
+          ? "We could not read the barcode on this photo. The photo is saved — upload again or enter details manually."
+          : "",
+    });
     setForm((prev) =>
       hydrateOnboardingFormFromIntake(prev, (data.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
     );
@@ -523,7 +536,7 @@ export default function OnboardingApplicantPage() {
       setDlState(s => s[docType] === "UPLOADING" ? { ...s, [docType]: "SCANNING" } : s);
       setDlMessage(m => ({
         ...m,
-        [docType]: docType === "CDL_BACK" ? "Processing licence and reading PDF417..." : "Processing licence image...",
+        [docType]: "Processing licence image...",
       }));
     }, 600);
     try {
@@ -552,9 +565,6 @@ export default function OnboardingApplicantPage() {
             return { ...prev, [docType]: thumbUrl };
           });
         } catch {}
-        setForm((prev) =>
-          hydrateOnboardingFormFromIntake(prev, (resp.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
-        );
       }
       return ok;
     } catch (e: any) {
@@ -568,6 +578,39 @@ export default function OnboardingApplicantPage() {
   async function handleDlUploadSide(side: "front" | "back", file: File): Promise<boolean> {
     const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
     return uploadDl(docType, file);
+  }
+
+  async function handleDlConfirmSide(side: "front" | "back"): Promise<boolean> {
+    if (!app || !token) return false;
+    const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
+    setError(null);
+    setDlMessage((m) => ({
+      ...m,
+      [docType]: docType === "CDL_BACK" ? "Reading licence barcode…" : "Saving photo…",
+    }));
+    try {
+      const resp = await confirmPersonApplicationDlSide({ onboardingToken: token, docType });
+      setApp((prev) => (prev ? { ...prev, intake_payload: resp.intake_payload ?? prev.intake_payload } : prev));
+      const extract = resp.license_extract_status;
+      if (docType === "CDL_BACK" && extract && extract !== "SUCCESS") {
+        setDlMessage((m) => ({
+          ...m,
+          [docType]:
+            extract === "FAILED"
+              ? "We could not read the barcode on this photo. The photo is saved — upload again or enter details manually."
+              : "We could not read licence details from this photo. The photo is saved — you can enter details manually.",
+        }));
+      } else {
+        setDlMessage((m) => ({ ...m, [docType]: "" }));
+      }
+      setForm((prev) =>
+        hydrateOnboardingFormFromIntake(prev, (resp.intake_payload as Record<string, unknown>) || {}, "after_dl_upload"),
+      );
+      return true;
+    } catch (e: unknown) {
+      setError(userFacingErrorMessage(e, "Could not confirm this photo. Please try again."));
+      return false;
+    }
   }
 
   async function resetSavedDraft() {
@@ -610,8 +653,8 @@ export default function OnboardingApplicantPage() {
   }
 
   function canProceedStep0(): boolean {
-    const hasFront = dlState.CDL_FRONT === "SUCCESS";
-    const hasBack = dlState.CDL_BACK === "SUCCESS";
+    const hasFront = dlSideConfirmed(intake, "CDL_FRONT");
+    const hasBack = dlSideConfirmed(intake, "CDL_BACK");
     const hasLicenseNumber = (form.driver_license_number || "").trim().length > 0;
     const hasRegion = (form.license_region || "").trim().length > 0;
     const hasExpiry = (form.license_expiry || "").trim().length > 0;
@@ -622,8 +665,8 @@ export default function OnboardingApplicantPage() {
 
   function step0ValidationMessage(): string {
     const missing: string[] = [];
-    if (dlState.CDL_FRONT !== "SUCCESS") missing.push("front of driver license");
-    if (dlState.CDL_BACK !== "SUCCESS") missing.push("back of driver license");
+    if (!dlSideConfirmed(intake, "CDL_FRONT")) missing.push("front of driver license (Use This Photo)");
+    if (!dlSideConfirmed(intake, "CDL_BACK")) missing.push("back of driver license (Use This Photo)");
     if (!(form.driver_license_number || "").trim()) missing.push("License Number");
     if (!(form.license_region || "").trim()) missing.push("State/Province Issued");
     if (!(form.license_expiry || "").trim()) missing.push("Expiry Date");
@@ -972,6 +1015,7 @@ export default function OnboardingApplicantPage() {
               frontMessage={dlMessage.CDL_FRONT}
               backMessage={dlMessage.CDL_BACK}
               onUploadSide={handleDlUploadSide}
+              onConfirmSide={handleDlConfirmSide}
               onNormalizeError={(message) => setError(message)}
               onboardingToken={token || undefined}
               intake={intake}

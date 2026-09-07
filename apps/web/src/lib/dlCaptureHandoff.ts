@@ -1,3 +1,5 @@
+import { API_BASE, fetchWithTenant } from "../api";
+
 const CAPTURE_PATH = "/dl-capture/";
 
 export function isRestrictedDlCaptureUrl(value: string): boolean {
@@ -70,4 +72,26 @@ export function applyEmailCaptureLinkResponse(resp: {
   }
   const note = (resp.email_error || "").trim() || EMAIL_FAILED_LINK_READY_MESSAGE;
   return { captureLink: resp.link, emailNote: note, emailFailed: true };
+}
+
+export async function emailApplicantDlCaptureLink(onboardingToken: string): Promise<{
+  link: string;
+  emailed?: boolean;
+  email_error?: string | null;
+}> {
+  const url = new URL(
+    `${API_BASE}/driver-onboarding/applicant/application/dl-capture-link/email`,
+    window.location.origin,
+  );
+  url.searchParams.set("token", onboardingToken);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(text || res.statusText);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return res.json();
 }

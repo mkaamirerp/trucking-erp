@@ -86,6 +86,20 @@ async def test_maybe_complete_waits_for_user_confirm() -> None:
     assert access.completed_at is not None
 
 
+def test_processed_storage_key_is_enh_file_not_original() -> None:
+    intake = {
+        "files": {
+            "CDL_BACK": {
+                "storage_key": "original.jpg",
+                "enh_file_id": "processed.jpg",
+                "dl_preprocess_status": "PROCESSED",
+            },
+            "CDL_BACK_PROCESSED": {"storage_key": "processed.jpg"},
+        }
+    }
+    assert ro._dl_processed_storage_key(intake, "CDL_BACK") == "processed.jpg"
+
+
 def test_session_out_exposes_confirmed_flags() -> None:
     access = SimpleNamespace(completed_at=None)
     intake = {

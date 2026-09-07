@@ -56,7 +56,11 @@ from app.schemas.driver_onboarding import (
 )
 from app.deps.admin import is_tenant_admin
 from app.deps.entitlements import require_tenant_subscription_active
-from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417, pdf417_enabled_for_doc_type
+from app.services.applicant_dl_pdf417 import (
+    apply_stored_cdl_back_pdf417,
+    clear_pdf417_extract_from_intake,
+    pdf417_enabled_for_doc_type,
+)
 from app.constants.person_application_workflow import WORKFLOW_LANE_COMPLETE, normalize_workflow_lane
 from app.constants.person_onboarding import PERSON_SETUP_UI_COMBINED, normalize_person_setup_ui_mode
 from app.schemas.driver_compensation_setup import DriverCompensationSetupOut, DriverCompensationSetupWrite
@@ -571,6 +575,37 @@ def _dl_side_preview_file_id(intake: dict, side: str) -> str | None:
     )
 
 
+def _dl_processed_storage_key(intake: dict, side: str) -> str | None:
+    """Processed/warped JPEG key used for preview and PDF417 (never the original upload)."""
+    files = intake.get("files") or {}
+    meta = files.get(side)
+    processed_meta = files.get(f"{side}_PROCESSED")
+    for candidate in (
+        meta.get("enh_file_id") if isinstance(meta, dict) else None,
+        processed_meta.get("storage_key") if isinstance(processed_meta, dict) else None,
+        processed_meta.get("file_id") if isinstance(processed_meta, dict) else None,
+        processed_meta.get("enh_file_id") if isinstance(processed_meta, dict) else None,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _pdf417_confirm_message(intake: dict) -> str | None:
+    status = intake.get("license_extract_status")
+    if status == "FAILED":
+        return (
+            "We could not read the barcode on the back of this licence. "
+            "The photo is saved — upload again or try Use This Photo once more."
+        )
+    if status == "NO_FIELDS_FOUND":
+        return (
+            "We could not read licence details from this photo. "
+            "The photo is saved — you can upload a clearer back photo or enter details manually."
+        )
+    return None
+
+
 def _dl_capture_step(front_status: str, back_status: str) -> str:
     """Preprocess-only step (PROCESSED advances). Phone capture uses _dl_capture_phone_step."""
     if front_status != "PROCESSED":
@@ -611,6 +646,89 @@ def _mark_dl_side_user_confirmed(intake: dict, side: str) -> dict:
     files[side] = meta
     intake["files"] = files
     return intake
+
+
+async def _enqueue_dl_domain_events(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    application_id: int,
+    events: list[tuple[str, dict]],
+) -> None:
+    if not events:
+        return
+    from app.services.domain_event_outbox import (
+        AGGREGATE_TYPE_PERSON_APPLICATION,
+        enqueue_domain_event,
+    )
+
+    for event_type, payload in events:
+        await enqueue_domain_event(
+            db,
+            tenant_id=tenant_id,
+            aggregate_type=AGGREGATE_TYPE_PERSON_APPLICATION,
+            aggregate_id=str(application_id),
+            event_type=event_type,
+            payload=payload,
+        )
+
+
+async def _confirm_applicant_dl_side(
+    *,
+    db: AsyncSession,
+    app: PersonApplication,
+    tenant_slug: str,
+    doc_type: str,
+) -> PersonApplication:
+    """Mark a PROCESSED side confirmed. PDF417 runs here for CDL_BACK on the processed JPEG only."""
+    intake = dict(app.intake_payload or {})
+    if _dl_side_status(intake, doc_type) != "PROCESSED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Processed image is required before confirming this side",
+        )
+
+    already_confirmed = _dl_side_user_confirmed(intake, doc_type)
+    if not already_confirmed:
+        intake = _mark_dl_side_user_confirmed(intake, doc_type)
+
+    extract_status: str | None = None
+    if pdf417_enabled_for_doc_type(doc_type):
+        prior_status = intake.get("license_extract_status")
+        should_decode = (not already_confirmed) or prior_status in (
+            None,
+            "FAILED",
+            "NO_FIELDS_FOUND",
+        )
+        if should_decode:
+            processed_key = _dl_processed_storage_key(intake, doc_type)
+            intake = await apply_stored_cdl_back_pdf417(intake, processed_key, tenant_slug)
+        extract_status = intake.get("license_extract_status")
+
+    app.intake_payload = intake
+
+    from app.services.domain_event_outbox import build_dl_confirm_domain_events
+
+    both_confirmed = _dl_side_user_confirmed(intake, "CDL_FRONT") and _dl_side_user_confirmed(
+        intake, "CDL_BACK"
+    )
+    await _enqueue_dl_domain_events(
+        db,
+        tenant_id=app.tenant_id,
+        application_id=app.id,
+        events=build_dl_confirm_domain_events(
+            doc_type=doc_type,
+            both_confirmed=both_confirmed,
+            extract_status=extract_status if isinstance(extract_status, str) else None,
+        ),
+    )
+    await db.commit()
+    await db.refresh(app)
+
+    from app.services.domain_event_delivery import get_domain_event_dispatcher
+
+    get_domain_event_dispatcher().wake(app.tenant_id)
+    return app
 
 
 async def _maybe_complete_dl_capture_token(
@@ -676,6 +794,7 @@ async def _apply_applicant_dl_upload(
     preprocess_debug = processed.debug
     preprocess_status = "FAILED"
     ocr_storage_key: str | None = None
+    files.pop(f"{doc_type}_PROCESSED", None)
 
     if processed.success and processed.jpeg_bytes:
         stored_processed = await save_applicant_dl_processed_bytes(
@@ -708,12 +827,7 @@ async def _apply_applicant_dl_upload(
 
     intake["files"] = files
     if pdf417_enabled_for_doc_type(doc_type):
-        intake = await apply_stored_cdl_back_pdf417(
-            intake,
-            stored.storage_key,
-            tenant_slug,
-            processed_storage_key=ocr_storage_key,
-        )
+        intake = clear_pdf417_extract_from_intake(intake)
     app.intake_payload = intake
 
     new_front = _dl_side_status(intake, "CDL_FRONT")
@@ -1070,6 +1184,37 @@ async def upload_applicant_dl(
     return _person_application_to_out(app)
 
 
+@router.post(
+    "/applicant/application/dl-confirm",
+    response_model=ApplicantApplicationOut,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def confirm_applicant_dl(
+    token: str = Query(..., description="Invite link token"),
+    doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Applicant accepts the processed preview (Use This Photo). PDF417 runs on confirmed CDL_BACK."""
+    if doc_type not in ("CDL_FRONT", "CDL_BACK"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
+    app = await _get_application_by_token(db, tenant_id, token)
+    _require_driver_workflow(app)
+    if app.status != DriverOnboardingStatus.DRAFT.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application already submitted",
+        )
+    app = await _confirm_applicant_dl_side(
+        db=db,
+        app=app,
+        tenant_slug=tenant_slug,
+        doc_type=doc_type,
+    )
+    return _person_application_to_out(app)
+
+
 @router.get(
     "/applicant/dl-capture/{token}",
     response_model=DlCaptureSessionOut,
@@ -1183,9 +1328,10 @@ async def confirm_dl_capture_side(
     token: str,
     doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Applicant accepts the already-processed side (Use This Photo). Does not re-run OpenCV."""
+    """Applicant accepts the processed preview (Use This Photo). PDF417 runs on confirmed CDL_BACK."""
     if doc_type not in ("CDL_FRONT", "CDL_BACK"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
 
@@ -1200,7 +1346,7 @@ async def confirm_dl_capture_side(
 
     intake = dict(app.intake_payload or {})
     if access.completed_at is not None:
-        return _dl_capture_session_out(access, intake)
+        return _dl_capture_session_out(access, intake, message=_pdf417_confirm_message(intake))
 
     if app.status != DriverOnboardingStatus.DRAFT.value:
         raise HTTPException(
@@ -1213,7 +1359,7 @@ async def confirm_dl_capture_side(
         await _maybe_complete_dl_capture_token(db, access, intake)
         await db.commit()
         await db.refresh(access)
-        return _dl_capture_session_out(access, intake)
+        return _dl_capture_session_out(access, intake, message=_pdf417_confirm_message(intake))
 
     expected = "CDL_FRONT" if step == "FRONT" else "CDL_BACK"
     if doc_type != expected:
@@ -1221,19 +1367,22 @@ async def confirm_dl_capture_side(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Expected {expected} for current capture step",
         )
-    if _dl_side_status(intake, doc_type) != "PROCESSED":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Processed image is required before confirming this side",
-        )
 
-    intake = _mark_dl_side_user_confirmed(intake, doc_type)
-    app.intake_payload = intake
+    app = await _confirm_applicant_dl_side(
+        db=db,
+        app=app,
+        tenant_slug=tenant_slug,
+        doc_type=doc_type,
+    )
+    intake = dict(app.intake_payload or {})
+    access = await db.get(ApplicationAccessToken, access.id)
+    assert access is not None
     await _maybe_complete_dl_capture_token(db, access, intake)
     await db.commit()
     await db.refresh(access)
     await db.refresh(app)
-    return _dl_capture_session_out(access, dict(app.intake_payload or {}))
+    intake = dict(app.intake_payload or {})
+    return _dl_capture_session_out(access, intake, message=_pdf417_confirm_message(intake))
 
 
 @router.get("/applicant/dl-capture/{token}/file", dependencies=_APPLICANT_SUBSCRIPTION)

@@ -340,6 +340,11 @@ export default function DlCapturePage() {
           <p style={{ margin: 0, lineHeight: 1.55, color: "var(--trk-text-muted, #94a3b8)" }}>
             You can return to the other device.
           </p>
+          {(error || session.message) && (
+            <p style={{ color: "var(--trk-danger, #f87171)", fontSize: "0.9rem", lineHeight: 1.5, marginTop: 12 }}>
+              {error || session.message}
+            </p>
+          )}
           <button type="button" style={primary} onClick={() => tryCloseCaptureTab()}>
             Close
           </button>
