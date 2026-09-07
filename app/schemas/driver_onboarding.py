@@ -237,6 +237,8 @@ class DlCaptureSessionOut(BaseModel):
     back_status: str = Field(description="MISSING | FAILED | PROCESSED")
     front_preview_file_id: str | None = None
     back_preview_file_id: str | None = None
+    front_confirmed: bool = False
+    back_confirmed: bool = False
     message: str | None = None
 
 
@@ -245,6 +247,8 @@ class DlCaptureLinkResponse(BaseModel):
     token: str
     link: str
     expires_at: datetime
+    emailed: bool = False
+    email_error: str | None = None
 
 
 class PersonApplicationDocumentAcceptBody(BaseModel):

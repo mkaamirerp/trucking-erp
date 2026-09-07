@@ -39,6 +39,7 @@ def _token_sha256_hex(raw: str) -> str:
 
 
 def test_dl_capture_step_resume_rules() -> None:
+    """Preprocess-only step. Phone capture stays on a side until user confirm (see test_dl_capture_confirm)."""
     assert ro._dl_capture_step("MISSING", "MISSING") == "FRONT"
     assert ro._dl_capture_step("FAILED", "MISSING") == "FRONT"
     assert ro._dl_capture_step("PROCESSED", "MISSING") == "BACK"
@@ -140,15 +141,18 @@ async def _make_draft_driver_app_with_invite(
     *,
     demo_tenant_id: int,
     status: str = DriverOnboardingStatus.DRAFT.value,
+    email: str | None = "__auto__",
+    application_type: str = "DRIVER",
 ) -> tuple[int, str]:
     suffix = uuid.uuid4().hex[:10]
+    stored_email = f"dlcap.{suffix}@test.invalid" if email == "__auto__" else email
     app_row = PersonApplication(
         tenant_id=demo_tenant_id,
         source="dl_capture_test",
         status=status,
-        requested_role_code="DRIVER",
-        application_type="DRIVER",
-        email=f"dlcap.{suffix}@test.invalid",
+        requested_role_code=application_type,
+        application_type=application_type,
+        email=stored_email,
         intake_payload={"step": "dl_upload"},
     )
     tenant_session.add(app_row)
@@ -341,3 +345,251 @@ class TestApplicantDlCaptureLinkIssue:
         assert wrong_host.status_code in (404, 403, 400), wrong_host.text
 
         assert app_id > 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
+@pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB URL required")
+class TestApplicantDlCaptureLinkEmail:
+    async def test_email_without_application_email(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+    ) -> None:
+        _app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session,
+            demo_tenant_id=demo_tenant_id,
+            email=None,
+        )
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 400, r.text
+        assert "No applicant email is available for this application." in r.text
+
+        tenant_session.expire_all()
+        rows = (
+            await tenant_session.scalars(
+                select(ApplicationAccessToken).where(
+                    ApplicationAccessToken.tenant_id == demo_tenant_id,
+                    ApplicationAccessToken.application_id == _app_id,
+                    ApplicationAccessToken.purpose == ro.TOKEN_PURPOSE_DL_CAPTURE,
+                )
+            )
+        ).all()
+        assert rows == []
+
+    async def test_email_success_replaces_active_token(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sent: dict[str, str] = {}
+
+        async def fake_send(*, to: str, capture_link: str) -> None:
+            sent["to"] = to
+            sent["link"] = capture_link
+
+        monkeypatch.setattr(ro, "send_dl_capture_link_email", fake_send)
+
+        app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session, demo_tenant_id=demo_tenant_id
+        )
+        first = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert first.status_code == 200
+        first_token = first.json()["token"]
+
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers=AUTH_HEADERS,
+            json={"email": "attacker@evil.test"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["application_id"] == app_id
+        assert body["emailed"] is True
+        assert "/dl-capture/" in body["link"]
+        assert "onboarding?token=" not in body["link"]
+        assert body["token"] != first_token
+        assert sent["link"] == body["link"]
+        assert "onboarding?token=" not in sent["link"]
+        assert sent["to"].endswith("@test.invalid")
+        assert sent["to"] != "attacker@evil.test"
+
+        old = await client.get(
+            f"/api/v1/driver-onboarding/applicant/dl-capture/{first_token}",
+            headers=AUTH_HEADERS,
+        )
+        assert old.status_code == 404
+        fresh = await client.get(
+            f"/api/v1/driver-onboarding/applicant/dl-capture/{body['token']}",
+            headers=AUTH_HEADERS,
+        )
+        assert fresh.status_code == 200
+        tenant_session.expire_all()
+        capture_rows = (
+            await tenant_session.scalars(
+                select(ApplicationAccessToken).where(
+                    ApplicationAccessToken.tenant_id == demo_tenant_id,
+                    ApplicationAccessToken.application_id == app_id,
+                    ApplicationAccessToken.purpose == ro.TOKEN_PURPOSE_DL_CAPTURE,
+                )
+            )
+        ).all()
+        active = [t for t in capture_rows if t.revoked_at is None]
+        assert len(active) == 1
+        assert invite not in sent["link"]
+        assert body["token"] in sent["link"]
+        assert body["token"] in body["link"]
+
+    async def test_no_email_does_not_revoke_existing_capture_token(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+    ) -> None:
+        app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session,
+            demo_tenant_id=demo_tenant_id,
+            email=None,
+        )
+        issued = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert issued.status_code == 200
+        token = issued.json()["token"]
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 400, r.text
+        still = await client.get(
+            f"/api/v1/driver-onboarding/applicant/dl-capture/{token}",
+            headers=AUTH_HEADERS,
+        )
+        assert still.status_code == 200, still.text
+        assert app_id > 0
+
+    async def test_mail_failure_keeps_new_token_active(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def boom(*, to: str, capture_link: str) -> None:
+            raise RuntimeError("smtp_unavailable")
+
+        monkeypatch.setattr(ro, "send_dl_capture_link_email", boom)
+        _app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session, demo_tenant_id=demo_tenant_id
+        )
+        first = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert first.status_code == 200
+        first_token = first.json()["token"]
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["emailed"] is False
+        assert body["email_error"]
+        assert body["token"] != first_token
+        assert "/dl-capture/" in body["link"]
+        assert "onboarding?token=" not in body["link"]
+        old = await client.get(
+            f"/api/v1/driver-onboarding/applicant/dl-capture/{first_token}",
+            headers=AUTH_HEADERS,
+        )
+        assert old.status_code == 404
+        fresh = await client.get(
+            f"/api/v1/driver-onboarding/applicant/dl-capture/{body['token']}",
+            headers=AUTH_HEADERS,
+        )
+        assert fresh.status_code == 200
+
+    async def test_email_rejected_for_non_driver_workflow(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sent: dict[str, str] = {}
+
+        async def fake_send(*, to: str, capture_link: str) -> None:
+            sent["to"] = to
+            sent["link"] = capture_link
+
+        monkeypatch.setattr(ro, "send_dl_capture_link_email", fake_send)
+        _app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session,
+            demo_tenant_id=demo_tenant_id,
+            application_type="DISPATCHER",
+        )
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 403, r.text
+        assert sent == {}
+
+    async def test_email_rejected_for_submitted_application(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def fake_send(*, to: str, capture_link: str) -> None:
+            raise AssertionError("mail must not send")
+
+        monkeypatch.setattr(ro, "send_dl_capture_link_email", fake_send)
+        _app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session,
+            demo_tenant_id=demo_tenant_id,
+            status=DriverOnboardingStatus.SUBMITTED.value,
+        )
+        r = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 409, r.text
+
+    async def test_email_rejected_for_invalid_invite_and_wrong_host(
+        self,
+        client: AsyncClient,
+        demo_tenant_id: int,
+        tenant_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def fake_send(*, to: str, capture_link: str) -> None:
+            raise AssertionError("mail must not send")
+
+        monkeypatch.setattr(ro, "send_dl_capture_link_email", fake_send)
+        _app_id, invite = await _make_draft_driver_app_with_invite(
+            tenant_session, demo_tenant_id=demo_tenant_id
+        )
+        missing = await client.post(
+            "/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token=not-a-real-invite",
+            headers=AUTH_HEADERS,
+        )
+        assert missing.status_code in (404, 403, 400), missing.text
+        wrong_host = await client.post(
+            f"/api/v1/driver-onboarding/applicant/application/dl-capture-link/email?token={invite}",
+            headers={"host": "other.truckerp.me"},
+        )
+        assert wrong_host.status_code in (404, 403, 400), wrong_host.text
+        assert demo_tenant_id > 0

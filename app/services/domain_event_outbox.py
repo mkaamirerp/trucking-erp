@@ -14,6 +14,8 @@ AGGREGATE_TYPE_PERSON_APPLICATION = "person_application"
 EVENT_DRIVER_LICENCE_FRONT_PROCESSED = "driver_licence.front_processed"
 EVENT_DRIVER_LICENCE_BACK_PROCESSED = "driver_licence.back_processed"
 EVENT_DRIVER_LICENCE_PROCESSING_FAILED = "driver_licence.processing_failed"
+EVENT_DRIVER_LICENCE_SIDE_CONFIRMED = "driver_licence.side_confirmed"
+EVENT_DRIVER_LICENCE_BACK_EXTRACTED = "driver_licence.back_extracted"
 EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE = "driver_licence.capture_complete"
 
 
@@ -58,9 +60,23 @@ def build_dl_licence_domain_events(
     if upload_failed:
         events.append((EVENT_DRIVER_LICENCE_PROCESSING_FAILED, {"side": doc_type}))
 
-    old_both = old_front == "PROCESSED" and old_back == "PROCESSED"
-    new_both = new_front == "PROCESSED" and new_back == "PROCESSED"
-    if not old_both and new_both:
-        events.append((EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE, {}))
+    return events
 
+
+def build_dl_confirm_domain_events(
+    *,
+    doc_type: str,
+    both_confirmed: bool,
+    extract_status: str | None = None,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Events after the applicant confirms a processed side (PDF417 runs on back confirm)."""
+    events: list[tuple[str, dict[str, Any]]] = [
+        (EVENT_DRIVER_LICENCE_SIDE_CONFIRMED, {"side": doc_type}),
+    ]
+    if doc_type == "CDL_BACK" and extract_status:
+        events.append(
+            (EVENT_DRIVER_LICENCE_BACK_EXTRACTED, {"license_extract_status": extract_status}),
+        )
+    if both_confirmed:
+        events.append((EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE, {}))
     return events

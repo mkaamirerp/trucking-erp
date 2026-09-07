@@ -22,10 +22,13 @@ from app.models.person_application import PersonApplication
 from app.schemas.driver_onboarding import DriverOnboardingStatus
 from app.services.domain_event_delivery import DomainEventDispatcher, SubscriberRegistry, format_sse_application_changed
 from app.services.domain_event_outbox import (
+    EVENT_DRIVER_LICENCE_BACK_EXTRACTED,
     EVENT_DRIVER_LICENCE_BACK_PROCESSED,
     EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE,
     EVENT_DRIVER_LICENCE_FRONT_PROCESSED,
     EVENT_DRIVER_LICENCE_PROCESSING_FAILED,
+    EVENT_DRIVER_LICENCE_SIDE_CONFIRMED,
+    build_dl_confirm_domain_events,
     build_dl_licence_domain_events,
 )
 from app.routers import driver_onboarding as ro
@@ -73,7 +76,33 @@ def test_back_processed_transition_event() -> None:
     )
     types = [e[0] for e in events]
     assert EVENT_DRIVER_LICENCE_BACK_PROCESSED in types
+    assert EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE not in types
+
+
+def test_confirm_back_emits_extract_and_complete() -> None:
+    events = build_dl_confirm_domain_events(
+        doc_type="CDL_BACK",
+        both_confirmed=True,
+        extract_status="SUCCESS",
+    )
+    types = [e[0] for e in events]
+    assert EVENT_DRIVER_LICENCE_SIDE_CONFIRMED in types
+    assert EVENT_DRIVER_LICENCE_BACK_EXTRACTED in types
     assert EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE in types
+    extract = [e for e in events if e[0] == EVENT_DRIVER_LICENCE_BACK_EXTRACTED]
+    assert extract[0][1] == {"license_extract_status": "SUCCESS"}
+
+
+def test_confirm_front_does_not_extract() -> None:
+    events = build_dl_confirm_domain_events(
+        doc_type="CDL_FRONT",
+        both_confirmed=False,
+        extract_status=None,
+    )
+    types = [e[0] for e in events]
+    assert EVENT_DRIVER_LICENCE_SIDE_CONFIRMED in types
+    assert EVENT_DRIVER_LICENCE_BACK_EXTRACTED not in types
+    assert EVENT_DRIVER_LICENCE_CAPTURE_COMPLETE not in types
 
 
 def test_no_duplicate_capture_complete_when_already_complete() -> None:

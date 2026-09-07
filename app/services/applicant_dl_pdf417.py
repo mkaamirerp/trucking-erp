@@ -14,10 +14,52 @@ from app.services.dl_pdf417 import (
     decode_pdf417_barcode_with_trace,
 )
 
+# Extract debug keys dropped when replacing a back image.
+_PDF417_EXTRACT_META_KEYS = (
+    "license_extract_status",
+    "license_extract_debug",
+    "license_extract_error",
+)
+
 
 def pdf417_enabled_for_doc_type(doc_type: str) -> bool:
     """PDF417 runs only on the licence back. Front is never a barcode source."""
     return doc_type == "CDL_BACK"
+
+
+def clear_pdf417_extract_from_intake(intake: dict[str, Any]) -> dict[str, Any]:
+    """Drop PDF417-sourced values and extract debug so a new back photo cannot keep stale fields."""
+    out = dict(intake)
+    user_edited = out.get("user_edited_fields") if isinstance(out.get("user_edited_fields"), dict) else {}
+    sources = dict(out.get("field_sources") or {})
+
+    drop_keys: set[str] = set(_PDF417_EXTRACT_META_KEYS)
+    drop_keys.add("pdf417_text")
+    for key, meta in list(sources.items()):
+        if not (isinstance(meta, dict) and meta.get("source") == "pdf417"):
+            continue
+        if user_edited.get(key) is True:
+            continue
+        sources.pop(key, None)
+        drop_keys.add(key)
+
+    if "license_number" in drop_keys:
+        drop_keys.add("driver_license_number")
+    if "license_state" in drop_keys:
+        drop_keys.add("license_region")
+    if "license_class" in drop_keys:
+        drop_keys.add("cdl_class")
+
+    for key in drop_keys:
+        if user_edited.get(key) is True:
+            continue
+        out.pop(key, None)
+
+    if sources:
+        out["field_sources"] = sources
+    else:
+        out.pop("field_sources", None)
+    return out
 
 
 async def _decode_stored_key(
@@ -63,49 +105,25 @@ def _attach_source_debug(
 
 async def apply_stored_cdl_back_pdf417(
     intake: dict[str, Any],
-    storage_key: str | None,
+    processed_storage_key: str | None,
     tenant_slug: str,
-    *,
-    processed_storage_key: str | None = None,
 ) -> dict[str, Any]:
-    """Decode PDF417 from the original stored BACK upload (processed warp is fallback only)."""
-    if not storage_key:
+    """Decode PDF417 from the confirmed processed BACK JPEG only. Never reads the original upload."""
+    if not processed_storage_key:
         return _attach_source_debug(
             apply_pdf417_to_intake(
-                intake, raw_barcode_text=None, technical_error="missing_storage_key"
+                intake, raw_barcode_text=None, technical_error="missing_processed_image"
             ),
-            barcode_image_source="original",
+            barcode_image_source="processed",
             processed_fallback_used=False,
         )
 
-    raw, meta, tech = await _decode_stored_key(storage_key, tenant_slug)
-    source = "original"
-    fallback_used = False
-
-    can_fallback = (
-        not raw
-        and tech != "decode_timeout"
-        and bool(processed_storage_key)
-        and processed_storage_key != storage_key
-    )
-    if can_fallback:
-        assert processed_storage_key is not None
-        raw2, meta2, tech2 = await _decode_stored_key(processed_storage_key, tenant_slug)
-        fallback_used = True
-        if raw2:
-            raw, meta, tech = raw2, meta2, None
-            source = "processed"
-        elif tech is None:
-            meta = meta2 or meta
-        elif tech == "source_file_missing" and tech2 is None and not raw2:
-            meta = meta2 or meta
-            tech = None
-
+    raw, meta, tech = await _decode_stored_key(processed_storage_key, tenant_slug)
     out = apply_pdf417_to_intake(
         intake, raw_barcode_text=raw, technical_error=tech, decode_meta=meta
     )
     return _attach_source_debug(
         out,
-        barcode_image_source=source,
-        processed_fallback_used=fallback_used,
+        barcode_image_source="processed",
+        processed_fallback_used=False,
     )

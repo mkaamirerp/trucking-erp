@@ -1,9 +1,6 @@
 # ACTIVE_ONBOARDING_2026Q1
 # Canonical onboarding pipeline:
 #   PersonApplication -> applicant submit -> admin review -> admin approve/reject
-# Legacy compatibility only:
-#   DriverOnboardingSubmission routes below remain temporarily for older flows and
-#   must not be treated as the future approval source-of-truth.
 #
 # Tenant policy (enforced in TenantContextMiddleware before handlers):
 #   - Platform tenant must be status ACTIVE and db_status READY, or all routes get 403 "Tenant not ready".
@@ -41,7 +38,6 @@ from app.deps.tenant_db import get_tenant_db
 from app.models.application_access_token import ApplicationAccessToken
 from app.models.driver import Driver
 from app.models.platform import PlatformTenant
-from app.models.driver_onboarding_submission import DriverOnboardingSubmission
 from app.models.person import Person, PersonRole, DriverProfile
 from app.models.person_application import APPLICATION_TYPES, PersonApplication
 from app.schemas.driver_onboarding import (
@@ -54,19 +50,17 @@ from app.schemas.driver_onboarding import (
     PersonApplicationDocumentRequest,
     PersonApplicationDocumentRequestResponse,
     PersonApplicationReviewPatch,
-    DriverOnboardingApproveResponse,
-    DriverOnboardingCreateResponse,
-    DriverOnboardingRejectRequest,
-    DriverOnboardingSubmissionCreate,
-    DriverOnboardingSubmissionOut,
     DriverOnboardingStatus,
     PersonApplicationRejectRequest,
     PersonApplicationListItem,
-    PersonOut,
 )
 from app.deps.admin import is_tenant_admin
 from app.deps.entitlements import require_tenant_subscription_active
-from app.services.applicant_dl_pdf417 import apply_stored_cdl_back_pdf417, pdf417_enabled_for_doc_type
+from app.services.applicant_dl_pdf417 import (
+    apply_stored_cdl_back_pdf417,
+    clear_pdf417_extract_from_intake,
+    pdf417_enabled_for_doc_type,
+)
 from app.constants.person_application_workflow import WORKFLOW_LANE_COMPLETE, normalize_workflow_lane
 from app.constants.person_onboarding import PERSON_SETUP_UI_COMBINED, normalize_person_setup_ui_mode
 from app.schemas.driver_compensation_setup import DriverCompensationSetupOut, DriverCompensationSetupWrite
@@ -87,7 +81,7 @@ from app.services.person_application_onboarding import (
     set_submitted_lane_on_applicant_submit,
     setup_status_after_approval,
 )
-from app.utils.email import send_onboarding_document_request_email
+from app.utils.email import send_dl_capture_link_email, send_onboarding_document_request_email
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +133,7 @@ TOKEN_PURPOSE_DL_CAPTURE = "dl_capture"
 DL_CAPTURE_TOKEN_TTL = timedelta(hours=24)
 
 _DL_CAPTURE_INVALID = "Invalid or expired capture link"
+_NO_APPLICANT_EMAIL = "No applicant email is available for this application."
 
 # Applicant may upload / resubmit documents after initial submit or after approval (admin document request).
 _POST_SUBMIT_DOC_RESUME_STATUSES = frozenset(
@@ -226,20 +221,6 @@ def _sanitize_intake_for_workflow(app: PersonApplication, intake: dict | None) -
     if "step" not in out:
         out["step"] = "common"
     return out
-
-
-async def _get_submission(
-    db: AsyncSession, tenant_id: int, submission_id: int
-) -> DriverOnboardingSubmission:
-    submission = await db.scalar(
-        select(DriverOnboardingSubmission).where(
-            DriverOnboardingSubmission.id == submission_id,
-            DriverOnboardingSubmission.tenant_id == tenant_id,
-        )
-    )
-    if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
-    return submission
 
 
 async def _get_person_application_admin_or_404(
@@ -528,20 +509,6 @@ async def _ensure_person_entities_for_application(
     return person
 
 
-async def _get_my_latest_submission(
-    db: AsyncSession, tenant_id: int, member_id: int
-) -> DriverOnboardingSubmission | None:
-    return await db.scalar(
-        select(DriverOnboardingSubmission)
-        .where(
-            DriverOnboardingSubmission.tenant_id == tenant_id,
-            DriverOnboardingSubmission.created_by_user_id == member_id,
-        )
-        .order_by(DriverOnboardingSubmission.created_at.desc())
-        .limit(1)
-    )
-
-
 def _token_sha256_hex(raw: str) -> str:
     return hashlib.sha256(raw.strip().encode("utf-8")).hexdigest()
 
@@ -608,7 +575,39 @@ def _dl_side_preview_file_id(intake: dict, side: str) -> str | None:
     )
 
 
+def _dl_processed_storage_key(intake: dict, side: str) -> str | None:
+    """Processed/warped JPEG key used for preview and PDF417 (never the original upload)."""
+    files = intake.get("files") or {}
+    meta = files.get(side)
+    processed_meta = files.get(f"{side}_PROCESSED")
+    for candidate in (
+        meta.get("enh_file_id") if isinstance(meta, dict) else None,
+        processed_meta.get("storage_key") if isinstance(processed_meta, dict) else None,
+        processed_meta.get("file_id") if isinstance(processed_meta, dict) else None,
+        processed_meta.get("enh_file_id") if isinstance(processed_meta, dict) else None,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _pdf417_confirm_message(intake: dict) -> str | None:
+    status = intake.get("license_extract_status")
+    if status == "FAILED":
+        return (
+            "We could not read the barcode on the back of this licence. "
+            "The photo is saved — upload again or try Use This Photo once more."
+        )
+    if status == "NO_FIELDS_FOUND":
+        return (
+            "We could not read licence details from this photo. "
+            "The photo is saved — you can upload a clearer back photo or enter details manually."
+        )
+    return None
+
+
 def _dl_capture_step(front_status: str, back_status: str) -> str:
+    """Preprocess-only step (PROCESSED advances). Phone capture uses _dl_capture_phone_step."""
     if front_status != "PROCESSED":
         return "FRONT"
     if back_status != "PROCESSED":
@@ -616,18 +615,131 @@ def _dl_capture_step(front_status: str, back_status: str) -> str:
     return "COMPLETE"
 
 
+def _dl_side_user_confirmed(intake: dict, side: str) -> bool:
+    """True only when this side is PROCESSED and the applicant accepted it (Use This Photo)."""
+    if _dl_side_status(intake, side) != "PROCESSED":
+        return False
+    meta = (intake.get("files") or {}).get(side)
+    return isinstance(meta, dict) and meta.get("dl_user_confirmed") is True
+
+
+def _dl_capture_phone_step(intake: dict) -> str:
+    """Phone UI step: stay on a side until the user confirms the processed image."""
+    if not _dl_side_user_confirmed(intake, "CDL_FRONT"):
+        return "FRONT"
+    if not _dl_side_user_confirmed(intake, "CDL_BACK"):
+        return "BACK"
+    return "COMPLETE"
+
+
+def _mark_dl_side_user_confirmed(intake: dict, side: str) -> dict:
+    intake = dict(intake)
+    files = dict(intake.get("files") or {})
+    meta = files.get(side)
+    if not isinstance(meta, dict):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{side} is not available to confirm",
+        )
+    meta = dict(meta)
+    meta["dl_user_confirmed"] = True
+    files[side] = meta
+    intake["files"] = files
+    return intake
+
+
+async def _enqueue_dl_domain_events(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    application_id: int,
+    events: list[tuple[str, dict]],
+) -> None:
+    if not events:
+        return
+    from app.services.domain_event_outbox import (
+        AGGREGATE_TYPE_PERSON_APPLICATION,
+        enqueue_domain_event,
+    )
+
+    for event_type, payload in events:
+        await enqueue_domain_event(
+            db,
+            tenant_id=tenant_id,
+            aggregate_type=AGGREGATE_TYPE_PERSON_APPLICATION,
+            aggregate_id=str(application_id),
+            event_type=event_type,
+            payload=payload,
+        )
+
+
+async def _confirm_applicant_dl_side(
+    *,
+    db: AsyncSession,
+    app: PersonApplication,
+    tenant_slug: str,
+    doc_type: str,
+) -> PersonApplication:
+    """Mark a PROCESSED side confirmed. PDF417 runs here for CDL_BACK on the processed JPEG only."""
+    intake = dict(app.intake_payload or {})
+    if _dl_side_status(intake, doc_type) != "PROCESSED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Processed image is required before confirming this side",
+        )
+
+    already_confirmed = _dl_side_user_confirmed(intake, doc_type)
+    if not already_confirmed:
+        intake = _mark_dl_side_user_confirmed(intake, doc_type)
+
+    extract_status: str | None = None
+    if pdf417_enabled_for_doc_type(doc_type):
+        prior_status = intake.get("license_extract_status")
+        should_decode = (not already_confirmed) or prior_status in (
+            None,
+            "FAILED",
+            "NO_FIELDS_FOUND",
+        )
+        if should_decode:
+            processed_key = _dl_processed_storage_key(intake, doc_type)
+            intake = await apply_stored_cdl_back_pdf417(intake, processed_key, tenant_slug)
+        extract_status = intake.get("license_extract_status")
+
+    app.intake_payload = intake
+
+    from app.services.domain_event_outbox import build_dl_confirm_domain_events
+
+    both_confirmed = _dl_side_user_confirmed(intake, "CDL_FRONT") and _dl_side_user_confirmed(
+        intake, "CDL_BACK"
+    )
+    await _enqueue_dl_domain_events(
+        db,
+        tenant_id=app.tenant_id,
+        application_id=app.id,
+        events=build_dl_confirm_domain_events(
+            doc_type=doc_type,
+            both_confirmed=both_confirmed,
+            extract_status=extract_status if isinstance(extract_status, str) else None,
+        ),
+    )
+    await db.commit()
+    await db.refresh(app)
+
+    from app.services.domain_event_delivery import get_domain_event_dispatcher
+
+    get_domain_event_dispatcher().wake(app.tenant_id)
+    return app
+
+
 async def _maybe_complete_dl_capture_token(
     db: AsyncSession,
     access: ApplicationAccessToken,
     intake: dict,
 ) -> None:
-    """Set completed_at when both licence sides are PROCESSED."""
+    """Set completed_at when both licence sides are PROCESSED and user-confirmed."""
     if access.completed_at is not None:
         return
-    if (
-        _dl_side_status(intake, "CDL_FRONT") == "PROCESSED"
-        and _dl_side_status(intake, "CDL_BACK") == "PROCESSED"
-    ):
+    if _dl_side_user_confirmed(intake, "CDL_FRONT") and _dl_side_user_confirmed(intake, "CDL_BACK"):
         access.completed_at = _utcnow()
 
 
@@ -639,7 +751,7 @@ def _dl_capture_session_out(
 ) -> DlCaptureSessionOut:
     front_status = _dl_side_status(intake, "CDL_FRONT")
     back_status = _dl_side_status(intake, "CDL_BACK")
-    step = _dl_capture_step(front_status, back_status)
+    step = _dl_capture_phone_step(intake)
     if access.completed_at is not None:
         step = "COMPLETE"
     return DlCaptureSessionOut(
@@ -648,6 +760,8 @@ def _dl_capture_session_out(
         back_status=back_status,
         front_preview_file_id=_dl_side_preview_file_id(intake, "CDL_FRONT"),
         back_preview_file_id=_dl_side_preview_file_id(intake, "CDL_BACK"),
+        front_confirmed=_dl_side_user_confirmed(intake, "CDL_FRONT"),
+        back_confirmed=_dl_side_user_confirmed(intake, "CDL_BACK"),
         message=message,
     )
 
@@ -680,6 +794,7 @@ async def _apply_applicant_dl_upload(
     preprocess_debug = processed.debug
     preprocess_status = "FAILED"
     ocr_storage_key: str | None = None
+    files.pop(f"{doc_type}_PROCESSED", None)
 
     if processed.success and processed.jpeg_bytes:
         stored_processed = await save_applicant_dl_processed_bytes(
@@ -712,12 +827,7 @@ async def _apply_applicant_dl_upload(
 
     intake["files"] = files
     if pdf417_enabled_for_doc_type(doc_type):
-        intake = await apply_stored_cdl_back_pdf417(
-            intake,
-            stored.storage_key,
-            tenant_slug,
-            processed_storage_key=ocr_storage_key,
-        )
+        intake = clear_pdf417_extract_from_intake(intake)
     app.intake_payload = intake
 
     new_front = _dl_side_status(intake, "CDL_FRONT")
@@ -1074,6 +1184,37 @@ async def upload_applicant_dl(
     return _person_application_to_out(app)
 
 
+@router.post(
+    "/applicant/application/dl-confirm",
+    response_model=ApplicantApplicationOut,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def confirm_applicant_dl(
+    token: str = Query(..., description="Invite link token"),
+    doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Applicant accepts the processed preview (Use This Photo). PDF417 runs on confirmed CDL_BACK."""
+    if doc_type not in ("CDL_FRONT", "CDL_BACK"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
+    app = await _get_application_by_token(db, tenant_id, token)
+    _require_driver_workflow(app)
+    if app.status != DriverOnboardingStatus.DRAFT.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application already submitted",
+        )
+    app = await _confirm_applicant_dl_side(
+        db=db,
+        app=app,
+        tenant_slug=tenant_slug,
+        doc_type=doc_type,
+    )
+    return _person_application_to_out(app)
+
+
 @router.get(
     "/applicant/dl-capture/{token}",
     response_model=DlCaptureSessionOut,
@@ -1084,7 +1225,7 @@ async def get_dl_capture_session(
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Resume DL capture: step derived from application file preprocess status."""
+    """Resume DL capture: phone step is PROCESSED + user-confirmed, not OpenCV alone."""
     app, access = await _get_application_and_access_by_token(
         db,
         tenant_id,
@@ -1140,10 +1281,7 @@ async def upload_dl_capture_side(
         )
 
     intake_before = dict(app.intake_payload or {})
-    step = _dl_capture_step(
-        _dl_side_status(intake_before, "CDL_FRONT"),
-        _dl_side_status(intake_before, "CDL_BACK"),
-    )
+    step = _dl_capture_phone_step(intake_before)
     if step == "COMPLETE":
         await _maybe_complete_dl_capture_token(db, access, intake_before)
         await db.commit()
@@ -1179,6 +1317,72 @@ async def upload_dl_capture_side(
     if side_status == "FAILED":
         message = "We couldn't clearly detect all four edges."
     return _dl_capture_session_out(access, intake, message=message)
+
+
+@router.post(
+    "/applicant/dl-capture/{token}/confirm",
+    response_model=DlCaptureSessionOut,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def confirm_dl_capture_side(
+    token: str,
+    doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Applicant accepts the processed preview (Use This Photo). PDF417 runs on confirmed CDL_BACK."""
+    if doc_type not in ("CDL_FRONT", "CDL_BACK"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
+
+    app, access = await _get_application_and_access_by_token(
+        db,
+        tenant_id,
+        token,
+        purpose=TOKEN_PURPOSE_DL_CAPTURE,
+        detail=_DL_CAPTURE_INVALID,
+    )
+    _require_driver_workflow(app)
+
+    intake = dict(app.intake_payload or {})
+    if access.completed_at is not None:
+        return _dl_capture_session_out(access, intake, message=_pdf417_confirm_message(intake))
+
+    if app.status != DriverOnboardingStatus.DRAFT.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Application already submitted",
+        )
+
+    step = _dl_capture_phone_step(intake)
+    if step == "COMPLETE":
+        await _maybe_complete_dl_capture_token(db, access, intake)
+        await db.commit()
+        await db.refresh(access)
+        return _dl_capture_session_out(access, intake, message=_pdf417_confirm_message(intake))
+
+    expected = "CDL_FRONT" if step == "FRONT" else "CDL_BACK"
+    if doc_type != expected:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Expected {expected} for current capture step",
+        )
+
+    app = await _confirm_applicant_dl_side(
+        db=db,
+        app=app,
+        tenant_slug=tenant_slug,
+        doc_type=doc_type,
+    )
+    intake = dict(app.intake_payload or {})
+    access = await db.get(ApplicationAccessToken, access.id)
+    assert access is not None
+    await _maybe_complete_dl_capture_token(db, access, intake)
+    await db.commit()
+    await db.refresh(access)
+    await db.refresh(app)
+    intake = dict(app.intake_payload or {})
+    return _dl_capture_session_out(access, intake, message=_pdf417_confirm_message(intake))
 
 
 @router.get("/applicant/dl-capture/{token}/file", dependencies=_APPLICANT_SUBSCRIPTION)
@@ -1244,6 +1448,8 @@ async def _issue_dl_capture_link_for_application(
         token=raw,
         link=link,
         expires_at=expires_at,
+        emailed=False,
+        email_error=None,
     )
 
 
@@ -1278,6 +1484,20 @@ async def issue_applicant_dl_capture_link(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Applicant: issue restricted phone DL capture link for the authenticated draft application."""
+    app = await _require_applicant_may_issue_dl_capture(db, tenant_id, token)
+    return await _issue_dl_capture_link_for_application(db, tenant_id, app.id, request)
+
+
+def _applicant_email_for_capture(app: PersonApplication) -> str | None:
+    raw = (getattr(app, "email", None) or "").strip()
+    return raw or None
+
+
+async def _require_applicant_may_issue_dl_capture(
+    db: AsyncSession,
+    tenant_id: int,
+    token: str,
+) -> PersonApplication:
     app, access = await _get_application_and_access_by_token(db, tenant_id, token)
     purpose = getattr(access, "purpose", None) or TOKEN_PURPOSE_INVITE
     if purpose != TOKEN_PURPOSE_INVITE:
@@ -1291,7 +1511,51 @@ async def issue_applicant_dl_capture_link(
             detail="Phone capture links are only available while the application is in draft",
         )
     _require_driver_workflow(app)
-    return await _issue_dl_capture_link_for_application(db, tenant_id, app.id, request)
+    return app
+
+
+@router.post(
+    "/applicant/application/dl-capture-link/email",
+    response_model=DlCaptureLinkResponse,
+    dependencies=_APPLICANT_SUBSCRIPTION,
+)
+async def email_applicant_dl_capture_link(
+    request: Request,
+    token: str = Query(..., description="Invite link token"),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Issue one active restricted capture token and email it to PersonApplication.email."""
+    app = await _require_applicant_may_issue_dl_capture(db, tenant_id, token)
+    applicant_email = _applicant_email_for_capture(app)
+    if not applicant_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_NO_APPLICANT_EMAIL,
+        )
+
+    issued = await _issue_dl_capture_link_for_application(db, tenant_id, app.id, request)
+    emailed = False
+    email_error: str | None = None
+    try:
+        await send_dl_capture_link_email(to=applicant_email, capture_link=issued.link)
+        emailed = True
+    except Exception:
+        logger.exception(
+            "dl_capture_email_failed application_id=%s tenant_id=%s",
+            app.id,
+            tenant_id,
+        )
+        email_error = "Could not send the capture link email. Try QR or copy link."
+
+    return DlCaptureLinkResponse(
+        application_id=issued.application_id,
+        token=issued.token,
+        link=issued.link,
+        expires_at=issued.expires_at,
+        emailed=emailed,
+        email_error=email_error,
+    )
 
 
 @router.get("/applicant/application/file", dependencies=_APPLICANT_SUBSCRIPTION)
@@ -1418,31 +1682,6 @@ def _resolve_applicant_dl_serve_key(meta: dict, file_id: str) -> str | None:
     if meta.get("dl_preprocess_status") == "PROCESSED" and meta.get("enh_file_id"):
         return str(meta["enh_file_id"])
     return str(meta.get("storage_key") or meta.get("file_id") or file_id)
-
-
-@router.post("/submissions", response_model=DriverOnboardingCreateResponse, status_code=status.HTTP_201_CREATED)
-async def create_submission(
-    payload: DriverOnboardingSubmissionCreate,
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    # LEGACY QUARANTINE: No new entity creation or submissions. Use PersonApplication invite-link flow.
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy driver onboarding submission flow is deprecated. Use the invite-link application flow provided by your admin.",
-    )
-
-
-@router.get("/submissions/me", response_model=DriverOnboardingSubmissionOut | None)
-async def get_my_latest_submission(
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    if current_user.member_id is None:
-        return None
-    return await _get_my_latest_submission(db, tenant_id, current_user.member_id)
 
 
 @router.get("/applications", response_model=list[PersonApplicationListItem])
@@ -2214,84 +2453,3 @@ async def complete_person_application_onboarding(
     await db.commit()
     app = await _get_person_application_admin_or_404(db, tenant_id, application_id)
     return _person_application_to_out(app, include_review_meta=True)
-
-
-# Legacy admin review/approval routes below are retained temporarily for compatibility only.
-@router.get("/submissions", response_model=list[DriverOnboardingSubmissionOut])
-async def list_submissions(
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-    status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-):
-    if not is_tenant_admin(current_user.role):
-        raise HTTPException(status_code=403, detail="Admin role required")
-    stmt = select(DriverOnboardingSubmission).where(DriverOnboardingSubmission.tenant_id == tenant_id)
-    if status:
-        stmt = stmt.where(DriverOnboardingSubmission.status == status)
-    stmt = stmt.order_by(DriverOnboardingSubmission.created_at.desc()).offset(offset).limit(limit)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
-
-
-@router.get("/submissions/{submission_id}", response_model=DriverOnboardingSubmissionOut)
-async def get_submission(
-    submission_id: int,
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    if not is_tenant_admin(current_user.role):
-        raise HTTPException(status_code=403, detail="Admin role required")
-    return await _get_submission(db, tenant_id, submission_id)
-
-
-@router.post("/submissions/{submission_id}/submit", response_model=DriverOnboardingSubmissionOut)
-async def submit_submission(
-    submission_id: int,
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    submission = await _get_submission(db, tenant_id, submission_id)
-    if not _is_admin(current_user) and submission.created_by_user_id != current_user.member_id:
-        raise HTTPException(status_code=403, detail="Not allowed to submit this draft")
-    if submission.status != DriverOnboardingStatus.DRAFT.value:
-        raise HTTPException(status_code=409, detail="Submission is not in DRAFT status")
-    submission.status = DriverOnboardingStatus.SUBMITTED.value
-    submission.submitted_at = _utcnow()
-    # Person_roles.is_active stays False until approve; status lives on submission
-    await db.commit()
-    await db.refresh(submission)
-    return submission
-
-
-@router.post("/submissions/{submission_id}/approve", response_model=DriverOnboardingApproveResponse)
-async def approve_submission(
-    submission_id: int,
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    # LEGACY QUARANTINE: Approval source of truth is PersonApplication. Use POST /applications/{id}/approve.
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy approval path is deprecated. Use POST /api/v1/driver-onboarding/applications/{id}/approve.",
-    )
-
-
-@router.post("/submissions/{submission_id}/reject", response_model=DriverOnboardingSubmissionOut)
-async def reject_submission(
-    submission_id: int,
-    payload: DriverOnboardingRejectRequest,
-    tenant_id: int = Depends(require_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    # LEGACY QUARANTINE: Reject source of truth is PersonApplication. Use POST /applications/{id}/reject.
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy reject path is deprecated. Use POST /api/v1/driver-onboarding/applications/{id}/reject.",
-    )
