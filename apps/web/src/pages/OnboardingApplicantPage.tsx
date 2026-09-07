@@ -190,11 +190,11 @@ function dlSourceConfidence(source: unknown): unknown {
   return (source as { confidence?: unknown }).confidence;
 }
 
-/** Left-edge accent for DL-filled fields that need applicant review (Med/Low confidence). */
+/** Left-edge accent for DL-filled fields that need applicant review (Low confidence only). */
 function dlReviewAccent(source: unknown, edited: boolean | undefined, value: unknown): string {
   if (!shouldShowDlSource(source, edited, value)) return "";
   const label = confidenceLabel(dlSourceConfidence(source));
-  if (label !== "Med" && label !== "Low") return "";
+  if (label !== "Low") return "";
   return "border-l-4 border-l-orange-500";
 }
 
