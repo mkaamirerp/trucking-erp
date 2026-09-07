@@ -14,12 +14,12 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.deps.tenant_db import open_tenant_session_by_id
+from app.deps.tenant_db import dispose_cached_engine_for_tenant_id, open_tenant_session_by_id
 from app.models.domain_event_outbox import DomainEventOutbox
 from app.models.platform import PlatformTenant
 
@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 RECOVERY_INTERVAL_SECONDS = 10.0
 DISPATCH_BATCH_LIMIT = 100
+
+
+def _is_unsweepable_tenant_error(exc: BaseException) -> bool:
+    """True when this tenant cannot be swept and should be skipped, not retried every 10s."""
+    name = type(exc).__name__
+    if name in {"HTTPException", "InvalidCatalogNameError"}:
+        return True
+    text_blob = str(exc).lower()
+    return "database" in text_blob and "does not exist" in text_blob
 
 
 def _utcnow() -> datetime:
@@ -75,6 +84,9 @@ class DomainEventDispatcher:
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._running = False
+        # Tenants whose DBs lack domain_event_outbox or the catalog itself.
+        # Skip without re-querying so Postgres is not flooded with ERROR/FATAL.
+        self._skip_tenant_ids: set[int] = set()
 
     async def start(self) -> None:
         if self._running:
@@ -118,11 +130,36 @@ class DomainEventDispatcher:
                 logger.exception("domain_event_sweep_failed tenant_id=%s", tenant_id)
 
     async def process_pending_for_tenant(self, tenant_id: int) -> None:
-        async for db in open_tenant_session_by_id(tenant_id):
-            await self._process_pending_session(db, tenant_id)
-
-    async def _process_pending_session(self, db: AsyncSession, tenant_id: int) -> None:
+        if tenant_id in self._skip_tenant_ids:
+            return
         try:
+            should_forget_engine = False
+            async for db in open_tenant_session_by_id(tenant_id):
+                should_forget_engine = await self._process_pending_session(db, tenant_id)
+            if should_forget_engine:
+                await dispose_cached_engine_for_tenant_id(tenant_id)
+        except Exception as exc:
+            if not _is_unsweepable_tenant_error(exc):
+                raise
+            self._skip_tenant_ids.add(int(tenant_id))
+            logger.warning(
+                "domain_event_skip_tenant tenant_id=%s reason=%s",
+                tenant_id,
+                type(exc).__name__,
+            )
+            await dispose_cached_engine_for_tenant_id(tenant_id)
+
+    async def _process_pending_session(self, db: AsyncSession, tenant_id: int) -> bool:
+        """Return True when the cached tenant engine should be disposed."""
+        try:
+            present = await db.scalar(text("SELECT to_regclass('public.domain_event_outbox')"))
+            if present is None:
+                self._skip_tenant_ids.add(int(tenant_id))
+                logger.warning(
+                    "domain_event_outbox table missing for tenant_id=%s — skip pending sweep",
+                    tenant_id,
+                )
+                return True
             while True:
                 rows = list(
                     await db.scalars(
@@ -142,12 +179,14 @@ class DomainEventDispatcher:
         except ProgrammingError as exc:
             await db.rollback()
             if "domain_event_outbox" in str(exc).lower():
+                self._skip_tenant_ids.add(int(tenant_id))
                 logger.warning(
                     "domain_event_outbox table missing for tenant_id=%s — skip pending sweep",
                     tenant_id,
                 )
-                return
+                return True
             raise
+        return False
 
     async def _dispatch_row(self, db: AsyncSession, row: DomainEventOutbox) -> None:
         try:
