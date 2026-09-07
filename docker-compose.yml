@@ -1,14 +1,22 @@
-# Production-oriented memory caps (single-host Docker, non-Swarm):
-# - postgres: 1Gi — stable base for shared_buffers + connections; raise if heavy reporting / many tenants.
-# - API: 1536m — Python FastAPI + SQLAlchemy; raise before marketing spikes if OOM-killed in logs.
-# - nginx: 256m — reverse proxy + TLS; ample for static + buffering.
+# Production-oriented memory caps for a 2 GiB t3.small host (non-Swarm):
+# - postgres: 512m — shared_buffers is 128MB; observed RSS ~110Mi with ~20 backends.
+# - API: 1280m — idle ~160Mi, historical OpenCV/DL ~750Mi; keep headroom, do not cut further.
+# - nginx: 128m — observed ~7Mi; TLS reverse proxy.
+# Sum of caps ~1.9Gi; leave RAM for Debian, dockerd, SSH, page cache.
 # Tune per host RAM: leave headroom for OS + SSH (~20–30%). Override in a private overlay if needed.
+x-logging: &json-file-rotate
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   truckerp-postgres:
     image: postgres:15.7-alpine
     container_name: truckerp-postgres
     restart: unless-stopped
-    mem_limit: 1g
+    mem_limit: 512m
+    logging: *json-file-rotate
     environment:
       POSTGRES_DB: trucking_erp
       POSTGRES_USER: postgres
@@ -27,7 +35,8 @@ services:
         TRUCKERP_APP_GIT_SHA: ${TRUCKERP_APP_GIT_SHA:-}
     container_name: truckerp-api
     restart: unless-stopped
-    mem_limit: 1536m
+    mem_limit: 1280m
+    logging: *json-file-rotate
     depends_on:
       - truckerp-postgres
     command: ["/bin/sh", "-lc", "/app/scripts/start_api_with_ssm.sh"]
@@ -62,7 +71,8 @@ services:
       dockerfile: infra/nginx/Dockerfile
     container_name: truckerp-nginx
     restart: unless-stopped
-    mem_limit: 256m
+    mem_limit: 128m
+    logging: *json-file-rotate
     ports:
       - "80:80"
       - "443:443"
@@ -80,7 +90,8 @@ services:
     image: certbot/certbot:latest
     container_name: truckerp-certbot
     restart: unless-stopped
-    mem_limit: 128m
+    mem_limit: 64m
+    logging: *json-file-rotate
     volumes:
       - letsencrypt:/etc/letsencrypt
       - certbot_www:/var/www/certbot
