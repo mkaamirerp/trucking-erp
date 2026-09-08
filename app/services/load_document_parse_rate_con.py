@@ -3,7 +3,7 @@
 Wired as the product ``parse_pdf_bytes_to_load_document_response`` implementation.
 Does **not** embed PRODUCT_PARSE_DIAGNOSTICS or run semantic guardrail repairs.
 
-Digital PDFs: original bytes + v2 JSON rules/schema (no document.pages) → OpenAI.
+Digital PDFs: original bytes + existing v2 JSON rules/schema → OpenAI (unchanged).
 Image-only/scanned PDFs: OCR pages, then OCR text + the same JSON rules/schema → OpenAI
 (no original PDF attachment). Mixed PDFs remain blocked.
 """
@@ -134,7 +134,6 @@ async def parse_pdf_bytes_to_load_document_response(
         content_type="application/pdf",
         size_bytes=len(pdf_bytes),
         acquisition_method=str(acquisition.get("pdf_type") or "digital_text"),
-        include_pages=False,
     )
 
     api_key = (settings.openai_api_key or "").strip()
@@ -158,7 +157,7 @@ async def parse_pdf_bytes_to_load_document_response(
     ai_payload = await client(
         api_key=api_key,
         model=(settings.openai_extraction_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
-        system=build_v2_openai_system_prompt(include_pages=False),
+        system=build_v2_openai_system_prompt(),
         user_text=build_v2_openai_user_message(handoff),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
