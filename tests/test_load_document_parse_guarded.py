@@ -31,6 +31,12 @@ _GOLDEN_CASES = [
 ]
 
 
+def _handoff_json_from_user_text(user_text: str) -> dict:
+    idx = user_text.find('{"handoff_version"')
+    assert idx >= 0, "user_text missing serialized handoff JSON"
+    return json.loads(user_text[idx:])
+
+
 def _lab_golden_to_semantic_openai(golden_payload: dict) -> dict:
     """Test-only: lab goldens are product-shaped; OpenAI now returns semantic extracted."""
     payload = dict(golden_payload)
@@ -173,7 +179,22 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
     assert "role_hint" not in calls[0]["user_text"]
     assert "tenant_identity_exclusion" in calls[0]["user_text"]
     assert "field_rules" in calls[0]["user_text"]
-    assert "document.pages" in calls[0]["user_text"] or '"pages"' in calls[0]["user_text"]
+    user_text = calls[0]["user_text"]
+    prompt_prefix = user_text[: user_text.find('{"handoff_version"')]
+    handoff_json = _handoff_json_from_user_text(user_text)
+    assert "pages" not in handoff_json["document"]
+    assert set(handoff_json.keys()) == {
+        "handoff_version",
+        "profile",
+        "tenant_identity_exclusion",
+        "field_rules",
+        "document",
+    }
+    assert "document.pages" not in prompt_prefix
+    assert "Use tenant_identity_exclusion, field_rules, and document.pages only" not in user_text
+    assert "Use the attached PDF as the document evidence" in user_text
+    assert "Use the attached PDF as the document evidence" in calls[0]["system"]
+    assert calls[0]["schema"] == ParseDocumentSemanticModelOutput.model_json_schema()
     assert calls[0]["schema"]["type"] == "object"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
     assert calls[0]["input_file_bytes"] == _FIXTURE_PDF.read_bytes()
@@ -208,6 +229,53 @@ async def test_digital_pdf_does_not_invoke_ocr(monkeypatch: pytest.MonkeyPatch) 
     )
     assert out.extracted.broker_load_reference == "D-1"
     assert out.context.get("requires_ocr") is False
+
+
+@pytest.mark.asyncio
+async def test_digital_parse_keeps_page_text_for_mechanical_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import load_document_parse_rate_con
+
+    captured: dict = {}
+    original = load_document_parse_rate_con.apply_load_parser_mechanical_validation
+
+    def spy(response, **kwargs):
+        captured["page_texts"] = list(kwargs.get("page_texts") or [])
+        return original(response, **kwargs)
+
+    monkeypatch.setattr(
+        load_document_parse_rate_con,
+        "apply_load_parser_mechanical_validation",
+        spy,
+    )
+
+    async def fake_openai(**kwargs):
+        captured["user_text"] = kwargs["user_text"]
+        return {
+            "document": {"filename": "digital.pdf"},
+            "extracted": {"principal_load_identifier": "D-2", "references": [], "stops": []},
+            "warnings": [],
+            "field_confidence": {},
+            "context": {},
+        }
+
+    out = await parse_pdf_bytes_to_load_document_response(
+        AsyncMock(),
+        tenant_id=1,
+        pdf_bytes=_FIXTURE_PDF.read_bytes(),
+        filename="digital.pdf",
+        openai_chat_json_schema=fake_openai,
+    )
+    assert out.raw_text
+    assert captured["page_texts"]
+    assert any(str(t).strip() for t in captured["page_texts"])
+    handoff_json = _handoff_json_from_user_text(captured["user_text"])
+    assert "pages" not in handoff_json["document"]
+    for page_text in captured["page_texts"]:
+        snippet = (page_text or "").strip()[:24]
+        if snippet:
+            assert snippet not in json.dumps(handoff_json["document"])
 
 
 def _blank_pdf_bytes() -> bytes:
@@ -259,9 +327,20 @@ async def test_scanned_image_sends_ocr_text_not_pdf(monkeypatch: pytest.MonkeyPa
 
     assert calls
     assert calls[0]["input_file_bytes"] is None
+    handoff_json = _handoff_json_from_user_text(calls[0]["user_text"])
+    assert set(handoff_json.keys()) == {
+        "handoff_version",
+        "profile",
+        "tenant_identity_exclusion",
+        "field_rules",
+        "document",
+    }
+    assert "pages" in handoff_json["document"]
+    assert handoff_json["document"]["pages"][0]["text"] == "AGRICULTURE OCR PAGE 1 LOAD 123"
     assert "AGRICULTURE OCR PAGE 1" in calls[0]["user_text"]
     assert "field_rules" in calls[0]["user_text"]
     assert "tenant_identity_exclusion" in calls[0]["user_text"]
+    assert calls[0]["schema"] == ParseDocumentSemanticModelOutput.model_json_schema()
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
     assert out.extracted.broker_load_reference == "OCR-1"
     assert out.context["requires_ocr"] is True

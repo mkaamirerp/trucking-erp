@@ -110,11 +110,65 @@ def test_page_order_and_boundaries_preserved() -> None:
         tenant_identity_exclusion=_sample_exclusion(),
         pages=pages_in,
         filename="Armstrong.pdf",
+        include_pages=True,
     )
     pages = handoff["document"]["pages"]
     assert [p["page_number"] for p in pages] == [1, 2, 3]
     assert [p["text"] for p in pages] == ["AAA", "BBB", "CCC"]
     assert handoff["document"]["page_count"] == 3
+
+
+def test_digital_handoff_omits_document_pages() -> None:
+    """Digital path: page text is local-only; OpenAI JSON has metadata, not pages."""
+    pages_in = [
+        {"page": 1, "text": "AAA"},
+        {"page": 2, "text": "BBB"},
+        {"page": 3, "text": "CCC"},
+    ]
+    handoff = build_load_rate_con_openai_handoff_v2_payload(
+        tenant_identity_exclusion=_sample_exclusion(),
+        pages=pages_in,
+        filename="Armstrong.pdf",
+        include_pages=False,
+    )
+    assert set(handoff.keys()) == {
+        "handoff_version",
+        "profile",
+        "tenant_identity_exclusion",
+        "field_rules",
+        "document",
+    }
+    assert "pages" not in handoff["document"]
+    assert handoff["document"]["page_count"] == 3
+    blob = json.dumps(handoff)
+    assert "AAA" not in blob
+    assert "BBB" not in blob
+    assert "CCC" not in blob
+    assert '"pages"' not in blob
+    assert "tenant_identity_exclusion" in handoff
+    assert "field_rules" in handoff
+    body = build_proposed_openai_request_body_v2(handoff)
+    user = body["messages"][1]["content"]
+    system = body["messages"][0]["content"]
+    assert "Use the attached PDF as the document evidence" in user
+    assert "Use the attached PDF as the document evidence" in system
+    assert "Use tenant_identity_exclusion, field_rules, and document.pages only" not in user
+
+
+def test_ocr_handoff_includes_document_pages() -> None:
+    handoff = build_load_rate_con_openai_handoff_v2_payload(
+        tenant_identity_exclusion=_sample_exclusion(),
+        pages=[{"page_number": 1, "text": "OCR PAGE TEXT"}],
+        filename="scanned.pdf",
+        extraction_method="product_pdf_ocr",
+        acquisition_method="scanned_image_ocr",
+        include_pages=True,
+    )
+    assert "pages" in handoff["document"]
+    assert handoff["document"]["pages"][0]["text"] == "OCR PAGE TEXT"
+    user = build_proposed_openai_request_body_v2(handoff)["messages"][1]["content"]
+    assert "OCR PAGE TEXT" in user
+    assert "document.pages" in user
 
 
 def test_old_diagnostics_absent() -> None:
