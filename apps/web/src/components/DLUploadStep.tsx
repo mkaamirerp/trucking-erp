@@ -202,6 +202,7 @@ export default function DLUploadStep({
   const backPre = dlPreprocessStatus(intake, "CDL_BACK");
   const frontConfirmed = dlUserConfirmed(intake, "CDL_FRONT");
   const backConfirmed = dlUserConfirmed(intake, "CDL_BACK");
+  const bothConfirmed = frontConfirmed && backConfirmed;
 
   const handleFileSelect = async (side: Side, file: File) => {
     let normalizedFile: File;
@@ -229,9 +230,6 @@ export default function DLUploadStep({
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
-    if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
-      input.setAttribute("capture", "environment");
-    }
     input.onchange = () => {
       const file = input.files?.[0];
       if (file) void handleFileSelect(side, file);
@@ -398,12 +396,12 @@ export default function DLUploadStep({
         )}
 
         {awaitingConfirm ? (
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="flex gap-2">
             <button
               type="button"
               disabled={disabled || stageBusy}
               onClick={() => openFilePicker(side)}
-              className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex flex-1 items-center justify-center rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Retake
             </button>
@@ -411,7 +409,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || stageBusy}
               onClick={() => void handleConfirm(side)}
-              className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg bg-orange-500 px-3 py-2.5 text-sm font-bold text-black transition-all hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex flex-1 items-center justify-center rounded-lg bg-orange-500 px-3 py-2 text-xs font-bold text-black transition-all hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {confirmBusy === side ? "Saving…" : "Use This Photo"}
             </button>
@@ -421,7 +419,7 @@ export default function DLUploadStep({
           type="button"
           disabled={disabled || stageBusy}
           onClick={() => openFilePicker(side)}
-          className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" strokeLinecap="round" strokeLinejoin="round" />
@@ -433,13 +431,50 @@ export default function DLUploadStep({
     );
   }
 
+  const statusRow = (
+    sideLabel: string,
+    sub: string,
+    preprocess: "MISSING" | "FAILED" | "PROCESSED",
+    state: UploadState,
+    icon: "card" | "shield",
+    confirmed: boolean,
+  ) => {
+    const badge = sideBadge(state, preprocess, confirmed);
+    const done = confirmed || (icon === "shield" && bothConfirmed);
+    return (
+      <div className="flex items-start gap-3 border-b border-gray-700 py-2.5 last:border-b-0">
+        <div
+          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            done ? "bg-green-500/10 text-green-400" : "bg-gray-700/50 text-orange-400"
+          }`}
+        >
+          {icon === "shield" ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <circle cx="8.5" cy="11" r="2" />
+            </svg>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-white">{sideLabel}</div>
+          <div className="text-xs text-gray-500">{sub}</div>
+        </div>
+        <Badge label={done && icon === "shield" ? "COMPLETE" : badge.label} tone={done ? "done" : badge.tone} />
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-6 rounded-2xl border border-gray-700 bg-gray-800/60 p-4 sm:p-6">
-      <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-start">
+    <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <div className="h-5 w-1 shrink-0 rounded bg-orange-500" />
-            <h2 className="text-lg font-black uppercase tracking-wide text-white sm:text-xl">
+            <div className="w-1 h-5 shrink-0 bg-orange-500 rounded" />
+            <h2 className="text-xl font-black text-white uppercase tracking-wide">
               Driver&apos;s <span className="text-orange-400">License</span>
             </h2>
           </div>
@@ -453,7 +488,7 @@ export default function DLUploadStep({
             type="button"
             onClick={() => onClearSavedData()}
             disabled={saving}
-            className="min-h-[44px] shrink-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
+            className="shrink-0 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-rose-300 transition-all hover:bg-rose-500/20 disabled:opacity-50"
           >
             {saving ? "Clearing..." : "Clear Saved Data"}
           </button>
@@ -525,12 +560,12 @@ export default function DLUploadStep({
             <p className="mb-3 text-xs text-gray-500">Phone capture is unavailable without an application invite.</p>
           )}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <div className="mb-3 flex flex-wrap gap-2">
             <button
               type="button"
               disabled={disabled || issuing || !onboardingToken}
               onClick={() => void handleOpenCapture()}
-              className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+              className="flex items-center justify-center gap-2 rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="7" y="2" width="10" height="20" rx="2" />
@@ -542,7 +577,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || !captureLink}
               onClick={() => void handleCopyLink()}
-              className="min-h-[44px] flex-1 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50 sm:flex-none"
+              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
             >
               {copied ? "Copied" : "Copy link"}
             </button>
@@ -551,7 +586,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || emailing || !onboardingToken}
               onClick={() => void handleEmailCaptureLink()}
-              className="min-h-[44px] flex-1 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50 sm:flex-none"
+              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
             >
               {emailing ? "Sending…" : "Email capture link"}
             </button>
@@ -560,7 +595,7 @@ export default function DLUploadStep({
               type="button"
               disabled={disabled || checking || !onRefreshApplication}
               onClick={() => void handleCheckStatus()}
-              className="min-h-[44px] flex-1 rounded-lg border border-gray-600 px-3 py-2.5 text-sm font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50 sm:flex-none"
+              className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 hover:border-orange-500 hover:text-orange-400 disabled:opacity-50"
             >
               {checking ? "Checking…" : "Check status"}
             </button>
@@ -570,6 +605,44 @@ export default function DLUploadStep({
             <p className={`mb-2 text-xs ${emailFailed ? "text-rose-400" : "text-green-400"}`}>{emailNote}</p>
           )}
           {phoneError && <p className="mt-2 text-xs text-rose-400">{phoneError}</p>}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-xl border border-gray-700 p-4">
+          <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">Upload status</span>
+          <div>
+            {statusRow("Front of license", "Upload the front side", frontPre, frontState, "card", frontConfirmed)}
+            {statusRow("Back of license", "Upload the back side", backPre, backState, "card", backConfirmed)}
+            {statusRow(
+              "License complete",
+              "Both sides confirmed",
+              bothConfirmed ? "PROCESSED" : "MISSING",
+              bothConfirmed ? "SUCCESS" : "IDLE",
+              "shield",
+              bothConfirmed,
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-gray-700 p-4">
+          <span className="mb-3 block text-xs font-bold uppercase tracking-widest text-orange-400">How it works</span>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+                { n: "1", title: "Scan or copy link", sub: DL_CAPTURE_EMAIL_HANDOFF_ENABLED ? "QR, copy, email, or open capture" : "QR, copy, or open capture" },
+              { n: "2", title: "Take or choose front photo", sub: "Follow the on-screen guidance" },
+              { n: "3", title: "Take or choose back photo", sub: "Follow the on-screen guidance" },
+              { n: "4", title: "Confirm each photo", sub: "Use This Photo after you review the crop" },
+            ].map((step) => (
+              <div key={step.n} className="text-center">
+                <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-sm font-bold text-black">
+                  {step.n}
+                </div>
+                <div className="text-xs font-semibold leading-snug text-white">{step.title}</div>
+                <div className="mt-1 text-[10px] leading-snug text-gray-500">{step.sub}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -276,10 +276,10 @@ export default function DlCapturePage() {
   };
 
   const shell: CSSProperties = {
-    minHeight: "100dvh",
+    minHeight: "100vh",
     background: "var(--trk-bg, #0f172a)",
     color: "var(--trk-text, #e2e8f0)",
-    padding: "24px max(18px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left))",
+    padding: "24px 18px 48px",
     fontFamily: "system-ui, sans-serif",
   };
   const card: CSSProperties = {
@@ -292,14 +292,13 @@ export default function DlCapturePage() {
   };
   const btn: CSSProperties = {
     width: "100%",
-    minHeight: 44,
     padding: "14px 16px",
     borderRadius: 10,
     border: "1px solid var(--trk-border, #475569)",
     background: "transparent",
     color: "var(--trk-heading, #f8fafc)",
     fontWeight: 700,
-    fontSize: "1rem",
+    fontSize: "0.95rem",
     cursor: "pointer",
     marginTop: 10,
   };
@@ -377,7 +376,7 @@ export default function DlCapturePage() {
         >
           Driver Licence
         </div>
-        <h1 style={{ fontSize: "clamp(1.25rem, 5vw, 1.45rem)", margin: "0 0 6px" }}>{stepLabel}</h1>
+        <h1 style={{ fontSize: "1.45rem", margin: "0 0 6px" }}>{stepLabel}</h1>
         {session.step === "BACK" && session.front_status === "PROCESSED" && (
           <div style={{ color: "var(--trk-success, #22c55e)", fontWeight: 700, marginBottom: 12 }}>
             ✓ Front accepted
