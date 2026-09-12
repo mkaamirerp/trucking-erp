@@ -195,6 +195,23 @@ async def send_workspace_intake_continue_email(*, to: str, continue_url: str) ->
     await send_email(to=to, subject=subject, body=body, category="required")
 
 
+async def send_dl_capture_link_email(*, to: str, capture_link: str) -> None:
+    """Email the restricted phone DL capture URL. Caller must not log the URL or token."""
+    subject = "Your driver licence capture link – TruckERP"
+    body_lines = [
+        "Hi,",
+        "",
+        "Use this link on your phone to photograph both sides of your driver licence.",
+        "This capture link is separate from your application and expires in 24 hours.",
+        "",
+        capture_link,
+        "",
+        "If you didn't expect this email, you can ignore it.",
+    ]
+    body = "\n".join(body_lines)
+    await send_email(to=to, subject=subject, body=body)
+
+
 async def send_onboarding_invite_email(*, to: str, invite_link: str) -> None:
     """Sends the driver onboarding invite link to the given email address."""
     subject = "Your driver onboarding link – TruckERP"
