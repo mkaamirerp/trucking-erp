@@ -680,7 +680,7 @@ async def _confirm_applicant_dl_side(
     tenant_slug: str,
     doc_type: str,
 ) -> PersonApplication:
-    """Mark a PROCESSED side confirmed. PDF417 runs here for CDL_BACK on the processed JPEG only."""
+    """Mark a PROCESSED side confirmed. CDL_BACK PDF417 reads processed first, original as fallback."""
     intake = dict(app.intake_payload or {})
     if _dl_side_status(intake, doc_type) != "PROCESSED":
         raise HTTPException(
@@ -702,7 +702,18 @@ async def _confirm_applicant_dl_side(
         )
         if should_decode:
             processed_key = _dl_processed_storage_key(intake, doc_type)
-            intake = await apply_stored_cdl_back_pdf417(intake, processed_key, tenant_slug)
+            back_meta = (intake.get("files") or {}).get(doc_type)
+            original_key = (
+                back_meta.get("storage_key")
+                if isinstance(back_meta, dict)
+                else None
+            )
+            intake = await apply_stored_cdl_back_pdf417(
+                intake,
+                processed_key,
+                tenant_slug,
+                original_storage_key=original_key if isinstance(original_key, str) else None,
+            )
         extract_status = intake.get("license_extract_status")
 
     app.intake_payload = intake

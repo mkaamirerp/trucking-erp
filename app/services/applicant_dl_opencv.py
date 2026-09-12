@@ -1169,6 +1169,65 @@ def _warp_confirmed_card(image_bgr, corners):
     return ensure_landscape_upright_for_dl(warped)
 
 
+def map_working_corners_to_original(
+    work_corners: np.ndarray,
+    *,
+    orientation: str,
+    original_bgr: np.ndarray,
+    working_bgr: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Map 1544-working-copy detector corners onto the EXIF-correct original.
+
+    Does not re-run detection. Applies the same orientation used on the working
+    copy, then scales by original_oriented_size / working_oriented_size.
+    """
+    orig_oriented = rotate_image(original_bgr, orientation)
+    work_oriented = rotate_image(working_bgr, orientation)
+    orig_h, orig_w = orig_oriented.shape[:2]
+    work_h, work_w = work_oriented.shape[:2]
+    if work_w < 1 or work_h < 1:
+        raise ValueError("working_copy_empty")
+    scale_x = orig_w / float(work_w)
+    scale_y = orig_h / float(work_h)
+    mapped = np.asarray(work_corners, dtype=np.float64).reshape(4, 2).copy()
+    mapped[:, 0] *= scale_x
+    mapped[:, 1] *= scale_y
+    meta: dict[str, Any] = {
+        "detection_source_dimensions": {
+            "width": int(working_bgr.shape[1]),
+            "height": int(working_bgr.shape[0]),
+        },
+        "original_source_dimensions": {
+            "width": int(original_bgr.shape[1]),
+            "height": int(original_bgr.shape[0]),
+        },
+        "coordinate_scale_factor": {"x": float(scale_x), "y": float(scale_y)},
+    }
+    return orig_oriented, mapped.astype(np.float32), meta
+
+
+def warp_confirmed_card_from_original(
+    original_bgr: np.ndarray,
+    working_bgr: np.ndarray,
+    work_corners: np.ndarray,
+    orientation: str,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Perspective-warp TARGET_W×TARGET_H from original pixels using mapped corners."""
+    orig_oriented, mapped, meta = map_working_corners_to_original(
+        work_corners,
+        orientation=orientation,
+        original_bgr=original_bgr,
+        working_bgr=working_bgr,
+    )
+    warped = _warp_confirmed_card(orig_oriented, mapped)
+    meta["final_warp_source"] = "original_pixels"
+    meta["final_processed_dimensions"] = {
+        "width": int(warped.shape[1]),
+        "height": int(warped.shape[0]),
+    }
+    return warped, meta
+
+
 def _failure_result(image_bgr: np.ndarray, report: dict[str, Any]) -> tuple[ProcessResult, np.ndarray]:
     candidate = CandidateResult("original", 0, -999.0, None, report)
     result = ProcessResult(
