@@ -29,7 +29,11 @@ _FIELD_CODES = (
     "DDE", "DDF", "DDG",
 )
 _FIELD_CODES_SET = frozenset(_FIELD_CODES)
-_FIELD_CODE_RE = re.compile("|".join(re.escape(c) for c in _FIELD_CODES))
+# Shared by position and line extractors. Zxx codes bound values only; they are not mapped.
+_Z_EXTENSION_CODE = r"Z[A-Z0-9]{2}"
+_FIELD_DELIMITER_RE = re.compile(
+    r"(?:%s|%s)" % ("|".join(re.escape(c) for c in _FIELD_CODES), _Z_EXTENSION_CODE)
+)
 
 PDF417_INTAKE_METADATA_KEYS: frozenset[str] = frozenset({"field_sources", "pdf417_text"})
 
@@ -742,9 +746,10 @@ def _clean_value(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _extract_field_map_by_positions(text: str) -> dict[str, str]:
+def _extract_fields_with_delimiters(text: str) -> dict[str, str]:
+    """Split on AAMVA D-codes and Zxx; store mapped D-codes only."""
     fields: dict[str, str] = {}
-    matches = list(_FIELD_CODE_RE.finditer(text))
+    matches = list(_FIELD_DELIMITER_RE.finditer(text))
     for idx, m in enumerate(matches):
         code = m.group(0)
         if code not in _FIELD_CODES_SET:
@@ -757,10 +762,12 @@ def _extract_field_map_by_positions(text: str) -> dict[str, str]:
     return fields
 
 
+def _extract_field_map_by_positions(text: str) -> dict[str, str]:
+    return _extract_fields_with_delimiters(text)
+
+
 def _extract_field_map_lines(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
-    code_pattern = r"(?:%s|Z[A-Z0-9]{2})" % "|".join(_FIELD_CODES)
-
     for raw_line in text.split("\n"):
         line = raw_line.strip()
         if not line:
@@ -769,24 +776,22 @@ def _extract_field_map_lines(text: str) -> dict[str, str]:
         if line.startswith(("DL", "ID")) and len(line) > 5 and line[2:5] in _FIELD_CODES_SET:
             line = line[2:]
 
-        matches = list(re.finditer(rf"({code_pattern})", line))
-        if not matches:
-            continue
-        for idx, match in enumerate(matches):
-            code = match.group(1)
-            start = match.end()
-            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(line)
-            value = _clean_value(line[start:end])
-            if value and code in _FIELD_CODES_SET:
-                fields.setdefault(code, value)
+        for code, value in _extract_fields_with_delimiters(line).items():
+            fields.setdefault(code, value)
 
     return fields
+
+
+def _has_identity_fields(fields: dict[str, str]) -> bool:
+    if fields.get("DAQ"):
+        return True
+    return bool(fields.get("DCS") and fields.get("DAC"))
 
 
 def _extract_field_map(text: str) -> dict[str, str]:
     normalized = _normalize_text(text)
     by_pos = _extract_field_map_by_positions(normalized)
-    if len(by_pos) >= 3:
+    if _has_identity_fields(by_pos):
         return by_pos
     by_lines = _extract_field_map_lines(normalized)
     merged = dict(by_lines)

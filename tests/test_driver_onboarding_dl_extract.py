@@ -349,6 +349,8 @@ async def test_img6446_processed_succeeds_skips_original_fallback(tmp_path: Path
     assert out.get("last_name")
     assert out.get("sex") == "F"
     assert "sex" in (dbg.get("extracted_intake_keys") or [])
+    assert out.get("license_region") == "ON"
+    assert out.get("address_postal") == "N2R0N4"
 
 
 @pytest.mark.asyncio
@@ -385,6 +387,8 @@ async def test_img0084_processed_fails_original_fallback_succeeds(tmp_path: Path
     assert out.get("last_name")
     assert out.get("sex") == "M"
     assert "sex" in (dbg.get("extracted_intake_keys") or [])
+    assert out.get("license_region") == "ON"
+    assert out.get("address_postal") == "N2R0N4"
 
 
 @pytest.mark.asyncio
@@ -428,6 +432,8 @@ async def test_img0084_original_pixel_processed_succeeds_without_fallback(tmp_pa
     assert out.get("last_name")
     assert out.get("sex") == "M"
     assert "sex" in (dbg.get("extracted_intake_keys") or [])
+    assert out.get("license_region") == "ON"
+    assert out.get("address_postal") == "N2R0N4"
 
 
 @pytest.mark.asyncio

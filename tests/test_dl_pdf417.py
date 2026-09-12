@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PIL import Image
 
+import pytest
+import re
 import time
 
 from app.services.dl_pdf417 import (
@@ -62,6 +64,49 @@ def test_parse_sex_stays_strict_on_contaminated_dbc() -> None:
     assert _parse_sex("9") == "X"
     assert _parse_sex("1 DAYUNK") is None
     assert _parse_sex("2 DAYUNK") is None
+
+
+def test_ontario_zxx_does_not_contaminate_dak() -> None:
+    """Compact DAK immediately followed by ZOZ must not swallow the extension into postal."""
+    text = "DAKN2R0N4ZOZEXTDAQH010062911981DCSMOTORISTSAMPLEDACJANEQA"
+    fields = _extract_field_map(text)
+    assert fields.get("DAK") == "N2R0N4"
+    assert "ZOZ" not in (fields.get("DAK") or "")
+    assert fields.get("DAQ") == "H010062911981"
+    assert "ZOZ" not in fields
+    payload = aamva_intake_from_pdf417_text(text)
+    assert payload.get("address_postal") == "N2R0N4"
+    assert "ZOZ" not in payload
+    assert payload.get("driver_license_number") == "H010062911981"
+
+
+def test_ontario_zxx_truncates_dck() -> None:
+    text = (
+        "DCK3088730*ZOZOAKH,TEST,NAMEZOBYZOCZOD"
+        "DAQH010062911981DCSMOTORISTSAMPLEDACJANEQA"
+    )
+    fields = _extract_field_map(text)
+    dck = fields.get("DCK") or ""
+    assert dck == "3088730"
+    assert "ZOZ" not in dck
+    assert "ZOB" not in dck
+    assert re.search(r"Z[A-Z0-9]{2}", dck) is None
+    assert fields.get("DAQ") == "H010062911981"
+    payload = aamva_intake_from_pdf417_text(text)
+    assert "ZOZ" not in payload
+    assert payload.get("driver_license_number") == "H010062911981"
+
+
+def test_extract_field_map_uses_identity_not_field_count() -> None:
+    """Three non-identity fields must not skip Zxx-aware segmentation / line fallback."""
+    text = "DBC1DAYUNKDAU160 cmDAKN2R0N4ZOZEXT"
+    fields = _extract_field_map(text)
+    assert fields.get("DBC") == "1"
+    assert fields.get("DAY") == "UNK"
+    assert fields.get("DAK") == "N2R0N4"
+    assert "ZOZ" not in (fields.get("DAK") or "")
+    assert not fields.get("DAQ")
+    assert not (fields.get("DCS") and fields.get("DAC"))
 
 
 def test_extract_field_map_single_line_compact() -> None:
@@ -311,3 +356,59 @@ def test_successful_decode_diagnostics_omit_barcode_payload() -> None:
     assert dbg.get("barcode_char_length") == len(text)
     assert dbg.get("meaningful_field_count", 0) >= 1
     assert out.get("driver_license_number") == "H010062911981"
+
+
+_IMG0084_ORIGINAL = Path("/tmp/dl_pdf417_regress/img0084_original.jpg")
+_IMG6446_PROCESSED = Path("/tmp/dl_pdf417_regress/img6446_processed.jpg")
+
+
+def _assert_no_zxx_in_value(value: str | None) -> None:
+    assert not re.search(r"Z[A-Z0-9]{2}", value or "")
+
+
+@pytest.mark.skipif(not _IMG0084_ORIGINAL.is_file(), reason="live IMG_0084 original not on host")
+def test_frozen_img0084_zxx_truncates_dck_preserves_intake() -> None:
+    raw, _meta = decode_pdf417_barcode_with_trace(_IMG0084_ORIGINAL, mode="applicant_two_phase")
+    assert raw
+    fields = _extract_field_map(raw)
+    assert fields.get("DAK") == "N2R0N4"
+    _assert_no_zxx_in_value(fields.get("DAK"))
+    assert fields.get("DCK")
+    _assert_no_zxx_in_value(fields.get("DCK"))
+    assert "ZOZ" not in fields
+    payload = aamva_intake_from_pdf417_text(raw)
+    out = apply_pdf417_to_intake({}, raw_barcode_text=raw, technical_error=None)
+    assert out["license_extract_status"] == "SUCCESS"
+    assert payload.get("sex") == "M"
+    assert payload.get("license_region") == "ON"
+    assert payload.get("address_postal") == "N2R0N4"
+    assert payload.get("driver_license_number")
+    assert payload.get("first_name")
+    assert payload.get("last_name")
+    assert payload.get("date_of_birth")
+    assert payload.get("license_expiry")
+    assert payload.get("license_issue_date")
+
+
+@pytest.mark.skipif(not _IMG6446_PROCESSED.is_file(), reason="live IMG_6446 processed warp not on host")
+def test_frozen_img6446_zxx_truncates_dck_preserves_intake() -> None:
+    raw, _meta = decode_pdf417_barcode_with_trace(_IMG6446_PROCESSED, mode="applicant_two_phase")
+    assert raw
+    fields = _extract_field_map(raw)
+    assert fields.get("DAK") == "N2R0N4"
+    _assert_no_zxx_in_value(fields.get("DAK"))
+    assert fields.get("DCK")
+    _assert_no_zxx_in_value(fields.get("DCK"))
+    assert "ZOZ" not in fields
+    payload = aamva_intake_from_pdf417_text(raw)
+    out = apply_pdf417_to_intake({}, raw_barcode_text=raw, technical_error=None)
+    assert out["license_extract_status"] == "SUCCESS"
+    assert payload.get("sex") == "F"
+    assert payload.get("license_region") == "ON"
+    assert payload.get("address_postal") == "N2R0N4"
+    assert payload.get("driver_license_number")
+    assert payload.get("first_name")
+    assert payload.get("last_name")
+    assert payload.get("date_of_birth")
+    assert payload.get("license_expiry")
+    assert payload.get("license_issue_date")
