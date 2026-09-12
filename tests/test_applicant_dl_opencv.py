@@ -320,6 +320,10 @@ def test_live_img0084_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> Non
     fields, text = _decode_processed_fields(outcome.jpeg_bytes, tmp_path)
     assert text
     assert fields >= 15
+    from app.services.dl_pdf417 import aamva_intake_from_pdf417_text
+
+    payload = aamva_intake_from_pdf417_text(text)
+    assert payload.get("sex") == "M"
 
 
 @pytest.mark.skipif(not _LIVE_6446.is_file(), reason="live IMG_6446 original not on host")
@@ -333,3 +337,7 @@ def test_live_img6446_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> Non
     fields, text = _decode_processed_fields(outcome.jpeg_bytes, tmp_path)
     assert text
     assert fields >= 15
+    from app.services.dl_pdf417 import aamva_intake_from_pdf417_text
+
+    payload = aamva_intake_from_pdf417_text(text)
+    assert payload.get("sex") == "F"

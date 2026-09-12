@@ -23,7 +23,45 @@ from app.services.dl_pdf417 import (
     _decode_loop,
     _enumerate_pdf417_image_candidates,
     _extract_field_map,
+    _parse_sex,
 )
+
+
+def test_ontario_dbc_day_delimiter_male() -> None:
+    """DAY (eye color) must bound DBC so sex is not contaminated as '1 DAYUNK'."""
+    text = "DBC1\nDAYUNK\nDAU160 cm\n"
+    fields = _extract_field_map(text)
+    assert fields.get("DBC") == "1"
+    assert fields.get("DAY") == "UNK"
+    assert fields.get("DAU") == "160 cm"
+    payload = aamva_intake_from_pdf417_text(text)
+    assert payload.get("sex") == "M"
+    assert "eye_color" not in payload
+    assert payload.get("height") == "160 cm"
+    out = apply_pdf417_to_intake({}, raw_barcode_text=text, technical_error=None)
+    assert out.get("sex") == "M"
+    assert "sex" in (out.get("license_extract_debug") or {}).get("extracted_intake_keys", [])
+
+
+def test_ontario_dbc_day_delimiter_female() -> None:
+    text = "DBC2\nDAYUNK\nDAU165 cm\n"
+    fields = _extract_field_map(text)
+    assert fields.get("DBC") == "2"
+    assert fields.get("DAY") == "UNK"
+    assert fields.get("DAU") == "165 cm"
+    payload = aamva_intake_from_pdf417_text(text)
+    assert payload.get("sex") == "F"
+    assert "eye_color" not in payload
+    out = apply_pdf417_to_intake({}, raw_barcode_text=text, technical_error=None)
+    assert out.get("sex") == "F"
+
+
+def test_parse_sex_stays_strict_on_contaminated_dbc() -> None:
+    assert _parse_sex("1") == "M"
+    assert _parse_sex("2") == "F"
+    assert _parse_sex("9") == "X"
+    assert _parse_sex("1 DAYUNK") is None
+    assert _parse_sex("2 DAYUNK") is None
 
 
 def test_extract_field_map_single_line_compact() -> None:

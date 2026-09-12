@@ -23,7 +23,7 @@ PDF417_LOCAL_AVERAGE_MIN_REMAINING_SEC = 0.75
 
 _FIELD_CODES = (
     "DAQ", "DCS", "DAC", "DAD", "DAA",
-    "DBA", "DBD", "DBB", "DBC", "DAU",
+    "DBA", "DBD", "DBB", "DBC", "DAU", "DAY",
     "DAG", "DAI", "DAJ", "DAK",
     "DCA", "DCB", "DCD", "DCF", "DCG", "DCK",
     "DDE", "DDF", "DDG",
