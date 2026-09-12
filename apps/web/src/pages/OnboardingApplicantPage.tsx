@@ -185,6 +185,28 @@ function shouldShowDlSource(source: unknown, edited: boolean | undefined, value:
   return Boolean(source) && !edited && hasReadableValue(value);
 }
 
+function dlSourceConfidence(source: unknown): unknown {
+  if (!source || typeof source !== "object") return undefined;
+  return (source as { confidence?: unknown }).confidence;
+}
+
+/** Left-edge accent for unedited DL-filled fields that need review (Low confidence only). */
+function dlReviewAccent(source: unknown, edited: boolean | undefined, value: unknown): string {
+  if (!shouldShowDlSource(source, edited, value)) return "";
+  if (confidenceLabel(dlSourceConfidence(source)) !== "Low") return "";
+  return "border-l-4 border-l-orange-500";
+}
+
+function dlReviewAccentAny(
+  entries: Array<{ source: unknown; edited?: boolean; value: unknown }>,
+): string {
+  for (const { source, edited, value } of entries) {
+    const accent = dlReviewAccent(source, edited, value);
+    if (accent) return accent;
+  }
+  return "";
+}
+
 function userFacingErrorMessage(error: unknown, fallback: string): string {
   const raw = typeof error === "string" ? error : (error as any)?.message;
   const status = Number((error as any)?.status);
@@ -280,30 +302,6 @@ function Field({ label, children, half }: { label: string; children: React.React
 const inp = "w-full rounded-lg border border-gray-600 bg-gray-700/50 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
 const inpErr = "border-rose-500 ring-2 ring-rose-500/50 focus:ring-rose-500 focus:border-rose-500";
 const sel = inp + " appearance-none";
-
-function FromDlTag({ confidence }: { confidence: unknown }) {
-  const label = confidenceLabel(confidence);
-  const dot = label === "High" ? "bg-emerald-500" : label === "Med" ? "bg-yellow-500" : "bg-orange-500";
-  return (
-    <span className="inline-flex min-h-6 items-center gap-1 rounded-full border border-gray-600 bg-gray-700/50 px-2 py-0.5 text-xs text-gray-300 mb-1">
-      <span className={`h-2 w-2 rounded-full ${dot}`} /> From DL{label ? ` (${label})` : ""}
-    </span>
-  );
-}
-
-function DlSourceSlot({
-  visible,
-  confidence,
-}: {
-  visible: boolean;
-  confidence: unknown;
-}) {
-  return (
-    <div className="mb-1 min-h-6">
-      {visible ? <FromDlTag confidence={confidence} /> : null}
-    </div>
-  );
-}
 
 function TypedDateInput({
   value,
@@ -1041,16 +1039,14 @@ export default function OnboardingApplicantPage() {
 
                 {/* License Number */}
                 <Field label="License Number">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.license_number, edited.license_number, form.driver_license_number)} confidence={sources.license_number?.confidence} />
-                  <input className={`${inp} ${showValidationStep0 && !(form.driver_license_number || "").trim() ? inpErr : ""}`} value={form.driver_license_number}
+                  <input className={`${inp} ${dlReviewAccent(sources.license_number, edited.license_number, form.driver_license_number)} ${showValidationStep0 && !(form.driver_license_number || "").trim() ? inpErr : ""}`} value={form.driver_license_number}
                     onChange={e => setF("driver_license_number", e.target.value)}
                     placeholder={form.address_country === "CA" ? "e.g. K35587-56016-90112" : "e.g. DL12345678"} />
                 </Field>
 
                 {/* Province/State Issued */}
                 <Field label={form.address_country === "CA" ? "Province Issued" : "State Issued"}>
-                  <DlSourceSlot visible={shouldShowDlSource(sources.license_state, edited.license_state, form.license_region)} confidence={sources.license_state?.confidence} />
-                  <select className={`${sel} ${showValidationStep0 && !(form.license_region || "").trim() ? inpErr : ""}`} value={form.license_region}
+                  <select className={`${sel} ${dlReviewAccent(sources.license_state, edited.license_state, form.license_region)} ${showValidationStep0 && !(form.license_region || "").trim() ? inpErr : ""}`} value={form.license_region}
                     onChange={e => setF("license_region", e.target.value)}>
                     <option value="">{form.address_country === "CA" ? "Select Province" : "Select State"}</option>
                     {form.address_country === "CA"
@@ -1062,38 +1058,33 @@ export default function OnboardingApplicantPage() {
 
                 {/* Expiry Date */}
                 <Field label="Expiry Date">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.license_expiry, edited.license_expiry, form.license_expiry)} confidence={sources.license_expiry?.confidence} />
-                  <TypedDateInput className={`${inp} ${showValidationStep0 && !(form.license_expiry || "").trim() ? inpErr : ""}`} value={form.license_expiry}
+                  <TypedDateInput className={`${inp} ${dlReviewAccent(sources.license_expiry, edited.license_expiry, form.license_expiry)} ${showValidationStep0 && !(form.license_expiry || "").trim() ? inpErr : ""}`} value={form.license_expiry}
                     onChange={value => setF("license_expiry", value)} />
                 </Field>
 
                 {/* Issue Date */}
                 <Field label="Issue Date">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.license_issue_date, edited.license_issue_date, form.license_issue_date)} confidence={sources.license_issue_date?.confidence} />
-                  <TypedDateInput className={inp} value={form.license_issue_date}
+                  <TypedDateInput className={`${inp} ${dlReviewAccent(sources.license_issue_date, edited.license_issue_date, form.license_issue_date)}`} value={form.license_issue_date}
                     onChange={value => setF("license_issue_date", value)} />
                 </Field>
 
                 {/* Class — free text, prepopulated from extraction, applicant can correct */}
                 <Field label={form.address_country === "CA" ? "Licence Class (e.g. A, AC)" : "CDL Class (e.g. A, B, C)"}>
-                  <DlSourceSlot visible={shouldShowDlSource(sources.license_class, edited.license_class, form.cdl_class)} confidence={sources.license_class?.confidence} />
-                  <input className={`${inp} ${showValidationStep0 && !(form.cdl_class || "").trim() ? inpErr : ""}`} value={form.cdl_class}
+                  <input className={`${inp} ${dlReviewAccent(sources.license_class, edited.license_class, form.cdl_class)} ${showValidationStep0 && !(form.cdl_class || "").trim() ? inpErr : ""}`} value={form.cdl_class}
                     onChange={e => setF("cdl_class", e.target.value)}
                     placeholder={form.address_country === "CA" ? "e.g. A, AC, G" : "e.g. A, B, C"} />
                 </Field>
 
                 {/* Endorsements */}
                 <Field label={form.address_country === "CA" ? "Endorsements / Conditions Code" : "Endorsements"}>
-                  <DlSourceSlot visible={shouldShowDlSource(sources.endorsements, edited.endorsements, form.endorsements)} confidence={sources.endorsements?.confidence} />
-                  <input className={inp} value={form.endorsements}
+                  <input className={`${inp} ${dlReviewAccent(sources.endorsements, edited.endorsements, form.endorsements)}`} value={form.endorsements}
                     onChange={e => setF("endorsements", e.target.value)}
                     placeholder={form.address_country === "CA" ? "e.g. Z (Air Brakes)" : "e.g. H, N, T, X"} />
                 </Field>
 
                 {/* Restrictions */}
                 <Field label="Restrictions">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.restrictions, edited.restrictions, form.restrictions)} confidence={sources.restrictions?.confidence} />
-                  <input className={inp} value={form.restrictions || ""}
+                  <input className={`${inp} ${dlReviewAccent(sources.restrictions, edited.restrictions, form.restrictions)}`} value={form.restrictions || ""}
                     onChange={e => setF("restrictions", e.target.value)}
                     placeholder="e.g. B, Corrective Lenses" />
                 </Field>
@@ -1101,8 +1092,7 @@ export default function OnboardingApplicantPage() {
                 {/* Conditions — Canadian only */}
                 {form.address_country === "CA" && (
                   <Field label="Conditions (Canadian licences only)">
-                    <DlSourceSlot visible={shouldShowDlSource(sources.conditions, edited.conditions, form.conditions)} confidence={sources.conditions?.confidence} />
-                    <input className={inp} value={form.conditions}
+                    <input className={`${inp} ${dlReviewAccent(sources.conditions, edited.conditions, form.conditions)}`} value={form.conditions}
                       onChange={e => setF("conditions", e.target.value)}
                       placeholder="e.g. COND" />
                   </Field>
@@ -1115,20 +1105,16 @@ export default function OnboardingApplicantPage() {
               <SectionTitle>Applicant Details From DL</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="First Name">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.first_name, edited.first_name, form.first_name)} confidence={sources.first_name?.confidence} />
-                  <input className={inp} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
+                  <input className={`${inp} ${dlReviewAccent(sources.first_name, edited.first_name, form.first_name)}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
                 </Field>
                 <Field label="Last Name">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.last_name, edited.last_name, form.last_name)} confidence={sources.last_name?.confidence} />
-                  <input className={inp} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
+                  <input className={`${inp} ${dlReviewAccent(sources.last_name, edited.last_name, form.last_name)}`} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
                 </Field>
                 <Field label="Date of Birth">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)} confidence={sources.date_of_birth?.confidence} />
-                  <TypedDateInput className={inp} value={form.date_of_birth} onChange={value => setF("date_of_birth", value)} />
+                  <TypedDateInput className={`${inp} ${dlReviewAccent(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)}`} value={form.date_of_birth} onChange={value => setF("date_of_birth", value)} />
                 </Field>
                 <Field label="Sex">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.sex, edited.sex, form.sex)} confidence={sources.sex?.confidence} />
-                  <select className={sel} value={form.sex} onChange={e => setF("sex", e.target.value)}>
+                  <select className={`${sel} ${dlReviewAccent(sources.sex, edited.sex, form.sex)}`} value={form.sex} onChange={e => setF("sex", e.target.value)}>
                     <option value="">Select</option>
                     <option value="M">Male</option>
                     <option value="F">Female</option>
@@ -1136,25 +1122,24 @@ export default function OnboardingApplicantPage() {
                   </select>
                 </Field>
                 <Field label="Height">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.height, edited.height, form.height)} confidence={sources.height?.confidence} />
-                  <input className={inp} value={form.height} onChange={e => setF("height", e.target.value)} placeholder="e.g. 180 cm or 5-11" />
+                  <input className={`${inp} ${dlReviewAccent(sources.height, edited.height, form.height)}`} value={form.height} onChange={e => setF("height", e.target.value)} placeholder="e.g. 180 cm or 5-11" />
                 </Field>
                 <Field label="Street Address">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.address_line, edited.address_street, form.address_street) || shouldShowDlSource(sources.address_street, edited.address_street, form.address_street)} confidence={sources.address_line?.confidence ?? sources.address_street?.confidence} />
-                  <input className={inp} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
+                  <input className={`${inp} ${dlReviewAccentAny([
+                    { source: sources.address_line, edited: edited.address_street, value: form.address_street },
+                    { source: sources.address_street, edited: edited.address_street, value: form.address_street },
+                  ])}`} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
                 </Field>
                 <Field label="City">
-                  <DlSourceSlot visible={shouldShowDlSource(sources.address_city, edited.address_city, form.address_city)} confidence={sources.address_city?.confidence} />
-                  <input className={inp} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
+                  <input className={`${inp} ${dlReviewAccent(sources.address_city, edited.address_city, form.address_city)}`} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
                 </Field>
                 <Field label={form.address_country === "CA" ? "Province / Postal Code" : "State / ZIP Code"}>
-                  <DlSourceSlot visible={shouldShowDlSource(sources.address_region, edited.address_region, form.address_region) || shouldShowDlSource(sources.address_postal, edited.address_postal, form.address_postal) || shouldShowDlSource(sources.zip_code, edited.zip_code, form.zip_code)} confidence={sources.address_region?.confidence ?? sources.address_postal?.confidence ?? sources.zip_code?.confidence} />
                   <div className="grid grid-cols-2 gap-3">
-                    <input className={inp} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder={form.address_country === "CA" ? "Province" : "State"} />
+                    <input className={`${inp} ${dlReviewAccent(sources.address_region, edited.address_region, form.address_region)}`} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder={form.address_country === "CA" ? "Province" : "State"} />
                     {form.address_country === "CA" ? (
-                      <input className={inp} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
+                      <input className={`${inp} ${dlReviewAccent(sources.address_postal, edited.address_postal, form.address_postal)}`} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
                     ) : (
-                      <input className={inp} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="ZIP Code" />
+                      <input className={`${inp} ${dlReviewAccent(sources.zip_code, edited.zip_code, form.zip_code)}`} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="ZIP Code" />
                     )}
                   </div>
                 </Field>
@@ -1201,19 +1186,16 @@ export default function OnboardingApplicantPage() {
               <SectionTitle>Basic Information</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="First Name">
-                  {sources.first_name && !edited.first_name && <FromDlTag confidence={sources.first_name?.confidence} />}
-                  <input className={`${inp} ${showValidationStep1 && !(form.first_name || "").trim() ? inpErr : ""}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
+                  <input className={`${inp} ${dlReviewAccent(sources.first_name, edited.first_name, form.first_name)} ${showValidationStep1 && !(form.first_name || "").trim() ? inpErr : ""}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
                 </Field>
                 <Field label="Middle Name">
                   <input className={inp} value={form.middle_name} onChange={e => setF("middle_name", e.target.value)} placeholder="Middle (optional)" />
                 </Field>
                 <Field label="Last Name">
-                  {sources.last_name && !edited.last_name && <FromDlTag confidence={sources.last_name?.confidence} />}
-                  <input className={`${inp} ${showValidationStep1 && !(form.last_name || "").trim() ? inpErr : ""}`} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
+                  <input className={`${inp} ${dlReviewAccent(sources.last_name, edited.last_name, form.last_name)} ${showValidationStep1 && !(form.last_name || "").trim() ? inpErr : ""}`} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
                 </Field>
                 <Field label="Date of Birth">
-                  {sources.date_of_birth && !edited.date_of_birth && <FromDlTag confidence={sources.date_of_birth?.confidence} />}
-                  <input className={inp} type="date" value={form.date_of_birth} onChange={e => setF("date_of_birth", e.target.value)} />
+                  <input className={`${inp} ${dlReviewAccent(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)}`} type="date" value={form.date_of_birth} onChange={e => setF("date_of_birth", e.target.value)} />
                 </Field>
                 <Field label="SSN (last 4 optional)">
                   <input className={inp} value={form.ssn} onChange={e => setF("ssn", e.target.value)} placeholder="XXX-XX-XXXX" />
@@ -1224,8 +1206,7 @@ export default function OnboardingApplicantPage() {
 
                 {/* Sex / Gender */}
                 <Field label="Sex / Gender">
-                  {sources.sex && !edited.sex && <FromDlTag confidence={sources.sex?.confidence} />}
-                  <select className={sel} value={form.sex} onChange={e => setF("sex", e.target.value)}>
+                  <select className={`${sel} ${dlReviewAccent(sources.sex, edited.sex, form.sex)}`} value={form.sex} onChange={e => setF("sex", e.target.value)}>
                     <option value="">Select</option>
                     <option value="M">Male</option>
                     <option value="F">Female</option>
@@ -1235,8 +1216,7 @@ export default function OnboardingApplicantPage() {
 
                 {/* Height */}
                 <Field label={form.address_country === "CA" ? "Height (cm)" : "Height (ft/in)"}>
-                  {sources.height && !edited.height && <FromDlTag confidence={sources.height?.confidence} />}
-                  <input className={inp} value={form.height}
+                  <input className={`${inp} ${dlReviewAccent(sources.height, edited.height, form.height)}`} value={form.height}
                     onChange={e => setF("height", e.target.value)}
                     placeholder={form.address_country === "CA" ? "e.g. 160 cm" : "e.g. 5'11\""} />
                 </Field>
