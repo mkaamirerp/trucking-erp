@@ -211,6 +211,16 @@ Name, licence number, province, dates, and class matched the previous gold parse
 4. **IMG_6446 uncropped original** — PDF417 still fails; the card needs a crop. Gold path is the processed warp.
 5. **Do not detect at native 2400** for IMG_6446 — four-corner confirm fails. 1544 remains the detection working-copy ceiling.
 6. **Old 1544-pixel 0084 warp** (`0b3e22b2…` 1000×631) still fails PDF417. Gold processed bytes come from original-pixel warp. Fallback still rescues that legacy file if it is re-confirmed.
+7. **Intermittent same-DL decode / hydration (observed 2026-09-12)** — the same Ontario DL that failed earlier in the morning later passed with fields populated correctly. A successful run was observed at approximately **12:25 PM ET (America/New_York)**; the earlier failure occurred the same morning, but the exact failure timestamp must be recovered from API/nginx/application logs rather than guessed. Do **not** change parser rules based on this observation alone. Compare failed vs successful runs at the boundaries below:
+   - upload/session/application identifier
+   - original storage key and processed storage key
+   - source and processed dimensions + SHA/hash if logged
+   - OpenCV result and `final_warp_source`
+   - PDF417 status and barcode source (`processed` vs `original`)
+   - raw barcode length / parsed AAMVA field count
+   - `apply_pdf417_to_intake` result / intake JSON update
+   - frontend reload/hydration timing and final form state
+   The purpose of preserving the timestamp is to inspect logs around the **12:25 PM ET successful run** and the earlier-morning failure to locate the first stage where behavior diverges. Treat this as a possible timing/state/path inconsistency until logs prove otherwise.
 
 Shipped in this gold (no longer parked): `DAY` delimiter / sex mapping; generic `Z[A-Z0-9]{2}` field boundaries (delimiter-only; identity-based position/line fallback).
 
