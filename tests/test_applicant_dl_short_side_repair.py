@@ -271,6 +271,7 @@ def test_15_img6446_remains_normal_path_pass():
     assert out.debug.get("rough_locator_used") == "CANNY"
     assert out.debug.get("edge_repair_applied") is False
     assert out.debug.get("edge_repair_attempted") is False
+    assert out.debug.get("final_warp_source") == "original_pixels"
     arr = cv2.imdecode(np.frombuffer(out.jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert arr is not None
     assert arr.shape[1] == TARGET_W
@@ -283,6 +284,7 @@ def test_ontario_back_repair_confirms_near_id1():
     assert out.success is True
     assert out.debug.get("edge_repair_applied") is True
     assert out.debug.get("edge_repair_attempted") is True
+    assert out.debug.get("final_warp_source") == "original_pixels"
     assert 1.25 <= float(out.debug.get("final_ratio")) <= 1.95
     arr = cv2.imdecode(np.frombuffer(out.jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert arr is not None

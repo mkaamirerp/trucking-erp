@@ -92,38 +92,81 @@ def _attach_source_debug(
     out: dict[str, Any],
     *,
     barcode_image_source: str,
-    processed_fallback_used: bool,
+    original_fallback_used: bool,
 ) -> dict[str, Any]:
     debug = dict(out.get("license_extract_debug") or {})
     debug["barcode_image_source"] = barcode_image_source
-    debug["processed_fallback_used"] = processed_fallback_used
+    debug["original_fallback_used"] = original_fallback_used
+    # Processed is primary; this flag stays false so old debug readers are not inverted.
+    debug["processed_fallback_used"] = False
     debug.pop("pdf417_text", None)
     debug.pop("raw_barcode_text", None)
     out["license_extract_debug"] = debug
     return out
 
 
+def _original_back_storage_key(
+    intake: dict[str, Any],
+    *,
+    explicit: str | None = None,
+) -> str | None:
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    meta = (intake.get("files") or {}).get("CDL_BACK")
+    if not isinstance(meta, dict):
+        return None
+    key = meta.get("storage_key")
+    if isinstance(key, str) and key.strip():
+        return key.strip()
+    return None
+
+
+def _extract_succeeded(out: dict[str, Any]) -> bool:
+    return out.get("license_extract_status") == "SUCCESS"
+
+
 async def apply_stored_cdl_back_pdf417(
     intake: dict[str, Any],
     processed_storage_key: str | None,
     tenant_slug: str,
+    *,
+    original_storage_key: str | None = None,
 ) -> dict[str, Any]:
-    """Decode PDF417 from the confirmed processed BACK JPEG only. Never reads the original upload."""
+    """Decode the confirmed processed BACK JPEG first; original upload is PDF417 fallback only."""
     if not processed_storage_key:
         return _attach_source_debug(
             apply_pdf417_to_intake(
                 intake, raw_barcode_text=None, technical_error="missing_processed_image"
             ),
             barcode_image_source="processed",
-            processed_fallback_used=False,
+            original_fallback_used=False,
         )
 
     raw, meta, tech = await _decode_stored_key(processed_storage_key, tenant_slug)
     out = apply_pdf417_to_intake(
         intake, raw_barcode_text=raw, technical_error=tech, decode_meta=meta
     )
+    if _extract_succeeded(out):
+        return _attach_source_debug(
+            out,
+            barcode_image_source="processed",
+            original_fallback_used=False,
+        )
+
+    original_key = _original_back_storage_key(intake, explicit=original_storage_key)
+    if not original_key or original_key == processed_storage_key:
+        return _attach_source_debug(
+            out,
+            barcode_image_source="processed",
+            original_fallback_used=False,
+        )
+
+    raw, meta, tech = await _decode_stored_key(original_key, tenant_slug)
+    fallback = apply_pdf417_to_intake(
+        intake, raw_barcode_text=raw, technical_error=tech, decode_meta=meta
+    )
     return _attach_source_debug(
-        out,
-        barcode_image_source="processed",
-        processed_fallback_used=False,
+        fallback,
+        barcode_image_source="original",
+        original_fallback_used=True,
     )

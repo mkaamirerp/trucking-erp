@@ -19,6 +19,8 @@ from app.services.applicant_dl_opencv import (
     TARGET_H,
     TARGET_W,
     _confirm_all_four_corners,
+    map_working_corners_to_original,
+    rotate_image,
 )
 from app.services.applicant_dl_preprocess import (
     WORKING_COPY_MAX_SIDE,
@@ -28,12 +30,15 @@ from app.services.applicant_dl_preprocess import (
 
 _PRIVATE_SKIP = "private DL regression fixture not installed"
 _PRIVATE_FILENAME = "IMG_6446_normalized.jpg"
+_LIVE_0084 = Path("/tmp/dl_pdf417_regress/img0084_original.jpg")
+_LIVE_6446 = Path("/tmp/dl_pdf417_regress/img6446_original.jpg")
+_OLD_0084_WORKING_COPY_WARP_SHA = (
+    "0b3e22b23c942b9298561f6e63aabfe1ddeb28e4483fe0086eb1c5f0f8b3f290"
+)
 
 
 def _private_img6446() -> Path | None:
-    raw = (os.environ.get("DL_PRIVATE_FIXTURE_DIR") or "").strip()
-    if not raw:
-        return None
+    raw = (os.environ.get("DL_PRIVATE_FIXTURE_DIR") or "/home/admin/private_test_fixtures/dl").strip()
     path = Path(raw) / _PRIVATE_FILENAME
     return path if path.is_file() else None
 
@@ -167,6 +172,46 @@ def test_working_copy_does_not_overwrite_stored_source(tmp_path: Path) -> None:
         _cleanup_working_copy(temp_path)
 
 
+def test_map_working_corners_to_original_scales_axis_aligned() -> None:
+    working = np.zeros((772, 579, 3), dtype=np.uint8)
+    original = np.zeros((1544, 1158, 3), dtype=np.uint8)
+    corners = np.array([[10.0, 20.0], [200.0, 20.0], [200.0, 120.0], [10.0, 120.0]], dtype=np.float32)
+    orig_oriented, mapped, meta = map_working_corners_to_original(
+        corners,
+        orientation="original",
+        original_bgr=original,
+        working_bgr=working,
+    )
+    assert orig_oriented.shape[:2] == (1544, 1158)
+    assert mapped[0, 0] == pytest.approx(10.0 * (1158 / 579))
+    assert mapped[0, 1] == pytest.approx(20.0 * (1544 / 772))
+    assert mapped[2, 0] == pytest.approx(200.0 * (1158 / 579))
+    assert meta["detection_source_dimensions"] == {"width": 579, "height": 772}
+    assert meta["original_source_dimensions"] == {"width": 1158, "height": 1544}
+    assert meta["coordinate_scale_factor"]["x"] == pytest.approx(1158 / 579)
+    assert meta["coordinate_scale_factor"]["y"] == pytest.approx(1544 / 772)
+
+
+def test_map_working_corners_to_original_respects_cw90() -> None:
+    working = np.zeros((200, 100, 3), dtype=np.uint8)
+    original = np.zeros((400, 200, 3), dtype=np.uint8)
+    work_oriented_corners = np.array(
+        [[10.0, 15.0], [80.0, 15.0], [80.0, 90.0], [10.0, 90.0]],
+        dtype=np.float32,
+    )
+    orig_oriented, mapped, meta = map_working_corners_to_original(
+        work_oriented_corners,
+        orientation="cw90",
+        original_bgr=original,
+        working_bgr=working,
+    )
+    assert orig_oriented.shape[:2] == rotate_image(original, "cw90").shape[:2]
+    assert mapped[0, 0] == pytest.approx(20.0)
+    assert mapped[0, 1] == pytest.approx(30.0)
+    assert meta["coordinate_scale_factor"]["x"] == pytest.approx(2.0)
+    assert meta["coordinate_scale_factor"]["y"] == pytest.approx(2.0)
+
+
 def test_confirmed_synthetic_card_output_is_1000x631(tmp_path: Path) -> None:
     path = tmp_path / "synthetic_card.jpg"
     cv2.imwrite(str(path), _synthetic_cool_card())
@@ -177,6 +222,13 @@ def test_confirmed_synthetic_card_output_is_1000x631(tmp_path: Path) -> None:
     assert arr is not None
     assert arr.shape[1] == TARGET_W == 1000
     assert arr.shape[0] == TARGET_H == 631
+    assert outcome.debug.get("final_warp_source") == "original_pixels"
+    assert outcome.debug.get("final_processed_dimensions") == {"width": 1000, "height": 631}
+    assert outcome.debug.get("detection_source_dimensions") == {"width": 1400, "height": 900}
+    assert outcome.debug.get("original_source_dimensions") == {"width": 1400, "height": 900}
+    scale = outcome.debug.get("coordinate_scale_factor") or {}
+    assert scale.get("x") == pytest.approx(1.0)
+    assert scale.get("y") == pytest.approx(1.0)
 
 
 @pytest.mark.skipif(_private_img6446() is None, reason=_PRIVATE_SKIP)
@@ -200,11 +252,15 @@ def test_private_img6446_canny_working_scale_1544() -> None:
     assert outcome.success is True
     assert outcome.debug.get("rough_locator_used") == "CANNY"
     assert outcome.debug.get("opencv_input_shape", {}).get("height") == 1544
+    assert outcome.debug.get("final_warp_source") == "original_pixels"
+    assert outcome.debug.get("detection_source_dimensions", {}).get("height") == 1544
+    assert outcome.debug.get("original_source_dimensions") == {"width": 1350, "height": 2400}
     assert outcome.jpeg_bytes
     arr = cv2.imdecode(np.frombuffer(outcome.jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
     assert arr is not None
     assert arr.shape[1] == TARGET_W
     assert arr.shape[0] == TARGET_H
+    assert outcome.debug.get("final_processed_dimensions") == {"width": TARGET_W, "height": TARGET_H}
 
 
 @pytest.mark.skipif(_private_img6446() is None, reason=_PRIVATE_SKIP)
@@ -226,4 +282,54 @@ def test_private_img6446_processed_back_pdf417_fields(tmp_path: Path) -> None:
     text, _meta = decode_pdf417_barcode_with_trace(out, mode="applicant_two_phase")
     assert text
     fields = meaningful_license_field_count(aamva_intake_from_pdf417_text(text))
+    assert fields >= 15
+    assert outcome.debug.get("final_warp_source") == "original_pixels"
+
+
+def _decode_processed_fields(jpeg_bytes: bytes, tmp_path: Path) -> tuple[int, str | None]:
+    from app.services.dl_pdf417 import (
+        aamva_intake_from_pdf417_text,
+        decode_pdf417_barcode_with_trace,
+        meaningful_license_field_count,
+    )
+
+    out = tmp_path / "processed.jpg"
+    out.write_bytes(jpeg_bytes)
+    text, _meta = decode_pdf417_barcode_with_trace(out, mode="applicant_two_phase")
+    if not text:
+        return 0, None
+    return meaningful_license_field_count(aamva_intake_from_pdf417_text(text)), text
+
+
+@pytest.mark.skipif(not _LIVE_0084.is_file(), reason="live 1800x2400 IMG_0084 original not on host")
+def test_live_img0084_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> None:
+    outcome = run_applicant_dl_opencv(_LIVE_0084)
+    assert outcome.success is True
+    assert outcome.jpeg_bytes
+    assert outcome.debug.get("final_warp_source") == "original_pixels"
+    assert outcome.debug.get("original_source_dimensions") == {"width": 1800, "height": 2400}
+    assert outcome.debug.get("detection_source_dimensions", {}).get("height") == 1544
+    scale = outcome.debug.get("coordinate_scale_factor") or {}
+    assert scale.get("x") == pytest.approx(1800 / 1158, rel=1e-4)
+    assert scale.get("y") == pytest.approx(2400 / 1544, rel=1e-4)
+    assert outcome.debug.get("final_processed_dimensions") == {"width": 1000, "height": 631}
+    assert hashlib.sha256(outcome.jpeg_bytes).hexdigest() != _OLD_0084_WORKING_COPY_WARP_SHA
+    arr = cv2.imdecode(np.frombuffer(outcome.jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert arr is not None
+    assert arr.shape[:2] == (TARGET_H, TARGET_W)
+    fields, text = _decode_processed_fields(outcome.jpeg_bytes, tmp_path)
+    assert text
+    assert fields >= 15
+
+
+@pytest.mark.skipif(not _LIVE_6446.is_file(), reason="live IMG_6446 original not on host")
+def test_live_img6446_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> None:
+    outcome = run_applicant_dl_opencv(_LIVE_6446)
+    assert outcome.success is True
+    assert outcome.jpeg_bytes
+    assert outcome.debug.get("final_warp_source") == "original_pixels"
+    assert outcome.debug.get("rough_locator_used") == "CANNY"
+    assert outcome.debug.get("final_processed_dimensions") == {"width": 1000, "height": 631}
+    fields, text = _decode_processed_fields(outcome.jpeg_bytes, tmp_path)
+    assert text
     assert fields >= 15

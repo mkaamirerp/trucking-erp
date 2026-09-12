@@ -1,4 +1,4 @@
-"""Regression: CDL back PDF417 reads the confirmed processed image only."""
+"""Regression: CDL back PDF417 reads processed first, original upload as fallback."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ async def test_apply_cdl_back_no_processed_image_is_failed() -> None:
     dbg = out.get("license_extract_debug") or {}
     assert dbg.get("barcode_image_source") == "processed"
     assert dbg.get("processed_fallback_used") is False
+    assert dbg.get("original_fallback_used") is False
 
 
 @pytest.mark.asyncio
@@ -57,6 +58,7 @@ async def test_apply_cdl_back_success_when_decode_returns_aamva_text(tmp_path: P
     dbg = out.get("license_extract_debug") or {}
     assert dbg.get("meaningful_field_count", 0) >= 1
     assert dbg.get("barcode_image_source") == "processed"
+    assert dbg.get("original_fallback_used") is False
     assert "H010062911981" not in str(dbg)
     assert "pdf417_text" not in dbg
 
@@ -108,6 +110,7 @@ async def test_decode_opens_processed_key_never_original(tmp_path: Path) -> None
     proc = tmp_path / "proc.jpg"
     proc.write_bytes(b"proc")
     opened: list[str] = []
+    intake = {"files": {"CDL_BACK": {"storage_key": "original-key", "enh_file_id": "processed-key"}}}
 
     @contextmanager
     def fake_readable_path(storage_key: str, _kind: str, _slug: str):
@@ -121,13 +124,54 @@ async def test_decode_opens_processed_key_never_original(tmp_path: Path) -> None
         patch.object(storage_mod, "readable_path", fake_readable_path),
         patch("app.services.applicant_dl_pdf417.decode_pdf417_barcode_with_trace", fake_decode),
     ):
-        out = await apply_stored_cdl_back_pdf417({}, "processed-key", "demo")
+        out = await apply_stored_cdl_back_pdf417(
+            intake, "processed-key", "demo", original_storage_key="original-key"
+        )
 
     assert opened == ["processed-key"]
     assert out["license_extract_status"] == "SUCCESS"
     assert out.get("driver_license_number") == "H010062911981"
     dbg = out.get("license_extract_debug") or {}
     assert dbg.get("barcode_image_source") == "processed"
+    assert dbg.get("processed_fallback_used") is False
+    assert dbg.get("original_fallback_used") is False
+
+
+@pytest.mark.asyncio
+async def test_processed_no_fields_falls_back_to_original(tmp_path: Path) -> None:
+    proc = tmp_path / "proc.jpg"
+    orig = tmp_path / "orig.jpg"
+    proc.write_bytes(b"proc")
+    orig.write_bytes(b"orig")
+    opened: list[str] = []
+
+    @contextmanager
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        opened.append(storage_key)
+        yield orig if storage_key == "original-key" else proc
+
+    def fake_decode(path, mode="applicant_two_phase"):
+        if Path(path).name == "orig.jpg":
+            return SYNTHETIC_AAMVA, Pdf417DecodeMeta("fast_full_rgb", "zxing", [])
+        return None, Pdf417DecodeMeta(None, None, [])
+
+    with (
+        patch.object(storage_mod, "readable_path", fake_readable_path),
+        patch("app.services.applicant_dl_pdf417.decode_pdf417_barcode_with_trace", fake_decode),
+    ):
+        out = await apply_stored_cdl_back_pdf417(
+            {"files": {"CDL_BACK": {"storage_key": "original-key"}}},
+            "processed-key",
+            "demo",
+            original_storage_key="original-key",
+        )
+
+    assert opened == ["processed-key", "original-key"]
+    assert out["license_extract_status"] == "SUCCESS"
+    assert out.get("driver_license_number") == "H010062911981"
+    dbg = out.get("license_extract_debug") or {}
+    assert dbg.get("barcode_image_source") == "original"
+    assert dbg.get("original_fallback_used") is True
     assert dbg.get("processed_fallback_used") is False
 
 
@@ -159,7 +203,52 @@ async def test_timeout_on_processed_does_not_open_another_key(tmp_path: Path) ->
     assert out["license_extract_status"] == "FAILED"
     assert out.get("license_extract_error") == "decode_timeout"
     assert out["license_extract_debug"].get("processed_fallback_used") is False
+    assert out["license_extract_debug"].get("original_fallback_used") is False
     assert out["license_extract_debug"].get("barcode_image_source") == "processed"
+
+
+@pytest.mark.asyncio
+async def test_timeout_on_processed_falls_back_to_original(tmp_path: Path) -> None:
+    proc = tmp_path / "proc.jpg"
+    orig = tmp_path / "orig.jpg"
+    proc.write_bytes(b"proc")
+    orig.write_bytes(b"orig")
+    opened: list[str] = []
+
+    @contextmanager
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        opened.append(storage_key)
+        yield orig if storage_key == "original-key" else proc
+
+    import asyncio
+
+    real_wait_for = asyncio.wait_for
+
+    async def fake_wait_for(aw, timeout=None):
+        if opened[-1] == "processed-key":
+            if hasattr(aw, "close"):
+                aw.close()
+            raise asyncio.TimeoutError()
+        return await real_wait_for(aw, timeout=timeout)
+
+    def fake_decode(path, mode="applicant_two_phase"):
+        return SYNTHETIC_AAMVA, Pdf417DecodeMeta("fast_full_rgb", "zxing", [])
+
+    with (
+        patch.object(storage_mod, "readable_path", fake_readable_path),
+        patch("app.services.applicant_dl_pdf417.asyncio.wait_for", fake_wait_for),
+        patch("app.services.applicant_dl_pdf417.decode_pdf417_barcode_with_trace", fake_decode),
+    ):
+        out = await apply_stored_cdl_back_pdf417(
+            {}, "processed-key", "demo", original_storage_key="original-key"
+        )
+
+    assert opened == ["processed-key", "original-key"]
+    assert out["license_extract_status"] == "SUCCESS"
+    assert out.get("driver_license_number") == "H010062911981"
+    dbg = out.get("license_extract_debug") or {}
+    assert dbg.get("barcode_image_source") == "original"
+    assert dbg.get("original_fallback_used") is True
 
 
 @pytest.mark.asyncio
@@ -205,8 +294,16 @@ def test_clear_pdf417_extract_drops_stale_fields() -> None:
     assert "field_sources" not in out
 
 
+_REGRESS_DIR = Path("/tmp/dl_pdf417_regress")
+_IMG6446_PROCESSED = _REGRESS_DIR / "img6446_processed.jpg"
+_IMG6446_ORIGINAL = _REGRESS_DIR / "img6446_original.jpg"
+_IMG0084_PROCESSED = _REGRESS_DIR / "img0084_processed.jpg"
+_IMG0084_ORIGINAL = _REGRESS_DIR / "img0084_original.jpg"
+
+
 def _img6446_processed_warp() -> Path | None:
     candidates = [
+        _IMG6446_PROCESSED,
         Path("/tmp/dl_pdf417_forensic/60001d44d82e4e70a198c981ef3cb78a.jpg"),
         Path("/tmp/app157_processed.jpg"),
     ]
@@ -217,27 +314,143 @@ def _img6446_processed_warp() -> Path | None:
 
 
 @pytest.mark.asyncio
-async def test_img6446_processed_warp_pdf417_via_confirm_entry(tmp_path: Path) -> None:
-    """Product path: PDF417 on the confirmed processed warp of IMG_6446, not the original."""
-    src = _img6446_processed_warp()
-    if src is None:
-        pytest.skip("IMG_6446 processed warp not present on this host")
+async def test_img6446_processed_succeeds_skips_original_fallback(tmp_path: Path) -> None:
+    """Known-good IMG_6446 warp: processed SUCCESS, original file is never opened."""
+    processed = _img6446_processed_warp()
+    original = _IMG6446_ORIGINAL if _IMG6446_ORIGINAL.is_file() else None
+    if processed is None or original is None:
+        pytest.skip("IMG_6446 processed/original pair not present on this host")
 
-    dest = tmp_path / "processed.jpg"
-    dest.write_bytes(src.read_bytes())
+    opened: list[str] = []
+    dest_p = tmp_path / "processed.jpg"
+    dest_o = tmp_path / "original.jpg"
+    dest_p.write_bytes(processed.read_bytes())
+    dest_o.write_bytes(original.read_bytes())
 
     @contextmanager
-    def fake_readable_path(_storage_key: str, _kind: str, _slug: str):
-        yield dest
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        opened.append(storage_key)
+        yield dest_p if storage_key == "processed-key" else dest_o
 
     with patch.object(storage_mod, "readable_path", fake_readable_path):
-        out = await apply_stored_cdl_back_pdf417({}, "processed-key", "demo")
+        out = await apply_stored_cdl_back_pdf417(
+            {}, "processed-key", "demo", original_storage_key="original-key"
+        )
 
+    assert opened == ["processed-key"]
     assert out["license_extract_status"] == "SUCCESS"
     dbg = out.get("license_extract_debug") or {}
     assert dbg.get("barcode_image_source") == "processed"
+    assert dbg.get("original_fallback_used") is False
     assert dbg.get("processed_fallback_used") is False
     assert int(dbg.get("meaningful_field_count") or 0) >= 15
     assert out.get("driver_license_number")
     assert out.get("first_name")
     assert out.get("last_name")
+
+
+@pytest.mark.asyncio
+async def test_img0084_processed_fails_original_fallback_succeeds(tmp_path: Path) -> None:
+    """Safety net: the old 1544-pixel 1000×631 warp still falls back to original."""
+    if not _IMG0084_PROCESSED.is_file() or not _IMG0084_ORIGINAL.is_file():
+        pytest.skip("IMG_0084 processed/original pair not present on this host")
+
+    opened: list[str] = []
+    dest_p = tmp_path / "processed.jpg"
+    dest_o = tmp_path / "original.jpg"
+    dest_p.write_bytes(_IMG0084_PROCESSED.read_bytes())
+    dest_o.write_bytes(_IMG0084_ORIGINAL.read_bytes())
+
+    @contextmanager
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        opened.append(storage_key)
+        yield dest_p if storage_key == "processed-key" else dest_o
+
+    with patch.object(storage_mod, "readable_path", fake_readable_path):
+        out = await apply_stored_cdl_back_pdf417(
+            {}, "processed-key", "demo", original_storage_key="original-key"
+        )
+
+    assert opened == ["processed-key", "original-key"]
+    assert out["license_extract_status"] == "SUCCESS"
+    dbg = out.get("license_extract_debug") or {}
+    assert dbg.get("barcode_image_source") == "original"
+    assert dbg.get("original_fallback_used") is True
+    assert dbg.get("processed_fallback_used") is False
+    assert int(dbg.get("meaningful_field_count") or 0) >= 15
+    assert out.get("driver_license_number")
+    assert out.get("first_name")
+    assert out.get("last_name")
+
+
+@pytest.mark.asyncio
+async def test_img0084_original_pixel_processed_succeeds_without_fallback(tmp_path: Path) -> None:
+    """New OpenCV path: 1544 detection + original-pixel 1000×631 should hydrate without fallback."""
+    if not _IMG0084_ORIGINAL.is_file():
+        pytest.skip("IMG_0084 original not present on this host")
+
+    from app.services.applicant_dl_preprocess import run_applicant_dl_opencv
+
+    outcome = run_applicant_dl_opencv(_IMG0084_ORIGINAL)
+    assert outcome.success is True
+    assert outcome.jpeg_bytes
+    assert outcome.debug.get("final_warp_source") == "original_pixels"
+
+    opened: list[str] = []
+    dest_p = tmp_path / "processed.jpg"
+    dest_o = tmp_path / "original.jpg"
+    dest_p.write_bytes(outcome.jpeg_bytes)
+    dest_o.write_bytes(_IMG0084_ORIGINAL.read_bytes())
+
+    @contextmanager
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        opened.append(storage_key)
+        yield dest_p if storage_key == "processed-key" else dest_o
+
+    with patch.object(storage_mod, "readable_path", fake_readable_path):
+        out = await apply_stored_cdl_back_pdf417(
+            {}, "processed-key", "demo", original_storage_key="original-key"
+        )
+
+    assert opened == ["processed-key"]
+    assert out["license_extract_status"] == "SUCCESS"
+    dbg = out.get("license_extract_debug") or {}
+    assert dbg.get("barcode_image_source") == "processed"
+    assert dbg.get("original_fallback_used") is False
+    assert dbg.get("processed_fallback_used") is False
+    assert int(dbg.get("meaningful_field_count") or 0) >= 15
+    assert out.get("driver_license_number")
+    assert out.get("first_name")
+    assert out.get("last_name")
+
+
+@pytest.mark.asyncio
+async def test_both_images_fail_keeps_current_failure_status(tmp_path: Path) -> None:
+    proc = tmp_path / "proc.jpg"
+    orig = tmp_path / "orig.jpg"
+    Image.new("RGB", (80, 50), "white").save(proc, "JPEG")
+    Image.new("RGB", (80, 50), "white").save(orig, "JPEG")
+    opened: list[str] = []
+
+    @contextmanager
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        opened.append(storage_key)
+        yield orig if storage_key == "original-key" else proc
+
+    with patch.object(storage_mod, "readable_path", fake_readable_path):
+        out = await apply_stored_cdl_back_pdf417(
+            {}, "processed-key", "demo", original_storage_key="original-key"
+        )
+
+    assert opened == ["processed-key", "original-key"]
+    assert out["license_extract_status"] == "NO_FIELDS_FOUND"
+    assert "license_extract_error" not in out
+    dbg = out.get("license_extract_debug") or {}
+    assert dbg.get("barcode_image_source") == "original"
+    assert dbg.get("original_fallback_used") is True
+    from app.routers.driver_onboarding import _pdf417_confirm_message
+
+    assert _pdf417_confirm_message(out) == (
+        "We could not read licence details from this photo. "
+        "The photo is saved — you can upload a clearer back photo or enter details manually."
+    )

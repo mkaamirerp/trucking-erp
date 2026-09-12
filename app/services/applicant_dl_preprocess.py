@@ -15,6 +15,7 @@ from app.services.applicant_dl_opencv import (
     PREPROCESS_VERSION,
     encode_processed_jpeg,
     process_applicant_dl_image_path,
+    warp_confirmed_card_from_original,
 )
 
 # Temporary OpenCV detection working copy only — not the stored image size.
@@ -86,13 +87,22 @@ def _prepare_working_copy(image_path: Path) -> tuple[Path, Path | None, dict[str
     return temp_path, temp_path, meta
 
 
+def _source_shape(image_bgr: np.ndarray | None) -> dict[str, int] | None:
+    if image_bgr is None or image_bgr.size == 0:
+        return None
+    return {"width": int(image_bgr.shape[1]), "height": int(image_bgr.shape[0])}
+
+
 def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> ApplicantDlPreprocessOutcome:
-    """Run the exact frozen sandbox processor. `side` is accepted for router compatibility only."""
+    """Detect on the 1544 working copy; warp the stored preview from original pixels."""
     _ = side
     source_path = Path(image_path)
+    original_bgr = _load_bgr_with_exif(source_path)
     work_path, temp_path, prep_meta = _prepare_working_copy(source_path)
+    working_bgr: np.ndarray | None = None
     try:
-        result, corrected = process_applicant_dl_image_path(work_path)
+        working_bgr = cv2.imread(str(work_path), cv2.IMREAD_COLOR)
+        result, working_warp = process_applicant_dl_image_path(work_path)
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
@@ -100,8 +110,15 @@ def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> 
     debug = dict(result.report)
     debug.update(prep_meta)
     debug["preprocess_version"] = PREPROCESS_VERSION
+    detection_shape = _source_shape(working_bgr) or prep_meta.get("opencv_input_shape")
+    original_shape = _source_shape(original_bgr) or prep_meta.get("original_input_shape")
+    if detection_shape:
+        debug["detection_source_dimensions"] = detection_shape
+    if original_shape:
+        debug["original_source_dimensions"] = original_shape
 
     if not result.post_validation_pass:
+        debug.setdefault("final_warp_source", None)
         return ApplicantDlPreprocessOutcome(
             success=False,
             jpeg_bytes=None,
@@ -110,9 +127,30 @@ def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> 
             correction_applied=result.correction_applied,
         )
 
+    warped = working_warp
+    debug["final_warp_source"] = "working_copy_pixels"
+    debug["final_processed_dimensions"] = {
+        "width": int(working_warp.shape[1]),
+        "height": int(working_warp.shape[0]),
+    }
+    corners = result.report.get("corners_tl_tr_br_bl")
+    orientation = str(result.report.get("orientation_used") or "original")
+    if original_bgr is not None and working_bgr is not None and corners is not None:
+        try:
+            warped, warp_meta = warp_confirmed_card_from_original(
+                original_bgr,
+                working_bgr,
+                np.asarray(corners, dtype=np.float32),
+                orientation,
+            )
+            debug.update(warp_meta)
+        except Exception as exc:
+            debug["warp_from_original_error"] = type(exc).__name__
+            debug["final_warp_source"] = "working_copy_pixels"
+
     return ApplicantDlPreprocessOutcome(
         success=True,
-        jpeg_bytes=encode_processed_jpeg(corrected),
+        jpeg_bytes=encode_processed_jpeg(warped),
         debug=debug,
         classification=result.geometry_class,
         correction_applied=result.correction_applied,
