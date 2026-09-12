@@ -214,6 +214,121 @@ Name, licence number, province, dates, and class matched the previous gold parse
 
 Shipped in this gold (no longer parked): `DAY` delimiter / sex mapping; generic `Z[A-Z0-9]{2}` field boundaries (delimiter-only; identity-based position/line fallback).
 
+## Planned hardening — orientation, low-resolution images, and front fallback
+
+**Status: documentation only. Do not treat this section as current gold behaviour. Do not implement it as part of an unrelated DL fix.**
+
+### Problem separation
+
+TruckERP has three separate orientation concerns and they must not be mixed:
+
+1. **EXIF/display orientation** — metadata may tell software how the pixels should be displayed. It can be correct, missing, stripped (for example by messaging apps), stale after editing, or inconsistent with the actual saved pixels. Treat EXIF as an input hint, not final truth.
+2. **Card geometry orientation** — the current OpenCV pipeline already tries image rotations while finding the card, confirms four corners, deskews/perspective-warps, and produces the rectified card. This answers “where is the card?” and “how do we straighten it?”
+3. **Human-readable document orientation** — a perfectly rectified licence can still be upside down. OpenCV geometry alone cannot reliably distinguish a 0-degree card from the same rectangle rotated 180 degrees because both have valid geometry.
+
+Do not replace the proven OpenCV crop/warp pipeline just to solve human-readable orientation.
+
+### Planned architecture
+
+Keep the current OpenCV stages, then add one semantic document-orientation stage after the clean card crop:
+
+```text
+uploaded image
+  → EXIF-aware load if metadata exists
+  → current OpenCV geometry / 0-90-180-270 search
+  → four-corner confirmation
+  → original-pixel perspective warp
+  → clean rectified DL crop
+  → document-orientation classifier
+      → 0 / 90 / 180 / 270 + confidence
+  → if confidence is accepted: physically rotate/bake the winning orientation into pixels
+  → if confidence is not accepted: do not guess; preserve image for user review/manual correction
+  → preview / extraction
+```
+
+The orientation classifier is a semantic stage. It is not another contour, Hough-line, deskew, or aspect-ratio heuristic.
+
+### Candidate bake-off before implementation
+
+Benchmark locally before choosing a dependency:
+
+- **PaddleOCR/PaddleX `PP-LCNet_x1_0_doc_ori`** — preferred candidate from research; dedicated 4-class document/ID orientation classifier (`0/90/180/270`).
+- **Tesseract OSD** — free/open-source baseline (Apache 2.0); test only as a comparison. It may be weaker on sparse ID-card text, so do not select it without fixture evidence.
+- Do not invent a custom OpenCV “upside-down” heuristic unless the model bake-off demonstrates a concrete reason.
+
+Acceptance must be based on TruckERP fixtures, not published benchmark numbers alone.
+
+### Orientation fixture matrix
+
+Before production implementation, test at minimum:
+
+- upright front
+- front rotated 180 degrees
+- front rotated 90 degrees
+- front rotated 270 degrees
+- EXIF present and correct
+- EXIF absent
+- image manually rotated/cropped and re-saved
+- messaging-app/WhatsApp-style metadata-stripped image
+- low-resolution front
+- normal/high-resolution front
+- representative back images
+
+Record for each candidate: predicted angle, confidence, correctness, inference time, and whether the final saved pixels are visually upright.
+
+### Low-resolution policy
+
+Do **not** add one global minimum-resolution rejection for all DL images.
+
+- **Front:** if OpenCV can find/crop the card, allow the front to continue even when resolution is low. Attempt front OCR later. If extraction confidence is weak, require user verification/manual entry rather than rejecting solely because the dimensions are small.
+- **Back:** OpenCV may still crop a low-resolution image, but PDF417 requires real barcode detail. If processed decode and original fallback both fail, image dimensions/compression may be used as a specific diagnostic reason. Do not claim that upscaling recreates lost barcode detail.
+- Upscaling may help an OCR/decoder algorithm operate, but it does not create missing source information.
+
+The observed low-resolution front image around `664×412` is a useful future regression fixture because OpenCV cropping succeeded and the image remained human-readable. It should not become a blanket rejection fixture.
+
+### Extraction/fallback order
+
+Future extraction plan:
+
+```text
+BACK processed crop → PDF417
+  OR, if not SUCCESS:
+BACK original stored image → PDF417 fallback
+  OR, if still not SUCCESS and FRONT exists:
+FRONT corrected crop → OCR / AI fallback
+  OR:
+manual entry / verification
+```
+
+Source authority:
+
+```text
+successful structured PDF417
+  > front OCR/AI fallback
+  > manual entry
+```
+
+Front OCR/AI must not overwrite a successful trusted PDF417 field merely because it produces a different value. Field-level source/confidence rules must be explicit when this stage is implemented.
+
+### Simple IF / OR decision contract
+
+- **IF** EXIF exists, use it only to normalize the starting image; **OR** if it does not exist, continue from the pixels as received.
+- **IF** OpenCV finds and rectifies the card, continue; **OR** if four corners cannot be confirmed, use the existing capture/retry path.
+- **IF** the orientation model is confident, rotate the actual pixels to the predicted upright angle; **OR** if confidence is weak, do not guess and let the user review/correct it.
+- **IF** the image is FRONT, allow low resolution when OpenCV succeeds and attempt OCR; **OR** use manual verification when OCR is weak.
+- **IF** the image is BACK and processed PDF417 succeeds, use it; **OR** try the original stored BACK.
+- **IF** both BACK PDF417 attempts fail and a FRONT image exists, later allow FRONT OCR/AI as recovery; **OR** require manual entry.
+- **IF** PDF417 already supplied a trusted field, keep it; **OR** use OCR/AI/manual data only for missing/untrusted fields.
+
+### Implementation guardrails
+
+- Do not change current OpenCV detector scale, corner confirmation, or original-pixel warp while implementing orientation unless separate evidence requires it.
+- Do not depend on EXIF to decide final human-readable orientation.
+- Do not silently rotate on low-confidence model output.
+- Bake the selected orientation into actual pixels before saving/preview/extraction so downstream code does not depend on metadata.
+- Add tests first; implement in a small isolated DL commit; live-verify fixtures; only then consider moving `gold/dl`.
+- Keep this future work independent of Load Parser, Fuel, Trip/Dispatch, and unrelated dirty-tree changes.
+
 ## Hard warning
 
 **Never build production from a dirty tree.** `Dockerfile` `COPY . .` will bake uncommitted Load Parser / frontend WIP into `truckerp-api`. Stash or worktree to a clean `5c445494` / `dl-gold-2026-09-12-aamva` before `scripts/reload_api.sh`. Recovery image of the prior warp gold: `dl-gold-2026-09-12` (`ac650fff`).
