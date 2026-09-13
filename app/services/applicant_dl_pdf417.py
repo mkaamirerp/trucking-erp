@@ -5,6 +5,7 @@ Kept separate from the FastAPI router so unit tests can import without pulling a
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from app.services.dl_pdf417 import (
@@ -62,6 +63,28 @@ def clear_pdf417_extract_from_intake(intake: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _decode_pdf417_sync(path: Path) -> tuple[str | None, Pdf417DecodeMeta]:
+    return decode_pdf417_barcode_with_trace(path, mode="applicant_two_phase")
+
+
+async def _await_decode_worker(path: Path) -> tuple[str | None, Pdf417DecodeMeta]:
+    """Run decode in a worker thread. Join the worker even if the emergency wait_for fires.
+
+    ``asyncio.wait_for`` cancellation does not stop native ZXing work. Shield the future
+    and always await it so original fallback cannot overlap a still-running processed decode.
+    The ``with readable_path`` caller must stay open until this returns.
+    """
+    loop = asyncio.get_running_loop()
+    fut = loop.run_in_executor(None, _decode_pdf417_sync, path)
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(fut),
+            timeout=PDF417_APPLICANT_THREAD_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        return await fut
+
+
 async def _decode_stored_key(
     storage_key: str,
     tenant_slug: str,
@@ -73,17 +96,10 @@ async def _decode_stored_key(
         with readable_path(storage_key, "applicant_dl", tenant_slug) as path:
             if not path.is_file():
                 return None, None, "source_file_missing"
-            raw, meta = await asyncio.wait_for(
-                asyncio.to_thread(
-                    decode_pdf417_barcode_with_trace,
-                    path,
-                    mode="applicant_two_phase",
-                ),
-                timeout=PDF417_APPLICANT_THREAD_TIMEOUT_SEC,
-            )
+            raw, meta = await _await_decode_worker(path)
+            if not raw and meta.timeout_reason:
+                return raw, meta, "decode_timeout"
             return raw, meta, None
-    except asyncio.TimeoutError:
-        return None, None, "decode_timeout"
     except Exception as exc:  # noqa: BLE001 — surface class name only
         return None, None, type(exc).__name__
 

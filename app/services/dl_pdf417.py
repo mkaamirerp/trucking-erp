@@ -11,13 +11,18 @@ from typing import Any, Literal
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 import zxingcpp
 
-# --- Applicant upload latency (strict monotonic budgets inside decode thread) ---
+# --- Applicant upload latency (one wall-clock budget owned by the decoder) ---
+# FAST phase cap inside the total (cheap candidates first; leftover goes to enumerate+thorough).
 PDF417_APPLICANT_FAST_BUDGET_SEC = 1.5
+# Intended remainder after FAST for enumerate + thorough + pyzbar (not a separate clock).
 PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC = 4.0
-# asyncio guard (slightly above fast + thorough + PIL overhead)
-PDF417_APPLICANT_THREAD_TIMEOUT_SEC = (
-    PDF417_APPLICANT_FAST_BUDGET_SEC + PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC + 0.75
+# Single deadline covering open/EXIF, FAST, candidate enumeration, thorough, pyzbar.
+PDF417_APPLICANT_TOTAL_BUDGET_SEC = (
+    PDF417_APPLICANT_FAST_BUDGET_SEC + PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC
 )
+# Emergency asyncio backstop only. Comfortably above total + one in-flight ZXing call.
+# Must not be used as the normal stop: cancelling to_thread does not kill native work.
+PDF417_APPLICANT_THREAD_TIMEOUT_SEC = PDF417_APPLICANT_TOTAL_BUDGET_SEC + 6.5
 # LocalAverage on large stills can overrun the remaining slice; do not start it below this.
 PDF417_LOCAL_AVERAGE_MIN_REMAINING_SEC = 0.75
 
@@ -94,6 +99,10 @@ class Pdf417DecodeMeta:
     thorough_candidate_count: int = 0
     source_width: int | None = None
     source_height: int | None = None
+    total_elapsed_ms: float | None = None
+    phase_reached: str | None = None
+    timeout_reason: str | None = None
+    attempts_completed: int = 0
 
     def as_debug_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +117,10 @@ class Pdf417DecodeMeta:
             "decode_thorough_candidate_count": self.thorough_candidate_count,
             "source_width": self.source_width,
             "source_height": self.source_height,
+            "decode_total_elapsed_ms": self.total_elapsed_ms,
+            "decode_phase_reached": self.phase_reached,
+            "decode_timeout_reason": self.timeout_reason,
+            "decode_attempts_completed": self.attempts_completed,
         }
 
 
@@ -249,6 +262,14 @@ def _budget_hit(deadline_mon: float | None) -> bool:
     return deadline_mon is not None and time.monotonic() >= deadline_mon
 
 
+def _attempts_completed(attempts: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for a in attempts
+        if a.get("engine") in {"zxing", "pyzbar"} and not a.get("skipped_due_to_budget")
+    )
+
+
 def _remaining_sec(deadline_mon: float | None) -> float | None:
     if deadline_mon is None:
         return None
@@ -307,7 +328,8 @@ def _record_attempt(
         row["height"] = height
     if note is not None:
         row["note"] = note
-    attempts.append(row)
+    if len(attempts) < _MAX_DEBUG_ATTEMPTS:
+        attempts.append(row)
 
 
 def _decode_loop(
@@ -319,11 +341,13 @@ def _decode_loop(
     run_pyzbar: bool,
     phase: str,
     loop_t0: float | None = None,
-) -> tuple[str | None, str | None, str | None]:
-    """Return ``(text, winning_candidate, engine)``."""
+) -> tuple[str | None, str | None, str | None, bool]:
+    """Return ``(text, winning_candidate, engine, stopped_for_budget)``."""
     t0 = loop_t0 if loop_t0 is not None else time.monotonic()
+    stopped_for_budget = False
     for cname, pil_im in candidates:
         if _budget_hit(deadline_mon):
+            stopped_for_budget = True
             _record_attempt(
                 attempts,
                 phase=phase,
@@ -337,6 +361,7 @@ def _decode_loop(
         cw, ch = pil_im.size
         for binarizer, try_inv in zxing_tries:
             if _budget_hit(deadline_mon):
+                stopped_for_budget = True
                 _record_attempt(
                     attempts,
                     phase=phase,
@@ -349,7 +374,7 @@ def _decode_loop(
                     skipped_due_to_budget=True,
                     note="budget_exhausted",
                 )
-                return None, None, None
+                return None, None, None, True
             if _should_skip_expensive(binarizer, deadline_mon):
                 _record_attempt(
                     attempts,
@@ -383,10 +408,11 @@ def _decode_loop(
                 decoded_char_count=len(text) if text else 0,
             )
             if text:
-                return text, cname, "zxing"
+                return text, cname, "zxing", False
     if run_pyzbar:
         for cname, pil_im in candidates:
             if _budget_hit(deadline_mon):
+                stopped_for_budget = True
                 _record_attempt(
                     attempts,
                     phase=phase,
@@ -414,53 +440,82 @@ def _decode_loop(
                 decoded_char_count=len(text) if text else 0,
             )
             if text:
-                return text, cname, "pyzbar"
-    return None, None, None
+                return text, cname, "pyzbar", False
+    return None, None, None, stopped_for_budget or _budget_hit(deadline_mon)
 
 
-def _enumerate_pdf417_image_candidates(rgb: Image.Image) -> list[tuple[str, Image.Image]]:
+def _enumerate_pdf417_image_candidates(
+    rgb: Image.Image,
+    *,
+    deadline_mon: float | None = None,
+) -> list[tuple[str, Image.Image]]:
     w, h = rgb.size
     acc: list[tuple[str, Image.Image]] = []
     seen: set[int] = set()
 
-    def push(name: str, im: Image.Image) -> None:
+    def push(name: str, im: Image.Image) -> bool:
+        if _budget_hit(deadline_mon):
+            return False
         sid = id(im)
         if sid in seen:
-            return
+            return True
         seen.add(sid)
         acc.append((name, im))
+        return True
 
-    push("full_rgb", rgb)
+    if not push("full_rgb", rgb):
+        return acc
     for angle, tag in ((90, "r90"), (180, "r180"), (270, "r270")):
-        push(f"full_rgb_{tag}", rgb.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC))
+        if _budget_hit(deadline_mon):
+            return acc
+        if not push(
+            f"full_rgb_{tag}",
+            rgb.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC),
+        ):
+            return acc
 
     if max(w, h) < 1400:
-        push("full_rgb_up135", _resize_lanczos(rgb, 1.35))
-        push("full_rgb_up175", _resize_lanczos(rgb, 1.75))
+        if not push("full_rgb_up135", _resize_lanczos(rgb, 1.35)):
+            return acc
+        if not push("full_rgb_up175", _resize_lanczos(rgb, 1.75)):
+            return acc
     if max(w, h) < 1100:
-        push("full_rgb_up220", _resize_lanczos(rgb, 2.2))
+        if not push("full_rgb_up220", _resize_lanczos(rgb, 2.2)):
+            return acc
     if w > 2000 or h > 2000:
-        push("full_rgb_down2", _resize_lanczos(rgb, 0.5))
+        if not push("full_rgb_down2", _resize_lanczos(rgb, 0.5)):
+            return acc
     if w > 2800 or h > 2800:
-        push("full_rgb_down3", _resize_lanczos(rgb, 0.33))
+        if not push("full_rgb_down3", _resize_lanczos(rgb, 0.33)):
+            return acc
 
     for gname, gim in _gray_variants_full(rgb, "full"):
-        push(gname, gim)
+        if not push(gname, gim):
+            return acc
 
     crops = _build_spatial_crops(rgb)
     for cname, cim in crops:
-        push(f"{cname}_rgb", cim.convert("RGB"))
+        if _budget_hit(deadline_mon):
+            return acc
+        if not push(f"{cname}_rgb", cim.convert("RGB")):
+            return acc
         for gname, gim in _gray_variants_crop(cim, cname):
-            push(gname, gim)
+            if not push(gname, gim):
+                return acc
         cw, ch = cim.size
         if cw >= 120 and ch >= 40:
-            push(f"{cname}_up2", _resize_lanczos(cim, 2.0))
-            push(f"{cname}_up25", _resize_lanczos(cim, 2.5))
+            if not push(f"{cname}_up2", _resize_lanczos(cim, 2.0)):
+                return acc
+            if not push(f"{cname}_up25", _resize_lanczos(cim, 2.5)):
+                return acc
         if cw > 900:
-            push(f"{cname}_down085", _resize_lanczos(cim, 0.85))
+            if not push(f"{cname}_down085", _resize_lanczos(cim, 0.85)):
+                return acc
 
-    push("full_rgb_brighter", ImageEnhance.Brightness(rgb).enhance(1.25))
-    push("full_rgb_darker", ImageEnhance.Brightness(rgb).enhance(0.82))
+    if not push("full_rgb_brighter", ImageEnhance.Brightness(rgb).enhance(1.25)):
+        return acc
+    if not push("full_rgb_darker", ImageEnhance.Brightness(rgb).enhance(0.82)):
+        return acc
     push("full_rgb_sat", ImageEnhance.Color(rgb).enhance(1.35))
 
     return acc
@@ -472,17 +527,12 @@ def decode_pdf417_barcode_with_trace(
     save_candidates_dir: Path | None = None,
     mode: Literal["applicant_two_phase", "thorough", "fast_only"] = "thorough",
 ) -> tuple[str | None, Pdf417DecodeMeta]:
+    t0 = time.monotonic()
     attempts: list[dict[str, Any]] = []
-
-    try:
-        with Image.open(image_path) as image:
-            image = ImageOps.exif_transpose(image)
-            rgb = image.convert("RGB")
-    except Exception as exc:
-        attempts.append({"candidate": "__open__", "engine": "none", "ok": False, "error": type(exc).__name__})
-        return None, Pdf417DecodeMeta(None, None, attempts, pipeline="open_error")
-
-    src_w, src_h = rgb.size
+    src_w: int | None = None
+    src_h: int | None = None
+    phase_reached = "open"
+    timeout_reason: str | None = None
 
     def _meta(
         winner: str | None,
@@ -497,7 +547,7 @@ def decode_pdf417_barcode_with_trace(
         return Pdf417DecodeMeta(
             winner,
             engine,
-            attempts,
+            list(attempts[:_MAX_DEBUG_ATTEMPTS]),
             pipeline=pipeline,
             fast_elapsed_ms=fast_elapsed_ms,
             thorough_elapsed_ms=thorough_elapsed_ms,
@@ -505,78 +555,143 @@ def decode_pdf417_barcode_with_trace(
             thorough_candidate_count=thorough_candidate_count,
             source_width=src_w,
             source_height=src_h,
+            total_elapsed_ms=round((time.monotonic() - t0) * 1000, 1),
+            phase_reached=phase_reached,
+            timeout_reason=timeout_reason,
+            attempts_completed=_attempts_completed(attempts),
         )
 
+    total_deadline = (
+        t0 + PDF417_APPLICANT_TOTAL_BUDGET_SEC if mode == "applicant_two_phase" else None
+    )
     if mode == "fast_only":
-        t0 = time.monotonic()
-        deadline = t0 + PDF417_APPLICANT_FAST_BUDGET_SEC
-        fast_c = _build_fast_candidates(rgb)
-        text, winner, engine = _decode_loop(
-            fast_c,
-            attempts,
-            deadline_mon=deadline,
-            zxing_tries=_ZXING_TRIES_FAST,
-            run_pyzbar=False,
-            phase="fast",
-            loop_t0=t0,
-        )
+        total_deadline = t0 + PDF417_APPLICANT_FAST_BUDGET_SEC
+
+    if total_deadline is not None and _budget_hit(total_deadline):
+        timeout_reason = "total_budget"
+        return None, _meta(None, None, pipeline=mode)
+
+    try:
+        with Image.open(image_path) as image:
+            image = ImageOps.exif_transpose(image)
+            rgb = image.convert("RGB")
+    except Exception as exc:
+        attempts.append({"candidate": "__open__", "engine": "none", "ok": False, "error": type(exc).__name__})
+        return None, _meta(None, None, pipeline="open_error")
+
+    src_w, src_h = rgb.size
+    if total_deadline is not None and _budget_hit(total_deadline):
+        timeout_reason = "total_budget"
+        phase_reached = "open"
+        return None, _meta(None, None, pipeline=mode)
+
+    if mode == "fast_only":
+        phase_reached = "fast"
+        fast_c: list[tuple[str, Image.Image]] = []
+        try:
+            fast_c = _build_fast_candidates(rgb)
+            text, winner, engine, stopped = _decode_loop(
+                fast_c,
+                attempts,
+                deadline_mon=total_deadline,
+                zxing_tries=_ZXING_TRIES_FAST,
+                run_pyzbar=False,
+                phase="fast",
+                loop_t0=t0,
+            )
+        finally:
+            fast_c = []
         elapsed_ms = (time.monotonic() - t0) * 1000
+        if stopped and not text:
+            timeout_reason = "total_budget"
         if text:
             return text, _meta(
                 winner, engine, pipeline="fast",
-                fast_elapsed_ms=elapsed_ms, fast_candidate_count=len(fast_c),
+                fast_elapsed_ms=elapsed_ms, fast_candidate_count=FAST_DECODE_CANDIDATE_COUNT,
             )
         return None, _meta(
             None, None, pipeline="fast",
-            fast_elapsed_ms=elapsed_ms, fast_candidate_count=len(fast_c),
+            fast_elapsed_ms=elapsed_ms, fast_candidate_count=FAST_DECODE_CANDIDATE_COUNT,
         )
 
     if mode == "applicant_two_phase":
+        assert total_deadline is not None
+        phase_reached = "fast"
         t_fast = time.monotonic()
-        deadline_fast = t_fast + PDF417_APPLICANT_FAST_BUDGET_SEC
-        fast_c = _build_fast_candidates(rgb)
-        text, winner, engine = _decode_loop(
-            fast_c,
-            attempts,
-            deadline_mon=deadline_fast,
-            zxing_tries=_ZXING_TRIES_FAST,
-            run_pyzbar=False,
-            phase="fast",
-            loop_t0=t_fast,
-        )
+        fast_deadline = min(total_deadline, t_fast + PDF417_APPLICANT_FAST_BUDGET_SEC)
+        fast_c = []
+        try:
+            fast_c = _build_fast_candidates(rgb)
+            text, winner, engine, stopped_fast = _decode_loop(
+                fast_c,
+                attempts,
+                deadline_mon=fast_deadline,
+                zxing_tries=_ZXING_TRIES_FAST,
+                run_pyzbar=False,
+                phase="fast",
+                loop_t0=t_fast,
+            )
+        finally:
+            fast_n = len(fast_c)
+            fast_c = []
         fast_ms = (time.monotonic() - t_fast) * 1000
         if text:
             return text, _meta(
                 winner, engine, pipeline="fast",
-                fast_elapsed_ms=fast_ms, fast_candidate_count=len(fast_c),
+                fast_elapsed_ms=fast_ms, fast_candidate_count=fast_n,
+            )
+        if _budget_hit(total_deadline):
+            timeout_reason = "total_budget"
+            return None, _meta(
+                None, None, pipeline="fast",
+                fast_elapsed_ms=fast_ms, fast_candidate_count=fast_n,
             )
 
-        thorough_c = _enumerate_pdf417_image_candidates(rgb)
+        phase_reached = "enumerate"
+        thorough_c: list[tuple[str, Image.Image]] = []
+        thorough_n = 0
+        stopped_th = False
         t_th = time.monotonic()
-        deadline_th = t_th + PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC
-        text2, winner2, engine2 = _decode_loop(
-            thorough_c,
-            attempts,
-            deadline_mon=deadline_th,
-            zxing_tries=_ZXING_TRIES_THOROUGH,
-            run_pyzbar=True,
-            phase="thorough_fallback",
-            loop_t0=t_th,
-        )
+        try:
+            thorough_c = _enumerate_pdf417_image_candidates(rgb, deadline_mon=total_deadline)
+            thorough_n = len(thorough_c)
+            if _budget_hit(total_deadline) and not thorough_c:
+                timeout_reason = "total_budget"
+                return None, _meta(
+                    None, None, pipeline="fast+thorough_fallback",
+                    fast_elapsed_ms=fast_ms, thorough_elapsed_ms=0.0,
+                    fast_candidate_count=fast_n, thorough_candidate_count=0,
+                )
+            phase_reached = "thorough_fallback"
+            text2, winner2, engine2, stopped_th = _decode_loop(
+                thorough_c,
+                attempts,
+                deadline_mon=total_deadline,
+                zxing_tries=_ZXING_TRIES_THOROUGH,
+                run_pyzbar=True,
+                phase="thorough_fallback",
+                loop_t0=t_th,
+            )
+        finally:
+            thorough_n = len(thorough_c) if thorough_c else 0
+            thorough_c = []
         thorough_ms = (time.monotonic() - t_th) * 1000
         if text2:
             return text2, _meta(
                 winner2, engine2, pipeline="fast+thorough_fallback",
                 fast_elapsed_ms=fast_ms, thorough_elapsed_ms=thorough_ms,
-                fast_candidate_count=len(fast_c), thorough_candidate_count=len(thorough_c),
+                fast_candidate_count=fast_n, thorough_candidate_count=thorough_n,
             )
+        if stopped_fast or stopped_th or _budget_hit(total_deadline):
+            timeout_reason = "total_budget"
         return None, _meta(
             None, None, pipeline="fast+thorough_fallback",
             fast_elapsed_ms=fast_ms, thorough_elapsed_ms=thorough_ms,
-            fast_candidate_count=len(fast_c), thorough_candidate_count=len(thorough_c),
+            fast_candidate_count=fast_n, thorough_candidate_count=thorough_n,
         )
 
     # mode == "thorough" — ops / debug: full sweep, no time budget, pyzbar last
+    phase_reached = "thorough"
     candidates = _enumerate_pdf417_image_candidates(rgb)
     if save_candidates_dir is not None:
         save_candidates_dir.mkdir(parents=True, exist_ok=True)
@@ -589,7 +704,7 @@ def decode_pdf417_barcode_with_trace(
                 pass
 
     t_th = time.monotonic()
-    text, winner, engine = _decode_loop(
+    text, winner, engine, _stopped = _decode_loop(
         candidates,
         attempts,
         deadline_mon=None,
@@ -598,14 +713,16 @@ def decode_pdf417_barcode_with_trace(
         phase="thorough",
         loop_t0=t_th,
     )
+    n_cand = len(candidates)
+    candidates = []
     if text:
         return text, _meta(
             winner, engine, pipeline="thorough",
-            thorough_candidate_count=len(candidates),
+            thorough_candidate_count=n_cand,
         )
     return None, _meta(
         None, None, pipeline="thorough",
-        thorough_candidate_count=len(candidates),
+        thorough_candidate_count=n_cand,
     )
 
 

@@ -14,6 +14,8 @@ from app.services.dl_pdf417 import (
     FAST_DECODE_CANDIDATE_COUNT,
     PDF417_APPLICANT_FAST_BUDGET_SEC,
     PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC,
+    PDF417_APPLICANT_TOTAL_BUDGET_SEC,
+    PDF417_APPLICANT_THREAD_TIMEOUT_SEC,
     aamva_intake_from_pdf417_text,
     apply_pdf417_to_intake,
     decode_pdf417_barcode_with_trace,
@@ -243,11 +245,80 @@ def test_applicant_two_phase_blank_bounded_and_reports_timings(tmp_path: Path) -
     assert meta.pipeline == "fast+thorough_fallback"
     assert meta.fast_elapsed_ms is not None
     assert meta.thorough_elapsed_ms is not None
-    assert meta.fast_elapsed_ms <= (PDF417_APPLICANT_FAST_BUDGET_SEC + 0.5) * 1000
-    assert meta.thorough_elapsed_ms <= (PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC + 0.5) * 1000
-    assert elapsed < (
-        PDF417_APPLICANT_FAST_BUDGET_SEC + PDF417_APPLICANT_THOROUGH_FALLBACK_BUDGET_SEC + 1.25
-    )
+    assert meta.total_elapsed_ms is not None
+    assert elapsed < PDF417_APPLICANT_TOTAL_BUDGET_SEC + 1.25
+    assert elapsed < PDF417_APPLICANT_THREAD_TIMEOUT_SEC
+
+
+def test_fast_success_returns_quickly(monkeypatch, tmp_path: Path) -> None:
+    def fake_read(pil_image, *, binarizer, try_invert):
+        return "ANSI_SYNTHETIC_NO_PII"
+
+    monkeypatch.setattr("app.services.dl_pdf417._zxing_read", fake_read)
+    p = tmp_path / "blank.jpg"
+    Image.new("RGB", (80, 80), "white").save(p, "JPEG")
+    t0 = time.perf_counter()
+    text, meta = decode_pdf417_barcode_with_trace(p, mode="applicant_two_phase")
+    elapsed = time.perf_counter() - t0
+    assert text == "ANSI_SYNTHETIC_NO_PII"
+    assert meta.pipeline == "fast"
+    assert meta.timeout_reason is None
+    assert elapsed < 1.0
+    assert elapsed < PDF417_APPLICANT_THREAD_TIMEOUT_SEC
+
+
+def test_decoder_owned_timeout_returns_before_outer_backstop(monkeypatch, tmp_path: Path) -> None:
+    import app.services.dl_pdf417 as mod
+
+    monkeypatch.setattr(mod, "PDF417_APPLICANT_TOTAL_BUDGET_SEC", 0.2)
+    monkeypatch.setattr(mod, "PDF417_APPLICANT_FAST_BUDGET_SEC", 0.2)
+
+    def fake_read(pil_image, *, binarizer, try_invert):
+        time.sleep(0.08)
+        return None
+
+    monkeypatch.setattr(mod, "_zxing_read", fake_read)
+    p = tmp_path / "blank.jpg"
+    Image.new("RGB", (80, 80), "white").save(p, "JPEG")
+    t0 = time.perf_counter()
+    text, meta = decode_pdf417_barcode_with_trace(p, mode="applicant_two_phase")
+    elapsed = time.perf_counter() - t0
+    assert text is None
+    assert meta.timeout_reason == "total_budget"
+    assert meta.phase_reached in {"fast", "enumerate", "thorough_fallback", "open"}
+    assert meta.total_elapsed_ms is not None
+    assert meta.attempts_completed >= 1
+    assert elapsed < PDF417_APPLICANT_THREAD_TIMEOUT_SEC
+    assert elapsed < 1.5
+
+
+def test_candidate_enumeration_counts_against_total_budget(monkeypatch, tmp_path: Path) -> None:
+    import app.services.dl_pdf417 as mod
+
+    monkeypatch.setattr(mod, "PDF417_APPLICANT_TOTAL_BUDGET_SEC", 0.25)
+    monkeypatch.setattr(mod, "PDF417_APPLICANT_FAST_BUDGET_SEC", 0.02)
+    seen_deadlines: list[float | None] = []
+
+    def fake_enum(rgb, *, deadline_mon=None):
+        seen_deadlines.append(deadline_mon)
+        assert deadline_mon is not None
+        while time.monotonic() < deadline_mon:
+            time.sleep(0.02)
+        return [("full_rgb", rgb)]
+
+    monkeypatch.setattr(mod, "_enumerate_pdf417_image_candidates", fake_enum)
+    monkeypatch.setattr(mod, "_zxing_read", lambda *a, **k: None)
+    p = tmp_path / "blank.jpg"
+    Image.new("RGB", (80, 80), "white").save(p, "JPEG")
+    t0 = time.perf_counter()
+    text, meta = decode_pdf417_barcode_with_trace(p, mode="applicant_two_phase")
+    elapsed = time.perf_counter() - t0
+    assert text is None
+    assert seen_deadlines and seen_deadlines[0] is not None
+    assert meta.timeout_reason == "total_budget"
+    assert meta.phase_reached in {"enumerate", "thorough_fallback"}
+    assert elapsed < PDF417_APPLICANT_THREAD_TIMEOUT_SEC
+    assert elapsed < 1.5
 
 
 def test_thorough_mode_allows_many_attempts_on_blank(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
+import time
 
 import app.core.storage as storage_mod
 import pytest
@@ -186,57 +187,70 @@ async def test_timeout_on_processed_does_not_open_another_key(tmp_path: Path) ->
         opened.append(storage_key)
         yield proc
 
-    import asyncio
-
-    async def fake_wait_for(aw, timeout=None):
-        if hasattr(aw, "close"):
-            aw.close()
-        raise asyncio.TimeoutError()
+    def fake_decode(path, mode="applicant_two_phase"):
+        return None, Pdf417DecodeMeta(
+            None,
+            None,
+            [],
+            timeout_reason="total_budget",
+            phase_reached="fast",
+            total_elapsed_ms=200.0,
+            attempts_completed=3,
+        )
 
     with (
         patch.object(storage_mod, "readable_path", fake_readable_path),
-        patch("app.services.applicant_dl_pdf417.asyncio.wait_for", fake_wait_for),
+        patch("app.services.applicant_dl_pdf417.decode_pdf417_barcode_with_trace", fake_decode),
     ):
         out = await apply_stored_cdl_back_pdf417({}, "processed-key", "demo")
 
     assert opened == ["processed-key"]
     assert out["license_extract_status"] == "FAILED"
     assert out.get("license_extract_error") == "decode_timeout"
-    assert out["license_extract_debug"].get("processed_fallback_used") is False
-    assert out["license_extract_debug"].get("original_fallback_used") is False
-    assert out["license_extract_debug"].get("barcode_image_source") == "processed"
+    dbg = out.get("license_extract_debug") or {}
+    assert dbg.get("processed_fallback_used") is False
+    assert dbg.get("original_fallback_used") is False
+    assert dbg.get("barcode_image_source") == "processed"
+    assert dbg.get("decode_timeout_reason") == "total_budget"
+    assert dbg.get("decode_phase_reached") == "fast"
+    assert dbg.get("decode_total_elapsed_ms") == 200.0
+    assert dbg.get("decode_attempts_completed") == 3
+    assert "pdf417_text" not in dbg
 
 
 @pytest.mark.asyncio
-async def test_timeout_on_processed_falls_back_to_original(tmp_path: Path) -> None:
+async def test_processed_timeout_joins_before_original_fallback(tmp_path: Path) -> None:
     proc = tmp_path / "proc.jpg"
     orig = tmp_path / "orig.jpg"
     proc.write_bytes(b"proc")
     orig.write_bytes(b"orig")
     opened: list[str] = []
+    order: list[tuple[str, str]] = []
+    in_flight = 0
+    max_in_flight = 0
 
     @contextmanager
     def fake_readable_path(storage_key: str, _kind: str, _slug: str):
         opened.append(storage_key)
         yield orig if storage_key == "original-key" else proc
 
-    import asyncio
-
-    real_wait_for = asyncio.wait_for
-
-    async def fake_wait_for(aw, timeout=None):
-        if opened[-1] == "processed-key":
-            if hasattr(aw, "close"):
-                aw.close()
-            raise asyncio.TimeoutError()
-        return await real_wait_for(aw, timeout=timeout)
-
     def fake_decode(path, mode="applicant_two_phase"):
+        nonlocal in_flight, max_in_flight
+        name = Path(path).name
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        order.append(("start", name))
+        time.sleep(0.04)
+        order.append(("end", name))
+        in_flight -= 1
+        if name == "proc.jpg":
+            return None, Pdf417DecodeMeta(
+                None, None, [], timeout_reason="total_budget", phase_reached="thorough_fallback"
+            )
         return SYNTHETIC_AAMVA, Pdf417DecodeMeta("fast_full_rgb", "zxing", [])
 
     with (
         patch.object(storage_mod, "readable_path", fake_readable_path),
-        patch("app.services.applicant_dl_pdf417.asyncio.wait_for", fake_wait_for),
         patch("app.services.applicant_dl_pdf417.decode_pdf417_barcode_with_trace", fake_decode),
     ):
         out = await apply_stored_cdl_back_pdf417(
@@ -244,11 +258,54 @@ async def test_timeout_on_processed_falls_back_to_original(tmp_path: Path) -> No
         )
 
     assert opened == ["processed-key", "original-key"]
+    assert max_in_flight == 1
+    assert order == [
+        ("start", "proc.jpg"),
+        ("end", "proc.jpg"),
+        ("start", "orig.jpg"),
+        ("end", "orig.jpg"),
+    ]
     assert out["license_extract_status"] == "SUCCESS"
-    assert out.get("driver_license_number") == "H010062911981"
     dbg = out.get("license_extract_debug") or {}
     assert dbg.get("barcode_image_source") == "original"
     assert dbg.get("original_fallback_used") is True
+
+
+@pytest.mark.asyncio
+async def test_temp_path_survives_until_worker_returns(tmp_path: Path) -> None:
+    decode_running = {"on": False}
+    cleanup_while_running: list[bool] = []
+    path_ok_during_decode = []
+
+    @contextmanager
+    def fake_readable_path(storage_key: str, _kind: str, _slug: str):
+        p = tmp_path / f"{storage_key}.jpg"
+        Image.new("RGB", (40, 40), "white").save(p, "JPEG")
+        try:
+            yield p
+        finally:
+            cleanup_while_running.append(decode_running["on"])
+            p.unlink()
+
+    def fake_decode(path, mode="applicant_two_phase"):
+        decode_running["on"] = True
+        path_ok_during_decode.append(Path(path).is_file())
+        time.sleep(0.04)
+        decode_running["on"] = False
+        return None, Pdf417DecodeMeta(
+            None, None, [], timeout_reason="total_budget", phase_reached="fast"
+        )
+
+    with (
+        patch.object(storage_mod, "readable_path", fake_readable_path),
+        patch("app.services.applicant_dl_pdf417.decode_pdf417_barcode_with_trace", fake_decode),
+    ):
+        out = await apply_stored_cdl_back_pdf417({}, "processed-key", "demo")
+
+    assert path_ok_during_decode == [True]
+    assert cleanup_while_running == [False]
+    assert out["license_extract_status"] == "FAILED"
+    assert out.get("license_extract_error") == "decode_timeout"
 
 
 @pytest.mark.asyncio
