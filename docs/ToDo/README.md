@@ -14,16 +14,32 @@ Key direction:
 
 - One onboarding door into People for every worker/person.
 - Common Person/contact data stays separate from role-specific credential/evidence data.
-- Requirements are selected by explicit applicability dimensions: common/universal, role, scope, jurisdiction, and employment/business relationship.
+- Requirements are selected by explicit applicability dimensions: common/universal, role, scope, jurisdiction, employment/business relationship, and policy profile/version.
 - Requirement applicability is separate from lifecycle timing; not every applicable item is mandatory at initial application submission.
-- Use stage/eligibility gates such as application submit, approval, work start, company-vehicle eligibility, dispatch eligibility, and cross-border eligibility instead of one `required`/`blocking` flag.
-- Documents/evidence, verification state, and operational eligibility are separate concepts.
+- Applicability uses explicit DNF clauses: AND inside each clause, OR across clauses; no ambiguous bare tag arrays.
+- Applicant answers may create provisional scope only through explicit/versioned derivation rules; admin-approved scope has precedence.
+- Use stage/eligibility gates such as approval, work start, company-vehicle eligibility, commercial-driver eligibility, dispatch eligibility, and cross-border eligibility instead of one `required`/`blocking` flag.
+- Documents/evidence, verification state, expiry, and operational eligibility are separate concepts.
+- Evidence is reusable through an explicit many-to-many evidence-to-requirement satisfaction link when compatibility rules allow it.
+- Requirement `code` is the stable business concept; definition `version` preserves rule history. Historical instances are never collapsed.
+- Authority/waiver rules are explicit; regulatory requirements are not casually waivable and UI must not expose Waive when disallowed.
+- Expiry fields/semantics belong in the Phase A schema even though renewal notifications are later work.
 - Driver is the first full rule set but the engine must not be Driver-shaped.
 - Owner-operator is a relationship/business arrangement, not a separate PersonRole.
 - Cross-border is a work scope, not a role.
-- Preserve requirement/evidence history when roles, scope, policy, or documents change.
+- Preserve requirement/evidence history when roles, scope, policy, rules, or documents change.
 
-Before implementation, do a focused schema report against the current PersonApplication / Person / PersonRole / document-request / approval-promotion flow and propose the minimum requirement-definition + requirement-instance + evidence/gate model. Do not build copied role-specific forms or scatter `if role == ...` logic through frontend/backend.
+Before implementation, Phase A must lock five prerequisite artifacts against the current repo:
+
+1. Applicability/DNF contract.
+2. Evidence-to-requirement satisfaction/reuse contract.
+3. Gate dependency graph/table.
+4. Scope-determination and precedence contract.
+5. Authority/waiver contract.
+
+Then produce the focused schema report against the current `PersonApplication` / `Person` / `PersonRole` / document-request / approval-promotion flow and propose the minimum requirement-definition + version + applicability-clause + requirement-instance + scope-assignment + evidence-satisfaction + expiry + gate model.
+
+Do not build copied role-specific forms or scatter `if role == ...` logic through frontend/backend. Phase A should end with schema translation, not another design debate.
 
 ### Existing applicant detection before sending onboarding link
 
