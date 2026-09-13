@@ -4,6 +4,27 @@ Use this folder as the parking lot for work that is intentionally pending: bugs 
 
 ## Onboarding / People
 
+### Onboarding requirements engine / role and scope rules
+
+Status: architecture defined; implementation pending.
+
+Use [`docs/Onboarding_Rules.md`](../Onboarding_Rules.md) as the design source for the future onboarding requirements engine.
+
+Key direction:
+
+- One onboarding door into People for every worker/person.
+- Common Person/contact data stays separate from role-specific credential/evidence data.
+- Requirements are selected by explicit applicability dimensions: common/universal, role, scope, jurisdiction, and employment/business relationship.
+- Requirement applicability is separate from lifecycle timing; not every applicable item is mandatory at initial application submission.
+- Use stage/eligibility gates such as application submit, approval, work start, company-vehicle eligibility, dispatch eligibility, and cross-border eligibility instead of one `required`/`blocking` flag.
+- Documents/evidence, verification state, and operational eligibility are separate concepts.
+- Driver is the first full rule set but the engine must not be Driver-shaped.
+- Owner-operator is a relationship/business arrangement, not a separate PersonRole.
+- Cross-border is a work scope, not a role.
+- Preserve requirement/evidence history when roles, scope, policy, or documents change.
+
+Before implementation, do a focused schema report against the current PersonApplication / Person / PersonRole / document-request / approval-promotion flow and propose the minimum requirement-definition + requirement-instance + evidence/gate model. Do not build copied role-specific forms or scatter `if role == ...` logic through frontend/backend.
+
 ### Existing applicant detection before sending onboarding link
 
 Status: pending / future work.
