@@ -114,3 +114,22 @@ Contact/mailing information
 ```
 
 This is future work; do not mix it into the current onboarding validation/date-field patch.
+
+## Fuel / Card transactions
+
+### Non-fuel fuel-card transactions and lumper handoff
+
+Status: discussion / future cross-module work.
+
+See [`docs/FUEL_GOLD_MANIFEST.md`](../FUEL_GOLD_MANIFEST.md), section **Discussion / future design notes**, for the parked design notes.
+
+Key direction:
+
+- BVD/fuel-card feeds can contain non-fuel transactions such as scales, cash advances, purchases, parking, tolls, repairs/services, and occasionally lumper fees.
+- The Fuel/Card module should ingest and classify the transaction; it should not own the complete business workflow for every transaction type.
+- Lumper is primarily a Dispatch/Load workflow: driver pays, uploads receipt to Dispatch, Dispatch reviews it and attaches it to the correct Load.
+- If the carrier paid the lumper and the broker is expected to reimburse it, that payment must be visible on the Load and later tracked through the accounting/receivable path.
+- When a lumper happens to arrive through BVD/fuel-card data, Fuel/Card may suggest a likely load using driver/card, active trip, time, location, and context, but ambiguous multi-load/multi-stop cases must require Dispatch review.
+- Do not implement automatic load attachment solely because the driver had an active trip.
+
+This item is intentionally parked while Fuel/Card transaction design is still being discussed. Do not pull Dispatch/Load reimbursement implementation into the current Fuel parser slice.
