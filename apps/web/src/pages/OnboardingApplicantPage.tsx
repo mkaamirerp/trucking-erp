@@ -12,6 +12,26 @@ import {
   type PersonApplication,
 } from "../api";
 import DLUploadStep from "../components/DLUploadStep";
+import { Field, RequiredGlyph, controlClass, selectClass } from "../components/onboardingFields";
+import { OnboardingDateField } from "../components/OnboardingDateField";
+import { inp } from "../components/onboardingFieldStyles";
+import {
+  US_STATES,
+  CA_PROVINCES,
+  type JobEntry,
+  type RefEntry,
+  type OnboardingSnapshot,
+  liveNormalize,
+  blurNormalize,
+  normalizeSnapshot,
+  normalizeForm,
+  validateOnboardingStep,
+  validateSubmit,
+  validateNonDriverContact,
+  errorsByField,
+  firstErrorMessage,
+  displayPhone,
+} from "../core/onboardingFieldRules";
 import {
   cleanIntakeText,
   hydrateOnboardingFormFromIntake,
@@ -22,17 +42,6 @@ import { confirmPersonApplicationDlSide } from "../lib/applicantDlConfirm";
 type Step = 0 | 1 | 2 | 3;
 type DlUiState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
 type DocType = "CDL_FRONT" | "CDL_BACK";
-
-type JobEntry = {
-  company_name: string; position_title: string; start_date: string; end_date: string;
-  reason_for_leaving: string; supervisor_name: string; supervisor_phone: string;
-  equipment_operated: string; city_state: string; subject_to_fmcsa: string;
-};
-
-type RefEntry = {
-  full_name: string; relationship: string; company: string;
-  phone: string; email: string; known_duration: string;
-};
 
 const STEPS = ["LICENSE UPLOAD", "PERSONAL INFO", "WORK HISTORY & REFS", "DOCUMENTS"] as const;
 
@@ -57,26 +66,7 @@ const EMPTY_FORM = {
   equipment_types: "", accidents_last_3_years: "", violations_last_3_years: "",
   dot_medical_card_expiry: "", emergency_contact_name: "",
   emergency_contact_relationship: "", emergency_contact_phone: "",
-};
-
-const US_STATES: Record<string, string> = {
-  AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",
-  CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",
-  IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",
-  ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",
-  MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",
-  NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",
-  NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",
-  PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",
-  TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",
-  WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming",
-};
-
-const CA_PROVINCES: Record<string, string> = {
-  AB:"Alberta",BC:"British Columbia",MB:"Manitoba",NB:"New Brunswick",
-  NL:"Newfoundland and Labrador",NS:"Nova Scotia",NT:"Northwest Territories",
-  NU:"Nunavut",ON:"Ontario",PE:"Prince Edward Island",QC:"Quebec",
-  SK:"Saskatchewan",YT:"Yukon",
+  notes: "",
 };
 
 function confidenceLabel(conf: unknown): "High" | "Med" | "Low" | null {
@@ -168,13 +158,6 @@ function parseOnboardingStep(raw: unknown): Step | null {
   if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= 3) return raw as Step;
   if (typeof raw === "string" && /^[0-3]$/.test(raw)) return Number(raw) as Step;
   return null;
-}
-
-function formatDateAsTyped(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 8);
-  if (digits.length <= 4) return digits;
-  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
 }
 
 function hasReadableValue(value: unknown): boolean {
@@ -290,39 +273,27 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Field({ label, children, half }: { label: string; children: React.ReactNode; half?: boolean }) {
-  return (
-    <div className={half ? "col-span-1" : "col-span-2 sm:col-span-1"}>
-      <label className="block text-xs font-semibold uppercase tracking-widest text-gray-400 mb-1">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-const inp = "w-full rounded-lg border border-gray-600 bg-gray-700/50 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
-const inpErr = "border-rose-500 ring-2 ring-rose-500/50 focus:ring-rose-500 focus:border-rose-500";
-const sel = inp + " appearance-none";
-
-function TypedDateInput({
-  value,
-  onChange,
-  className,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  className: string;
-}) {
-  return (
-    <input
-      className={className}
-      type="text"
-      inputMode="numeric"
-      maxLength={10}
-      placeholder="YYYY-MM-DD"
-      value={value}
-      onChange={(e) => onChange(formatDateAsTyped(e.target.value))}
-    />
-  );
+function buildSnapshot(args: {
+  form: Record<string, string>;
+  jobs: JobEntry[];
+  refs: RefEntry[];
+  intake: Record<string, any>;
+  documents: Record<string, string>;
+  agree1: boolean;
+  agree2: boolean;
+  agree3: boolean;
+}): OnboardingSnapshot {
+  return {
+    form: args.form,
+    jobs: args.jobs,
+    refs: args.refs,
+    dlFrontConfirmed: dlSideConfirmed(args.intake, "CDL_FRONT"),
+    dlBackConfirmed: dlSideConfirmed(args.intake, "CDL_BACK"),
+    documents: args.documents,
+    agreeInfoAccurate: args.agree1,
+    agreeBackgroundCheck: args.agree2,
+    agreeDotCompliance: args.agree3,
+  };
 }
 
 export default function OnboardingApplicantPage() {
@@ -363,6 +334,7 @@ export default function OnboardingApplicantPage() {
   const [showValidationStep0, setShowValidationStep0] = useState(false);
   const [showValidationStep1, setShowValidationStep1] = useState(false);
   const [showValidationStep2, setShowValidationStep2] = useState(false);
+  const [showValidationSubmit, setShowValidationSubmit] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -471,6 +443,29 @@ export default function OnboardingApplicantPage() {
   const intake = useMemo(() => getIntake(app), [app]);
   const sources = useMemo(() => (intake.field_sources || {}) as Record<string, any>, [intake]);
   const edited = useMemo(() => (intake.user_edited_fields || {}) as Record<string, boolean>, [intake]);
+
+  const liveSnap = useMemo(
+    () =>
+      normalizeSnapshot(
+        buildSnapshot({
+          form,
+          jobs,
+          refs,
+          intake,
+          documents: docUploaded,
+          agree1,
+          agree2,
+          agree3,
+        }),
+      ),
+    [form, jobs, refs, intake, docUploaded, agree1, agree2, agree3],
+  );
+  const fe0 = showValidationStep0 || showValidationSubmit ? errorsByField(validateOnboardingStep(0, liveSnap)) : {};
+  const fe1 = showValidationStep1 || showValidationSubmit ? errorsByField(validateOnboardingStep(1, liveSnap)) : {};
+  const fe2 = showValidationStep2 || showValidationSubmit ? errorsByField(validateOnboardingStep(2, liveSnap)) : {};
+  const fe3 = showValidationSubmit ? errorsByField(validateOnboardingStep(3, liveSnap)) : {};
+  const feContact = showValidationStep1 ? errorsByField(validateNonDriverContact(normalizeForm(form))) : {};
+  const step0Incomplete = validateOnboardingStep(0, liveSnap).length > 0;
 
   function handlePhoneApplicationUpdated(data: PersonApplication) {
     setApp(data);
@@ -634,6 +629,7 @@ export default function OnboardingApplicantPage() {
       setShowValidationStep0(false);
       setShowValidationStep1(false);
       setShowValidationStep2(false);
+      setShowValidationSubmit(false);
       setDlState({ CDL_FRONT: "IDLE", CDL_BACK: "IDLE" });
       setDlMessage({ CDL_FRONT: "", CDL_BACK: "" });
       setPreviewUrl((prev) => {
@@ -650,114 +646,37 @@ export default function OnboardingApplicantPage() {
     }
   }
 
-  function canProceedStep0(): boolean {
-    const hasFront = dlSideConfirmed(intake, "CDL_FRONT");
-    const hasBack = dlSideConfirmed(intake, "CDL_BACK");
-    const hasLicenseNumber = (form.driver_license_number || "").trim().length > 0;
-    const hasRegion = (form.license_region || "").trim().length > 0;
-    const hasExpiry = (form.license_expiry || "").trim().length > 0;
-    const hasClass = (form.cdl_class || "").trim().length > 0;
-    const allFieldsFilled = hasLicenseNumber && hasRegion && hasExpiry && hasClass;
-    return hasFront && hasBack && allFieldsFilled;
-  }
-
-  function step0ValidationMessage(): string {
-    const missing: string[] = [];
-    if (!dlSideConfirmed(intake, "CDL_FRONT")) missing.push("front of driver license (Use This Photo)");
-    if (!dlSideConfirmed(intake, "CDL_BACK")) missing.push("back of driver license (Use This Photo)");
-    if (!(form.driver_license_number || "").trim()) missing.push("License Number");
-    if (!(form.license_region || "").trim()) missing.push("State/Province Issued");
-    if (!(form.license_expiry || "").trim()) missing.push("Expiry Date");
-    if (!(form.cdl_class || "").trim()) missing.push("CDL Class");
-    return `Please upload both sides of your driver license and complete all license detail fields before continuing. Missing: ${missing.join(", ")}.`;
-  }
-
-  function canProceedStep1(): boolean {
-    const trim = (s: string) => (s || "").trim();
-    const cc = trim(form.address_country).toUpperCase();
-    const hasPostalOrZip =
-      cc === "CA"
-        ? trim(form.address_postal).length > 0
-        : cc === "US"
-          ? trim(form.zip_code).length > 0
-          : trim(form.address_postal).length > 0 || trim(form.zip_code).length > 0;
-    return (
-      trim(form.first_name).length > 0 &&
-      trim(form.last_name).length > 0 &&
-      trim(form.email).length > 0 &&
-      trim(form.phone).length > 0 &&
-      trim(form.address_street).length > 0 &&
-      trim(form.address_city).length > 0 &&
-      (trim(form.address_region).length > 0 || hasPostalOrZip) &&
-      trim(form.address_country).length > 0
+  function applyNormalized(n: OnboardingSnapshot) {
+    setForm((prev) => ({ ...prev, ...n.form }));
+    setJobs(n.jobs.length ? n.jobs : [{ ...EMPTY_JOB }]);
+    setRefs(
+      n.refs.length >= 2
+        ? n.refs
+        : [...n.refs, ...Array.from({ length: 2 - n.refs.length }, () => ({ ...EMPTY_REF }))],
     );
-  }
-
-  function step1ValidationMessage(): string {
-    const missing: string[] = [];
-    if (!(form.first_name || "").trim()) missing.push("First Name");
-    if (!(form.last_name || "").trim()) missing.push("Last Name");
-    if (!(form.email || "").trim()) missing.push("Email");
-    if (!(form.phone || "").trim()) missing.push("Phone");
-    if (!(form.address_street || "").trim()) missing.push("Street Address");
-    if (!(form.address_city || "").trim()) missing.push("City");
-    const cc = (form.address_country || "").trim().toUpperCase();
-    const needPostal =
-      cc === "CA"
-        ? !(form.address_postal || "").trim()
-        : cc === "US"
-          ? !(form.zip_code || "").trim()
-          : !(form.address_postal || "").trim() && !(form.zip_code || "").trim();
-    if (!(form.address_region || "").trim() && needPostal) {
-      missing.push(
-        cc === "CA"
-          ? "State/Region or Postal Code"
-          : cc === "US"
-            ? "State/Region or ZIP Code"
-            : "State/Region or Postal/ZIP Code",
-      );
-    }
-    if (!(form.address_country || "").trim()) missing.push("Country");
-    return `Please complete all required personal information fields before continuing. Missing: ${missing.join(", ")}.`;
-  }
-
-  function canProceedStep2(): boolean {
-    const atLeastOneJob = jobs.some(
-      (j) =>
-        (j.company_name || "").trim() &&
-        (j.position_title || "").trim() &&
-        (j.start_date || "").trim()
-    );
-    const twoRefs = refs.length >= 2 && refs.every((r) => (r.full_name || "").trim() && ((r.phone || "").trim() || (r.email || "").trim()));
-    return atLeastOneJob && twoRefs;
-  }
-
-  function step2ValidationMessage(): string {
-    const missing: string[] = [];
-    if (!jobs.some((j) => (j.company_name || "").trim() && (j.position_title || "").trim() && (j.start_date || "").trim())) {
-      missing.push("at least one employer with Company, Position, and Start Date");
-    }
-    if (refs.length < 2 || !refs.every((r) => (r.full_name || "").trim() && ((r.phone || "").trim() || (r.email || "").trim()))) {
-      missing.push("two professional references with name and contact (phone or email)");
-    }
-    return `Please complete work history and references before continuing. Missing: ${missing.join("; ")}.`;
   }
 
   async function saveAndNext(nextStep: Step) {
     if (!app) return;
-    if (step === 0 && !canProceedStep0()) {
-      setShowValidationStep0(true);
-      setError(step0ValidationMessage());
-      return;
-    }
-    if (step === 1 && !canProceedStep1()) {
-      setShowValidationStep1(true);
-      setError(step1ValidationMessage());
-      return;
-    }
-    if (step === 2 && !canProceedStep2()) {
-      setShowValidationStep2(true);
-      setError(step2ValidationMessage());
+    const n = normalizeSnapshot(
+      buildSnapshot({
+        form,
+        jobs,
+        refs,
+        intake,
+        documents: docUploaded,
+        agree1,
+        agree2,
+        agree3,
+      }),
+    );
+    applyNormalized(n);
+    const errors = validateOnboardingStep(step, n);
+    if (errors.length) {
+      if (step === 0) setShowValidationStep0(true);
+      if (step === 1) setShowValidationStep1(true);
+      if (step === 2) setShowValidationStep2(true);
+      setError(firstErrorMessage(errors));
       return;
     }
     setSaving(true);
@@ -768,10 +687,10 @@ export default function OnboardingApplicantPage() {
     try {
       const payload = mergeIntakeForSave(
         ((app.intake_payload as any) || {}) as Record<string, unknown>,
-        form,
+        n.form,
         {
-          jobs,
-          refs,
+          jobs: n.jobs,
+          refs: n.refs,
           agree_info_accurate: agree1,
           agree_background_check: agree2,
           agree_dot_compliance: agree3,
@@ -791,19 +710,40 @@ export default function OnboardingApplicantPage() {
 
   async function handleSubmit() {
     if (!app || (submitted && !documentResumeActive)) return;
-    if (!agree1 || !agree2 || !agree3) { setError("Please check all agreement boxes before submitting."); return; }
+    const n = normalizeSnapshot(
+      buildSnapshot({
+        form,
+        jobs,
+        refs,
+        intake,
+        documents: docUploaded,
+        agree1,
+        agree2,
+        agree3,
+      }),
+    );
+    applyNormalized(n);
+    const errors = validateSubmit(n);
+    if (errors.length) {
+      setShowValidationSubmit(true);
+      setShowValidationStep0(true);
+      setShowValidationStep1(true);
+      setShowValidationStep2(true);
+      setError(firstErrorMessage(errors));
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const payload = mergeIntakeForSave(
         ((app.intake_payload as any) || {}) as Record<string, unknown>,
-        form,
+        n.form,
         {
-          jobs,
-          refs,
-          agree_info_accurate: agree1,
-          agree_background_check: agree2,
-          agree_dot_compliance: agree3,
+          jobs: n.jobs,
+          refs: n.refs,
+          agree_info_accurate: n.agreeInfoAccurate,
+          agree_background_check: n.agreeBackgroundCheck,
+          agree_dot_compliance: n.agreeDotCompliance,
         },
       );
       const updated = await submitPersonApplication({ appId: app.id, onboardingToken: token, intakePayload: payload });
@@ -817,9 +757,24 @@ export default function OnboardingApplicantPage() {
     }
   }
 
-  function setF(key: string, val: string) { setForm(f => ({ ...f, [key]: val })); }
-  function setJob(i: number, key: keyof JobEntry, val: string) { setJobs(j => j.map((x, idx) => idx === i ? { ...x, [key]: val } : x)); }
-  function setRef(i: number, key: keyof RefEntry, val: string) { setRefs(r => r.map((x, idx) => idx === i ? { ...x, [key]: val } : x)); }
+  function setF(key: string, val: string) {
+    setForm((f) => ({ ...f, [key]: liveNormalize(key, val) }));
+  }
+  function blurF(key: string) {
+    setForm((f) => ({ ...f, [key]: blurNormalize(key, String((f as Record<string, string>)[key] ?? "")) }));
+  }
+  function setJob(i: number, key: keyof JobEntry, val: string) {
+    setJobs((j) => j.map((x, idx) => (idx === i ? { ...x, [key]: liveNormalize(key, val) } : x)));
+  }
+  function blurJob(i: number, key: keyof JobEntry) {
+    setJobs((j) => j.map((x, idx) => (idx === i ? { ...x, [key]: blurNormalize(key, x[key]) } : x)));
+  }
+  function setRef(i: number, key: keyof RefEntry, val: string) {
+    setRefs((r) => r.map((x, idx) => (idx === i ? { ...x, [key]: liveNormalize(key, val) } : x)));
+  }
+  function blurRef(i: number, key: keyof RefEntry) {
+    setRefs((r) => r.map((x, idx) => (idx === i ? { ...x, [key]: blurNormalize(key, x[key]) } : x)));
+  }
 
   if (loading) return <div className="min-h-screen bg-gray-900 flex items-center justify-center text-gray-400">Loading…</div>;
 
@@ -848,31 +803,41 @@ export default function OnboardingApplicantPage() {
     </div>
   );
 
+  function nonDriverPayload(normalized: Record<string, string>) {
+    return {
+      first_name: normalized.first_name,
+      last_name: normalized.last_name,
+      phone: normalized.phone,
+      email: normalized.email,
+      address_street: normalized.address_street,
+      address_city: normalized.address_city,
+      address_region: normalized.address_region,
+      address_postal: normalized.address_postal,
+      zip_code: normalized.zip_code,
+      address_country: normalized.address_country,
+      notes: form.notes,
+    };
+  }
+
   async function handleMinimalSave() {
     if (!app) return;
-    if (!canProceedStep1()) {
+    const normalized = normalizeForm(form);
+    setForm((prev) => ({ ...prev, ...normalized }));
+    const errors = validateNonDriverContact(normalized);
+    if (errors.length) {
       setShowValidationStep1(true);
-      setError(step1ValidationMessage());
+      setError(firstErrorMessage(errors));
       return;
     }
     setSaving(true);
     setError(null);
     setShowValidationStep1(false);
     try {
-      const payload = {
-        first_name: form.first_name,
-        last_name: form.last_name,
-        phone: form.phone,
-        email: form.email,
-        address_street: form.address_street,
-        address_city: form.address_city,
-        address_region: form.address_region,
-        address_postal: form.address_postal,
-        zip_code: form.zip_code,
-        address_country: form.address_country,
-        notes: form.notes,
-      };
-      const updated = await savePersonApplicationIntake({ appId: app.id, onboardingToken: token, intakePayload: payload });
+      const updated = await savePersonApplicationIntake({
+        appId: app.id,
+        onboardingToken: token,
+        intakePayload: nonDriverPayload(normalized),
+      });
       setApp(updated);
     } catch (e: any) {
       setError(e?.message || "Failed to save.");
@@ -883,29 +848,23 @@ export default function OnboardingApplicantPage() {
 
   async function handleMinimalSubmit() {
     if (!app) return;
-    if (!canProceedStep1()) {
+    const normalized = normalizeForm(form);
+    setForm((prev) => ({ ...prev, ...normalized }));
+    const errors = validateNonDriverContact(normalized);
+    if (errors.length) {
       setShowValidationStep1(true);
-      setError(step1ValidationMessage());
+      setError(firstErrorMessage(errors));
       return;
     }
     setSaving(true);
     setError(null);
     setShowValidationStep1(false);
     try {
-      const payload = {
-        first_name: form.first_name,
-        last_name: form.last_name,
-        phone: form.phone,
-        email: form.email,
-        address_street: form.address_street,
-        address_city: form.address_city,
-        address_region: form.address_region,
-        address_postal: form.address_postal,
-        zip_code: form.zip_code,
-        address_country: form.address_country,
-        notes: form.notes,
-      };
-      const updated = await submitPersonApplication({ appId: app.id, onboardingToken: token, intakePayload: payload });
+      const updated = await submitPersonApplication({
+        appId: app.id,
+        onboardingToken: token,
+        intakePayload: nonDriverPayload(normalized),
+      });
       setApp(updated);
       setSubmitted(true);
     } catch (e: any) {
@@ -929,38 +888,52 @@ export default function OnboardingApplicantPage() {
           <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
             <SectionTitle>Contact &amp; Address</SectionTitle>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="First Name">
-                <input className={`${inp} ${showValidationStep1 && !(form.first_name || "").trim() ? inpErr : ""}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
+              <Field label="First Name" required invalid={!!feContact.first_name} error={feContact.first_name}>
+                <input className={controlClass(true, !!feContact.first_name)} value={form.first_name} onChange={e => setF("first_name", e.target.value)} onBlur={() => blurF("first_name")} placeholder="First Name" />
               </Field>
-              <Field label="Last Name">
-                <input className={`${inp} ${showValidationStep1 && !(form.last_name || "").trim() ? inpErr : ""}`} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
+              <Field label="Last Name" required invalid={!!feContact.last_name} error={feContact.last_name}>
+                <input className={controlClass(true, !!feContact.last_name)} value={form.last_name} onChange={e => setF("last_name", e.target.value)} onBlur={() => blurF("last_name")} placeholder="Last Name" />
               </Field>
-              <Field label="Email">
-                <input className={`${inp} ${showValidationStep1 && !(form.email || "").trim() ? inpErr : ""}`} type="email" value={form.email} onChange={e => setF("email", e.target.value)} placeholder="you@email.com" />
+              <Field label="Email" required invalid={!!feContact.email} error={feContact.email}>
+                <input className={controlClass(true, !!feContact.email)} type="email" value={form.email} onChange={e => setF("email", e.target.value)} onBlur={() => blurF("email")} placeholder="you@email.com" />
               </Field>
-              <Field label="Phone">
-                <input className={`${inp} ${showValidationStep1 && !(form.phone || "").trim() ? inpErr : ""}`} type="tel" value={form.phone} onChange={e => setF("phone", e.target.value)} placeholder="(555) 000-0000" />
+              <Field label="Phone" required invalid={!!feContact.phone} error={feContact.phone}>
+                <input className={controlClass(true, !!feContact.phone)} type="tel" value={displayPhone(form.phone)} onChange={e => setF("phone", e.target.value)} onBlur={() => blurF("phone")} placeholder="(555) 000-0000" />
               </Field>
               <div className="col-span-2">
-                <Field label="Street Address">
-                  <input className={`${inp} ${showValidationStep1 && !(form.address_street || "").trim() ? inpErr : ""}`} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
+                <Field label="Street Address" required invalid={!!feContact.address_street} error={feContact.address_street}>
+                  <input className={controlClass(true, !!feContact.address_street)} value={form.address_street} onChange={e => setF("address_street", e.target.value)} onBlur={() => blurF("address_street")} placeholder="Street Address" />
                 </Field>
               </div>
-              <Field label="City">
-                <input className={`${inp} ${showValidationStep1 && !(form.address_city || "").trim() ? inpErr : ""}`} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
+              <Field label="Country" required invalid={!!feContact.address_country} error={feContact.address_country}>
+                <select className={selectClass(true, !!feContact.address_country)} value={form.address_country} onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
+                  <option value="US">United States</option>
+                  <option value="CA">Canada</option>
+                </select>
               </Field>
-              <Field label="Region / State">
-                <input className={inp} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder="State or Province" />
+              <Field label="City" required invalid={!!feContact.address_city} error={feContact.address_city}>
+                <input className={controlClass(true, !!feContact.address_city)} value={form.address_city} onChange={e => setF("address_city", e.target.value)} onBlur={() => blurF("address_city")} placeholder="City" />
               </Field>
-              <Field label={(form.address_country || "").trim().toUpperCase() === "US" ? "ZIP Code" : (form.address_country || "").trim().toUpperCase() === "CA" ? "Postal Code" : "Postal / ZIP"}>
-                {(form.address_country || "").trim().toUpperCase() === "US" ? (
-                  <input className={inp} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="ZIP Code" />
+              <Field label={form.address_country === "CA" ? "Province" : "State"} required invalid={!!feContact.address_region} error={feContact.address_region}>
+                <select className={selectClass(true, !!feContact.address_region)} value={form.address_region} onChange={e => setF("address_region", e.target.value)}>
+                  <option value="">{form.address_country === "CA" ? "Select Province" : "Select State"}</option>
+                  {form.address_country === "CA"
+                    ? Object.entries(CA_PROVINCES).map(([code, name]) => <option key={code} value={code}>{name}</option>)
+                    : Object.entries(US_STATES).map(([code, name]) => <option key={code} value={code}>{name}</option>)
+                  }
+                </select>
+              </Field>
+              <Field
+                label={form.address_country === "CA" ? "Postal Code" : "ZIP Code"}
+                required
+                invalid={!!(form.address_country === "CA" ? feContact.address_postal : feContact.zip_code)}
+                error={form.address_country === "CA" ? feContact.address_postal : feContact.zip_code}
+              >
+                {form.address_country === "CA" ? (
+                  <input className={controlClass(true, !!feContact.address_postal)} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} onBlur={() => blurF("address_postal")} placeholder="A1A 1A1" />
                 ) : (
-                  <input className={inp} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
+                  <input className={controlClass(true, !!feContact.zip_code)} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} onBlur={() => blurF("zip_code")} placeholder="00000" />
                 )}
-              </Field>
-              <Field label="Country">
-                <input className={`${inp} ${showValidationStep1 && !(form.address_country || "").trim() ? inpErr : ""}`} value={form.address_country} onChange={e => setF("address_country", e.target.value)} placeholder="e.g. US" />
               </Field>
               <div className="col-span-2">
                 <Field label="Notes (optional)">
@@ -1022,14 +995,17 @@ export default function OnboardingApplicantPage() {
               onClearSavedData={() => void resetSavedDraft()}
               saving={saving}
             />
+            {(fe0.CDL_FRONT || fe0.CDL_BACK) && (
+              <p className="text-xs text-rose-400">{[fe0.CDL_FRONT, fe0.CDL_BACK].filter(Boolean).join(" ")}</p>
+            )}
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6 mt-4">
               <SectionTitle>License Details</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
 
                 {/* Country selector — always shown first */}
                 <div className="col-span-2">
-                  <Field label="Country">
-                    <select className={sel} value={form.address_country}
+                  <Field label="Country" required invalid={!!fe0.address_country} error={fe0.address_country}>
+                    <select className={selectClass(true, !!fe0.address_country)} value={form.address_country}
                       onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("license_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
                       <option value="US">🇺🇸 United States</option>
                       <option value="CA">🇨🇦 Canada</option>
@@ -1038,15 +1014,16 @@ export default function OnboardingApplicantPage() {
                 </div>
 
                 {/* License Number */}
-                <Field label="License Number">
-                  <input className={`${inp} ${dlReviewAccent(sources.license_number, edited.license_number, form.driver_license_number)} ${showValidationStep0 && !(form.driver_license_number || "").trim() ? inpErr : ""}`} value={form.driver_license_number}
+                <Field label="License Number" required invalid={!!fe0.driver_license_number} error={fe0.driver_license_number}>
+                  <input className={controlClass(true, !!fe0.driver_license_number, dlReviewAccent(sources.license_number, edited.license_number, form.driver_license_number))} value={form.driver_license_number}
                     onChange={e => setF("driver_license_number", e.target.value)}
+                    onBlur={() => blurF("driver_license_number")}
                     placeholder={form.address_country === "CA" ? "e.g. K35587-56016-90112" : "e.g. DL12345678"} />
                 </Field>
 
                 {/* Province/State Issued */}
-                <Field label={form.address_country === "CA" ? "Province Issued" : "State Issued"}>
-                  <select className={`${sel} ${dlReviewAccent(sources.license_state, edited.license_state, form.license_region)} ${showValidationStep0 && !(form.license_region || "").trim() ? inpErr : ""}`} value={form.license_region}
+                <Field label={form.address_country === "CA" ? "Province Issued" : "State Issued"} required invalid={!!fe0.license_region} error={fe0.license_region}>
+                  <select className={selectClass(true, !!fe0.license_region, dlReviewAccent(sources.license_state, edited.license_state, form.license_region))} value={form.license_region}
                     onChange={e => setF("license_region", e.target.value)}>
                     <option value="">{form.address_country === "CA" ? "Select Province" : "Select State"}</option>
                     {form.address_country === "CA"
@@ -1057,43 +1034,60 @@ export default function OnboardingApplicantPage() {
                 </Field>
 
                 {/* Expiry Date */}
-                <Field label="Expiry Date">
-                  <TypedDateInput className={`${inp} ${dlReviewAccent(sources.license_expiry, edited.license_expiry, form.license_expiry)} ${showValidationStep0 && !(form.license_expiry || "").trim() ? inpErr : ""}`} value={form.license_expiry}
-                    onChange={value => setF("license_expiry", value)} />
+                <Field label="Expiry Date" required skipShell>
+                  <OnboardingDateField
+                    required
+                    invalid={!!fe0.license_expiry}
+                    error={fe0.license_expiry}
+                    showError
+                    extraClass={dlReviewAccent(sources.license_expiry, edited.license_expiry, form.license_expiry)}
+                    value={form.license_expiry}
+                    onChange={value => setF("license_expiry", value)}
+                  />
                 </Field>
 
                 {/* Issue Date */}
-                <Field label="Issue Date">
-                  <TypedDateInput className={`${inp} ${dlReviewAccent(sources.license_issue_date, edited.license_issue_date, form.license_issue_date)}`} value={form.license_issue_date}
-                    onChange={value => setF("license_issue_date", value)} />
+                <Field label="Issue Date" skipShell>
+                  <OnboardingDateField
+                    invalid={!!fe0.license_issue_date}
+                    error={fe0.license_issue_date}
+                    showError
+                    extraClass={dlReviewAccent(sources.license_issue_date, edited.license_issue_date, form.license_issue_date)}
+                    value={form.license_issue_date}
+                    onChange={value => setF("license_issue_date", value)}
+                  />
                 </Field>
 
                 {/* Class — free text, prepopulated from extraction, applicant can correct */}
-                <Field label={form.address_country === "CA" ? "Licence Class (e.g. A, AC)" : "CDL Class (e.g. A, B, C)"}>
-                  <input className={`${inp} ${dlReviewAccent(sources.license_class, edited.license_class, form.cdl_class)} ${showValidationStep0 && !(form.cdl_class || "").trim() ? inpErr : ""}`} value={form.cdl_class}
+                <Field label={form.address_country === "CA" ? "Licence Class (e.g. A, AC)" : "CDL Class (e.g. A, B, C)"} required invalid={!!fe0.cdl_class} error={fe0.cdl_class}>
+                  <input className={controlClass(true, !!fe0.cdl_class, dlReviewAccent(sources.license_class, edited.license_class, form.cdl_class))} value={form.cdl_class}
                     onChange={e => setF("cdl_class", e.target.value)}
+                    onBlur={() => blurF("cdl_class")}
                     placeholder={form.address_country === "CA" ? "e.g. A, AC, G" : "e.g. A, B, C"} />
                 </Field>
 
                 {/* Endorsements */}
                 <Field label={form.address_country === "CA" ? "Endorsements / Conditions Code" : "Endorsements"}>
-                  <input className={`${inp} ${dlReviewAccent(sources.endorsements, edited.endorsements, form.endorsements)}`} value={form.endorsements}
+                  <input className={controlClass(false, false, dlReviewAccent(sources.endorsements, edited.endorsements, form.endorsements))} value={form.endorsements}
                     onChange={e => setF("endorsements", e.target.value)}
+                    onBlur={() => blurF("endorsements")}
                     placeholder={form.address_country === "CA" ? "e.g. Z (Air Brakes)" : "e.g. H, N, T, X"} />
                 </Field>
 
                 {/* Restrictions */}
                 <Field label="Restrictions">
-                  <input className={`${inp} ${dlReviewAccent(sources.restrictions, edited.restrictions, form.restrictions)}`} value={form.restrictions || ""}
+                  <input className={controlClass(false, false, dlReviewAccent(sources.restrictions, edited.restrictions, form.restrictions))} value={form.restrictions || ""}
                     onChange={e => setF("restrictions", e.target.value)}
+                    onBlur={() => blurF("restrictions")}
                     placeholder="e.g. B, Corrective Lenses" />
                 </Field>
 
                 {/* Conditions — Canadian only */}
                 {form.address_country === "CA" && (
                   <Field label="Conditions (Canadian licences only)">
-                    <input className={`${inp} ${dlReviewAccent(sources.conditions, edited.conditions, form.conditions)}`} value={form.conditions}
+                    <input className={controlClass(false, false, dlReviewAccent(sources.conditions, edited.conditions, form.conditions))} value={form.conditions}
                       onChange={e => setF("conditions", e.target.value)}
+                      onBlur={() => blurF("conditions")}
                       placeholder="e.g. COND" />
                   </Field>
                 )}
@@ -1105,16 +1099,20 @@ export default function OnboardingApplicantPage() {
               <SectionTitle>Applicant Details From DL</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="First Name">
-                  <input className={`${inp} ${dlReviewAccent(sources.first_name, edited.first_name, form.first_name)}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
+                  <input className={controlClass(false, false, dlReviewAccent(sources.first_name, edited.first_name, form.first_name))} value={form.first_name} onChange={e => setF("first_name", e.target.value)} onBlur={() => blurF("first_name")} placeholder="First Name" />
                 </Field>
                 <Field label="Last Name">
-                  <input className={`${inp} ${dlReviewAccent(sources.last_name, edited.last_name, form.last_name)}`} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
+                  <input className={controlClass(false, false, dlReviewAccent(sources.last_name, edited.last_name, form.last_name))} value={form.last_name} onChange={e => setF("last_name", e.target.value)} onBlur={() => blurF("last_name")} placeholder="Last Name" />
                 </Field>
-                <Field label="Date of Birth">
-                  <TypedDateInput className={`${inp} ${dlReviewAccent(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)}`} value={form.date_of_birth} onChange={value => setF("date_of_birth", value)} />
+                <Field label="Date of Birth" skipShell>
+                  <OnboardingDateField
+                    extraClass={dlReviewAccent(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)}
+                    value={form.date_of_birth}
+                    onChange={value => setF("date_of_birth", value)}
+                  />
                 </Field>
                 <Field label="Sex">
-                  <select className={`${sel} ${dlReviewAccent(sources.sex, edited.sex, form.sex)}`} value={form.sex} onChange={e => setF("sex", e.target.value)}>
+                  <select className={selectClass(false, false, dlReviewAccent(sources.sex, edited.sex, form.sex))} value={form.sex} onChange={e => setF("sex", e.target.value)}>
                     <option value="">Select</option>
                     <option value="M">Male</option>
                     <option value="F">Female</option>
@@ -1122,31 +1120,31 @@ export default function OnboardingApplicantPage() {
                   </select>
                 </Field>
                 <Field label="Height">
-                  <input className={`${inp} ${dlReviewAccent(sources.height, edited.height, form.height)}`} value={form.height} onChange={e => setF("height", e.target.value)} placeholder="e.g. 180 cm or 5-11" />
+                  <input className={controlClass(false, false, dlReviewAccent(sources.height, edited.height, form.height))} value={form.height} onChange={e => setF("height", e.target.value)} placeholder="e.g. 180 cm or 5-11" />
                 </Field>
                 <Field label="Street Address">
-                  <input className={`${inp} ${dlReviewAccentAny([
+                  <input className={controlClass(false, false, dlReviewAccentAny([
                     { source: sources.address_line, edited: edited.address_street, value: form.address_street },
                     { source: sources.address_street, edited: edited.address_street, value: form.address_street },
-                  ])}`} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
+                  ]))} value={form.address_street} onChange={e => setF("address_street", e.target.value)} onBlur={() => blurF("address_street")} placeholder="Street Address" />
                 </Field>
                 <Field label="City">
-                  <input className={`${inp} ${dlReviewAccent(sources.address_city, edited.address_city, form.address_city)}`} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
+                  <input className={controlClass(false, false, dlReviewAccent(sources.address_city, edited.address_city, form.address_city))} value={form.address_city} onChange={e => setF("address_city", e.target.value)} onBlur={() => blurF("address_city")} placeholder="City" />
                 </Field>
-                <Field label={form.address_country === "CA" ? "Province / Postal Code" : "State / ZIP Code"}>
+                <Field label={form.address_country === "CA" ? "Province / Postal Code" : "State / ZIP Code"} skipShell>
                   <div className="grid grid-cols-2 gap-3">
-                    <input className={`${inp} ${dlReviewAccent(sources.address_region, edited.address_region, form.address_region)}`} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder={form.address_country === "CA" ? "Province" : "State"} />
+                    <input className={controlClass(false, false, dlReviewAccent(sources.address_region, edited.address_region, form.address_region))} value={form.address_region} onChange={e => setF("address_region", e.target.value)} placeholder={form.address_country === "CA" ? "Province" : "State"} />
                     {form.address_country === "CA" ? (
-                      <input className={`${inp} ${dlReviewAccent(sources.address_postal, edited.address_postal, form.address_postal)}`} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="Postal Code" />
+                      <input className={controlClass(false, false, dlReviewAccent(sources.address_postal, edited.address_postal, form.address_postal))} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} onBlur={() => blurF("address_postal")} placeholder="Postal Code" />
                     ) : (
-                      <input className={`${inp} ${dlReviewAccent(sources.zip_code, edited.zip_code, form.zip_code)}`} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="ZIP Code" />
+                      <input className={controlClass(false, false, dlReviewAccent(sources.zip_code, edited.zip_code, form.zip_code))} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} onBlur={() => blurF("zip_code")} placeholder="ZIP Code" />
                     )}
                   </div>
                 </Field>
               </div>
             </div>
 
-            {!canProceedStep0() && (
+            {step0Incomplete && (
               <p className="text-amber-400 text-sm">
                 Upload both license sides and fill all license details above to continue.
               </p>
@@ -1185,38 +1183,46 @@ export default function OnboardingApplicantPage() {
             <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-6 space-y-6">
               <SectionTitle>Basic Information</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="First Name">
-                  <input className={`${inp} ${dlReviewAccent(sources.first_name, edited.first_name, form.first_name)} ${showValidationStep1 && !(form.first_name || "").trim() ? inpErr : ""}`} value={form.first_name} onChange={e => setF("first_name", e.target.value)} placeholder="First Name" />
+                <Field label="First Name" required invalid={!!fe1.first_name} error={fe1.first_name}>
+                  <input className={controlClass(true, !!fe1.first_name, dlReviewAccent(sources.first_name, edited.first_name, form.first_name))} value={form.first_name} onChange={e => setF("first_name", e.target.value)} onBlur={() => blurF("first_name")} placeholder="First Name" />
                 </Field>
-                <Field label="Middle Name">
-                  <input className={inp} value={form.middle_name} onChange={e => setF("middle_name", e.target.value)} placeholder="Middle (optional)" />
+                <Field label="Middle Name" invalid={!!fe1.middle_name} error={fe1.middle_name}>
+                  <input className={controlClass(false, !!fe1.middle_name)} value={form.middle_name} onChange={e => setF("middle_name", e.target.value)} onBlur={() => blurF("middle_name")} placeholder="Middle (optional)" />
                 </Field>
-                <Field label="Last Name">
-                  <input className={`${inp} ${dlReviewAccent(sources.last_name, edited.last_name, form.last_name)} ${showValidationStep1 && !(form.last_name || "").trim() ? inpErr : ""}`} value={form.last_name} onChange={e => setF("last_name", e.target.value)} placeholder="Last Name" />
+                <Field label="Last Name" required invalid={!!fe1.last_name} error={fe1.last_name}>
+                  <input className={controlClass(true, !!fe1.last_name, dlReviewAccent(sources.last_name, edited.last_name, form.last_name))} value={form.last_name} onChange={e => setF("last_name", e.target.value)} onBlur={() => blurF("last_name")} placeholder="Last Name" />
                 </Field>
-                <Field label="Date of Birth">
-                  <input className={`${inp} ${dlReviewAccent(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)}`} type="date" value={form.date_of_birth} onChange={e => setF("date_of_birth", e.target.value)} />
+                <Field label="Date of Birth" required skipShell>
+                  <OnboardingDateField
+                    required
+                    invalid={!!fe1.date_of_birth}
+                    error={fe1.date_of_birth}
+                    showError
+                    extraClass={dlReviewAccent(sources.date_of_birth, edited.date_of_birth, form.date_of_birth)}
+                    value={form.date_of_birth}
+                    onChange={value => setF("date_of_birth", value)}
+                  />
                 </Field>
-                <Field label="SSN (last 4 optional)">
-                  <input className={inp} value={form.ssn} onChange={e => setF("ssn", e.target.value)} placeholder="XXX-XX-XXXX" />
+                <Field label="SSN (last 4 optional)" invalid={!!fe1.ssn} error={fe1.ssn}>
+                  <input className={controlClass(false, !!fe1.ssn)} value={form.ssn} onChange={e => setF("ssn", e.target.value)} placeholder="XXX-XX-XXXX" />
                 </Field>
                 <Field label="Nationality">
-                  <input className={inp} value={form.nationality} onChange={e => setF("nationality", e.target.value)} placeholder="e.g. US Citizen" />
+                  <input className={controlClass(false, false)} value={form.nationality} onChange={e => setF("nationality", e.target.value)} placeholder="e.g. US Citizen" />
                 </Field>
 
                 {/* Sex / Gender */}
-                <Field label="Sex / Gender">
-                  <select className={`${sel} ${dlReviewAccent(sources.sex, edited.sex, form.sex)}`} value={form.sex} onChange={e => setF("sex", e.target.value)}>
+                <Field label="Sex / Gender" required invalid={!!fe1.sex} error={fe1.sex}>
+                  <select className={selectClass(true, !!fe1.sex, dlReviewAccent(sources.sex, edited.sex, form.sex))} value={form.sex} onChange={e => setF("sex", e.target.value)}>
                     <option value="">Select</option>
                     <option value="M">Male</option>
                     <option value="F">Female</option>
-                    <option value="X">Non-binary / X</option>
+                    <option value="X">Other / Unspecified</option>
                   </select>
                 </Field>
 
                 {/* Height */}
                 <Field label={form.address_country === "CA" ? "Height (cm)" : "Height (ft/in)"}>
-                  <input className={`${inp} ${dlReviewAccent(sources.height, edited.height, form.height)}`} value={form.height}
+                  <input className={controlClass(false, false, dlReviewAccent(sources.height, edited.height, form.height))} value={form.height}
                     onChange={e => setF("height", e.target.value)}
                     placeholder={form.address_country === "CA" ? "e.g. 160 cm" : "e.g. 5'11\""} />
                 </Field>
@@ -1224,28 +1230,28 @@ export default function OnboardingApplicantPage() {
 
               <SectionTitle>Contact Information</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Email">
-                  <input className={`${inp} ${showValidationStep1 && !(form.email || "").trim() ? inpErr : ""}`} type="email" value={form.email} onChange={e => setF("email", e.target.value)} placeholder="you@email.com" />
+                <Field label="Email" required invalid={!!fe1.email} error={fe1.email}>
+                  <input className={controlClass(true, !!fe1.email)} type="email" value={form.email} onChange={e => setF("email", e.target.value)} onBlur={() => blurF("email")} placeholder="you@email.com" />
                 </Field>
-                <Field label="Phone">
-                  <input className={`${inp} ${showValidationStep1 && !(form.phone || "").trim() ? inpErr : ""}`} type="tel" value={form.phone} onChange={e => setF("phone", e.target.value)} placeholder="(555) 000-0000" />
+                <Field label="Phone" required invalid={!!fe1.phone} error={fe1.phone}>
+                  <input className={controlClass(true, !!fe1.phone)} type="tel" value={displayPhone(form.phone)} onChange={e => setF("phone", e.target.value)} onBlur={() => blurF("phone")} placeholder="(555) 000-0000" />
                 </Field>
                 <div className="col-span-2">
-                  <Field label="Street Address">
-                    <input className={`${inp} ${showValidationStep1 && !(form.address_street || "").trim() ? inpErr : ""}`} value={form.address_street} onChange={e => setF("address_street", e.target.value)} placeholder="Street Address" />
+                  <Field label="Street Address" required invalid={!!fe1.address_street} error={fe1.address_street}>
+                    <input className={controlClass(true, !!fe1.address_street)} value={form.address_street} onChange={e => setF("address_street", e.target.value)} onBlur={() => blurF("address_street")} placeholder="Street Address" />
                   </Field>
                 </div>
-                <Field label="Country">
-                  <select className={`${sel} ${showValidationStep1 && !(form.address_country || "").trim() ? inpErr : ""}`} value={form.address_country} onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
+                <Field label="Country" required invalid={!!fe1.address_country} error={fe1.address_country}>
+                  <select className={selectClass(true, !!fe1.address_country)} value={form.address_country} onChange={e => { setF("address_country", e.target.value); setF("address_region", ""); setF("zip_code", ""); setF("address_postal", ""); }}>
                     <option value="US">🇺🇸 United States</option>
                     <option value="CA">🇨🇦 Canada</option>
                   </select>
                 </Field>
-                <Field label="City">
-                  <input className={`${inp} ${showValidationStep1 && !(form.address_city || "").trim() ? inpErr : ""}`} value={form.address_city} onChange={e => setF("address_city", e.target.value)} placeholder="City" />
+                <Field label="City" required invalid={!!fe1.address_city} error={fe1.address_city}>
+                  <input className={controlClass(true, !!fe1.address_city)} value={form.address_city} onChange={e => setF("address_city", e.target.value)} onBlur={() => blurF("address_city")} placeholder="City" />
                 </Field>
-                <Field label={form.address_country === "CA" ? "Province" : "State"}>
-                  <select className={`${sel} ${showValidationStep1 && !(form.address_region || "").trim() && (form.address_country === "CA" ? !(form.address_postal || "").trim() : !(form.zip_code || "").trim()) ? inpErr : ""}`} value={form.address_region} onChange={e => setF("address_region", e.target.value)}>
+                <Field label={form.address_country === "CA" ? "Province" : "State"} required invalid={!!fe1.address_region} error={fe1.address_region}>
+                  <select className={selectClass(true, !!fe1.address_region)} value={form.address_region} onChange={e => setF("address_region", e.target.value)}>
                     <option value="">{form.address_country === "CA" ? "Select Province" : "Select State"}</option>
                     {form.address_country === "CA"
                       ? Object.entries(CA_PROVINCES).map(([code, name]) => <option key={code} value={code}>{name}</option>)
@@ -1253,22 +1259,33 @@ export default function OnboardingApplicantPage() {
                     }
                   </select>
                 </Field>
-                <Field label={form.address_country === "CA" ? "Postal Code" : "ZIP Code"}>
+                <Field
+                  label={form.address_country === "CA" ? "Postal Code" : "ZIP Code"}
+                  required
+                  invalid={!!(form.address_country === "CA" ? fe1.address_postal : fe1.zip_code)}
+                  error={form.address_country === "CA" ? fe1.address_postal : fe1.zip_code}
+                >
                   {form.address_country === "CA" ? (
-                    <input className={`${inp} ${showValidationStep1 && !(form.address_region || "").trim() && !(form.address_postal || "").trim() ? inpErr : ""}`} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} placeholder="A1A 1A1" />
+                    <input className={controlClass(true, !!fe1.address_postal)} value={form.address_postal} onChange={e => setF("address_postal", e.target.value)} onBlur={() => blurF("address_postal")} placeholder="A1A 1A1" />
                   ) : (
-                    <input className={`${inp} ${showValidationStep1 && !(form.address_region || "").trim() && !(form.zip_code || "").trim() ? inpErr : ""}`} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} placeholder="00000" />
+                    <input className={controlClass(true, !!fe1.zip_code)} value={form.zip_code} onChange={e => setF("zip_code", e.target.value)} onBlur={() => blurF("zip_code")} placeholder="00000" />
                   )}
                 </Field>
               </div>
 
               <SectionTitle>Driving Experience</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="DOT Medical Card Expiry">
-                  <input className={inp} type="date" value={form.dot_medical_card_expiry} onChange={e => setF("dot_medical_card_expiry", e.target.value)} />
+                <Field label="DOT Medical Card Expiry" skipShell>
+                  <OnboardingDateField
+                    invalid={!!fe1.dot_medical_card_expiry}
+                    error={fe1.dot_medical_card_expiry}
+                    showError
+                    value={form.dot_medical_card_expiry}
+                    onChange={value => setF("dot_medical_card_expiry", value)}
+                  />
                 </Field>
                 <Field label="Years of CDL Experience">
-                  <select className={sel} value={form.years_experience} onChange={e => setF("years_experience", e.target.value)}>
+                  <select className={selectClass(false, false)} value={form.years_experience} onChange={e => setF("years_experience", e.target.value)}>
                     <option value="">Select</option>
                     <option>Less than 1 year</option>
                     <option>1–2 years</option>
@@ -1278,20 +1295,20 @@ export default function OnboardingApplicantPage() {
                   </select>
                 </Field>
                 <Field label="Total Miles Driven (approx)">
-                  <input className={inp} value={form.total_miles} onChange={e => setF("total_miles", e.target.value)} placeholder="e.g. 500,000" />
+                  <input className={controlClass(false, false)} value={form.total_miles} onChange={e => setF("total_miles", e.target.value)} placeholder="e.g. 500,000" />
                 </Field>
                 <Field label="Equipment Types">
-                  <input className={inp} value={form.equipment_types} onChange={e => setF("equipment_types", e.target.value)} placeholder="e.g. Dry Van, Flatbed" />
+                  <input className={controlClass(false, false)} value={form.equipment_types} onChange={e => setF("equipment_types", e.target.value)} placeholder="e.g. Dry Van, Flatbed" />
                 </Field>
                 <Field label="Accidents in Last 3 Years?">
-                  <select className={sel} value={form.accidents_last_3_years} onChange={e => setF("accidents_last_3_years", e.target.value)}>
+                  <select className={selectClass(false, false)} value={form.accidents_last_3_years} onChange={e => setF("accidents_last_3_years", e.target.value)}>
                     <option value="">Select</option>
                     <option value="no">No</option>
                     <option value="yes">Yes</option>
                   </select>
                 </Field>
                 <Field label="Moving Violations in Last 3 Years?">
-                  <select className={sel} value={form.violations_last_3_years} onChange={e => setF("violations_last_3_years", e.target.value)}>
+                  <select className={selectClass(false, false)} value={form.violations_last_3_years} onChange={e => setF("violations_last_3_years", e.target.value)}>
                     <option value="">Select</option>
                     <option value="no">No</option>
                     <option value="yes">Yes</option>
@@ -1301,14 +1318,14 @@ export default function OnboardingApplicantPage() {
 
               <SectionTitle>Emergency Contact</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Contact Name">
-                  <input className={inp} value={form.emergency_contact_name} onChange={e => setF("emergency_contact_name", e.target.value)} placeholder="Full Name" />
+                <Field label="Contact Name" invalid={!!fe1.emergency_contact_name} error={fe1.emergency_contact_name}>
+                  <input className={controlClass(false, !!fe1.emergency_contact_name)} value={form.emergency_contact_name} onChange={e => setF("emergency_contact_name", e.target.value)} onBlur={() => blurF("emergency_contact_name")} placeholder="Full Name" />
                 </Field>
                 <Field label="Relationship">
-                  <input className={inp} value={form.emergency_contact_relationship} onChange={e => setF("emergency_contact_relationship", e.target.value)} placeholder="e.g. Spouse" />
+                  <input className={controlClass(false, false)} value={form.emergency_contact_relationship} onChange={e => setF("emergency_contact_relationship", e.target.value)} placeholder="e.g. Spouse" />
                 </Field>
-                <Field label="Phone">
-                  <input className={inp} value={form.emergency_contact_phone} onChange={e => setF("emergency_contact_phone", e.target.value)} placeholder="(555) 000-0000" />
+                <Field label="Phone" invalid={!!fe1.emergency_contact_phone} error={fe1.emergency_contact_phone}>
+                  <input className={controlClass(false, !!fe1.emergency_contact_phone)} value={displayPhone(form.emergency_contact_phone)} onChange={e => setF("emergency_contact_phone", e.target.value)} onBlur={() => blurF("emergency_contact_phone")} placeholder="(555) 000-0000" />
                 </Field>
               </div>
             </div>
@@ -1337,27 +1354,59 @@ export default function OnboardingApplicantPage() {
             <div className="space-y-4">
               <SectionTitle>Employment History</SectionTitle>
               {jobs.map((job, i) => {
-                const hasValidJob = jobs.some(j => (j.company_name || "").trim() && (j.position_title || "").trim() && (j.start_date || "").trim());
-                const showJobErr = showValidationStep2 && !hasValidJob && (i === 0 || (job.company_name || "").trim() || (job.position_title || "").trim() || (job.start_date || "").trim());
-                const err = (key: keyof JobEntry) => showJobErr && !(job[key] || "").trim() ? inpErr : "";
+                const jobKey = (k: string) => `jobs.${i}.${k}`;
+                const started = Boolean((job.company_name || "").trim() || (job.position_title || "").trim() || (job.start_date || "").trim());
+                const jobRequired = i === 0 || started;
+                const jobErr = Boolean(fe2[jobKey("company_name")] || fe2[jobKey("position_title")] || fe2[jobKey("start_date")] || fe2[jobKey("end_date")] || fe2[jobKey("supervisor_phone")]);
                 return (
-                <div key={i} className={`rounded-2xl border p-5 relative transition-colors ${showJobErr ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60"}`}>
+                <div key={i} className={`rounded-2xl border p-5 relative transition-colors ${jobErr ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60"}`}>
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-xs font-bold uppercase tracking-widest text-orange-400">Employer {i + 1}</span>
                     {jobs.length > 1 && <button onClick={() => setJobs(j => j.filter((_, idx) => idx !== i))} className="text-xs text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded px-2 py-1">Remove</button>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Company Name"><input className={`${inp} ${err("company_name")}`} value={job.company_name} onChange={e => setJob(i, "company_name", e.target.value)} placeholder="Company Name" /></Field>
-                    <Field label="Position / Title"><input className={`${inp} ${err("position_title")}`} value={job.position_title} onChange={e => setJob(i, "position_title", e.target.value)} placeholder="e.g. OTR Driver" /></Field>
-                    <Field label="Start Date"><input className={`${inp} ${err("start_date")}`} type="date" value={job.start_date} onChange={e => setJob(i, "start_date", e.target.value)} /></Field>
-                    <Field label="End Date"><input className={inp} type="date" value={job.end_date} onChange={e => setJob(i, "end_date", e.target.value)} /></Field>
-                    <Field label="Reason for Leaving"><input className={inp} value={job.reason_for_leaving} onChange={e => setJob(i, "reason_for_leaving", e.target.value)} placeholder="e.g. Better opportunity" /></Field>
-                    <Field label="Supervisor Name"><input className={inp} value={job.supervisor_name} onChange={e => setJob(i, "supervisor_name", e.target.value)} placeholder="Supervisor" /></Field>
-                    <Field label="Supervisor Phone"><input className={inp} value={job.supervisor_phone} onChange={e => setJob(i, "supervisor_phone", e.target.value)} placeholder="(555) 000-0000" /></Field>
-                    <Field label="Equipment Operated"><input className={inp} value={job.equipment_operated} onChange={e => setJob(i, "equipment_operated", e.target.value)} placeholder="e.g. Dry Van 53ft" /></Field>
-                    <Field label="City, State"><input className={inp} value={job.city_state} onChange={e => setJob(i, "city_state", e.target.value)} placeholder="City, State" /></Field>
+                    <Field label="Company Name" required={jobRequired} invalid={!!fe2[jobKey("company_name")]} error={fe2[jobKey("company_name")]}>
+                      <input className={controlClass(jobRequired, !!fe2[jobKey("company_name")])} value={job.company_name} onChange={e => setJob(i, "company_name", e.target.value)} onBlur={() => blurJob(i, "company_name")} placeholder="Company Name" />
+                    </Field>
+                    <Field label="Position / Title" required={jobRequired} invalid={!!fe2[jobKey("position_title")]} error={fe2[jobKey("position_title")]}>
+                      <input className={controlClass(jobRequired, !!fe2[jobKey("position_title")])} value={job.position_title} onChange={e => setJob(i, "position_title", e.target.value)} onBlur={() => blurJob(i, "position_title")} placeholder="e.g. OTR Driver" />
+                    </Field>
+                    <Field label="Start Date" required={jobRequired} skipShell>
+                      <OnboardingDateField
+                        required={jobRequired}
+                        invalid={!!fe2[jobKey("start_date")]}
+                        error={fe2[jobKey("start_date")]}
+                        showError
+                        value={job.start_date}
+                        onChange={value => setJob(i, "start_date", value)}
+                      />
+                    </Field>
+                    <Field label="End Date" skipShell>
+                      <OnboardingDateField
+                        invalid={!!fe2[jobKey("end_date")]}
+                        error={fe2[jobKey("end_date")]}
+                        showError
+                        value={job.end_date}
+                        onChange={value => setJob(i, "end_date", value)}
+                      />
+                    </Field>
+                    <Field label="Reason for Leaving">
+                      <input className={controlClass(false, false)} value={job.reason_for_leaving} onChange={e => setJob(i, "reason_for_leaving", e.target.value)} placeholder="e.g. Better opportunity" />
+                    </Field>
+                    <Field label="Supervisor Name">
+                      <input className={controlClass(false, false)} value={job.supervisor_name} onChange={e => setJob(i, "supervisor_name", e.target.value)} onBlur={() => blurJob(i, "supervisor_name")} placeholder="Supervisor" />
+                    </Field>
+                    <Field label="Supervisor Phone" invalid={!!fe2[jobKey("supervisor_phone")]} error={fe2[jobKey("supervisor_phone")]}>
+                      <input className={controlClass(false, !!fe2[jobKey("supervisor_phone")])} value={displayPhone(job.supervisor_phone)} onChange={e => setJob(i, "supervisor_phone", e.target.value)} onBlur={() => blurJob(i, "supervisor_phone")} placeholder="(555) 000-0000" />
+                    </Field>
+                    <Field label="Equipment Operated">
+                      <input className={controlClass(false, false)} value={job.equipment_operated} onChange={e => setJob(i, "equipment_operated", e.target.value)} placeholder="e.g. Dry Van 53ft" />
+                    </Field>
+                    <Field label="City, State">
+                      <input className={controlClass(false, false)} value={job.city_state} onChange={e => setJob(i, "city_state", e.target.value)} placeholder="City, State" />
+                    </Field>
                     <Field label="Subject to FMCSA?">
-                      <select className={sel} value={job.subject_to_fmcsa} onChange={e => setJob(i, "subject_to_fmcsa", e.target.value)}>
+                      <select className={selectClass(false, false)} value={job.subject_to_fmcsa} onChange={e => setJob(i, "subject_to_fmcsa", e.target.value)}>
                         <option value="">Select</option>
                         <option value="yes">Yes</option>
                         <option value="no">No</option>
@@ -1378,20 +1427,29 @@ export default function OnboardingApplicantPage() {
             <div className="space-y-4">
               <SectionTitle>Professional References</SectionTitle>
               {refs.map((ref, i) => {
-                const refInvalid = !(ref.full_name || "").trim() || (!(ref.phone || "").trim() && !(ref.email || "").trim());
-                const showRefErr = showValidationStep2 && refInvalid;
-                const refNameErr = showRefErr && !(ref.full_name || "").trim() ? inpErr : "";
-                const refContactErr = showRefErr && !(ref.phone || "").trim() && !(ref.email || "").trim() ? inpErr : "";
+                const refErr = Boolean(fe2[`refs.${i}.full_name`] || fe2[`refs.${i}.phone`] || fe2[`refs.${i}.email`]);
                 return (
-                <div key={i} className={`rounded-2xl border p-5 transition-colors ${showRefErr ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60"}`}>
+                <div key={i} className={`rounded-2xl border p-5 transition-colors ${refErr ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60"}`}>
                   <span className="text-xs font-bold uppercase tracking-widest text-orange-400 block mb-4">Reference {i + 1}</span>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Full Name"><input className={`${inp} ${refNameErr}`} value={ref.full_name} onChange={e => setRef(i, "full_name", e.target.value)} placeholder="Full Name" /></Field>
-                    <Field label="Relationship"><input className={inp} value={ref.relationship} onChange={e => setRef(i, "relationship", e.target.value)} placeholder="e.g. Former Supervisor" /></Field>
-                    <Field label="Company"><input className={inp} value={ref.company} onChange={e => setRef(i, "company", e.target.value)} placeholder="Company Name" /></Field>
-                    <Field label="Phone"><input className={`${inp} ${refContactErr}`} value={ref.phone} onChange={e => setRef(i, "phone", e.target.value)} placeholder="(555) 000-0000" /></Field>
-                    <Field label="Email"><input className={`${inp} ${refContactErr}`} type="email" value={ref.email} onChange={e => setRef(i, "email", e.target.value)} placeholder="email@company.com" /></Field>
-                    <Field label="How long known?"><input className={inp} value={ref.known_duration} onChange={e => setRef(i, "known_duration", e.target.value)} placeholder="e.g. 5 years" /></Field>
+                    <Field label="Full Name" required invalid={!!fe2[`refs.${i}.full_name`]} error={fe2[`refs.${i}.full_name`]}>
+                      <input className={controlClass(true, !!fe2[`refs.${i}.full_name`])} value={ref.full_name} onChange={e => setRef(i, "full_name", e.target.value)} onBlur={() => blurRef(i, "full_name")} placeholder="Full Name" />
+                    </Field>
+                    <Field label="Relationship">
+                      <input className={controlClass(false, false)} value={ref.relationship} onChange={e => setRef(i, "relationship", e.target.value)} placeholder="e.g. Former Supervisor" />
+                    </Field>
+                    <Field label="Company">
+                      <input className={controlClass(false, false)} value={ref.company} onChange={e => setRef(i, "company", e.target.value)} placeholder="Company Name" />
+                    </Field>
+                    <Field label="Phone" invalid={!!fe2[`refs.${i}.phone`]} error={fe2[`refs.${i}.phone`]}>
+                      <input className={controlClass(false, !!fe2[`refs.${i}.phone`])} value={displayPhone(ref.phone)} onChange={e => setRef(i, "phone", e.target.value)} onBlur={() => blurRef(i, "phone")} placeholder="(555) 000-0000" />
+                    </Field>
+                    <Field label="Email" invalid={!!fe2[`refs.${i}.email`]} error={fe2[`refs.${i}.email`]}>
+                      <input className={controlClass(false, !!fe2[`refs.${i}.email`])} type="email" value={ref.email} onChange={e => setRef(i, "email", e.target.value)} onBlur={() => blurRef(i, "email")} placeholder="email@company.com" />
+                    </Field>
+                    <Field label="How long known?">
+                      <input className={controlClass(false, false)} value={ref.known_duration} onChange={e => setRef(i, "known_duration", e.target.value)} placeholder="e.g. 5 years" />
+                    </Field>
                   </div>
                 </div>
               );
@@ -1426,14 +1484,16 @@ export default function OnboardingApplicantPage() {
                 { key: "employment_verification", label: "Employment Verification", desc: "W-2s or verification letters", required: false, icon: "📋" },
                 { key: "certificates", label: "Certificates & Training", desc: "HAZMAT, tanker, safety certs", required: false, icon: "🏆" },
                 { key: "void_cheque", label: "Void Cheque / Direct Deposit", desc: "For payroll setup", required: false, icon: "📜" },
-              ].map(doc => (
-                <div key={doc.key} className={`rounded-xl border p-4 relative transition-all ${docUploaded[doc.key] ? "border-green-500/40 bg-green-500/5" : "border-gray-700 bg-gray-800/60 hover:border-gray-500"}`}>
+              ].map(doc => {
+                const docErr = fe3[`documents.${doc.key}`];
+                return (
+                <div key={doc.key} className={`rounded-xl border p-4 relative transition-all ${docUploaded[doc.key] ? "border-green-500/40 bg-green-500/5" : docErr ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60 hover:border-gray-500"}`}>
                   {doc.required && !docUploaded[doc.key] && <span className="absolute top-3 right-3 text-xs font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded">REQUIRED</span>}
                   {!doc.required && <span className="absolute top-3 right-3 text-xs font-bold text-gray-500 bg-gray-700/50 border border-gray-600 px-2 py-0.5 rounded">OPTIONAL</span>}
                   <div className="text-3xl mb-2">{doc.icon}</div>
                   <div className="font-semibold text-white text-sm mb-1">{doc.label}</div>
                   <div className="text-xs text-gray-400 mb-3">{doc.desc}</div>
-                  <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium cursor-pointer transition-all ${docUploaded[doc.key] ? "border-green-500/40 text-green-400" : "border-gray-600 text-gray-400 hover:border-orange-500 hover:text-orange-400"} ${docUploading === doc.key ? "opacity-70 pointer-events-none" : ""}`}>
+                  <label className={`relative flex items-center gap-2 rounded-lg border px-3 py-2 pr-9 text-xs font-medium cursor-pointer transition-all ${docUploaded[doc.key] ? "border-green-500/40 text-green-400" : docErr ? "border-rose-500 text-rose-400" : "border-gray-600 text-gray-400 hover:border-orange-500 hover:text-orange-400"} ${docUploading === doc.key ? "opacity-70 pointer-events-none" : ""}`}>
                     <input type="file" accept=".pdf,image/*" className="sr-only"
                       onChange={async (e) => {
                         const f = e.target.files?.[0];
@@ -1451,12 +1511,15 @@ export default function OnboardingApplicantPage() {
                         }
                       }} />
                     {docUploading === doc.key ? "Uploading…" : docUploaded[doc.key] ? `✓ ${docUploaded[doc.key].substring(0, 24)}` : "📎 Choose File"}
+                    {doc.required ? <RequiredGlyph /> : null}
                   </label>
+                  {docErr ? <p className="mt-1 text-xs text-rose-400">{docErr}</p> : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
-            <div className="rounded-2xl border border-gray-700 bg-gray-800/60 p-5 space-y-4">
+            <div className={`rounded-2xl border p-5 space-y-4 ${fe3.agreements ? "border-rose-500/60 bg-rose-500/5" : "border-gray-700 bg-gray-800/60"}`}>
               <SectionTitle>Agreements & Certification</SectionTitle>
               {[
                 { val: agree1, set: setAgree1, text: "I certify that all information provided is true and complete. Any falsification may result in rejection or termination." },
@@ -1471,13 +1534,14 @@ export default function OnboardingApplicantPage() {
                   <span className="text-sm text-gray-300 leading-relaxed">{a.text}</span>
                 </label>
               ))}
+              {fe3.agreements ? <p className="text-xs text-rose-400">{fe3.agreements}</p> : null}
             </div>
 
             <div className="flex gap-3">
               {!resumeDocsOnly && (
                 <button type="button" onClick={() => setStep(2)} className="rounded-xl border border-gray-600 px-4 py-3 text-sm text-gray-400 hover:bg-gray-800">← Back</button>
               )}
-              <button onClick={handleSubmit} disabled={saving || !agree1 || !agree2 || !agree3}
+              <button onClick={handleSubmit} disabled={saving}
                 className="rounded-xl bg-green-500 px-8 py-3 text-sm font-bold uppercase tracking-widest text-black hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-green-500/20">
                 {saving ? "Submitting…" : resumeDocsOnly ? "Resubmit documents ✓" : "Submit Application ✓"}
               </button>
