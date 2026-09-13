@@ -2,9 +2,9 @@
 
 Status: architecture / foundation design
 
-Purpose: define one onboarding engine for every person entering TruckERP while keeping common person data, role-specific requirements, work scope, employment/business relationship, jurisdiction, evidence, verification, and operational eligibility separate.
+Purpose: define one onboarding engine for every person entering TruckERP while keeping Person data, role, work scope, jurisdiction, employment/business relationship, business/company facts, physical equipment, evidence, verification, payment classification, and operational eligibility separate.
 
-This document is the design source for future onboarding work. It is intentionally broader than Driver onboarding. Driver is one role using the same engine.
+This document is the design source for future onboarding work. It is intentionally broader than Driver onboarding. Driver is the first mature consumer of the engine, not the shape of the engine.
 
 ---
 
@@ -22,103 +22,95 @@ Invitation / application
   -> role-specific profile / credentials / operational projections
 ```
 
-The application is the pre-approval working record. `Person` is the canonical approved human/contact identity. Role-specific facts do not belong in People merely because they were collected during onboarding.
+The application is the pre-approval working record. `Person` is the canonical approved human/contact identity. Role-specific, business-specific, equipment-specific, payroll-specific, and credential-derived facts must not be collapsed into generic Person fields merely because they were collected during onboarding.
 
 Examples:
 
 - Contact/mailing address -> Person.
 - Driver-licence address -> driver credential/profile evidence, not editable People contact address.
 - Mechanic certification -> mechanic credential/evidence, not a generic Person field.
-- Payroll setup -> payroll/employment setup, not a Driver field.
+- Owner-operator corporation data -> business/company domain, not Person name/address columns.
+- Truck VIN/registration/inspection -> Truck asset domain, not Person fields.
+- Pay classification -> Payee/compensation domain, not Driver role.
 
-The system must not become a collection of copied forms such as `DriverForm`, `MechanicForm`, and `DispatcherForm` that duplicate common identity/contact fields. It should be one common onboarding shell that renders reusable requirement sections according to rules.
-
----
-
-## 2. Existing onboarding/application types
-
-Current application types in TruckERP are:
-
-- `DRIVER`
-- `DISPATCHER`
-- `HR`
-- `MECHANIC`
-- `PAYROLL`
-- `SAFETY`
-- `OFFICE_ADMIN`
-- `OTHER`
-
-`application_type` controls the onboarding workflow/form track. `requested_role_code` controls the role proposed for assignment on approval. Keep those concepts separate.
-
-Admin may change the proposed/requested role during review if the business decision differs from the original invitation, but that change must be explicit, audited, and must trigger requirement re-evaluation before final approval.
-
-Do not make `OWNER_OPERATOR` a Person role merely to change onboarding questions. Owner-operator/company-driver is an employment/business relationship or Driver-specific operating arrangement, not the occupation itself.
+The system must not become a collection of copied forms such as `DriverForm`, `MechanicForm`, and `DispatcherForm` that duplicate common identity/contact fields. It should be one onboarding shell that renders reusable requirement sections according to explicit rules.
 
 ---
 
-## 3. Applicability is not timing
+## 2. Role, application workflow, relationship, pay classification, and scope are different axes
 
-Every onboarding requirement needs two independent answers:
+These concepts must remain distinct even when the UI presents them together.
 
-1. **Does this requirement apply to this person?**
-2. **At what stage must it be satisfied?**
+### 2.1 PersonRole = what the person does
 
-A requirement can apply to everyone but still not be mandatory on the initial application.
-
-Example:
+Current application/role vocabulary includes:
 
 ```text
-Work eligibility question
-  applies to: every hire
-  asked at: application
-
-Work-authorization evidence
-  applies to: when verification is required
-  requested by: admin/system rule
-  blocking stage: work_start
-
-SIN
-  applies to: employee/payroll setup
-  collected at: post-offer/payroll stage
-  not an initial recruiting identity field
+DRIVER
+DISPATCHER
+HR
+MECHANIC
+PAYROLL
+SAFETY
+OFFICE_ADMIN
+OTHER
 ```
 
-Do not use one global `required=true` boolean to represent the entire lifecycle.
+`requested_role_code` is the proposed PersonRole on approval.
 
----
+Admin may change the requested role during review when the hiring decision differs from the original invitation, but the change must be explicit, audited, and must re-evaluate requirements before final approval.
 
-## 4. Applicability dimensions
+### 2.2 application_type = which onboarding workflow/track is being used
 
-Requirements are selected by reusable dimensions, not hard-coded role pages.
+Current code uses the same list above for `application_type`.
 
-### 4.1 Common / universal
+A future **Owner-Operator onboarding track** is valid because it needs Driver requirements plus additional business/equipment/contract review. If introduced, it should be modeled as a workflow/application track such as:
+
+```text
+application_type = OWNER_OPERATOR        # future workflow track
+requested_role_code = DRIVER            # approved occupation remains Driver
+employment_relationship_type = owner_operator
+```
+
+This does **not** create an `OWNER_OPERATOR` PersonRole.
+
+The implementation must decide whether this is a new `application_type` value or a Driver application profile/template. The architectural rule is locked: the workflow may be different; the PersonRole remains `DRIVER`.
+
+### 2.3 Driver employment relationship = how the Driver is engaged
+
+TruckERP already implements this concept in `driver_person_extensions.employment_relationship_type`.
+
+Current implemented values are:
+
+```text
+company_driver
+owner_operator
+```
+
+Existing Driver foundation documentation intentionally reserved `contractor` as a possible later value but did not implement it in v1.
+
+Do **not** create a second competing relationship enum for onboarding. Onboarding must seed/reconcile with the existing Driver extension relationship.
+
+### 2.4 Payee.worker_type = payment/settlement classification
+
+TruckERP already has a separate Payee classification:
+
+```text
+EMPLOYEE_DRIVER
+CONTRACTOR_COMPANY_DRIVER
+OWNER_OPERATOR_LEASED_ON
+THIRD_PARTY_CARRIER
+```
+
+These are real pay/settlement classifications. They are not PersonRoles and must not be silently repurposed as the universal onboarding relationship taxonomy.
+
+Existing behavior already maps Driver relationship into pay classification in compensation setup. Future onboarding work must integrate with that contract rather than inventing parallel worker types.
+
+### 2.5 Work scope = what the person will actually do
+
+Scope is orthogonal to role and relationship.
 
 Examples:
-
-- legal name / core identity
-- contact information
-- contact/mailing address
-- emergency contact
-- legal entitlement to work in Canada question
-- common agreements/policies where applicable
-- Ontario health-and-safety awareness where applicable
-
-Universal does **not** mean every supporting document is mandatory at application submission.
-
-### 4.2 Role
-
-Examples:
-
-- commercial-driver qualification for Driver
-- dispatcher experience for Dispatcher
-- mechanic credentials for Mechanic
-- safety/compliance credentials for Safety
-
-### 4.3 Scope
-
-Scope describes what the person will actually do.
-
-Initial useful tags include:
 
 ```text
 OPERATES_COMPANY_VEHICLE
@@ -134,9 +126,123 @@ HANDLES_PAYROLL
 HANDLES_PERSONAL_INFORMATION
 ```
 
+A Driver can be:
+
+```text
+Role = DRIVER
+Relationship = owner_operator
+Operating subtype = long_haul
+Scope = CROSS_BORDER_US + COMMERCIAL_DRIVER
+```
+
+The Driver rules still apply in full. Owner-operator requirements are additive, not a replacement.
+
+---
+
+## 3. The owner-operator principle: union, never switch
+
+Owner-operator status does not replace Driver qualification.
+
+Conceptually:
+
+```text
+applicable_requirements(person) =
+    common_person_requirements
+  UNION role_requirements
+  UNION scope_requirements
+  UNION jurisdiction_requirements
+  UNION relationship_requirements
+  UNION business_requirements_when_linked
+  UNION asset_requirements_when_linked
+```
+
+For an owner-operator Driver:
+
+```text
+COMMON PERSON
++ DRIVER ROLE
++ OWNER_OPERATOR RELATIONSHIP
++ OWNER-OPERATOR BUSINESS
++ OWNER-OPERATOR EQUIPMENT
++ CROSS-BORDER / OTHER SCOPES
++ JURISDICTION RULES
+```
+
+A company Driver and an owner-operator Driver are both Drivers and are subject to the same applicable Driver/company safety rules. The owner-operator gets **additional** business, insurance, contract, equipment, and settlement requirements.
+
+---
+
+## 4. Applicability is not timing
+
+Every requirement needs two independent answers:
+
+1. **Does this requirement apply?**
+2. **At what stage must it be satisfied?**
+
+A requirement can apply to a person without being mandatory on the initial application.
+
+Example:
+
+```text
+Work eligibility question
+  applies: every hire
+  visible: application
+
+Work-authorization evidence
+  applies: when verification is needed
+  requested by: admin/system rule
+  blocking stage: work_start
+
+Owner-operator incorporation document
+  applies: owner_operator relationship
+  visible: optionally during application
+  admin requestable: yes
+  blocking stage: business_approved / contract_activation
+
+SIN
+  applies: employee/payroll setup
+  collected: post-offer/payroll stage
+  not an initial recruiting identity field
+```
+
+Do not use one global `required=true` or `blocking=true` boolean to represent the whole lifecycle.
+
+---
+
+## 5. Applicability dimensions
+
+Requirements are selected by reusable dimensions, not hard-coded role pages.
+
+### 5.1 Common / universal
+
+Examples:
+
+- legal name/core identity
+- contact information
+- contact/mailing address
+- emergency contact
+- legal entitlement to work in Canada question
+- common agreements/policies where applicable
+- Ontario health-and-safety awareness where applicable
+
+Universal does **not** mean every supporting document is mandatory at application submission.
+
+### 5.2 Role
+
+Examples:
+
+- Driver qualification for `DRIVER`
+- dispatch experience for `DISPATCHER`
+- mechanic credentials for `MECHANIC`
+- safety/compliance credentials for `SAFETY`
+
+### 5.3 Scope
+
+Scope describes the actual work assignment and capabilities required.
+
 A Mechanic can gain road-test requirements without becoming a Driver role. An Office Admin can gain company-vehicle requirements without changing occupational role.
 
-### 4.4 Jurisdiction
+### 5.4 Jurisdiction
 
 Initial useful tags:
 
@@ -146,45 +252,42 @@ ON
 US
 ```
 
-A rule may require a combination such as Driver + Cross-border U.S. + U.S. jurisdiction.
+A rule can require Driver + Cross-border U.S. + U.S. jurisdiction.
 
-### 4.5 Employment/business relationship
+### 5.5 Employment/business relationship
 
-Role answers **what the person does**. Relationship answers **how the person works for the company**.
-
-Examples:
+For Driver, use the existing implemented relationship axis first:
 
 ```text
-COMPANY_EMPLOYEE
-PART_TIME_EMPLOYEE
-CONTRACTOR
-OWNER_OPERATOR
+company_driver
+owner_operator
 ```
 
-For Driver, provides-own-truck / provides-own-trailer remain Driver-specific operating/equipment attributes. They do not become Person roles.
+Do not add `CONTRACTOR`, `EMPLOYEE_OF_CONTRACTED_BUSINESS`, or other new relationship values merely to make onboarding convenient until Phase A proves they are not already represented by existing Driver extension + Payee + carrier/business structures.
+
+### 5.6 Policy profile
+
+Company policy, insurer rules, and customer rules must be explicit inputs, not hidden `if` statements.
+
+### 5.7 Business/entity context
+
+A requirement can attach to a linked business/company rather than the Person.
+
+### 5.8 Asset context
+
+A requirement can attach to a Truck or Trailer rather than the Person.
 
 ---
 
-## 5. Applicability rule model: explicit DNF
+## 6. Applicability rule model: explicit DNF
 
 Applicability must be explicit and deterministic.
 
 Use **disjunctive normal form (DNF)**:
 
-- a requirement contains one or more applicability clauses;
-- every predicate inside one clause is **AND**;
-- multiple clauses are combined with **OR**.
-
-Conceptually:
-
-```text
-requirement applies if:
-  clause_1
-  OR clause_2
-  OR clause_3
-```
-
-Each clause can contain predicates from the supported dimensions.
+- every requirement contains one or more clauses;
+- predicates inside one clause are **AND**;
+- clauses are combined with **OR**.
 
 Example:
 
@@ -192,30 +295,22 @@ Example:
 Requirement: DRIVER_LICENCE
 
 Clause 1:
-  role in [DRIVER]
+  role_any = [DRIVER]
 
 OR
 
 Clause 2:
-  role in [MECHANIC]
-  AND scope contains ROAD_TESTS_COMMERCIAL_VEHICLES
+  role_any = [MECHANIC]
+  AND scope_all = [ROAD_TESTS_COMMERCIAL_VEHICLES]
 
 OR
 
 Clause 3:
-  scope contains OPERATES_COMPANY_VEHICLE
+  scope_all = [OPERATES_COMPANY_VEHICLE]
+  AND policy_profile requires licence evidence
 ```
 
-Within a clause:
-
-- `role_any = [DRIVER, MECHANIC]` means OR among those values;
-- `scope_all = [CROSS_BORDER_US, COMMERCIAL_DRIVER]` means both must be present;
-- `scope_any = [...]` means at least one must be present;
-- jurisdiction and relationship predicates are evaluated the same way according to explicit `*_any` / `*_all` fields.
-
-Do not use ambiguous bare arrays whose AND/OR meaning has to be guessed.
-
-Recommended conceptual clause shape:
+Conceptual clause:
 
 ```text
 applicability_clause {
@@ -227,16 +322,19 @@ applicability_clause {
   jurisdiction_all[]
   relationship_any[]
   relationship_all[]
+  policy_any[]
+  business_context_predicates[]
+  asset_context_predicates[]
 }
 ```
 
-Most real rules will use `role_any`, `scope_all`, and `jurisdiction_any`. The exact physical schema can be normalized later, but the boolean semantics are locked here.
+Do not use ambiguous bare arrays where AND/OR semantics have to be guessed.
 
 ---
 
-## 6. Requirement definition contract
+## 7. Requirement definition contract
 
-Conceptual shape:
+Conceptual definition:
 
 ```text
 onboarding_requirement_definition {
@@ -248,6 +346,7 @@ onboarding_requirement_definition {
   version
   active
 
+  subject_type              # PERSON | BUSINESS | TRUCK | TRAILER | ASSIGNMENT
   authority_class
   authority_reference
 
@@ -261,7 +360,7 @@ onboarding_requirement_definition {
   verification_required
 
   first_visible_stage
-  blocking_stage
+  blocking_gate
 
   waivable
   waivable_by[]
@@ -271,9 +370,9 @@ onboarding_requirement_definition {
 }
 ```
 
-### 6.1 Authority class
+### 7.1 Authority class
 
-Use explicit source classes:
+Use explicit authority/source classes:
 
 ```text
 REGULATORY
@@ -283,29 +382,25 @@ COMPANY_POLICY
 CONTRACTUAL
 ```
 
-Do not describe a company policy as a legal requirement.
+Never label company policy as a legal requirement.
 
-### 6.2 Waiver rules
+### 7.2 Waiver rules
 
-`WAIVED` is a valid requirement status only when the requirement definition allows waiver.
+`WAIVED` is valid only when the requirement definition allows waiver.
 
-Rules:
-
-- `REGULATORY` requirements default to `waivable = false` unless a lawful exception process is explicitly modeled.
-- insurance/customer/company-policy/contractual requirements may be waivable only if the definition says so;
-- `waivable_by` controls which admin permission/role may waive it;
-- waiver requires reason, actor, timestamp, and audit event;
-- the UI must never show a Waive action when `waivable = false`.
+- Regulatory requirements default to non-waivable unless a lawful exception is explicitly represented.
+- Insurance/customer/company-policy/contractual rules can be waived only when the definition permits it.
+- `waivable_by` controls permission.
+- Waiver requires reason, actor, timestamp, and audit event.
+- UI must not expose Waive when `waivable = false`.
 
 ---
 
-## 7. Scope determination: who sets it and when
+## 8. Scope determination: who sets it and when
 
-Some scope facts are known before invitation; others are discovered during onboarding. Scope therefore needs an explicit source and precedence model.
+Some scope facts are known before invitation; others are discovered during onboarding.
 
-### 7.1 Scope sources
-
-A scope assignment can come from:
+### 8.1 Scope sources
 
 ```text
 ADMIN_ASSIGNED
@@ -314,9 +409,9 @@ SYSTEM_DERIVED
 POLICY_DERIVED
 ```
 
-Store source, actor where applicable, timestamp, and rule/version that produced the value.
+Store source, actor where applicable, timestamp, and rule/version.
 
-### 7.2 Precedence
+### 8.2 Precedence
 
 Recommended precedence:
 
@@ -324,45 +419,24 @@ Recommended precedence:
 2. system/policy-derived mandatory scope;
 3. applicant-answer-derived provisional scope.
 
-Applicant answers may propose or derive scope, but they must not silently override an admin-approved work assignment.
+Applicant answers can propose scope but cannot silently override an admin-approved job assignment.
 
-### 7.3 Example
+### 8.3 Re-evaluation
 
-```text
-Invitation says role = MECHANIC
-Applicant answers: "Yes, I will road-test repaired trucks"
-  -> provisional scope ROAD_TESTS_COMMERCIAL_VEHICLES
-  -> newly applicable DL + abstract requirements appear
-Admin review confirms or removes that scope
-  -> requirement set re-evaluates
-```
+Whenever role, scope, relationship, jurisdiction, policy profile, linked business, or linked equipment changes:
 
-For Driver:
-
-```text
-Admin assignment may pre-set CROSS_BORDER_US
-Applicant answers may confirm passport/FAST/status details
-Applicant cannot remove CROSS_BORDER_US merely by answering "No" if the offered job requires it
-```
-
-### 7.4 Mid-application scope changes
-
-Whenever a scope is added/removed:
-
-1. recalculate requirements;
-2. add newly applicable requirement instances;
-3. preserve prior requirement/evidence history;
-4. mark no-longer-applicable instances without deleting them;
-5. recalculate gates;
-6. show the change in admin review/audit.
+1. re-evaluate the requirement set;
+2. create newly applicable requirement instances;
+3. preserve satisfied reusable evidence;
+4. mark no-longer-applicable instances without deleting history;
+5. re-evaluate all affected gates;
+6. audit the change.
 
 ---
 
-## 8. Policy profile and policy-dependent requirements
+## 9. Policy profiles
 
-Do not turn company policy into hidden branching logic.
-
-Use a policy profile/version as an input to requirement evaluation.
+Use explicit policy/version inputs.
 
 Conceptually:
 
@@ -372,187 +446,13 @@ tenant_policy_profile
   -> effective date/version
 ```
 
-Facts such as `OPERATES_COMPANY_VEHICLE` describe the person/work assignment. Whether that fact requires an annual abstract, background check, or extra training can come from `INSURANCE` or `COMPANY_POLICY` requirement definitions.
+For example, `OPERATES_COMPANY_VEHICLE` is a fact about the assignment. Whether that requires a fresh abstract every 12 months may come from an insurer or company-policy requirement.
 
-When policy changes:
-
-- do not rewrite old application history;
-- evaluate the current Person against the new active policy/version where operationally required;
-- create new requirement instances rather than mutating historical ones in place.
+Policy changes must not rewrite historical applications. They can create current requirement instances for active People when necessary.
 
 ---
 
-## 9. Lifecycle stages and gates
-
-Recommended stages:
-
-```text
-application_draft
-application_submit
-admin_review
-approval
-work_start
-operational_eligible
-company_vehicle_eligible
-commercial_driver_eligible
-dispatch_eligible
-cross_border_eligible
-safety_sensitive_cleared
-```
-
-A Person can exist in People without being eligible for every operational capability.
-
-### 9.1 Gate dependency table
-
-The gate graph is explicit; gates are not just labels.
-
-| Gate | Minimum parent dependencies | Additional evaluated requirements |
-|---|---|---|
-| `PERSON_APPROVED` | none | approval-stage common/role requirements |
-| `WORK_AUTHORIZED` | none | verified work-authorization requirements when applicable |
-| `WORK_START_READY` | `PERSON_APPROVED` + `WORK_AUTHORIZED` when work authorization applies | employment/relationship setup, required agreements, safety orientation, other work-start blockers |
-| `COMPANY_VEHICLE_ELIGIBLE` | `WORK_START_READY` | DL, driving abstract/MVR, insurer/company-policy requirements for vehicle operation |
-| `COMMERCIAL_DRIVER_ELIGIBLE` | `WORK_START_READY` | commercial licence, medical qualification, regulatory/insurance Driver qualification requirements |
-| `SAFETY_SENSITIVE_CLEARED` | `WORK_START_READY` | applicable safety-sensitive testing/clearance requirements |
-| `DISPATCH_ELIGIBLE` | for Driver: `COMMERCIAL_DRIVER_ELIGIBLE`; for non-driving dispatch staff: `WORK_START_READY` | role/scope-specific dispatch requirements |
-| `CROSS_BORDER_ELIGIBLE` | role-appropriate operational gate plus `WORK_AUTHORIZED` where applicable | border/admissibility/travel/qualification requirements for cross-border scope |
-
-Important: `DISPATCH_ELIGIBLE` is role-aware. A Dispatcher employee does not require `COMMERCIAL_DRIVER_ELIGIBLE`; a truck Driver does.
-
-The implementation may represent this as a dependency graph/table, but circular dependencies are forbidden.
-
----
-
-## 10. Requirement status is not evidence status
-
-Conceptual requirement statuses:
-
-```text
-NOT_APPLICABLE
-NOT_STARTED
-OPTIONAL
-REQUESTED
-PROVIDED
-UNDER_REVIEW
-VERIFIED
-REJECTED
-EXPIRED
-WAIVED
-```
-
-Conceptual evidence statuses:
-
-```text
-UPLOADED
-ACTIVE
-SUPERSEDED
-REJECTED
-EXPIRED
-```
-
-Examples:
-
-- DL uploaded but expired -> evidence exists; requirement is not satisfied.
-- Work permit uploaded but awaiting review -> evidence exists; work-start gate remains blocked.
-- FAST card uploaded but optional -> evidence exists; no blocking effect.
-
----
-
-## 11. Evidence can satisfy multiple requirement instances
-
-Reusable evidence must be modeled explicitly.
-
-Use a many-to-many satisfaction link:
-
-```text
-evidence_item
-  -> evidence_satisfaction
-       -> requirement_instance
-```
-
-Conceptually:
-
-```text
-evidence_satisfaction {
-  evidence_id
-  requirement_instance_id
-  satisfaction_status
-  verified_by
-  verified_at
-  notes
-}
-```
-
-A document may satisfy more than one requirement instance when allowed.
-
-Example:
-
-```text
-one verified driver's licence document
-  -> satisfies DRIVER_LICENCE instance for Driver role
-  -> also satisfies COMPANY_VEHICLE_DRIVER_LICENCE instance created by a second active role/scope
-```
-
-### 11.1 Reuse rule
-
-Evidence is reusable only when all required compatibility checks pass, including as applicable:
-
-- accepted `document_type` / evidence type;
-- not expired/superseded/rejected;
-- verification level meets the target requirement;
-- identity/person matches;
-- jurisdiction/issuer constraints match;
-- requirement definition explicitly permits that evidence type.
-
-Do **not** dedupe merely because two requirements share a similar name.
-
----
-
-## 12. Requirement code and version semantics
-
-`code` identifies the business concept. `version` identifies the definition/rule version that created an instance.
-
-Rules:
-
-- requirement instances freeze `definition_id` + `definition_version` + relevant evaluated trigger context;
-- history never collapses instances from different versions;
-- satisfaction reuse may cross versions **only** when the newer definition explicitly accepts the evidence type and its verification still meets the newer rule;
-- dedupe of the active/effective checklist is primarily by stable business `code`, but historical instances remain distinct;
-- a material rule change that should coexist with the old concept must use a new requirement code, not silently redefine semantics under the old code.
-
-Example:
-
-```text
-DRIVER_ABSTRACT v1
-DRIVER_ABSTRACT v2
-```
-
-The person may see one current Driver Abstract requirement, but audit/history retains both instances that existed at their respective times.
-
----
-
-## 13. Expiry data belongs in Phase A
-
-The notification/renewal scheduler can wait until a later phase. The **data model cannot**.
-
-Phase A schema must support:
-
-```text
-issued_at
-expires_at
-expiry_source
-verification_at
-renewal_window_days (definition/policy)
-status derived from expiry
-```
-
-Requirements/evidence that expire must be able to become `EXPIRED` and invalidate gates even before automated reminders are implemented.
-
-Phase F adds monitoring/notification automation, not the first expiry columns.
-
----
-
-## 14. Common Person onboarding data
+## 10. Common Person onboarding data
 
 Common Person/contact concepts include:
 
@@ -578,19 +478,17 @@ Common Person/contact concepts include:
 
 ### Work eligibility question
 
-At applicant stage use a neutral question such as:
+At applicant stage use a neutral question:
 
 > Are you legally entitled to work in Canada?
 
-Do not make citizenship, PR status, SIN, or immigration-document upload a mandatory initial-application identity question merely because the eligibility question is common.
+Do not bundle citizenship, PR status, SIN, immigration evidence, and Driver licence into one `Government ID` field.
 
 ---
 
-## 15. Work authorization: separate question, verification, and payroll identity
+## 11. Work eligibility, work authorization, identity evidence, and SIN are separate
 
-Do not bundle these into a generic `Government ID` requirement.
-
-### 15.1 Work eligibility
+### 11.1 Work eligibility
 
 Applicant-stage question:
 
@@ -599,16 +497,16 @@ Are you legally entitled to work in Canada?
 Yes / No
 ```
 
-### 15.2 Work-authorization verification
+### 11.2 Work-authorization verification
 
-Admin/system-requestable at the appropriate stage.
+Admin/system-requestable when applicable.
 
-Possible evidence types, when applicable:
+Possible evidence types can include, when appropriate:
 
 - proof of permanent resident status
 - work permit
 - study permit with work authorization
-- maintained-status / extension evidence
+- maintained-status/extension evidence
 - other permitted supporting evidence
 
 Useful facts:
@@ -623,15 +521,19 @@ verified_at
 verified_by
 ```
 
-### 15.3 SIN / payroll identity
+### 11.3 Identity evidence
 
-Keep SIN separate from immigration/work-authorization evidence and collect it at the appropriate payroll/employment stage with stricter access controls.
+Government identity documents are their own evidence category and are not synonymous with immigration/work authorization.
 
-Temporary-resident SIN expiry considerations must be representable by the expiry model.
+### 11.4 SIN / payroll identity
+
+Keep SIN separate and protect it with stricter RBAC. Collect it at the appropriate payroll/employment stage, not as a generic applicant ID upload.
 
 ---
 
-## 16. Address source-of-truth rule
+## 12. Address source-of-truth rule
+
+The current address correction establishes a general architectural rule:
 
 ```text
 Person contact data
@@ -643,386 +545,448 @@ credential/source-document data
 
 - applicant-controlled;
 - promoted into People;
-- editable later as normal Person contact data.
+- editable as normal Person contact data.
 
 ### Driver-licence address
 
 - sourced from accepted DL/PDF417 evidence;
-- stored with Driver licence/profile evidence;
+- stored with Driver credential/profile evidence;
 - not freely edited through People contact fields;
-- changes through controlled replace/update of the licence.
+- changes through controlled DL replacement/update.
 
-`Same as driver licence address` may copy current values into contact fields, but the two sources stay distinct.
+`Same as driver licence address` may copy values into contact fields, but the two sources remain distinct.
 
-This pattern applies to other role credentials too: evidence-derived facts stay with the credential/evidence source instead of silently becoming generic Person fields.
-
----
-
-## 17. Driver's licence is not universal
-
-Split these concepts:
-
-- work eligibility / identity;
-- driver's licence;
-- commercial-driver qualification.
-
-Typical triggers:
-
-```text
-DRIVER -> licence requirement
-MECHANIC + ROAD_TESTS_COMMERCIAL_VEHICLES -> licence requirement
-OFFICE_ADMIN + OPERATES_COMPANY_VEHICLE -> licence requirement if active policy requires
-DISPATCHER -> no licence requirement unless driving scope applies
-```
-
-The same DL capture/PDF417 pipeline can be reused anywhere the requirement applies without making the whole onboarding engine Driver-shaped.
+The same principle applies to future credential-derived facts for other roles.
 
 ---
 
-## 18. Driving record / abstract is separate
+## 13. Driver licence, driving abstract, medical qualification, and safety-sensitive testing are separate requirements
 
-Do not bundle MVR/driving abstract with medical or drug/alcohol testing.
+Do not bundle them.
 
-A driving record can apply to:
+### Driver licence
 
-- Driver;
-- Mechanic with road-test scope;
-- another role with company-vehicle scope;
-- insurer/company-policy requirements.
+Can apply through:
 
-Its refresh cycle, evidence, verification, and gate are independent.
+- Driver role;
+- Mechanic + road-test scope;
+- another role + company-vehicle scope.
 
----
+### Driving abstract / MVR
 
-## 19. Commercial-driver qualification package
+Separate requirement with its own refresh period, evidence, verification, and insurer/company-policy trigger.
 
-Depending on role/scope/jurisdiction/policy, Driver requirements can include:
+### Commercial-driver medical qualification
 
-- licence class/endorsements/status/expiry;
-- driving abstract/MVR;
-- regulated prior-employer/safety-performance history where applicable;
-- commercial medical qualification;
-- drug/alcohol program requirements where applicable;
-- equipment experience;
-- safety/compliance acknowledgements;
-- cross-border requirements where applicable.
-
-Driver work history is not merely generic HR references. It may need a specialized regulatory structure while reusing common employer/contact primitives.
-
----
-
-## 20. Cross-border is a scope, not a role
-
-Use scope such as:
-
-```text
-CROSS_BORDER_US
-```
-
-Potential requirements may include:
-
-- required travel/admissibility evidence;
-- border/customs/company training;
-- cross-border qualification rules;
-- customer/company-specific credentials.
-
-### FAST
-
-FAST is a separate trusted-traveller/commercial-clearance credential. It is not synonymous with legal cross-border eligibility.
-
-Model separately:
-
-```text
-Cross-border eligibility / required travel evidence
-FAST membership/card (optional unless a specific policy requires it)
-```
-
-### Commercial medical label
-
-Do not use `USDOT_MEDICAL` as the generic requirement code. Use a neutral code such as:
+Use a neutral code such as:
 
 ```text
 COMMERCIAL_DRIVER_MEDICAL_QUALIFICATION
 ```
 
-and let jurisdiction/scope determine the accepted evidence/rule profile.
+Do not use `USDOT_MEDICAL` as the universal requirement code. Canadian/U.S. cross-border qualification rules are jurisdiction-specific.
 
-External FMCSA documentation may use U.S.-specific medical terminology; that does not change TruckERP's generic requirement label.
+### Drug/alcohol or other safety-sensitive requirements
 
----
-
-## 21. Role modules
-
-The UI renders a common shell plus applicable modules.
-
-### DRIVER
-
-- commercial licence / DL evidence
-- specialized driving history
-- driving abstract/MVR
-- equipment experience with years per type
-- commercial medical qualification
-- safety-sensitive requirements
-- cross-border requirements when applicable
-- Driver relationship/equipment contribution setup
-
-### DISPATCHER
-
-- dispatch experience
-- TMS/load-board experience where company-defined
-- HOS/compliance/coercion-policy training where applicable
-- border/customs knowledge where applicable
-
-### MECHANIC
-
-- mechanic licence/certifications
-- specialty/tool/equipment experience
-- DL / abstract only when road-test/company-vehicle scope applies
-- safety-sensitive/shop training where applicable
-
-### SAFETY
-
-- safety/compliance qualifications
-- HOS/compliance training
-- audit/recordkeeping competencies
-- cross-border compliance knowledge where applicable
-- driving qualification only when actual scope requires driving
-
-### HR
-
-- HR experience/credentials where required
-- privacy/confidentiality acknowledgements
-- common employment setup
-
-### PAYROLL
-
-- payroll/accounting experience where required
-- confidentiality/privacy requirements
-- common employment setup
-
-### OFFICE_ADMIN
-
-- office/admin experience
-- company-system/process training
-- vehicle-operation evidence only when scope applies
-
-### OTHER
-
-- configurable fallback for uncommon roles;
-- not a dumping ground for owner-operators or known occupations.
+Trigger from the applicable regulatory/company scope, not simply `role == DRIVER`.
 
 ---
 
-## 22. Employment/payroll/tax setup
+## 14. Cross-border is scope, not role
 
-Do not assume every Person is an employee.
-
-### Employee relationship
-
-Potential post-offer/work-start requirements:
-
-- direct deposit/banking
-- federal TD1
-- provincial/territorial TD1, e.g. TD1ON
-- payroll/SIN setup
-- employment agreement
-
-### Contractor / owner-operator relationship
-
-Potential setup:
-
-- legal business name
-- entity/type
-- business number where applicable
-- GST/HST registration where applicable
-- remittance/payment banking
-- insurance evidence
-- contractor/owner-operator agreement
-- truck/trailer/equipment contribution information
-
-Do not force employee TD1/payroll requirements onto an owner-operator because both may have role `DRIVER`.
-
----
-
-## 23. Document/evidence model
-
-A requirement may be satisfied by zero, one, or multiple evidence items, and one evidence item may satisfy multiple requirement instances.
-
-Conceptual model:
+Use a scope such as:
 
 ```text
-requirement_instance
-  <- evidence_satisfaction -> evidence_item
-
-requirement_instance
-  -> review/verification state
-  -> blocking stage
-  -> expiry impact
-  -> audit history
-
-evidence_item
-  -> document metadata/files
-  -> issuer/effective/expiry facts
-  -> evidence status
+CROSS_BORDER_US
 ```
 
-TruckERP's existing document-request/resume mechanism should be driven by requirement instances instead of inventing a separate upload flow for each role.
+Potential requirements include travel/admissibility evidence, cross-border training, and applicable qualification evidence.
 
-Admin actions can include:
+### FAST
 
-- request evidence;
-- provide instructions/reason;
-- accept/reject evidence;
-- link reusable evidence to another applicable requirement;
-- waive only where allowed;
-- preserve superseded history.
+FAST is a trusted-traveller/commercial-clearance credential. It is not equivalent to legal U.S. admissibility.
 
----
-
-## 24. Requirement instances freeze what applied
-
-When rules evaluate for an application/person, freeze enough context to explain later why the requirement existed.
-
-At minimum preserve:
+Model separately:
 
 ```text
-definition_id
-requirement_code
-definition_version
-evaluated_role(s)
-evaluated_scope(s)
-evaluated_jurisdiction(s)
-evaluated_relationship
-evaluated_policy_profile/version
-applicability_clause matched
-created_at
+CROSS_BORDER_TRAVEL_ELIGIBILITY
+FAST_MEMBERSHIP
 ```
 
-Policy/rule changes do not rewrite historical application truth.
+FAST may be optional unless a carrier/customer/lane policy requires it.
 
 ---
 
-## 25. Re-evaluation when role/scope/relationship changes
+## 15. Driver work history is not generic work history
 
-Examples:
+Generic employment references and Driver regulated/safety-performance history are different structures.
 
-- Mechanic later gains road-test scope.
-- Driver changes local-only -> cross-border.
-- Dispatcher gains Safety role.
-- Company Driver becomes owner-operator.
+Shared employer/contact primitives can be reused, but Driver history may require role/jurisdiction-specific lookback, verification, and employer-response evidence.
 
-Re-evaluation must:
-
-1. calculate newly applicable requirements;
-2. reuse valid compatible evidence where permitted;
-3. preserve old instances/history;
-4. mark no-longer-applicable instances rather than delete them;
-5. recalculate gates;
-6. require admin confirmation where a changed role/scope affects employment/operational authorization.
-
-Never create a duplicate Person merely because role/scope changes.
+Do not force the Driver regulatory workflow into the generic HR reference form.
 
 ---
 
-## 26. Multiple roles
+## 16. Existing Driver commercial relationship model must be reused
 
-People may hold multiple PersonRoles.
+TruckERP already implemented a Driver extension layer.
 
-Effective requirements are the union of applicable requirements across active roles/scopes, evaluated through the rule engine.
+Current `driver_person_extensions` includes the Driver's operational/commercial setup, including:
 
-Do not ask for the same evidence twice when one verified evidence item validly satisfies multiple active requirement instances.
+```text
+employment_relationship_type = company_driver | owner_operator
+provides_own_truck
+provides_own_trailer
+team-related fields
+insurance/commercial approval
+```
 
-History still retains the distinct instances and definition versions that existed.
+The onboarding requirements engine must not duplicate these as a new Person relationship subsystem.
+
+Desired flow:
+
+```text
+Application/admin review
+  -> collect/propose Driver commercial relationship
+  -> approval/configuration
+  -> seed/reconcile driver_person_extensions
+```
+
+The Driver remains Role `DRIVER` regardless of whether relationship is `company_driver` or `owner_operator`.
 
 ---
 
-## 27. Applicant answer -> applicability flow
+## 17. Payee/compensation classification is already a separate domain
 
-Applicant answers can affect requirement selection, but only through declared derivation rules.
+Current `WorkerType` values are:
+
+```text
+EMPLOYEE_DRIVER
+CONTRACTOR_COMPANY_DRIVER
+OWNER_OPERATOR_LEASED_ON
+THIRD_PARTY_CARRIER
+```
+
+Current Payee supports `payee_type = DRIVER | CARRIER` and carries carrier-oriented fields such as MC/DOT/tax identifiers.
+
+Rules:
+
+1. Do not replace `driver_person_extensions.employment_relationship_type` with `Payee.worker_type`.
+2. Do not create a duplicate onboarding worker-type enum that shadows `WorkerType`.
+3. On approval/configuration, reconcile the Driver relationship with the correct Payee/Compensation setup through an explicit mapping.
+4. If a future owner-operator business with multiple Drivers needs a shared payee/carrier record, reuse or extend the existing Payee/carrier concept where appropriate rather than creating an overlapping settlement identity.
+5. Phase A must inspect the live Payee model before designing any new Business/payment relationship schema.
 
 Conceptually:
 
 ```text
-answer
-  -> derivation rule
-  -> provisional scope/fact
-  -> requirement re-evaluation
+PersonRole DRIVER
+    |
+    +-> DriverPersonExtension relationship
+    |
+    +-> Driver operational roster
+    |
+    +-> Payee / CompensationProfile
+           pay classification / settlement
 ```
+
+These are related, but they are not the same field.
+
+---
+
+## 18. Owner-operator onboarding track
+
+An owner-operator applicant is a Driver plus additional commercial/business requirements.
+
+The UI may offer a dedicated Owner-Operator invitation/application track because the form and admin review are materially richer.
+
+Conceptual invitation:
+
+```text
+Application track: Owner-Operator
+Requested PersonRole: DRIVER
+Driver relationship: owner_operator
+```
+
+The Owner-Operator application inherits all applicable Driver requirements and adds the owner-operator layers.
+
+### 18.1 Person/Driver layer
+
+Examples:
+
+- common Person/contact information
+- Driver licence/qualification
+- Driver history
+- abstract/MVR
+- medical qualification when applicable
+- equipment experience
+- work eligibility
+- cross-border scope requirements
+- policy acknowledgements
+
+### 18.2 Business/company layer
+
+Examples:
+
+- legal company name
+- operating name if different
+- entity type
+- business number
+- GST/HST registration where applicable
+- company contact/address
+- authorized representative
+- remittance/payment setup
+- insurance evidence
+- owner-operator/carrier agreement
+
+### 18.3 Equipment contribution/asset layer
+
+Examples:
+
+- provides own truck?
+- provides own trailer?
+- truck year/make/model/VIN
+- trailer year/make/model/VIN/type
+- bill of sale / ownership or lease evidence
+- registration
+- insurance association
+- inspection/compliance evidence
+
+Documents need not all be mandatory at initial submission. Admin can request missing applicable evidence during review using the existing secure document-resume flow.
+
+---
+
+## 19. Business/company is a first-class concept, but do not duplicate existing Payee blindly
+
+The owner-operator use case proves that company information cannot live as loose Person fields.
+
+A company can have:
+
+- one owner/primary representative;
+- several Drivers;
+- several Trucks/Trailers;
+- one contract with the carrier;
+- shared insurance/business documents;
+- one settlement/payee relationship;
+- company-level approval/readiness.
+
+Conceptually the domain needs a business/company identity:
+
+```text
+Business / ContractedCarrierEntity
+  legal identity
+  contacts
+  tax/business identifiers
+  company documents
+  insurance
+  contracts
+  people affiliations
+  equipment affiliations
+  settlement/payee link
+  approval/readiness
+```
+
+**Important existing-system constraint:** TruckERP already has `Payee` with `payee_type = CARRIER` and `WorkerType` values including `THIRD_PARTY_CARRIER` and `OWNER_OPERATOR_LEASED_ON`.
+
+Therefore Phase A must answer:
+
+- Is Payee sufficient as the financial/business identity?
+- Does TruckERP need a separate operational `Business` entity linked 1:1 or 1:N to Payee?
+- Can company documents/insurance/contracts live on Payee safely, or would that overload a payment-domain object?
+- How will multiple Persons and multiple assets link to the same business?
+
+Do **not** introduce a new Business table until this boundary report is complete. But the architecture is locked that business facts are **not Person fields**.
+
+---
+
+## 20. Person-to-business affiliation
+
+A multi-truck owner-operator company introduces a distinction between:
+
+1. the owner/authorized representative; and
+2. other Drivers working through that business.
+
+Do not invent a Driver-specific relationship value such as `DRIVER_FOR_OWNER_OPERATOR_COMPANY` until existing Payee/carrier affiliation is audited.
+
+The desired generic concept is an affiliation/link:
+
+```text
+Person
+  -> affiliation/membership/employment link
+  -> Business/Carrier entity
+```
+
+Possible semantics later may include owner, officer, authorized representative, employee/driver, contractor, etc.
+
+The exact enum/table is **not locked** yet because current Payee/carrier structures may already cover part of it.
+
+What is locked:
+
+- the Driver remains Role `DRIVER`;
+- their Driver qualification is evaluated independently;
+- company-level requirements are evaluated once per company where reusable;
+- shared company documents must not be uploaded again for every Driver;
+- no duplicate Person is created merely because a Driver changes business affiliation.
+
+---
+
+## 21. Equipment experience and physical equipment are different domains
+
+### 21.1 EquipmentExperience = Person/Driver qualification
 
 Examples:
 
 ```text
-"Will you road-test repaired trucks?" = Yes
-  -> provisional ROAD_TESTS_COMMERCIAL_VEHICLES
-
-"Will your assigned work include U.S. cross-border trips?"
-  -> normally admin/job-assignment driven
-  -> applicant answer can confirm/flag conflict, not silently redefine offered work
-
-"Are you legally entitled to work in Canada?" = No/needs review
-  -> work-authorization verification workflow
-  -> does not automatically set a Driver scope
+Dry Van: 2 years
+Reefer: 4 years
+Flatbed: 1 year
 ```
 
-Derivation rules must be explicit/versioned. Do not hide business logic inside React conditionals.
+This belongs to Driver qualification/onboarding and describes what the person knows how to operate.
+
+### 21.2 Truck/Trailer = physical assets
+
+TruckERP already has first-class `trucks` and `trailers` tables with ownership concepts.
+
+Current ownership values include:
+
+```text
+company
+owner_operator
+leased
+```
+
+Current ownership linkage is Person-oriented (`owner_person_id`).
+
+The owner-operator company use case may require future business ownership/affiliation because a corporation with five Trucks should not require all assets to be semantically owned by one Person.
+
+Do **not** create a generic duplicate `EquipmentAsset` table over existing Truck/Trailer models. Instead Phase A should report whether Truck/Trailer need an additive business-owner link or generalized owner entity.
+
+Physical asset evidence belongs to the asset lifecycle:
+
+- bill of sale/lease
+- registration
+- insurance association
+- inspection
+- permits
+- approval/readiness
+
+Driver experience belongs to the Person lifecycle. Never conflate them.
 
 ---
 
-## 28. Applicant UX
+## 22. Evidence and requirements are many-to-many
 
-The applicant experiences one coherent application:
+A requirement can be satisfied by multiple evidence items, and one verified evidence item can satisfy multiple compatible requirement instances.
+
+Model conceptually:
 
 ```text
-Welcome
-  -> common identity/contact
-  -> applicable common requirements
-  -> role/scope sections
-  -> requested documents/evidence
-  -> review & submit
+evidence_item
+  -> evidence_satisfaction
+       -> requirement_instance
+```
+
+Evidence reuse is allowed only when compatibility checks pass:
+
+- evidence/document type accepted;
+- not expired/superseded/rejected;
+- verification level sufficient;
+- subject identity matches (Person/Business/Truck/Trailer as appropriate);
+- jurisdiction/issuer constraints match;
+- target requirement definition permits reuse.
+
+Company evidence must be reusable across affiliated Drivers when the requirement subject is the company, without pretending the document belongs to each Driver personally.
+
+Asset evidence must follow the asset, not the currently assigned Driver.
+
+---
+
+## 23. Requirement instances freeze what applied
+
+Requirement definitions are versioned. Requirement instances freeze:
+
+```text
+definition_id
+definition_version
+subject_type
+subject_id
+trigger context
+policy version
+blocking gate
+authority class
 ```
 
 Rules:
 
-- hide irrelevant sections;
-- explain conditional requests when useful;
-- distinguish optional vs requested vs blocking-at-later-stage;
-- save/resume safely;
-- do not expose internal tag codes;
-- keep mobile-first/accessibility behavior;
-- use admin request flow for sensitive evidence not needed at initial submission.
+- historical instances remain distinct across definition versions;
+- active checklist dedupe is primarily by stable business requirement `code` and subject;
+- evidence may satisfy a newer version only if the newer definition explicitly accepts it;
+- a material semantic change should receive a new requirement code rather than silently changing meaning under an old code.
 
 ---
 
-## 29. Admin UX
+## 24. Requirement status is not evidence status
 
-Recommended grouping:
+Requirement status examples:
 
 ```text
-Common / Person
-Role-specific
-Scope-specific
-Employment / pay setup
-Documents / evidence
-Eligibility / gates
+NOT_APPLICABLE
+NOT_STARTED
+OPTIONAL
+REQUESTED
+PROVIDED
+UNDER_REVIEW
+VERIFIED
+REJECTED
+EXPIRED
+WAIVED
 ```
 
-For each requirement show:
+Evidence status examples:
 
-- name;
-- why it applies / matched clause;
-- authority class;
-- status;
-- linked evidence;
-- expiry;
-- verifier;
-- blocking stage;
-- allowed actions.
+```text
+UPLOADED
+ACTIVE
+SUPERSEDED
+REJECTED
+EXPIRED
+```
 
-Waive appears only when permitted by the definition and user permission.
+Uploading a file does not make the requirement verified.
+
+Examples:
+
+- expired DL uploaded -> evidence exists, Driver gate remains blocked;
+- insurance certificate uploaded but under review -> business/asset readiness not yet approved;
+- FAST card uploaded but optional for the lane -> no blocking effect.
 
 ---
 
-## 30. Eligibility outputs
+## 25. Expiry data belongs in Phase A
+
+Automated renewal alerts can come later. The data cannot.
+
+Phase A must support:
+
+```text
+issued_at
+expires_at
+expiry_source
+verified_at
+renewal_window_days
+status derived from expiry
+```
+
+Expiry can invalidate the relevant gate immediately even before reminder automation exists.
+
+---
+
+## 26. Two gate axes: person capability vs business/asset readiness
+
+Do not collapse everything into `approved`.
+
+### 26.1 Person-capability gates
 
 Examples:
 
@@ -1037,260 +1001,728 @@ CROSS_BORDER_ELIGIBLE
 SAFETY_SENSITIVE_CLEARED
 ```
 
-These are derived operational capabilities, not document fields.
+Suggested dependencies:
 
-A Person may be approved but not yet dispatchable or cross-border eligible.
+| Gate | Parent dependencies | Additional requirements |
+|---|---|---|
+| `PERSON_APPROVED` | none | approval-stage common/role requirements |
+| `WORK_AUTHORIZED` | none | applicable work-authorization verification |
+| `WORK_START_READY` | `PERSON_APPROVED` + `WORK_AUTHORIZED` when applicable | employment setup, agreements, safety orientation |
+| `COMPANY_VEHICLE_ELIGIBLE` | `WORK_START_READY` | DL, abstract/MVR, insurer/company policy |
+| `COMMERCIAL_DRIVER_ELIGIBLE` | `WORK_START_READY` | commercial Driver qualification |
+| `SAFETY_SENSITIVE_CLEARED` | `WORK_START_READY` | applicable testing/clearance |
+| `DISPATCH_ELIGIBLE` | for Driver: `COMMERCIAL_DRIVER_ELIGIBLE`; for office Dispatcher: `WORK_START_READY` | role/scope dispatch rules |
+| `CROSS_BORDER_ELIGIBLE` | role-appropriate operational gate | border/travel/jurisdiction requirements |
+
+### 26.2 Business/relationship readiness gates
+
+Owner-operator/company relationships add a second axis:
+
+```text
+BUSINESS_APPROVED
+BUSINESS_INSURANCE_APPROVED
+CONTRACT_COMPLETE
+OWNER_OPERATOR_SETTLEMENT_READY
+```
+
+These gates attach to the business/relationship, not to Driver qualification.
+
+### 26.3 Asset readiness gates
+
+Physical assets have their own readiness:
+
+```text
+TRUCK_APPROVED
+TRAILER_APPROVED
+```
+
+Possible subrequirements include registration, inspection, insurance linkage, permits, ownership/lease evidence, and carrier approval.
+
+### 26.4 Why the separation matters
+
+If a Truck inspection expires:
+
+```text
+Driver.COMMERCIAL_DRIVER_ELIGIBLE = true
+Truck.TRUCK_APPROVED = false
+```
+
+Do not mark the Driver unqualified.
+
+If the Driver licence expires:
+
+```text
+Driver.COMMERCIAL_DRIVER_ELIGIBLE = false
+Business.BUSINESS_APPROVED = true
+Truck.TRUCK_APPROVED = true
+```
+
+Do not invalidate the corporation or Truck.
 
 ---
 
-## 31. Seed matrix: illustration only
+## 27. Assignment readiness is the intersection
 
-This matrix is a human-readable cross-check, **not** the rule-storage format.
+The final operational question is not merely “Is the Driver dispatchable?” It is whether the proposed combination is valid for this work.
 
-Any cell that says `Scope`, `Policy`, `Jurisdiction`, `Conditional`, or similar must be implemented as an actual requirement definition with applicability clauses. Do not encode this table itself as business logic.
+Conceptually:
+
+```text
+ASSIGNMENT_READY(
+  person,
+  business,
+  truck,
+  trailer,
+  trip_scope
+)
+=
+  person capability gates
+  AND applicable business/relationship gates
+  AND truck readiness
+  AND trailer readiness when required
+  AND trip-specific scope/jurisdiction gates
+```
+
+Example:
+
+```text
+Driver qualified                   YES
+Cross-border eligible              YES
+Owner-operator business approved   YES
+Insurance approved                 YES
+Contract complete                  YES
+Truck approved                     YES
+Trailer approved                   YES
+--------------------------------------
+Assignment ready                   YES
+```
+
+Swap in an expired trailer:
+
+```text
+Driver qualified                   YES
+Business approved                  YES
+Truck approved                     YES
+Trailer approved                   NO
+--------------------------------------
+Assignment ready                   NO
+```
+
+This fits TruckERP's Trip/Dispatch direction: Driver + Truck + Trailer + Trip scope are evaluated together without corrupting each entity's independent status.
+
+---
+
+## 28. Owner-operator admin review is additive and multi-gate
+
+A company Driver review can primarily focus on Person + Driver qualification.
+
+An Owner-Operator review must show separate blocks:
+
+```text
+PERSON
+DRIVER QUALIFICATION
+OWNER-OPERATOR RELATIONSHIP
+BUSINESS / PAYEE-CARRIER
+INSURANCE
+TRUCK(S)
+TRAILER(S)
+CONTRACT
+SETTLEMENT READINESS
+```
+
+Admin decisions may be independent:
+
+```text
+Driver qualified?       yes/no
+Business approved?      yes/no
+Insurance approved?     yes/no
+Truck approved?         yes/no per truck
+Trailer approved?       yes/no per trailer
+Contract complete?      yes/no
+Settlement ready?       yes/no
+```
+
+Admin should be able to request specific missing evidence from review without requiring every owner-operator document on the first applicant screen.
+
+---
+
+## 29. Multi-truck owner-operator company scenario
+
+The architecture must support a contracted owner-operator company with several assets and several Drivers.
+
+Example:
+
+```text
+ABC Transport Inc.
+  Business/payee-carrier context
+  Company documents
+  Insurance
+  Contract
+  Settlement setup
+
+  People / Drivers
+    Driver A
+    Driver B
+    Driver C
+
+  Assets
+    Truck 101
+    Truck 102
+    Truck 103
+    Truck 104
+    Truck 105
+    Trailer 201
+    Trailer 202
+```
+
+Rules:
+
+- each Driver is evaluated under Driver rules independently;
+- business documents are evaluated once at business level when reusable;
+- each Truck/Trailer has its own asset readiness;
+- assignment readiness evaluates the chosen Driver + business + Truck + Trailer + trip scope;
+- a company insurance lapse can block business/assignment readiness without erasing Driver qualifications;
+- changing which Driver operates a Truck does not transfer ownership documents into the Person record.
+
+---
+
+## 30. Owner-operator portal direction
+
+Future Owner-Operator Portal should be business-centered, not merely a Driver-detail skin.
+
+Potential workspace:
+
+```text
+Company
+  legal/business identity
+  contacts
+  tax/business registration
+  contract
+  insurance
+
+People / Drivers
+  qualifications
+  requirements
+  affiliations
+
+Equipment
+  trucks
+  trailers
+  documents
+  inspections
+  readiness
+
+Financial
+  loads
+  settlements
+  deductions
+  fuel
+  tolls
+  invoices/remittances
+
+Compliance
+  expiring business docs
+  expiring driver docs
+  expiring asset docs
+```
+
+This future portal strengthens the rule that Person, Business/Payee, and equipment assets must remain separate domains.
+
+---
+
+## 31. Role modules
+
+The UI renders a common shell plus applicable rule-driven modules.
+
+### DRIVER
+
+Potential modules:
+
+- commercial licence/DL evidence
+- Driver history/regulatory prior-employer history
+- abstract/MVR
+- equipment experience
+- commercial medical qualification
+- safety-sensitive requirements
+- cross-border requirements
+- Driver commercial relationship
+- team setup
+
+### OWNER-OPERATOR WORKFLOW ADD-ON
+
+Not a PersonRole. Adds to Driver:
+
+- business identity
+- owner-operator company documents
+- insurance
+- contract
+- equipment ownership/contribution
+- bill of sale/lease evidence
+- settlement/payee setup
+- business/asset approval gates
+
+### DISPATCHER
+
+- dispatch experience
+- TMS/load-board knowledge where required
+- HOS/compliance/coercion-policy training where applicable
+- border/customs knowledge if scope requires it
+
+### MECHANIC
+
+- mechanic licences/certifications
+- trade/specialty experience
+- tool/equipment experience
+- DL/abstract only when road-test/company-vehicle scope applies
+- shop/safety-sensitive rules as applicable
+
+### SAFETY
+
+- compliance qualifications
+- HOS knowledge
+- audit/recordkeeping competency
+- cross-border compliance scope where applicable
+- driving evidence only if their actual scope requires driving
+
+### HR / PAYROLL / OFFICE_ADMIN
+
+- role-specific experience/credentials where company policy requires
+- appropriate privacy/confidentiality requirements
+- common Person/employment setup
+
+### OTHER
+
+Configurable fallback for uncommon roles until a first-class application type is justified. Do not use `OTHER` as a dumping ground for Owner-Operator.
+
+---
+
+## 32. Employment/payroll/tax setup
+
+Do not assume every Person is an employee.
+
+### Employee relationship
+
+Potential post-offer/work-start requirements:
+
+- direct-deposit/banking information
+- TD1 federal
+- applicable provincial/territorial TD1
+- SIN/payroll setup
+- employment agreement
+
+### Owner-operator / carrier relationship
+
+Potential requirements:
+
+- legal business identity
+- business number/tax registration
+- GST/HST where applicable
+- remittance/payment banking
+- insurance
+- owner-operator/carrier agreement
+- equipment contribution/ownership evidence
+- Payee/CompensationProfile setup
+
+Do not force employee payroll/tax forms onto an owner-operator merely because the PersonRole is `DRIVER`.
+
+---
+
+## 33. Applicant UX
+
+The applicant should experience a coherent application, not the rules engine.
+
+```text
+Welcome
+  -> common Person/contact
+  -> applicable role questions
+  -> applicable relationship/business questions
+  -> applicable scope questions
+  -> requested documents
+  -> review & submit
+```
+
+Rules:
+
+- hide irrelevant sections;
+- explain conditional requests when useful;
+- distinguish optional, requested, and blocking-before-stage items;
+- save/resume safely;
+- do not expose internal tag names;
+- use the admin document-request flow for sensitive/supporting documents not needed initially;
+- Owner-Operator applicant may enter business and equipment basics up front while admin requests additional evidence later.
+
+---
+
+## 34. Admin UX
+
+Admin review should group requirements by subject and reason:
+
+```text
+Person / common
+Role-specific
+Scope-specific
+Relationship
+Business/company
+Truck(s)
+Trailer(s)
+Documents/evidence
+Eligibility/readiness gates
+```
+
+For each requirement show:
+
+- name
+- subject
+- why it applies
+- current state
+- evidence
+- expiry
+- reviewer/verifier
+- blocking gate
+- actions allowed by policy
+
+Avoid one giant flat checklist.
+
+---
+
+## 35. Existing document-request flow should be reused
+
+TruckERP already has a secure document-resume/request path. The requirements engine should drive it.
+
+Admin can:
+
+- request a specific missing document;
+- provide reason/instructions;
+- send/reissue secure resume link;
+- see missing/provided/verified/expired state;
+- accept/reject evidence;
+- preserve superseded evidence/history;
+- audit request/supply/accept/reject/waive/replace actions.
+
+Do not create one upload subsystem per role.
+
+---
+
+## 36. Multiple roles and changing relationships
+
+People can hold multiple PersonRoles.
+
+The effective requirement set is the union of all applicable definitions, deduplicated by stable requirement code + subject according to the frozen version rules.
+
+Examples:
+
+- Dispatcher + Safety -> both role sets, shared evidence reused.
+- Mechanic later gains road-test scope -> driving requirements added.
+- Driver moves local -> cross-border -> cross-border requirements added.
+- company_driver -> owner_operator -> Driver role remains; business/equipment/contract requirements are added.
+- owner_operator -> company_driver -> historical OO evidence is preserved but current OO-specific requirements become not applicable.
+
+Never create a duplicate Person merely because role, scope, or commercial relationship changes.
+
+---
+
+## 37. Seed matrix is illustrative only
+
+A matrix is useful for humans, but it must never become the rules engine.
 
 | Requirement / section | DRIVER | DISPATCHER | MECHANIC | SAFETY | HR | PAYROLL | OFFICE_ADMIN | OTHER |
 |---|---|---|---|---|---|---|---|---|
-| Contact / mailing information | Common | Common | Common | Common | Common | Common | Common | Common |
+| Contact / mailing | Common | Common | Common | Common | Common | Common | Common | Common |
 | Emergency contact | Common | Common | Common | Common | Common | Common | Common | Common |
-| Legally entitled to work in Canada? | Common | Common | Common | Common | Common | Common | Common | Common |
-| Work-authorization evidence | Conditional/admin request | Same | Same | Same | Same | Same | Same | Same |
-| Employment/contract acknowledgements | Relationship/stage | Same | Same | Same | Same | Same | Same | Same |
-| OHSA awareness where applicable | Jurisdiction/stage | Same | Same | Same | Same | Same | Same | Same |
-| Banking / payroll / tax | Relationship/stage | Same | Same | Same | Same | Same | Same | Configurable |
-| Driver's licence | Yes | Scope | Road-test/scope | Scope | Scope | Scope | Scope | Scope |
-| Driving abstract / MVR | Policy/scope | Policy/scope | Road-test/scope | Policy/scope | Policy/scope | Policy/scope | Policy/scope | Policy/scope |
-| Commercial DL details | Yes | No | Scope | Scope | No | No | No | Scope |
+| Work eligibility question | Common | Common | Common | Common | Common | Common | Common | Common |
+| Work-authorization evidence | Request/condition | Same | Same | Same | Same | Same | Same | Same |
+| Driver licence | Yes | Scope only | Road-test/scope | Scope only | Scope only | Scope only | Scope only | Scope only |
+| Driving abstract/MVR | Driver/policy | Scope/policy | Road-test/policy | Scope/policy | Scope/policy | Scope/policy | Scope/policy | Scope/policy |
+| Commercial qualification | Yes | No | Scope only | Scope only | No | No | No | Scope only |
 | Driver equipment experience | Yes | No | Mechanic experience instead | No | No | No | No | Role-specific |
-| Commercial-driver medical | Role/scope/jurisdiction | No | Scope only if actual commercial-driving duty | Scope | No | No | No | Scope |
-| Drug/alcohol/safety-sensitive program | Scope/jurisdiction | Scope | Scope | Scope | Scope if designated | Scope if designated | Scope if designated | Scope |
 | Cross-border requirements | Scope | Scope if job requires | Scope if job requires | Scope | No | No | No | Scope |
 | Dispatch experience | No | Yes | No | Crossover scope | No | No | No | Role-specific |
-| Mechanic licences/certifications | No | No | Yes | No | No | No | No | Role-specific |
-| Safety/compliance credentials | No | Policy/scope | No | Yes | No | No | No | Role-specific |
-| Work history/references | Specialized Driver variant | Yes | Yes | Yes | Yes | Yes | Yes | Configurable |
+| Mechanic credentials | No | No | Yes | No | No | No | No | Role-specific |
+| Safety credentials | No | Policy/scope | No | Yes | No | No | No | Role-specific |
+
+Owner-Operator is an additive Driver workflow/relationship, not a separate PersonRole column in this matrix.
+
+Any matrix cell containing words such as `scope`, `policy`, `conditional`, or `request` must be represented as an actual requirement definition/DNF clause, not encoded as a matrix switch.
 
 ---
 
-## 32. Security and privacy
+## 38. Regulatory vs insurer vs customer vs company policy
 
-Particularly sensitive data includes:
+Every requirement identifies its authority source.
+
+Examples:
+
+```text
+REGULATORY
+INSURANCE
+CUSTOMER
+COMPANY_POLICY
+CONTRACTUAL
+```
+
+This determines waiver behavior, audit wording, and why the requirement appears.
+
+Do not hard-code broad assertions such as “background check is mandatory for all Drivers” unless the active authority/policy definition actually says so.
+
+---
+
+## 39. Security and privacy
+
+Sensitive onboarding information requires least-privilege access.
+
+Examples:
 
 - SIN
-- banking information
+- banking
 - immigration/work-authorization evidence
 - background-check results
 - medical/compliance evidence
+- business banking/tax identifiers
 
-Design expectations:
+Expectations:
 
 - RBAC by data category/job function;
-- no sensitive values in normal logs;
-- mask/redact in broad People views;
-- audit sensitive view/download/change actions where appropriate;
-- preserve superseded evidence/history instead of casual deletion;
-- do not expose payroll/immigration data merely because someone can view Driver operations.
+- no sensitive values in ordinary logs;
+- masking/redaction in broad People/Dispatch views;
+- audit view/download/change actions where appropriate;
+- retention/supersession rather than casual deletion;
+- Driver operations access does not automatically grant payroll/immigration/business-banking access.
 
 ---
 
-## 33. Known anti-patterns to prevent
+## 40. Current-system constraints that Phase A must respect
 
-1. Do not combine government/work eligibility with driver's licence.
-2. Do not combine MVR with medical/drug testing.
-3. Do not make cross-border a role.
-4. Do not make owner-operator a role.
-5. Do not equate FAST with legal border eligibility.
-6. Do not use `USDOT_MEDICAL` as the generic Canadian/U.S. commercial medical requirement code.
-7. Do not treat Driver regulated work history as generic references.
-8. Do not promote credential-derived facts into generic People contact fields.
-9. Do not require every applicable item at application submission.
-10. Do not infer compliance from document upload alone.
-11. Do not scatter `if role == ...` logic across frontend/backend.
-12. Do not delete history when role/scope/policy/evidence changes.
-13. Do not leave tag-combination semantics implicit.
-14. Do not let applicant answers silently override admin-approved work scope.
-15. Do not show Waive for non-waivable requirements.
-16. Do not postpone expiry data modeling until notification work.
+Before creating schema, Phase A must inspect and reconcile these existing models:
 
----
+```text
+PersonApplication
+Person
+PersonRole
+DriverProfile
+DriverPersonExtension
+Driver operational roster
+Payee
+CompensationProfile
+Truck
+Trailer
+Person/document models
+Document request/resume flow
+Trip/Dispatch assignment
+```
 
-## 34. Phase A must lock these five artifacts first
+Known current contracts:
 
-Before schema implementation begins, Phase A must produce/confirm these contracts against the live/current repo:
-
-### A. Applicability/DNF contract
-
-- exact clause structure;
-- AND/OR semantics;
-- role/scope/jurisdiction/relationship predicate representation;
-- policy profile/version input;
-- deterministic evaluation examples.
-
-### B. Evidence satisfaction contract
-
-- evidence item model;
-- many-to-many evidence-to-requirement satisfaction join;
-- compatibility/reuse rules;
-- verification ownership;
-- supersession/expiry behavior.
-
-### C. Gate dependency contract
-
-- persisted/derived gate representation;
-- dependency graph;
-- role-aware gates such as Driver dispatch vs Dispatcher work eligibility;
-- invalidation when requirements expire/change.
-
-### D. Scope determination contract
-
-- admin-assigned vs applicant-derived vs policy/system-derived scope;
-- precedence;
-- mid-application changes;
-- audit and re-evaluation behavior.
-
-### E. Authority/waiver contract
-
-- `authority_class`;
-- `authority_reference`;
-- `waivable`;
-- `waivable_by`;
-- waiver reason/audit requirements.
-
-Phase A is complete only when these are explicit enough that the migration/schema work is translation rather than another design debate.
+1. `DriverPersonExtension.employment_relationship_type` already implements `company_driver | owner_operator`.
+2. `Payee.worker_type` already implements `EMPLOYEE_DRIVER`, `CONTRACTOR_COMPANY_DRIVER`, `OWNER_OPERATOR_LEASED_ON`, `THIRD_PARTY_CARRIER`.
+3. `Driver.payee_id` links operational Driver to Payee.
+4. Trucks/Trailers already have `ownership_type = company | owner_operator | leased` and `owner_person_id`.
+5. Payee supports `CARRIER`, so a carrier/business identity partially exists in the payment domain.
+6. These existing structures must be extended/reconciled, not duplicated.
 
 ---
 
-## 35. Recommended implementation sequence
+## 41. Phase A foundation report: required answers before migration
 
-### Phase A — foundation report / schema lock
+Phase A must be a report/schema lock first.
 
-Audit current:
+It must answer:
 
-- `PersonApplication`
-- `Person`
-- `PersonRole`
-- role profiles/extensions
-- current documents/evidence
-- document-request/resume flow
-- admin review
-- approval/promotion mapping
-- application-type gates
+### Requirements engine
 
-Then propose the minimum schema for:
+- definition table(s)
+- DNF clause persistence
+- requirement instance table
+- version freezing
+- evidence satisfaction joins
+- expiry semantics
+- gate state/derivation
+- waiver/audit model
 
-- requirement definitions + versions;
-- DNF applicability clauses;
-- requirement instances;
-- scope assignments/source;
-- evidence items;
-- evidence satisfaction join;
-- verification/status;
-- expiry fields;
-- gate dependencies/state;
-- authority/waiver policy.
+### Driver/owner-operator relationship
+
+- how onboarding seeds `driver_person_extensions`
+- mapping from relationship to `Payee.worker_type`
+- whether a dedicated Owner-Operator application type or Driver workflow profile is cleaner in current code
+- how company_driver -> owner_operator conversion works without a duplicate Person
+
+### Business/carrier entity
+
+- whether existing `Payee(type=CARRIER)` can be extended to serve as business root;
+- whether a separate Business entity is required and how it links to Payee;
+- how multiple Persons affiliate with one business;
+- where business documents, insurance, contract, and approval state live.
+
+### Equipment
+
+- how owner-operator company ownership maps onto existing Truck/Trailer `owner_person_id`;
+- whether an additive business owner FK/generalized owner reference is required;
+- where bill-of-sale/registration/inspection evidence attaches;
+- how asset approval is stored.
+
+### Dispatch
+
+- how person gates + business gates + Truck/Trailer readiness combine into `ASSIGNMENT_READY`;
+- no current Driver/Trip behavior should be silently changed until this contract is explicit.
+
+No implementation migration should begin until these boundaries are reviewed.
+
+---
+
+## 42. Implementation sequence
+
+### Phase A — foundation report/schema lock
+
+Reconcile the rules engine with existing DriverPersonExtension, Payee, Truck/Trailer, documents, onboarding approval, and Dispatch.
 
 ### Phase B — common onboarding contract
 
-Move common Person/contact/work-eligibility concepts behind the shared onboarding contract.
+Common Person/contact/work-eligibility sections and shared requirement evaluation.
 
 ### Phase C — Driver as first complete consumer
 
-Use Driver as the first full rule set without making the engine Driver-shaped.
+Use existing Driver onboarding while moving requirement selection to the engine.
 
-### Phase D — Dispatcher / Mechanic / Safety
+### Phase D — Owner-Operator additive workflow
 
-Add their definitions through the same engine.
+Layer business, insurance, contract, equipment, and settlement requirements over Driver without changing the Driver role.
 
-### Phase E — HR / Payroll / Office Admin / Other
+### Phase E — Dispatcher / Mechanic / Safety
 
-Add remaining role and relationship definitions.
+Add role/scope definitions without copied forms.
 
-### Phase F — renewal monitoring / notifications
+### Phase F — HR / Payroll / Office Admin / Other
 
-Build expiry reminders/automation on top of expiry data that already exists from Phase A.
+Complete remaining role modules.
+
+### Phase G — operational gate integration and renewal monitoring
+
+Connect verified/expired requirements to People/Dispatch/business/asset readiness and automate renewal alerts.
 
 ---
 
-## 36. Acceptance tests for the architecture
+## 43. Acceptance scenarios
 
-The design is working only if these scenarios can be expressed without adding a new hard-coded form branch:
+The architecture is accepted only if these scenarios work without introducing a new hard-coded form branch for each case:
 
 1. Company Driver, Ontario, local-only.
 2. Company Driver, Ontario, cross-border U.S.
-3. Owner-Operator Driver, Ontario, cross-border U.S.
-4. Dispatcher who never drives.
-5. Dispatcher later authorized to operate a company vehicle.
-6. Mechanic who does not road-test.
-7. Mechanic who road-tests commercial vehicles.
-8. Safety employee handling cross-border compliance but not driving.
-9. Office Admin with no driving responsibility.
-10. Office Admin later authorized to use a company vehicle.
-11. One Person with Dispatcher + Safety roles.
-12. Temporary work authorization with expiry and admin-requested evidence.
-13. Applicant whose contact address differs from driver's-licence address.
-14. Existing Person gaining a new role without a duplicate Person record.
-15. Requirement definition changes after an older application was approved while old history remains intact.
-16. One evidence item validly satisfying requirement instances created by two active roles.
-17. Same requirement code across two versions preserving history while showing one current effective checklist item.
-18. Applicant answer creates provisional road-test scope, then admin rejects that scope and requirements recalculate without deleting history.
-19. Non-waivable regulatory requirement never exposes Waive.
-20. Evidence expires before Phase F notifications exist and the related operational gate becomes invalid.
+3. Individual Owner-Operator Driver with one Truck.
+4. Owner-Operator Driver providing Truck + Trailer.
+5. Owner-Operator business with 5 Trucks, multiple Trailers, and 3 Drivers.
+6. Business company documents verified once and reused for all affiliated Drivers where applicable.
+7. Each affiliated Driver remains independently qualified under Driver rules.
+8. Each Truck/Trailer remains independently approved under asset rules.
+9. Driver qualified but Truck inspection expired -> Driver capability remains true, assignment blocked.
+10. Truck approved but Driver licence expired -> Truck remains approved, assignment blocked.
+11. Business insurance expires -> business/assignment readiness fails, Driver qualifications remain intact.
+12. Company Driver converts to Owner-Operator without a duplicate Person.
+13. Owner-Operator converts to company_driver while historical business evidence remains.
+14. Dispatcher who never drives.
+15. Dispatcher later gains company-vehicle scope.
+16. Mechanic who never road-tests.
+17. Mechanic who gains road-test scope.
+18. Safety employee handles cross-border compliance but does not drive.
+19. Office Admin later authorized to operate a company vehicle.
+20. Person holds Dispatcher + Safety roles.
+21. Temporary work authorization expires and work-start gate updates.
+22. Applicant contact address differs from DL address.
+23. Applicant/admin changes scope mid-application and requirements re-evaluate without data loss.
+24. Requirement definition changes after approval while old history remains frozen.
+25. One valid evidence item satisfies multiple compatible requirement instances.
+26. FAST expires but is optional for the assigned lane -> cross-border eligibility follows actual policy rather than a hard-coded FAST rule.
+27. Owner-Operator business has approved Driver A and Driver B; Driver A can be paired with Truck 1 and Driver B with Truck 2 without copying company documents into either Person.
 
 ---
 
-## 37. Reference notes for rule authors
+## 44. Architecture anti-patterns
 
-These references ground future requirement-definition review; they are not substitutes for legal/compliance review before labeling a rule mandatory.
+Do not:
 
-- Ontario OHSA worker awareness guidance / O. Reg. 297/13: https://www.ontario.ca/document/guide-occupational-health-and-safety-act-requirements-basic-awareness-training/worker and https://www.ontario.ca/laws/regulation/130297
+1. build one copied form per role;
+2. model Owner-Operator as a replacement for Driver role;
+3. create a second Driver employment relationship enum alongside `driver_person_extensions`;
+4. use `Payee.worker_type` as if it were the Person role;
+5. put business name/HST/company insurance directly on Person as the canonical business model;
+6. put Truck VIN/bill of sale/inspection directly on Person;
+7. create a duplicate generic Equipment table over Truck/Trailer without a proven need;
+8. make FAST synonymous with U.S. admissibility;
+9. call every commercial medical requirement `USDOT medical`;
+10. bundle MVR with medical/drug testing;
+11. bundle SIN/PR/work permit/DL into `Government ID`;
+12. use one static `blocking` boolean;
+13. treat uploaded evidence as automatically verified;
+14. delete historical requirements/evidence on role/scope/relationship changes;
+15. let an asset failure erase a Person qualification;
+16. let a Person qualification failure erase a Business or asset approval;
+17. add `EMPLOYEE_OF_CONTRACTED_BUSINESS` or `DRIVER_FOR_OWNER_OPERATOR_COMPANY` before checking existing Payee/carrier relationships;
+18. scatter `if role == ...` logic throughout frontend/backend instead of central requirement evaluation.
+
+---
+
+## 45. Reference notes
+
+These references are architecture grounding only. Compliance/legal owners must confirm exact regulatory triggers before a requirement is labelled legally mandatory.
+
+- Ontario worker health/safety awareness: https://www.ontario.ca/document/guide-occupational-health-and-safety-act-requirements-basic-awareness-training/worker
+- Ontario O. Reg. 297/13: https://www.ontario.ca/laws/regulation/130297
 - CRA TD1 Ontario: https://www.canada.ca/en/revenue-agency/services/forms-publications/td1-personal-tax-credits-returns/td1-forms-pay-received-on-january-1-later/td1on.html
-- Service Canada temporary-resident SIN guidance: https://www.canada.ca/en/employment-social-development/services/sin/temporary-residents.html
-- IRCC maintained-status/work-permit extension guidance: https://www.canada.ca/en/immigration-refugees-citizenship/services/work-canada/extend/expired-permit.html
+- Service Canada temporary-resident SIN: https://www.canada.ca/en/employment-social-development/services/sin/temporary-residents.html
+- IRCC work-permit extension/maintained status: https://www.canada.ca/en/immigration-refugees-citizenship/services/work-canada/extend/expired-permit.html
 - FMCSA U.S./Canada CDL reciprocity: https://www.fmcsa.dot.gov/international-programs/reciprocity-and-recognition-united-states-and-canadian-commercial-drivers
-- FMCSA Canadian cross-border medical qualification guidance: https://www.fmcsa.dot.gov/international-programs/medical-qualification-requirements
+- FMCSA Canadian cross-border medical qualification: https://www.fmcsa.dot.gov/international-programs/medical-qualification-requirements
 - CBSA FAST: https://www.cbsa-asfc.gc.ca/prog/fast-expres/menu-eng.html
 
-Note: external U.S. references may use terms such as DOT/USDOT medical. TruckERP's generic requirement code remains `COMMERCIAL_DRIVER_MEDICAL_QUALIFICATION` unless a truly U.S.-specific requirement is intentionally modeled.
+`USDOT medical` is intentionally **not** the generic TruckERP requirement code. Use `COMMERCIAL_DRIVER_MEDICAL_QUALIFICATION` and let jurisdiction/rule definitions specify required evidence.
 
 ---
 
-## 38. Locked architecture summary
+## 46. Locked architecture summary
 
 ```text
 ONE ONBOARDING ENGINE
 
 Person/common data
-  + Role(s)
+  + PersonRole(s)
   + Work scope(s)
   + Jurisdiction(s)
-  + Employment/business relationship
-  + Policy profile/version
+  + Driver employment relationship (existing DriverPersonExtension)
+  + Policy profile
+  + linked Business/Payee context where applicable
+  + linked Truck/Trailer assets where applicable
         |
         v
-Explicit DNF applicability evaluation
-        |
-        v
-Requirement instances (frozen/versioned)
+Requirement evaluation (DNF)
         |
         +-> questions/data
         +-> acknowledgements
         +-> admin-requestable evidence
-        +-> evidence satisfaction links
+        +-> documents/credentials
         +-> verification
-        +-> expiry
-        +-> waiver where lawful/allowed
+        +-> expiry/renewal
         |
         v
-Gate dependency engine
+Independent readiness axes
         |
-        +-> Person approved
-        +-> Work authorized
-        +-> Work-start ready
-        +-> Company-vehicle eligible
-        +-> Commercial-driver eligible
-        +-> Dispatch eligible
-        +-> Cross-border eligible
-        +-> Safety-sensitive cleared
+        +-> Person capability
+        +-> Business/relationship readiness
+        +-> Truck/Trailer readiness
+        |
+        v
+Assignment/trip evaluation
+        |
+        +-> Driver + Business + Truck + Trailer + Trip scope
+        +-> ASSIGNMENT_READY
 ```
 
-The goal is not to make every role use the Driver form. The goal is to make every person use the same onboarding **engine**, with explicit, versioned, auditable requirements selected by role, scope, jurisdiction, relationship, policy, and lifecycle stage.
+For Owner-Operator specifically:
+
+```text
+Role = DRIVER                          # always Driver rules
+Driver relationship = owner_operator  # existing extension concept
+Pay classification = existing Payee/WorkerType mapping
+Business/carrier context = shared company-level requirements
+Truck/Trailer = existing physical asset records
+Owner-Operator workflow = Driver requirements + additive business/equipment/contract requirements
+```
+
+The goal is not to make every role use the Driver form. The goal is one onboarding **engine** whose rules compose correctly across People, roles, relationships, businesses, assets, jurisdictions, and operational scope without duplicating existing TruckERP domains.
