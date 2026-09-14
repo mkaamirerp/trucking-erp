@@ -2,7 +2,7 @@
 
 **Status:** Discussion/design lock candidate — not implementation-complete, not Gold.
 
-**Purpose:** Define the Fuel / Fuel-Card module before implementation. This document captures the agreed business workflow, BVD PDF contract, provider/API boundary, owner-operator charging rules, truck ownership relationships, reconciliation gates, and payroll/settlement handoff.
+**Purpose:** Define the Fuel / Fuel-Card module before implementation. This document captures the agreed business workflow, provider PDF contracts, provider/API boundary, owner-operator charging rules, truck ownership relationships, reconciliation gates, and payroll/settlement handoff.
 
 ---
 
@@ -10,7 +10,7 @@
 
 A fuel-card provider transaction is **not automatically a fuel expense**.
 
-The provider (BVD first, future providers later) is the payment source. Each transaction must preserve the provider's original facts and then be classified/routed by TruckERP.
+The provider is the payment source. Each transaction must preserve the provider's original facts and then be classified/routed by TruckERP.
 
 Examples include:
 
@@ -39,1063 +39,662 @@ TruckERP supports three Fuel/Card entry paths:
 
 All three paths must converge on the same canonical transaction model and downstream financial rules.
 
-### 2.1 API
-
-Provider API values are authoritative raw provider facts. TruckERP must not rewrite provider amounts, dates, unit numbers, or provider transaction identifiers.
-
-The strictness is in **how TruckERP handles and posts the API data**:
-
-- freeze the raw payload
-- idempotency / duplicate protection
-- normalize formats without changing meaning
-- resolve truck historically
-- resolve owner/payee historically
-- apply the correct effective fuel agreement
-- only then make the transaction settlement-eligible
-
-### 2.2 Digital PDF
-
-The PDF path is higher risk because the document must be parsed. Parser output is **evidence, not authorization to move money**.
-
-The PDF path therefore requires human review plus automated reconciliation gates before posting.
-
-### 2.3 Manual driver entry
-
-Manual entry is driver-level input but still enters the same canonical transaction workflow. Driver identity should normally come from the logged-in user, and the assigned truck should default where possible.
-
-Manual entry should be simple for the driver and not expose accounting complexity.
-
 ---
 
-## 3. Front end, backend, and admin boundary
+## 3. Provider architecture
 
-The module has three major surfaces.
+TruckERP must support many fuel-card providers. BVD and Nationwide are the first real provider contracts, but the module must not be hard-coded around either one.
 
-### 3.1 Fuel/Card operations front end
-
-Operational routes should be separate from Admin integration settings, for example:
+Architecture:
 
 ```text
-/fuel
-/fuel/transactions
-/fuel/imports
-/fuel/review
+Provider-specific API / PDF
+        ↓
+Provider adapter/profile
+        ↓
+Canonical TruckERP Fuel/Card transaction model
+        ↓
+Shared reconciliation + ownership + settlement gates
 ```
 
-The working area shows transactions, imports, reconciliation/review status, filters, truck/unit grouping, provider, source, owner-operator/payee, and posting state.
+Provider-specific facts must be preserved, but common business fields must hydrate into one uniform TruckERP schema.
 
-### 3.2 Backend
-
-The backend owns:
-
-- canonical transaction schema
-- provider import batches
-- provider adapters
-- PDF parser profile integration
-- normalization
-- duplicate detection
-- historical truck resolution
-- ownership/payee resolution
-- financial responsibility routing
-- owner-operator pricing calculations
-- reconciliation gates
-- settlement eligibility
-- audit trail
-
-### 3.3 Admin integration settings
-
-The existing `/admin/integrations/fuel` route is the correct place for provider configuration.
-
-Admin should configure:
-
-- provider
-- enabled/disabled
-- connection type
-- base/API endpoint
-- account/client identifier
-- API credential references
-- environment
-- automatic sync
-- sync frequency
-- last sync/result
-- test connection
-
-Credentials must remain server-side. The browser must not receive stored API secrets after save.
-
-TruckERP should be multi-provider from day one even if BVD is the first provider.
+If a provider does not supply a field, the field remains null/blank. Do not create separate core schemas for BVD vs Nationwide.
 
 ---
 
-## 4. BVD PDF is the first real provider contract
+## 4. BVD first production contract
 
-The BVD digital PDF defines the first concrete statement layout.
+BVD is the first-class Canadian provider contract for initial implementation.
 
-The parser must preserve the provider fields as printed rather than replacing them with generic names that lose provider meaning.
+### 4.1 BVD invoice/header fields
 
-### 4.1 BVD statement/import header
+Extract:
 
-At import-batch level capture at least:
+- Provider
+- Invoice number
+- Invoice date
+- Invoice start date
+- Invoice end date
+- Due date
+- Client/customer information
 
-- provider
-- invoice number
-- invoice date
-- statement start date
-- statement end date
-- due date when present
-- client/account identity
-- source file
-- source type (`PDF`)
-- import/review/reconciliation status
-- provider control totals
-- created/imported/reviewed metadata
+### 4.2 BVD transaction fields
 
-### 4.2 BVD transaction row fields
+The BVD transaction table contains:
 
-Preserve the BVD transaction layout:
+- Card number
+- Auth code
+- Driver name
+- Unit number
+- Transaction date/time
+- Site number
+- Site name
+- Site city
+- Province/state
+- Product code
+- Quantity
+- Retail price
+- Billed price
+- Pre-tax amount
+- HST
+- GST
+- PST
+- QST
+- Discount rate
+- Discount amount
+- Final amount
+- Currency
+
+These provider values are preserved exactly as source facts.
+
+### 4.3 BVD control totals
+
+BVD subtotal/card/product/grand-total rows are control rows, not transactions.
+
+The parser must keep these separate from transaction rows and use them for reconciliation.
+
+---
+
+## 5. Nationwide Fuel provider contract
+
+Nationwide is the second real provider contract and has a materially different PDF layout from BVD.
+
+### 5.1 Nationwide transaction-table columns
+
+For normal transaction rows, Nationwide shows:
+
+- Account Code
+- Card Number
+- Unit #
+- Date
+- City
+- Pr/St
+- Product
+- Volume
+- Ex-GST ($/U)
+- Total
+- Network
+- Currency
+- USA Discount
+- Missed Disc
+- OON Fees
+
+The canonical TruckERP name for `Ex-GST ($/U)` should be neutral, such as **Provider Unit Price**, because its meaning depends on jurisdiction:
+
+- **US transaction:** final gallon price; no GST/HST on US fuel
+- **Canadian transaction:** ex-tax unit price; applicable Canadian taxes are carried separately
+
+### 5.2 Nationwide card number + unit number
+
+For Nationwide, the provider-side card/truck relationship is identified by the combination of:
 
 ```text
-Auth Code
-Driver Name
+provider + account + card number + unit number
+```
+
+Preserve both `card_number_snapshot` and `unit_number_snapshot` permanently, even if a card or truck assignment changes later.
+
+For transaction-level identity/deduplication, use additional fields such as transaction date/time, product and amount, or provider transaction ID when available.
+
+### 5.3 Nationwide row types — CRITICAL
+
+Nationwide is a structured digital table, but **the meaning of the cell positions changes by row type**.
+
+The parser must first classify the row before interpreting cells.
+
+Supported row types:
+
+```text
+TRANSACTION
+CARD_TOTAL
+INVOICE_SUMMARY
+```
+
+#### TRANSACTION row
+
+Use the normal transaction headings:
+
+```text
+Card Number
 Unit #
-Date / Time
-Site #
-Site Name
-Site City
-Prov/ST
-Prod
-QTY
-Retail
-Billed
-Pre Tax AMT
-HST
-GST
-PST
-QST
-Disc Rate
-Disc AMT
-Final AMT
-CUR
+Date
+City
+Pr/St
+Product
+Volume
+Provider Unit Price
+Total
+Network
+Currency
+USA Discount
+Missed Disc
+OON Fees
 ```
 
-These are provider facts and must remain traceable exactly as received/parsed.
+#### CARD_TOTAL row
 
-### 4.3 BVD product codes
-
-Preserve the provider product code exactly and separately derive TruckERP classification.
-
-Known BVD legend from the reviewed sample:
+A line such as:
 
 ```text
-TF = Trailer
-TA = Tractor
-DF = DEF
-S  = Scale
-C  = Cash
-AD = Additive
-O  = Oil
-L  = Lubricant
+XXXXX87115 Total
 ```
 
-Do not replace the raw provider product code with a generic category.
+is **not a transaction**.
 
-Example:
+It is a reconciliation/control row.
 
-```text
-product_code = "TA"            # provider fact
-transaction_type = "FUEL"      # TruckERP derived classification
-```
-
----
-
-## 5. Canonical schema direction
-
-Use two primary layers.
-
-### 5.1 `fuel_card_import_batches`
-
-Represents the provider invoice/statement/import.
-
-Candidate fields:
-
-```text
-id
-provider_id
-provider_code
-source_type                 API | PDF | MANUAL
-invoice_number
-invoice_date
-statement_start_date
-statement_end_date
-due_date
-provider_account_ref
-source_document_key
-raw_payload_hash            API path when applicable
-provider_total
-validated_total
-currency
-status
-uploaded_by
-reviewed_by
-reviewed_at
-processed_at
-finalized_at
-created_at
-updated_at
-```
-
-### 5.2 `fuel_card_transactions`
-
-Provider facts:
-
-```text
-id
-import_batch_id
-provider_id
-provider_transaction_id
-auth_code
-card_reference
-transaction_datetime
-driver_name_snapshot
-unit_number_snapshot
-site_number
-site_name
-site_city
-province_state
-country
-product_code
-quantity
-unit_of_measure
-retail_price
-billed_price
-pre_tax_amount
-hst_amount
-gst_amount
-pst_amount
-qst_amount
-discount_rate
-discount_amount
-final_amount
-currency
-raw_description
-```
-
-TruckERP-derived fields must be separate from provider facts:
-
-```text
-transaction_type
-truck_id                    nullable until resolved
-driver_id                   nullable until resolved
-owner_operator_payee_id     nullable until resolved
-trip_id                     nullable
-financial_responsibility
-pricing_agreement_id        nullable
-settlement_id               nullable
-match_status
-review_status
-source_reconciled
-transaction_validated
-truck_resolved
-ownership_resolved
-pricing_validated
-settlement_eligible
-posted
-```
-
-The original provider facts remain immutable after finalization. Corrections after posting require an audited adjustment/reversal, not silent mutation.
-
----
-
-## 6. BVD PDF review workflow
-
-Admin may upload one PDF or many PDFs, including PDFs from more than one provider.
-
-After upload, parsing can be started for the queue.
-
-### 6.1 Review workspace
-
-Use a side-by-side review workflow:
-
-```text
-LEFT:  Original PDF
-RIGHT: TruckERP parsed fields / transaction rows
-```
-
-The right side should mirror the provider layout as closely as practical, with the BVD view grouped operationally by **Truck Unit #**.
-
-Admin reviews the current PDF, corrects staging values when necessary, then clicks:
-
-```text
-Save & Next
-```
-
-That action:
-
-- saves the reviewed staging data
-- marks that document reviewed
-- automatically advances to the next PDF on the left
-- automatically loads the next parsed provider window on the right
-
-Repeat until the queue is complete.
-
-### 6.2 Process after all PDFs are reviewed
-
-When the review queue is finished, the admin clicks:
-
-```text
-Process
-```
-
-TruckERP then runs the reconciliation and financial gates behind the scenes.
-
-### 6.3 Summary
-
-After processing, show a final summary containing:
-
-- files reviewed
-- provider(s)
-- transaction count
-- truck/unit totals
-- other expense totals
-- unmatched/review-required items
-- duplicates
-- provider total
-- validated total
-- difference
-- gate failures if any
-
-If every required gate passes, admin confirms/finalizes and the review window closes.
-
-Human review is a gate, but it does not replace automated financial validation.
-
----
-
-## 7. BVD front-end layout rule: group by Truck Unit #
-
-The BVD operational review should preserve the provider row layout but group transaction rows by `Unit #`.
-
-Example concept:
-
-```text
-UNIT 1100
-  Auth | Driver | Date/Time | Site | Prod | QTY | Retail | Billed |
-  Pre Tax | HST | GST | PST | QST | Disc Rate | Disc Amt | Final | CUR
-
-  ...transactions...
-
-  UNIT TOTAL
-
-UNIT 1104
-  ...transactions...
-
-  UNIT TOTAL
-```
-
-The provider statement facts stay intact while TruckERP adds relational context separately.
-
----
-
-## 8. Truck identity and unit-number history
-
-`unit_number` is not the permanent identity of a truck.
-
-Use an immutable internal `truck_id`.
-
-Example:
-
-```text
-truck_id = 842
-unit_number = 1100
-```
-
-Fuel/Card transactions must preserve:
-
-```text
-unit_number_snapshot = "1100"
-truck_id = 842
-```
-
-If the physical truck is later renumbered, old transactions still show the original provider unit number.
-
-### 8.1 Unit-number history
-
-TruckERP needs effective-dated unit-number history, conceptually:
-
-```text
-truck_id
-unit_number
-effective_from
-effective_to
-reason
-changed_by
-```
-
-Historical provider matching uses **transaction date/time + unit-number history**, not the truck's current unit number.
-
-### 8.2 Renumbering vs replacing a truck
-
-- Same physical truck, new unit number -> same `truck_id`, new unit-number history row.
-- Different physical truck replacing the old truck -> new `truck_id`.
-
-Do not convert one physical asset into another by simply changing VIN/unit fields.
-
----
-
-## 9. Truck ownership must be explicit
-
-When adding a truck, TruckERP must identify ownership/relationship, for example:
-
-```text
-Company owned
-Owner-operator owned
-Leased / other supported relationship
-```
-
-If owner-operator owned, select the owning O/O business/payee.
-
-A single O/O may have one truck today and five trucks later.
-
-The financial model therefore cannot assume:
-
-```text
-one owner-operator = one driver = one truck
-```
-
-The durable relationship is closer to:
-
-```text
-OWNER-OPERATOR BUSINESS / PAYEE
-  -> Truck 1100
-  -> Truck 1104
-  -> Truck 1120
-  -> ...
-```
-
-Settlement is with the O/O/payee while transaction detail remains broken down by truck/unit and driver.
-
----
-
-## 10. Owner-operator fuel pricing agreement
-
-The current boolean `participates_in_fuel_discount_program` is not sufficient by itself.
-
-For an owner-operator participating in the fuel program, TruckERP needs a pricing rule.
-
-Supported methods:
-
-```text
-PUMP_PRICE
-FULL_PROVIDER_DISCOUNT
-FIXED_CENTS_DISCOUNT
-PERCENT_OF_PROVIDER_DISCOUNT
-```
-
-Example:
-
-```text
-Pump price:                 $3.00
-Provider/company discount:  $0.25
-Company net cost:           $2.75
-O/O allowed discount:       $0.05
-O/O charge price:           $2.95
-```
-
-For percentage mode, the percentage applies to the **provider discount**, not the pump price.
-
-Example:
-
-```text
-provider discount = $0.25
-O/O receives 20% of discount = $0.05
-O/O price = $3.00 - $0.05 = $2.95
-```
-
-Unless explicitly allowed by future policy, the O/O discount should not exceed the provider discount.
-
-### 10.1 Company driver rule
-
-For a company driver, the O/O fuel charge/pricing fields are disabled/not applicable.
-
-```text
-employment_relationship_type = company_driver
--> no O/O fuel pricing rule
-```
-
-### 10.2 Workflow ownership
-
-Small-company/combined onboarding mode:
-
-- reviewer/admin may configure the compensation/fuel rule during review
-
-Large-company/segmented onboarding mode:
-
-- hiring manager approves the applicant
-- application moves to downstream HR/Payroll/Compensation setup
-- downstream authorized staff configure the fuel pricing agreement
-- final onboarding waits for required downstream setup
-
-Do not hard-code this to a literal HR job title. Use permission/capability ownership.
-
-### 10.3 Agreement belongs financially to O/O/payee
-
-Even if the rule is initially configured during person onboarding, the durable financial agreement belongs to the O/O/payee/business relationship so that one O/O with multiple trucks can be settled correctly.
-
-The agreement should be effective-dated because historical transactions must use the rule in effect on the transaction date.
-
----
-
-## 11. Financial responsibility rules
-
-Classification and financial responsibility are separate concepts.
-
-Every provider transaction must have a financial destination before final posting.
-
-Candidate responsibility types:
-
-```text
-COMPANY
-OWNER_OPERATOR
-DRIVER
-LOAD_DISPATCH
-OTHER_REVIEWED
-```
-
-### 11.1 Fuel
-
-- Company truck/company driver -> company expense, no driver fuel deduction.
-- O/O truck -> O/O charge according to effective O/O fuel agreement.
-
-### 11.2 DEF / coolant / oil / additive / truck products
-
-Company truck/company driver:
-
-```text
-Provider expense -> Company expense
-Driver deduction -> $0
-```
-
-The employee may legitimately buy coolant or another truck product for the company's equipment.
-
-O/O truck:
-
-```text
-Provider expense -> carrier/provider payable
-O/O settlement deduction -> full applicable amount unless another explicit contract rule exists
-```
-
-The O/O deduction must preserve:
-
-- O/O/payee
-- unit number
-- truck
-- driver name
-- transaction date/time
-- provider
-- auth/provider transaction ID
-- site/location
-- product
-- amount/currency
-- source document/API reference
-
-### 11.3 Cash advance
-
-Cash advance is person/payee financial responsibility rather than a normal truck operating expense.
-
-- Company driver -> driver receivable / authorized payroll deduction
-- O/O -> O/O/payee settlement deduction
-
-### 11.4 Lumper
-
-Fuel/Card may ingest/classify a lumper transaction, but this module does not own final load association or broker reimbursement workflow.
-
-Dispatch/Load owns:
-
-- receipt upload/review
-- load association
-- broker reimbursement/accessorial
-- receivable lifecycle
-
-Do not auto-attach a lumper to a load merely because the driver had an active trip. Multi-load/multi-stop cases require Dispatch review unless an unambiguous rule is later established.
-
-### 11.5 Toll
-
-A provider-card toll transaction can be classified here, but downstream Toll/settlement policy determines financial treatment.
-
----
-
-## 12. Reconciliation principle: this is money
-
-The system must use multiple strict gates. A parser match or grand-total match alone is not enough.
-
-**Parser output is not posting authority.**
-
-A transaction cannot become payroll/settlement-eligible merely because it was parsed successfully.
-
----
-
-## 13. PDF-specific gate chain
-
-Recommended high-level flow:
-
-```text
-DIGITAL PROVIDER PDF
-    -> document validation
-    -> provider parser
-    -> parsed staging
-    -> human review
-    -> source reconciliation
-    -> transaction validation
-    -> truck resolution
-    -> ownership/payee resolution
-    -> financial responsibility
-    -> O/O pricing validation when applicable
-    -> settlement eligibility
-    -> final posting
-```
-
-### Gate 1 — Document identity
-
-Validate the expected provider/document format and capture provider/invoice/period metadata.
-
-### Gate 2 — Parser completeness
-
-Critical fields cannot silently disappear.
-
-For BVD fuel/card rows, critical identity/financial fields include at minimum:
-
-- auth/provider transaction identity when present
-- transaction date/time
-- unit number when present
-- product
-- quantity when applicable
-- final amount
-- currency
-
-Missing/ambiguous critical fields force review.
-
-### Gate 3 — Row integrity
-
-Where enough fields exist, recompute/check row arithmetic and make sure values from one row did not shift into another row.
-
-### Gate 4 — Date + unit integrity
-
-Transaction date/time and unit number must remain attached to the exact provider row.
-
-A parser can produce the correct grand total and still be wrong if it swaps truck amounts or dates.
-
-### Gate 5 — Unit reconciliation
-
-For each unit represented in the source, the complete set of parsed rows assigned to that unit must reconcile to the source unit-level facts/control totals where the provider exposes them or where they can be deterministically derived from the source rows.
-
-### Gate 6 — Card/product/subtotal reconciliation
-
-Where BVD/provider supplies card totals, product totals, or subtotals, reconcile against them.
-
-### Gate 7 — Provider grand total
-
-All source transaction rows must reconcile exactly to the provider's statement/invoice control total, subject only to explicit decimal-rounding policy.
-
-### Gate 8 — Exact accounting of every provider line
-
-Every source transaction must be accounted for exactly once:
-
-```text
-no missing transaction
-no duplicated transaction
-```
-
-A total can still match when one same-value transaction is duplicated and another is missing; therefore line-level identity is mandatory.
-
-### Gate 9 — Truck resolution
-
-Resolve:
-
-```text
-transaction_datetime
-+ unit_number_snapshot
--> effective unit-number history
--> unique truck_id
-```
-
-If no unique truck can be proven, stop.
-
-### Gate 10 — Ownership/payee resolution
-
-Using the transaction date/time, determine whether that truck belonged to:
-
-- company
-- a specific O/O/payee
-
-Do not use current ownership for historical transactions.
-
-Missing/overlapping/ambiguous ownership stops posting.
-
-### Gate 11 — Financial responsibility
-
-Every transaction must route to exactly one recognized financial destination before finalization.
-
-### Gate 12 — O/O pricing
-
-For eligible O/O fuel transactions:
-
-- find the effective pricing agreement on transaction date
-- calculate the O/O charge
-- preserve provider amount separately
-- validate calculation
-
-Provider amount and O/O settlement amount are different financial facts and must never be conflated.
-
-### Gate 13 — Settlement eligibility
-
-Only transactions that pass every required gate become settlement-eligible.
-
----
-
-## 14. Provider total and validated total hard rule
-
-The final batch must prove:
-
-```text
-ALL TRUCK-RELATED TRANSACTIONS
-+ ALL OTHER CLASSIFIED EXPENSE TRANSACTIONS
-= PROVIDER TOTAL
-```
-
-and:
-
-```text
-PROVIDER TOTAL
-= VALIDATED TOTAL
-```
+The same horizontal positions no longer have the normal transaction meanings. On Canadian card-total rows, Nationwide may place fields such as GST and QST in positions that visually sit under normal transaction columns such as Date/City.
 
 Therefore:
 
+> Never interpret Nationwide total rows using the transaction column names just because values appear under those visual positions.
+
+First detect `CARD_TOTAL`, then apply the card-total schema.
+
+A card-total row may contain:
+
+- Card number
+- Unit number/group context
+- GST total where applicable
+- QST total where applicable
+- Volume total
+- Amount total
+- USA Discount total
+- Missed Discount total
+- Other provider control totals where present
+
+### 5.4 Nationwide grouped transaction pattern
+
+A Nationwide card block may contain many transaction rows, including different products, followed by one card-total row.
+
+Example pattern:
+
 ```text
-Provider Total - Validated Total = 0.00
+DIESEL
+SCALE
+DIESEL
+DEF PUMP
+...
+CARD TOTAL
 ```
 
-No provider line may disappear merely because it is not fuel.
+The parser must consume all detail rows in the card/unit group and then store the yellow/`Total` line separately as the group control total.
 
-Truck-related and other transactions must together account for the entire provider source.
+Do not create a transaction from the total row.
 
-Examples of "other" routed transactions include:
+### 5.5 Nationwide multiple products
 
-- scale
-- cash advance
-- lumper
-- parking
-- toll
-- product purchase
-- repair/service
-- reviewed other
+The same card/unit can have multiple products in the same statement period, including examples such as:
 
-If the totals do not reconcile, finalization is blocked.
+- DIESEL
+- DEF PUMP
+- SCALE
+- REEFER
+
+The product value must remain attached to the exact source row.
+
+### 5.6 Nationwide CAD and USD reconciliation
+
+Nationwide can contain Canadian and US transactions on the same invoice.
+
+Reconcile currencies independently:
+
+```text
+CAD transactions = CAD provider total = CAD validated total
+USD transactions = USD provider total = USD validated total
+```
+
+Never combine CAD and USD into one provider total before any downstream accounting conversion.
+
+### 5.7 Nationwide printed totals vs displayed row arithmetic
+
+Nationwide may print card/invoice control totals that differ by a cent or two from the simple sum of displayed rounded row amounts because of provider precision/rounding.
+
+Preserve separately:
+
+- Provider row amounts
+- Provider card subtotal
+- Provider invoice total
+- Calculated detail-row sum
+- Variance
+
+The provider-declared control total is an authoritative source fact. The reconciliation engine must distinguish an accounted-for provider rounding variance from a genuine unexplained mismatch.
+
+Do not silently alter any source transaction amount to force equality.
+
+### 5.8 Nationwide CSV note
+
+Nationwide invoices may state that an attached CSV contains further transactional detail.
+
+Future implementation may support PDF + CSV together, but the PDF path must remain independently reviewable and reconcilable.
 
 ---
 
-## 15. Transaction date/time is authoritative for historical relationships
+## 6. Digital PDF parsing policy
 
-Do not use invoice date as a substitute for transaction date.
+For a valid digital PDF with usable embedded text/table structure:
 
-Maintain distinct timestamps:
+1. Read the embedded PDF text/table structure first.
+2. Do not use OCR as the primary path.
+3. Preserve row boundaries and provider table structure.
+4. Map known provider fields into strict JSON.
+5. Use AI only as a constrained structured-extraction/helper layer where needed; AI must not freely associate values from unrelated rows.
+6. Use OCR only when the document is scanned/image-only or lacks usable embedded text.
 
-```text
-transaction_datetime   # when the purchase happened
-invoice_date           # provider statement/invoice date
-imported_at             # when TruckERP received it
-posted_at               # downstream posting timestamp
-settled_at              # settlement timestamp when applicable
-```
-
-The transaction date/time determines:
-
-- unit-number history lookup
-- physical truck identity
-- historical ownership/payee
-- effective O/O fuel agreement
-- settlement-period eligibility
-- driver/trip matching where applicable
-
-A single provider invoice may contain transactions from different dates that belong to different settlement periods.
+Parser output is evidence, not authority to move money.
 
 ---
 
-## 16. Settlement/payroll bridge
+## 7. Uniform canonical transaction fields
 
-The Fuel/Card module does not hand payroll one invoice total.
+TruckERP uses one canonical transaction shape across providers.
 
-It hands settlement/payroll the exact set of validated, eligible individual transactions for the correct payee and settlement period.
+Common fields include:
 
-For an O/O with multiple trucks, the settlement must provide a breakdown by unit and allow drill-down to individual provider transactions.
+- Provider
+- Account code
+- Card number
+- Auth/provider transaction code
+- Driver name snapshot
+- Unit number snapshot
+- Transaction date/time
+- Site number
+- Site name
+- City
+- Province/state
+- Country
+- Product code
+- Product description
+- Quantity
+- Quantity unit (litres/gallons/etc.)
+- Provider unit price
+- Retail price
+- Billed price
+- Pre-tax amount
+- HST
+- GST
+- PST
+- QST
+- Provider discount rate
+- Provider discount amount
+- Missed discount amount
+- Out-of-network fee
+- Transaction total/final amount
+- Currency
+- Network
+
+Provider-specific fields remain nullable when not supplied.
+
+Do not remove fields from the canonical schema simply because one provider does not use them.
+
+---
+
+## 8. Provider facts vs TruckERP resolution
+
+Keep provider facts separate from TruckERP-derived relationships.
+
+### Provider/source facts — immutable after final review
+
+Examples:
+
+- card number snapshot
+- unit number snapshot
+- transaction date/time
+- driver name snapshot
+- product
+- quantity
+- provider prices
+- taxes
+- discounts
+- total
+- currency
+- provider control totals
+
+### TruckERP resolution fields
+
+Resolved after parsing/review:
+
+- truck_id
+- driver_id
+- owner_operator_payee_id
+- transaction classification
+- financial responsibility
+- pricing agreement
+- settlement link
+- gate statuses
+
+The parser must never populate ownership/payee/settlement fields by guessing.
+
+---
+
+## 9. Admin PDF review workflow
+
+Admin can upload one or many PDFs, including multiple providers.
+
+Workflow:
+
+```text
+Upload PDFs
+    ↓
+Parse
+    ↓
+Review queue
+    ↓
+LEFT: original PDF
+RIGHT: parsed TruckERP window
+    ↓
+Save & Next
+    ↓
+Automatically load next PDF + next parsed record
+    ↓
+Repeat until all reviewed
+    ↓
+Process
+    ↓
+Backend gates/reconciliation
+    ↓
+Summary
+    ↓
+Admin reviews
+    ↓
+Finalize / OK
+    ↓
+Window closes
+```
+
+`Save & Next` means the admin reviewed the PDF against parsed values. It is not financial posting.
+
+The admin review view should expose the full provider record needed for reconciliation and audit.
+
+---
+
+## 10. O/O portal view
+
+The owner-operator portal should show a reduced, understandable subset rather than every provider/audit field.
+
+Typical O/O-facing transaction fields:
+
+- Date/time
+- Unit number
+- Driver
+- Location/station
+- Product
+- Quantity
+- Price charged to O/O
+- Total deduction
+- Currency
+
+Every O/O deduction must remain traceable back to the exact provider transaction, unit, driver, date/time, product, location and source document/API record.
+
+---
+
+## 11. Truck identity and unit-number history
+
+Never use the unit number as the permanent identity of a truck.
+
+Use a permanent `truck_id` plus an effective-dated unit-number history.
+
+Historical provider records keep the source `unit_number_snapshot` exactly as reported.
+
+When resolving a historical transaction:
+
+```text
+provider unit number + transaction date/time
+    ↓
+unit-number history
+    ↓
+truck_id
+```
+
+If a unit cannot be uniquely resolved for that date, stop and require review.
+
+Renumbering the same physical truck keeps the same `truck_id`.
+
+Replacing the physical truck creates a new `truck_id`.
+
+---
+
+## 12. Truck ownership / owner-operator relationship
+
+When a truck is added, ownership must be explicit:
+
+- Company-owned
+- Owner-operator-owned
+- Leased / supported future relationship
+
+For owner-operator-owned equipment, link the truck to the correct owner-operator/payee.
+
+Ownership must be effective-dated so historical transactions resolve to the owner/payee that applied on the transaction date, not today's owner.
+
+---
+
+## 13. Owner-operator fuel pricing agreement
+
+For company drivers, the O/O fuel charge configuration is disabled/not applicable.
+
+For owner-operators participating in the company fuel program, support pricing methods such as:
+
+- Pump price
+- Full provider/company discount
+- Fixed cents per litre/gallon
+- Percentage of provider discount
+
+The fuel agreement belongs to the O/O/payee compensation/settlement relationship and should be effective-dated.
+
+In segmented onboarding, hiring managers do not decide monetary fuel rules. HR/Payroll/Compensation completes that downstream setup. In combined mode, authorized admin/owner users may complete it during review.
+
+---
+
+## 14. Financial responsibility by transaction type
+
+Classification and financial responsibility are separate concepts.
+
+Examples:
+
+### Company truck / company driver
+
+- Fuel → company expense
+- DEF → company expense
+- Coolant/oil/additive/product → company expense; no driver deduction
+- Cash advance → driver receivable/payroll deduction, subject to policy
+
+### Owner-operator truck
+
+- Fuel → O/O fuel charge according to pricing agreement
+- DEF → O/O deduction
+- Coolant/oil/additive/product → O/O deduction
+- Repair/service → normally O/O deduction, subject to contract/rule
+- Cash advance → O/O/payee deduction unless explicitly driver-specific under company policy
+
+Every financial posting retains unit number, driver context and provider transaction detail.
+
+---
+
+## 15. Lumper boundary
+
+Fuel/Card may ingest/classify a lumper transaction, but Fuel/Card does not own final load association or reimbursement workflow.
+
+Dispatch/Load owns:
+
+- driver receipt upload
+- receipt review
+- load association
+- broker reimbursement/accessorial
+- receivable status
+
+Do not auto-attach a lumper merely because the driver had an active trip. Multi-load/multi-stop cases require Dispatch review unless the match is unambiguous under future explicit rules.
+
+---
+
+## 16. Strict reconciliation gates
+
+This is a money-moving module. Parser output alone is never sufficient for posting.
+
+### Source reconciliation rule
+
+Every provider line must be accounted for exactly once.
+
+```text
+All truck transactions
++ all other classified transactions
++ accounted provider rounding variance where explicitly allowed
+= Provider control total
+= Validated total
+```
+
+Required conditions:
+
+- no missing transactions
+- no duplicate transactions
+- no unexplained variance
+- no unresolved currency mixing
+
+### Multiple gates
+
+Before a transaction becomes settlement-eligible, it must pass the applicable gates:
+
+1. Document/source validity
+2. Parser completeness
+3. Row-type correctness
+4. Row/source integrity
+5. Provider card/subtotal reconciliation
+6. Provider invoice/currency total reconciliation
+7. Duplicate/idempotency check
+8. Truck resolution using transaction date/time
+9. Ownership/payee resolution using transaction date/time
+10. Pricing agreement validation using transaction date/time
+11. Financial-responsibility resolution
+12. Settlement eligibility
+
+If any required money gate is `FAIL` or `REVIEW`, do not post.
+
+---
+
+## 17. API path
+
+Provider API data is treated as authoritative raw provider input.
+
+TruckERP must not rewrite provider amounts, dates, unit numbers or transaction IDs to make them fit internal records.
+
+API controls still include:
+
+- immutable raw payload
+- provider transaction uniqueness/idempotency
+- strict normalization
+- historical truck resolution
+- historical ownership/payee resolution
+- pricing-rule validation
+- settlement posting gate
+
+API simplicity does not remove downstream financial gates.
+
+---
+
+## 18. Settlement/payroll handoff
+
+The whole provider invoice does not necessarily equal one O/O's settlement deduction.
+
+Settlement uses the exact eligible transaction set for:
+
+- the correct owner/payee
+- the correct truck(s)
+- the correct transaction dates
+- the correct pricing agreement
+- the correct settlement period
+
+Multi-truck O/O settlements must provide breakdown by truck and drill-down to transaction detail.
 
 Example:
 
 ```text
 ABC Transport
 
-Unit 1100      $1,200.10
-Unit 1104      $1,580.32
-Unit 1120      $1,506.00
-              ---------
-Fuel/Card deduction total = $4,286.42
+Unit 1100    ...
+Unit 1104    ...
+Unit 1120    ...
+-------------
+Fuel/Card deduction total
 ```
 
-Each unit must drill down to transaction details including driver, date/time, provider, site/location, product, amount, and source reference.
-
-### 16.1 Settlement reconciliation
-
-For a settlement:
-
-```text
-sum(eligible validated transaction charges for this payee + period)
-=
-settlement Fuel/Card deduction total
-```
-
-This is separate from provider-invoice reconciliation.
+Each line remains traceable to the provider source.
 
 ---
 
-## 17. API-specific invariants
+## 19. Audit / correction policy
 
-Provider API numbers are authoritative and immutable.
+Keep:
 
-Hard rules:
-
-```text
-provider transaction ID = unique per provider/account
-raw provider amount = immutable
-raw provider unit number = immutable
-raw provider transaction datetime = immutable
-raw provider payload retained/hashed
-```
-
-TruckERP may change/review its own relational resolution before posting, but it does not rewrite provider facts.
-
-If the provider later changes/reverses a transaction, treat that as a provider amendment/reversal workflow, not silent replacement.
-
----
-
-## 18. PDF staging and correction audit
-
-For PDF parse review, preserve both machine output and reviewed value where a correction occurs.
-
-Conceptually:
-
-```text
-parsed_value
-reviewed_value
-review_reason
-reviewed_by
-reviewed_at
-```
-
-The original PDF remains immutable evidence.
-
-Once finalized/posted, later changes require audited adjustment/reversal behavior.
-
----
-
-## 19. Suggested statuses
-
-### Import batch
-
-```text
-UPLOADED
-PARSED
-REVIEW_REQUIRED
-REVIEWED
-PROCESSING
-RECONCILIATION_FAILED
-RECONCILED
-READY_TO_FINALIZE
-FINALIZED
-```
-
-### Transaction gates
-
-```text
-source_reconciled
-transaction_validated
-truck_resolved
-ownership_resolved
-financial_responsibility_resolved
-pricing_validated
-settlement_eligible
-posted
-```
-
-A failed/review gate must prevent monetary posting.
-
----
-
-## 20. Duplicate and idempotency rules
-
-Strong duplicate signals include:
-
-- provider + provider transaction ID/auth code
-- provider + card + transaction datetime
-- unit + quantity + amount + transaction datetime
-- source document/import batch relationships
-
-API imports must be idempotent.
-
-PDF/manual/API duplicates must not result in double charges.
-
-A manual driver entry later matched by API/PDF should become a reconciliation/match case, not a second financial transaction.
-
----
-
-## 21. Provider facts vs TruckERP decisions
-
-Keep these two layers visibly separate.
-
-### Provider facts
-
-What BVD/provider actually said:
-
-- provider transaction ID/auth
-- driver name snapshot
-- unit number snapshot
-- transaction date/time
-- site/location
-- product code
-- quantity
-- retail/billed pricing
-- taxes
-- discount
-- final amount
-- currency
-
-### TruckERP decisions
-
-What TruckERP resolved/calculated:
-
-- transaction classification
-- truck_id
-- driver_id
-- O/O/payee
-- financial responsibility
-- O/O pricing agreement
-- O/O charge
-- trip/load link when appropriate
-- settlement eligibility
-- posting status
-
-Do not mutate provider facts to make them fit internal data.
-
----
-
-## 22. Security and audit requirements
-
-Audit at minimum:
-
-- provider configuration changes
-- credential configuration changes (never log secret values)
-- imports
-- parser corrections
-- classification changes
-- truck resolution/remapping
-- ownership/payee resolution/remapping
-- pricing agreement changes
+- original source PDF/API payload
+- parser output
+- reviewed/corrected values
+- reviewer
+- review timestamp
+- correction reason
+- matching decisions
+- ownership/payee resolution
+- pricing rule applied
 - settlement posting
-- duplicate resolution
-- adjustments/reversals
 
-Money-affecting actions require actor, timestamp, before/after values, and source context.
+After financial posting, do not silently rewrite history. Corrections require an auditable adjustment/reversal workflow.
 
 ---
 
-## 23. Tests required before Gold
-
-At minimum:
-
-- BVD PDF regression fixture tests
-- parser field-map tests
-- date + unit row-integrity tests
-- row arithmetic tests
-- card/product/subtotal reconciliation tests
-- provider grand-total reconciliation tests
-- missing-row test
-- duplicated-row test
-- unit-history truck-resolution tests
-- historical ownership tests
-- effective-dated O/O pricing tests
-- company-driver no-deduction tests
-- O/O product-deduction tests
-- cash-advance routing tests
-- API idempotency tests
-- manual/API/PDF duplicate reconciliation tests
-- settlement-period eligibility tests
-- multi-truck O/O settlement breakdown tests
-- audit tests
-
-Fuel Gold is established only after the module is verified. Until then, this is a design/implementation document, not a Gold declaration.
-
----
-
-## 24. Implementation order
+## 20. Implementation order
 
 Recommended order:
 
-```text
-1. Canonical provider/card schema
-2. BVD field contract + parser JSON contract
-3. Admin provider configuration
-4. Truck ownership + O/O/payee relationship review
-5. Effective-dated unit-number history
-6. O/O fuel pricing agreement
-7. BVD PDF parser/profile
-8. PDF review queue UI (PDF left / parsed window right / Save & Next)
-9. Reconciliation engine and gates
-10. BVD API adapter
-11. Matching + dedupe/idempotency
-12. Fuel/Card operations UI grouped by Unit #
-13. Manual driver entry
-14. Financial responsibility routing
-15. Settlement/payroll bridge
-16. Cross-module hooks (Lumper/Dispatch, Toll, etc.)
-17. Audit + regression tests
-18. Establish Fuel Gold only after verification
-```
+1. Canonical Fuel/Card schema
+2. Provider import/batch schema
+3. BVD PDF profile + hydration contract
+4. Nationwide PDF profile + row-type rules
+5. Admin provider configuration
+6. Truck ownership + O/O/payee FK
+7. Unit-number history
+8. O/O fuel pricing agreement
+9. PDF review queue UI
+10. Reconciliation engine
+11. BVD API adapter
+12. Provider adapter framework
+13. Matching/dedupe
+14. Fuel/Card operations UI
+15. Driver manual entry
+16. Settlement/payroll bridge
+17. Audit/tests
+18. Establish Fuel Gold only after verified implementation
 
 ---
 
-## 25. Locked principles from current discussion
+## 21. Current unresolved implementation details
 
-1. **Fuel-card transaction does not mean fuel expense.**
-2. **One provider source can contain truck expenses and non-truck expenses.**
-3. **Every provider line must be accounted for exactly once.**
-4. **All truck + other classified expenses must equal Provider Total.**
-5. **Provider Total must equal Validated Total.**
-6. **Parser output cannot directly move money.**
-7. **Human review does not bypass automated gates.**
-8. **Transaction date/time controls historical matching and settlement eligibility.**
-9. **Unit number is a historical operational identifier; `truck_id` is permanent identity.**
-10. **Truck ownership must identify company vs O/O and which O/O/payee.**
-11. **O/O pricing agreement is effective-dated and financially belongs to the O/O/payee relationship.**
-12. **Company drivers are not charged for ordinary company-truck products such as coolant.**
-13. **O/O truck products paid by the carrier are normally O/O deductions unless an explicit rule says otherwise.**
-14. **Cash advance routes to driver/O/O financial responsibility, not ordinary truck expense.**
-15. **Lumper load association belongs to Dispatch/Load, not Fuel/Card.**
-16. **Provider facts stay immutable; TruckERP decisions live separately.**
-17. **No unresolved/ambiguous money-routing item may post.**
-18. **Settlement must show unit-by-unit and transaction-level detail for O/O deductions.**
+Still to be decided/verified from real provider evidence or code-level implementation:
 
----
+- exact database column types/precision
+- exact rounding-tolerance policy per provider
+- exact BVD API contract
+- exact Nationwide API/CSV contract
+- final settlement/payroll FK structure
+- whether provider card assignment history deserves its own first-class table
+- final UI wording for review/finalize states
 
-## 26. Open items still requiring implementation-level decisions
-
-These are intentionally not invented here and should be decided with real provider/API evidence or business policy:
-
-- exact BVD API authentication and endpoint contract
-- exact provider credential storage mechanism already preferred by platform infrastructure
-- exact schema names/column types/indexes after checking current tenant DB conventions
-- exact effective-dated ownership table shape if one already exists or needs extension
-- exact monetary rounding policy per provider/currency/unit
-- whether specific product/repair categories need configurable deduction policies beyond the agreed default rules
-- whether O/O truck-level fuel-pricing overrides are needed beyond the O/O/payee default
-- exact settlement posting model/FKs after Payroll module review
-- exact cross-module contract for Toll
-- exact cross-module contract for Lumper/Dispatch/Accounts Receivable
-
-Do not fill these gaps speculatively during implementation; inspect existing models and real provider data first.
+Do not invent these details before evidence is available.
