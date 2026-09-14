@@ -4,9 +4,9 @@
 
 **Source of truth:** `docs/FUEL_CARD_MODULE_DESIGN.md`
 
-**Current execution scope:** Digital PDF + manual driver entry + canonical normalization + review + reconciliation + truck/ownership resolution + O/O pricing + settlement/audit + UI.
+**Current execution scope:** Digital PDF + manual driver entry + canonical normalization + tenant provider configuration + SFTP/file-feed connection framework where the provider actually supports it + review + reconciliation + truck/ownership resolution + O/O pricing + settlement/audit + UI.
 
-**Explicitly deferred:** Provider API implementation and API tests. API remains an architectural intake path but must not be implemented in the current execution plan unless explicitly reopened.
+**Explicitly deferred unless reopened:** REST/API provider adapters, OAuth/data-sharing flows, unverified vendor-specific machine feeds, and API tests. API remains an architectural intake path but must not be implemented until a provider contract is actually confirmed.
 
 ---
 
@@ -32,20 +32,25 @@ Reuse existing TruckERP tenancy, people/payee, truck, audit, storage, permission
 
 Do **not** create a second end-to-end Fuel parser stack. Fuel/Card attaches a Fuel profile to the existing shared Document Platform, just as the Load parser owns its profile/rules/schema while reusing shared transport/capabilities.
 
-### 0.3 No provider API work now
+### 0.3 Provider connectivity rule
 
-Do not implement:
+Do not assume every provider uses REST/API.
 
-- BVD API adapter,
-- Nationwide API adapter,
-- sync scheduler,
-- provider polling/webhooks,
-- API credentials/test-connection behavior,
-- API tests.
+TruckERP Fuel/Card must be able to represent provider connection methods such as:
 
-The Admin surface may retain API configuration architecture for future work.
+```text
+PDF_UPLOAD
+FILE_EXPORT
+SFTP
+DATA_SHARING / PARTNER_AUTH   (future when provider contract is proven)
+REST_API                      (future when provider contract is proven)
+```
 
-### 0.4 Provider facts are evidence; parser output cannot move money
+The actual methods exposed for one provider come from the **backend provider catalog**, not from assumptions in React.
+
+Do not build an API adapter merely because a provider has some public APIs. The exact fleet fuel-card transaction feed must be proven first.
+
+### 0.4 Preserve provider evidence
 
 Never mutate source facts to force reconciliation.
 
@@ -98,7 +103,7 @@ Do not mark PASS if required tests were skipped.
 
 # Locked parser architecture — Fuel mirrors the Load-parser contract pattern
 
-Fuel/Card must use the same design discipline as the Rate Confirmation parser:
+Fuel/Card uses the same design discipline as the Rate Confirmation parser:
 
 ```text
 Calling Fuel module chooses explicit profile/provider context
@@ -122,11 +127,338 @@ Admin review
 Backend reconciliation / ownership / pricing gates
 ```
 
-The shared platform must not inspect a document and autonomously decide BVD vs Nationwide for financial meaning. The calling Fuel workflow supplies expected provider/profile context when known. If uploaded files support provider identification as a review aid, that result is not authority to bypass explicit profile/routing rules.
+The shared platform must not autonomously assign financial meaning by guessing a provider. The Fuel workflow supplies expected provider/profile context when known. Provider identification from an uploaded file may be used as a review aid, but not as authority to bypass routing rules.
 
 For a usable **digital PDF**, follow the current Load-parser policy: send the original PDF with the Fuel JSON rules/schema to the model path; do not attach a second extracted-text copy merely because text extraction is available. Scanned/image-only documents use the shared OCR fallback path before the Fuel profile handoff.
 
 AI performs semantic extraction. **Mechanical backend code validates money.**
+
+---
+
+# Locked tenant provider-connection architecture
+
+This section is required. Fuel/Card configuration is tenant-scoped and backend-driven.
+
+## A. One backend provider catalog
+
+The backend owns a catalog of supported Fuel/Card vendors. The frontend must not invent provider field lists independently.
+
+Conceptual provider catalog entries:
+
+```text
+BVD
+NATIONWIDE
+PILOT_FLYING_J
+LOVES
+WEX_EFS        (future/when reopened)
+OTHER_FILE     (controlled generic file path if later approved)
+```
+
+Each catalog entry defines:
+
+- stable provider code,
+- display name,
+- enabled/supported state,
+- supported connection methods,
+- default/preferred connection method,
+- whether direct machine feed is verified,
+- provider help text/instructions,
+- field-definition schema for each connection method,
+- parser/profile code,
+- expected file formats,
+- optional filename pattern,
+- credential requirements,
+- test-connection capability,
+- sync capability,
+- scheduling capability,
+- provider-specific validation rules.
+
+The provider catalog is application-owned reference configuration. A tenant selects from it; the tenant does not redefine what BVD or Pilot means.
+
+## B. Vendor dropdown -> predefined fields
+
+Tenant Admin workflow:
+
+```text
+Fuel Provider
+    [ Select vendor ▼ ]
+
+        BVD
+        Nationwide
+        Pilot Flying J
+        Love's
+        ...
+
+Choose vendor
+        ↓
+Backend returns provider connection schema
+        ↓
+UI renders only that provider's supported fields
+        ↓
+Authorized user enters tenant-specific values
+        ↓
+Save
+        ↓
+Test Connection (when supported)
+        ↓
+Enable
+        ↓
+Sync/Import begins through the provider's supported method
+```
+
+No giant universal form with irrelevant fields.
+
+## C. Dynamic field-definition contract
+
+A provider connection method should expose a backend field schema conceptually like:
+
+```json
+{
+  "provider_code": "PILOT_FLYING_J",
+  "connection_method": "SFTP",
+  "fields": [
+    {
+      "key": "account_reference",
+      "label": "Account / Customer Reference",
+      "type": "text",
+      "required": false,
+      "secret": false
+    },
+    {
+      "key": "sftp_username",
+      "label": "SFTP Username",
+      "type": "text",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "sftp_password",
+      "label": "SFTP Password",
+      "type": "secret",
+      "required": true,
+      "secret": true
+    }
+  ]
+}
+```
+
+Exact field names follow repo conventions. The locked behavior is that the **backend schema drives the UI**.
+
+Field metadata may include:
+
+- text/secret/number/select/boolean,
+- required/optional,
+- default value,
+- masked state,
+- validation pattern,
+- minimum/maximum,
+- help text,
+- provider instructions,
+- locked/predefined value,
+- hidden backend-only value.
+
+## D. SFTP connection fields
+
+For a provider with a verified SFTP transaction feed, support the concepts actually required by that provider, such as:
+
+- account/client reference,
+- SFTP host (provider-controlled/predefined when verified),
+- port (normally provider-controlled/defaulted),
+- username,
+- password or future key reference,
+- remote incoming path/folder if provider supplies one,
+- filename/pattern if required,
+- enabled/disabled,
+- polling/sync enabled,
+- sync frequency where policy allows,
+- last successful connection,
+- last successful sync,
+- last error/status.
+
+Do **not** allow arbitrary user-supplied hosts to become an SSRF/network escape path. Prefer backend-known/allowlisted provider endpoints. If a provider truly supplies tenant-specific hosts, validate/allowlist according to a documented rule before connection.
+
+### Current evidence-driven provider handling
+
+**Pilot Flying J**
+
+- Known TMS integration pattern: SFTP credentials are obtained from the Pilot representative.
+- TruckERP provider catalog may expose the required SFTP credential fields once the exact Pilot connection contract/host details are confirmed for implementation.
+- Do not invent a public REST transaction API.
+
+**Love's**
+
+- Known TMS integration pattern: SFTP credentials are obtained from the Love's representative for fuel transaction exchange.
+- TruckERP provider catalog may expose Love's SFTP connection fields once the tenant has those credentials.
+- Love's public developer APIs are not automatically the same thing as the fleet fuel-card transaction feed.
+
+**BVD**
+
+- BVD remains PDF/file-first for initial TruckERP production.
+- Existing industry integrations show BVD can provide export formats/files, but TruckERP must not claim a machine-to-machine SFTP/API contract until BVD confirms it.
+- Provider entry can therefore begin with `PDF_UPLOAD` / approved file-import behavior and gain additional connection methods later without changing the canonical transaction model.
+
+**Nationwide**
+
+- Current verified TruckERP evidence is PDF, with a note that further transactional detail may also exist in a CSV companion.
+- Do not assume SFTP/API until provider evidence is obtained.
+
+## E. Two authorized UI entry points, one backend
+
+Provider configuration may be reached from either:
+
+```text
+Admin / Integrations / Fuel
+```
+
+or directly from the operational Fuel page, for example:
+
+```text
+Fuel
+  -> Providers / Connections
+  -> Add Provider
+```
+
+These are **two UI entry points to the same tenant-scoped backend configuration service**. Do not create duplicate configuration models.
+
+The normal Admin path is appropriate for tenant administrators. The Fuel-page shortcut may be visible to operational users only when RBAC grants provider-configuration capability.
+
+## F. RBAC is backend-enforced
+
+Do not rely on hiding a button.
+
+Conceptual capabilities (final names must match repo permission conventions):
+
+```text
+fuel.providers.view
+fuel.providers.manage
+fuel.providers.test_connection
+fuel.providers.sync
+fuel.imports.review
+fuel.imports.process
+fuel.imports.finalize
+```
+
+A user with `fuel.providers.manage` may configure a provider from either allowed UI surface. A user without it receives backend authorization failure even if they manually call the endpoint.
+
+Tenant Admin/Owner may receive the capability through role policy. Other roles can receive it explicitly according to the existing RBAC system.
+
+## G. Secret handling
+
+Provider secrets must never be returned to the browser after save.
+
+Required behavior:
+
+```text
+Password/API secret/private credential entered
+        ↓
+server-side secure storage / encrypted secret reference
+        ↓
+subsequent GET response:
+configured = true
+masked_display = ********
+actual_secret = NEVER RETURNED
+```
+
+Also required:
+
+- redact secrets from logs,
+- redact secrets from audit-event payloads,
+- never commit secrets,
+- never send secrets to OpenAI/parser prompts,
+- rotate/replace secret without exposing old value,
+- tenant isolation on every connection record,
+- test-connection errors must not echo credentials.
+
+## H. Connection lifecycle
+
+Conceptual states:
+
+```text
+DRAFT
+READY_TO_TEST
+CONNECTED
+ERROR
+DISABLED
+```
+
+Typical flow:
+
+```text
+Select vendor
+-> fill provider-defined values
+-> Save
+-> Test Connection
+-> CONNECTED
+-> Enable sync/import
+```
+
+For `PDF_UPLOAD` providers there may be no connection test; configuration can simply become enabled/ready for import.
+
+## I. Multiple providers and multiple accounts
+
+A tenant may use multiple providers simultaneously.
+
+A tenant may also need more than one account under the same provider. The model must not assume one global BVD/Pilot/Love's account per tenant.
+
+Uniqueness should therefore be based on tenant + provider + tenant connection/account identity according to the actual schema, not provider code alone.
+
+## J. Provider connection never bypasses financial gates
+
+Whether source arrives from PDF, SFTP, file export, future API or manual entry:
+
+```text
+Provider source
+   ↓
+raw source preservation + hash/idempotency
+   ↓
+provider profile / structured-file adapter
+   ↓
+canonical Fuel/Card staging
+   ↓
+review/reconciliation as required
+   ↓
+truck/ownership/payee resolution
+   ↓
+pricing / financial responsibility
+   ↓
+settlement eligibility
+```
+
+A successful SFTP connection means only **data transport works**. It never means transactions are financially approved.
+
+## K. SFTP/file ingestion safety
+
+When a provider feed is implemented:
+
+- download server-side only,
+- preserve original file bytes/reference and cryptographic hash,
+- record provider connection + remote filename + remote timestamp where available,
+- idempotently prevent importing the same provider file twice,
+- parse only expected/approved file formats,
+- do not execute or trust file contents as instructions,
+- archive/process according to provider behavior without losing source evidence,
+- dedupe transactions independently of file-level dedupe,
+- errors go to review/connection status rather than silently dropping rows.
+
+## L. Provider connection tests
+
+At minimum:
+
+1. Tenant A cannot read/update Tenant B provider connection.
+2. Unauthorized user cannot create/update/test/sync a connection.
+3. Authorized user can access configuration from Admin and Fuel-page surfaces through the same backend record.
+4. Provider dropdown is returned from backend catalog.
+5. Selecting Pilot renders only Pilot-supported fields.
+6. Selecting Love's renders only Love's-supported fields.
+7. Selecting BVD does not invent SFTP/API fields when those methods are not yet verified.
+8. Secret value is accepted on write and never returned on read.
+9. Secret is absent/redacted from logs/audit payloads.
+10. Test connection updates status without altering financial data.
+11. Bad SFTP credentials -> ERROR with safe message, no secret echo.
+12. Duplicate downloaded file/hash does not create a second import.
+13. Multiple provider accounts for one tenant remain distinct.
+14. Disable connection stops future polling/import but does not erase history.
+15. Provider connection deletion/deactivation follows financial/audit retention rules; no cascade may erase imported transactions.
 
 ---
 
@@ -149,17 +481,83 @@ Inspect and record exact reusable files/classes/tables/routes for:
 - storage/upload patterns,
 - `/admin/integrations/fuel`, navigation and permissions,
 - payroll/settlement models,
-- frontend review/list patterns.
+- frontend review/list patterns,
+- existing secret-storage/encryption patterns,
+- existing background job/scheduler patterns that could later support provider polling,
+- existing RBAC capability/permission conventions.
 
 ## Must not do
 
-No migrations, Fuel behavior, API work or speculative new framework.
+No migrations, Fuel behavior, unverified API work or speculative new framework.
 
 ## Exit criteria
 
 Add a `Repository Fit` subsection here documenting what will be reused and any design-vs-code conflict.
 
 ### Execution Record — Segment 0
+
+Status: NOT STARTED
+
+---
+
+# Segment 0A — Tenant provider catalog, connection model and RBAC surfaces
+
+## Goal
+
+Implement the tenant-facing provider-selection/configuration foundation before provider machine feeds are trusted.
+
+## Required backend pieces
+
+- provider catalog/registry,
+- provider connection model scoped to tenant,
+- supported connection-method metadata,
+- dynamic field-definition schema,
+- secure secret/reference storage,
+- RBAC-protected CRUD/read endpoints,
+- server-side `test connection` hook contract,
+- connection status/last-test metadata,
+- support for more than one provider/account per tenant.
+
+## Required frontend behavior
+
+### Admin surface
+
+`/admin/integrations/fuel` should show configured connections and `Add Provider`.
+
+### Fuel operations surface
+
+If RBAC allows, Fuel page may expose `Providers / Connections` or equivalent shortcut. It uses the same endpoints/records as Admin.
+
+### Add Provider flow
+
+```text
+Add Provider
+-> provider dropdown from backend catalog
+-> choose provider
+-> choose supported connection method if more than one
+-> render backend-defined fields
+-> Save
+-> Test Connection when supported
+-> Enable
+```
+
+## Must not do
+
+- no frontend-hardcoded secrets,
+- no arbitrary SFTP host connection without backend validation,
+- no provider-specific financial posting,
+- no unverified API adapter,
+- no duplicate configuration tables for Admin vs Fuel page.
+
+## Tests
+
+Run all tests listed in Locked Tenant Provider-Connection Architecture section, plus frontend permission/rendering tests.
+
+## Exit criteria
+
+Tenant can safely configure supported provider connections through one backend model from either authorized UI entry point.
+
+### Execution Record — Segment 0A
 
 Status: NOT STARTED
 
@@ -173,20 +571,21 @@ Create one provider-independent transaction model that BVD, Nationwide and futur
 
 ## 1.1 Import batch
 
-One uploaded provider statement/file = one batch/source record.
+One uploaded/downloaded provider statement/file = one batch/source record.
 
 Batch must preserve at least:
 
 - tenant scope,
 - provider code,
-- provider account/customer reference,
-- source type (`PDF`; `MANUAL_DRIVER` uses canonical transaction path; `API` reserved),
+- provider connection/account reference when applicable,
+- source type (`PDF`, `SFTP_FILE`, `FILE_EXPORT`, `MANUAL_DRIVER`; future `API` reserved),
 - invoice/statement number,
 - invoice date,
 - statement start/end,
 - due date,
-- original document/storage reference,
+- original document/file/storage reference,
 - file/source hash,
+- remote filename/timestamp when applicable,
 - imported/uploaded timestamp,
 - parse/review/process/finalize state,
 - review/finalize actor/time,
@@ -214,7 +613,7 @@ Keep a compact canonical core. Exact DB names may follow repo conventions, but s
 | `discount_amount` | Canonical supported provider discount amount; nullable. |
 | `total_amount` | Provider transaction total/final amount. Required reconciliation anchor. |
 | `currency` | Currency for this transaction. |
-| `source_vendor` | BVD, NATIONWIDE, future provider code. |
+| `source_vendor` | BVD, NATIONWIDE, PILOT_FLYING_J, LOVES, future provider code. |
 
 Provider profile may require more/fewer of these fields depending on actual source evidence. Do not invent a value simply to satisfy a universal required flag.
 
@@ -245,6 +644,8 @@ Examples kept in raw JSON unless later proven to deserve a first-class query col
 - provider-specific card subtotal details,
 - other Nationwide-only fields.
 
+Future Pilot/Love's fields remain raw unless real files prove they deserve canonical query columns.
+
 Raw JSON is audit/source evidence. It must not become an excuse to skip canonical normalization.
 
 ## 1.4 Source identity/order
@@ -252,7 +653,7 @@ Raw JSON is audit/source evidence. It must not become an excuse to skip canonica
 Also preserve:
 
 - source row index/order,
-- source page where practical,
+- source page/file row where practical,
 - source batch/document FK,
 - provider transaction/auth identifier where available,
 - source hash/evidence linkage.
@@ -487,6 +888,8 @@ Conceptually:
 
 BVD and Nationwide rules may differ substantially while still hydrating the same canonical output.
 
+Pilot/Love's provider JSON rules are added only after real provider export files/statements are available. Do not write imaginary fields from marketing pages.
+
 ## 5.4 Field rules
 
 Field rules must explicitly define meaning and rejection behavior for at least:
@@ -538,6 +941,10 @@ Field rules must explicitly define meaning and rejection behavior for at least:
 - BVD may mechanically sum provider row HST/GST/PST/QST into canonical `tax_amount` while preserving components in raw JSON.
 - Nationwide per-row tax remains null when source does not support it.
 - Do **not** prorate invoice tax into transaction rows during parsing.
+- Nationwide Canadian control rows may carry explicit GST/QST/PST/HST controls. Preserve those as control-level tax values, not transaction tax.
+- If Nationwide explicitly prints `GST` paired with an amount on a Canadian control/summary row, map that amount to the GST control field.
+- Never interpret a `GST <amount>` control as Date, City, Product or another transaction column merely because of visual x-position.
+- U.S. transactions do not receive inferred GST/HST/QST/PST. Return null unless a future provider contract explicitly reports a supported tax field.
 
 ### `discount_amount`
 
@@ -645,7 +1052,9 @@ Money reconciliation against provider controls is a later backend gate; do not l
 - Forbidden `truck_id`/payee/settlement fields rejected or stripped per established Load-validator pattern.
 - Missing required BVD final amount/unit/date fails/reviews.
 - Nationwide driver name null is valid.
-- Nationwide tax null is valid.
+- Nationwide tax null is valid at transaction level.
+- Nationwide Canadian explicit GST control maps only to GST control field.
+- Nationwide U.S. row never receives inferred GST/HST.
 - Unit price without basis fails validation.
 - Neighbor-row cross contamination regression fixtures.
 - Control row emitted as transaction fails.
@@ -805,6 +1214,28 @@ Invoice controls:
 - PST `0.00`
 - CAD subtotal `1263.85`
 
+## Explicit Nationwide Canadian GST rule — LOCKED
+
+When a Nationwide `CARD_TOTAL` or `INVOICE_SUMMARY` row is in Canadian context and explicitly contains a label/value pair such as:
+
+```text
+GST 145.40
+```
+
+map the amount **only** to the GST control field.
+
+Likewise, explicit `QST`, `PST` or `HST` label/value pairs map only to their matching Canadian control tax field.
+
+Rules:
+
+- classify the row type first,
+- require explicit tax label/value ownership,
+- never treat a GST amount as Date, City, Product, Volume or transaction Total because of page position,
+- keep tax at control level when Nationwide does not provide per-transaction tax,
+- do not prorate control GST into transaction rows during parsing,
+- U.S. rows must never receive inferred GST/HST/QST/PST,
+- if a U.S. source someday explicitly reports another tax type, handle it only through a separately proven provider rule.
+
 ## Verified U.S. row
 
 - Card `XXXXX07588`
@@ -846,8 +1277,6 @@ Raw sidecar retains Network, USA Discount, Missed Disc, OON Fees, Account Code a
 
 TruckERP may later resolve `driver_id` by effective-dated card/unit assignment, but must not populate/alter `driver_name_snapshot` when Nationwide supplied no driver name.
 
-Do not prorate invoice GST into row-level canonical tax during parser normalization.
-
 ## Mixed/card controls
 
 Card `XXXXX87115`, Unit `789` includes multiple DIESEL rows; its provider card total must be stored as a control.
@@ -877,7 +1306,10 @@ Never alter source rows to force equality. Until a provider-specific tolerance i
 ## Tests
 
 - TRANSACTION vs CARD_TOTAL vs INVOICE_SUMMARY classification.
+- Explicit Canadian GST label/value maps to GST control only.
+- Explicit QST/PST/HST maps only to its matching control field.
 - GST/QST total rows never become fake transaction fields.
+- U.S. transaction never receives inferred Canadian tax.
 - Canadian `EX_TAX` basis.
 - U.S. `FINAL_GALLON_PRICE` basis.
 - Driver name remains null; later `driver_id` enrichment does not rewrite it.
@@ -1046,7 +1478,7 @@ Status: NOT STARTED
 
 ---
 
-# Segment 11 — Manual driver entry + duplicate matching against provider PDF
+# Segment 11 — Manual driver entry + duplicate matching against provider sources
 
 ## Goal
 
@@ -1067,7 +1499,7 @@ Authenticated context supplies driver identity where possible.
 
 Manual records enter the same canonical model/gates.
 
-When later provider PDF evidence arrives, candidate duplicate matching must prevent a second financial charge. Strong exact signals can auto-identify according to proven rules; ambiguous fuzzy matches stay review-required.
+When later provider PDF/SFTP/file evidence arrives, candidate duplicate matching must prevent a second financial charge. Strong exact signals can auto-identify according to proven rules; ambiguous fuzzy matches stay review-required.
 
 ### Execution Record — Segment 11
 
@@ -1126,7 +1558,7 @@ Status: NOT STARTED
 
 ## Goal
 
-Expose imports, transactions, exceptions and readiness without mixing provider configuration into operations.
+Expose imports, transactions, exceptions, readiness and authorized connection management without duplicating Admin configuration logic.
 
 Minimum filters:
 
@@ -1144,7 +1576,9 @@ Minimum filters:
 - reconciled/unreconciled,
 - posted/unposted.
 
-Unit/truck is a primary grouping. Exception rows drill back to exact batch/PDF/source evidence. O/O portal is a reduced projection of the same canonical data, not a second transaction model.
+Unit/truck is a primary grouping. Exception rows drill back to exact batch/PDF/file/source evidence. O/O portal is a reduced projection of the same canonical data, not a second transaction model.
+
+If RBAC grants provider-management permission, the Fuel page may also expose provider connection cards/settings. Those cards use Segment 0A backend connection records and do not create a second configuration store.
 
 ### Execution Record — Segment 13
 
@@ -1160,8 +1594,9 @@ A future auditor must be able to explain what the provider said, what parser ret
 
 Preserve:
 
-- original PDF/hash/reference,
-- AI/parser output,
+- original PDF/file/hash/reference,
+- provider connection/source account reference where applicable,
+- parser output,
 - parsed value,
 - reviewed value,
 - reviewer/time/reason,
@@ -1174,6 +1609,8 @@ Preserve:
 - adjustment/reversal.
 
 Use existing `audit_events` foundation where appropriate.
+
+Provider configuration changes are auditable, but secret values are never written into audit payloads.
 
 Before posting, reviewed correction may change the reviewed staging value while preserving source/parser evidence. After posting, no silent financial rewrite; use audited adjustment/reversal.
 
@@ -1195,21 +1632,35 @@ C. Nationwide mixed CAD/USD -> independent reconciliation.
 
 D. Nationwide control-row trap -> GST/QST/card totals never become fake transactions.
 
-E. Nationwide rounding variance -> preserve source/control/variance -> REVIEW unless explicit policy approves tolerance.
+E. Nationwide explicit Canadian GST -> `GST 145.40` maps only to GST control; no transaction tax fabricated.
 
-F. Manual then PDF duplicate -> one financial charge.
+F. Nationwide U.S. row -> no inferred GST/HST.
 
-G. Historical unit renumber -> correct permanent truck by transaction date.
+G. Nationwide rounding variance -> preserve source/control/variance -> REVIEW unless explicit policy approves tolerance.
 
-H. Ownership change -> transactions before/after route correct party.
+H. Manual then provider source duplicate -> one financial charge.
 
-I. Lumper -> source reconciles but Load association remains Dispatch/Load responsibility.
+I. Historical unit renumber -> correct permanent truck by transaction date.
 
-J. Posted correction -> edit blocked; reversal/adjustment audited.
+J. Ownership change -> transactions before/after route correct party.
 
-K. Parser contract -> BVD and Nationwide both hydrate same canonical JSON while retaining different `provider_raw` evidence.
+K. Lumper -> source reconciles but Load association remains Dispatch/Load responsibility.
 
-L. Driver gap -> Nationwide `driver_name_snapshot` remains null while backend may resolve separate `driver_id` by effective-dated assignment.
+L. Posted correction -> edit blocked; reversal/adjustment audited.
+
+M. Parser contract -> BVD and Nationwide both hydrate same canonical JSON while retaining different `provider_raw` evidence.
+
+N. Driver gap -> Nationwide `driver_name_snapshot` remains null while backend may resolve separate `driver_id` by effective-dated assignment.
+
+O. RBAC provider configuration -> authorized user can configure same provider connection from Admin or Fuel page; unauthorized user blocked server-side.
+
+P. Pilot SFTP configuration -> provider-defined fields render, secret is masked after save, test connection status is auditable without exposing secret.
+
+Q. Love's SFTP configuration -> same backend provider catalog pattern; no separate hard-coded frontend form.
+
+R. BVD connection -> PDF/file-first remains available even while a future direct BVD machine feed is unconfirmed.
+
+S. Provider file idempotency -> same remote file/hash cannot create a duplicate batch.
 
 ## Global regressions
 
@@ -1217,15 +1668,16 @@ L. Driver gap -> Nationwide `driver_name_snapshot` remains null while backend ma
 - Frontend tests/typecheck/build.
 - Tenant isolation/security.
 - Migration tests.
+- RBAC/provider-secret tests.
 - Existing Load shared-document parser remains green.
 - People/Payee/Truck flows remain green where reused.
-- No API tests required while API implementation remains explicitly deferred.
+- No REST/API tests required while REST/API implementation remains explicitly deferred.
 
 ## Gold rule
 
 Do not establish/update Fuel Gold merely because code compiles.
 
-Gold readiness requires completed/accepted segments, required tests green, real BVD and Nationwide PDFs verified, no unexplained financial variance treated as PASS, final docs updated with implementation evidence, and user/ChatGPT review.
+Gold readiness requires completed/accepted segments, required tests green, real BVD and Nationwide PDFs verified, provider configuration security/RBAC verified, no unexplained financial variance treated as PASS, final docs updated with implementation evidence, and user/ChatGPT review.
 
 ### Execution Record — Segment 15
 
@@ -1258,6 +1710,11 @@ For each returned segment verify:
 
 - implementation matches architecture, not only happy path,
 - shared services were reused,
+- provider catalog drives connection forms,
+- RBAC is enforced in backend and not only UI,
+- provider secrets never return to browser/log/audit,
+- SFTP endpoints are validated/allowlisted rather than arbitrary network targets,
+- Admin and Fuel page share one configuration model,
 - provider facts remain immutable/separate,
 - AI handoff follows strict JSON + rules + schema pattern,
 - transaction datetime drives historical decisions,
@@ -1277,10 +1734,11 @@ Any failed answer leaves the segment open.
 
 Unless explicitly reopened:
 
-- Provider API adapters/synchronization.
-- API credentials/test-connection behavior beyond configuration architecture.
-- Nationwide CSV companion ingestion.
-- Additional providers beyond BVD/Nationwide.
+- REST/API provider adapters and API synchronization.
+- OAuth/data-sharing authorization flows whose provider contract is not yet proven.
+- Unverified direct BVD SFTP/API connection.
+- Nationwide CSV companion ingestion until its actual file contract is captured.
+- Additional provider parsing rules beyond providers for which real statements/files are available.
 - Automatic provider-specific rounding tolerance without proven provider rules.
 - Automatic lumper-to-load matching beyond a separately proven safe workflow.
 - New O/O subsidy rule allowing more discount than provider actually gave.
