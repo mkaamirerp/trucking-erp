@@ -93,16 +93,36 @@ def _source_shape(image_bgr: np.ndarray | None) -> dict[str, int] | None:
     return {"width": int(image_bgr.shape[1]), "height": int(image_bgr.shape[0])}
 
 
+def rotate_processed_dl_jpeg_bytes(jpeg_bytes: bytes, rotate_cw_deg: int) -> bytes:
+    """Rotate an already-processed DL JPEG. Does not re-run OpenCV geometry."""
+    deg = int(rotate_cw_deg) % 360
+    if deg not in (0, 90, 180, 270):
+        raise ValueError("rotate_cw_deg must be 0, 90, 180, or 270")
+    if deg == 0:
+        return jpeg_bytes
+    arr = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if arr is None or arr.size == 0:
+        raise ValueError("processed_jpeg_decode_failed")
+    flag = {
+        90: cv2.ROTATE_90_CLOCKWISE,
+        180: cv2.ROTATE_180,
+        270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+    }[deg]
+    return encode_processed_jpeg(cv2.rotate(arr, flag))
+
+
 def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> ApplicantDlPreprocessOutcome:
     """Detect on the 1544 working copy; warp the stored preview from original pixels."""
-    _ = side
+    apply_dark_pixel_180 = str(side or "").upper() == "CDL_BACK"
     source_path = Path(image_path)
     original_bgr = _load_bgr_with_exif(source_path)
     work_path, temp_path, prep_meta = _prepare_working_copy(source_path)
     working_bgr: np.ndarray | None = None
     try:
         working_bgr = cv2.imread(str(work_path), cv2.IMREAD_COLOR)
-        result, working_warp = process_applicant_dl_image_path(work_path)
+        result, working_warp = process_applicant_dl_image_path(
+            work_path, apply_dark_pixel_180=apply_dark_pixel_180
+        )
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
@@ -110,6 +130,7 @@ def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> 
     debug = dict(result.report)
     debug.update(prep_meta)
     debug["preprocess_version"] = PREPROCESS_VERSION
+    debug["dark_pixel_180_enabled"] = apply_dark_pixel_180
     detection_shape = _source_shape(working_bgr) or prep_meta.get("opencv_input_shape")
     original_shape = _source_shape(original_bgr) or prep_meta.get("original_input_shape")
     if detection_shape:
@@ -142,6 +163,7 @@ def run_applicant_dl_opencv(image_path: str | Path, side: str = "CDL_FRONT") -> 
                 working_bgr,
                 np.asarray(corners, dtype=np.float32),
                 orientation,
+                apply_dark_pixel_180=apply_dark_pixel_180,
             )
             debug.update(warp_meta)
         except Exception as exc:

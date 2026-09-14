@@ -266,7 +266,7 @@ def test_14_img_8789_remains_failure():
 
 @pytest.mark.skipif(_private("IMG_6446_normalized.jpg") is None, reason="private IMG_6446 not installed")
 def test_15_img6446_remains_normal_path_pass():
-    out = run_applicant_dl_opencv(_private("IMG_6446_normalized.jpg"))
+    out = run_applicant_dl_opencv(_private("IMG_6446_normalized.jpg"), "CDL_BACK")
     assert out.success is True
     assert out.debug.get("rough_locator_used") == "CANNY"
     assert out.debug.get("edge_repair_applied") is False
@@ -280,7 +280,7 @@ def test_15_img6446_remains_normal_path_pass():
 
 @pytest.mark.skipif(_private("IMG_0084_ontario_back.jpg") is None, reason="private Ontario back not installed")
 def test_ontario_back_repair_confirms_near_id1():
-    out = run_applicant_dl_opencv(_private("IMG_0084_ontario_back.jpg"))
+    out = run_applicant_dl_opencv(_private("IMG_0084_ontario_back.jpg"), "CDL_BACK")
     assert out.success is True
     assert out.debug.get("edge_repair_applied") is True
     assert out.debug.get("edge_repair_attempted") is True

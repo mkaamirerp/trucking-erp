@@ -7,6 +7,10 @@ export type ApplicantDlConfirmResult = {
   license_extract_status?: string;
 };
 
+export function nextDlManualRotateCw(deg: number): number {
+  return (((Math.round(deg / 90) * 90) % 360) + 90) % 360;
+}
+
 const DL_CONFIRM_PATH = "driver-onboarding/applicant/application/dl-confirm";
 
 /**
@@ -42,10 +46,13 @@ async function handleJson<T>(res: Response): Promise<T> {
 export async function confirmPersonApplicationDlSide(params: {
   onboardingToken: string;
   docType: string;
+  rotateCwDeg?: number;
 }): Promise<ApplicantDlConfirmResult> {
   const requestUrl = applicantDlConfirmRequestUrl({ onboardingToken: params.onboardingToken });
+  const rotateCwDeg = ((params.rotateCwDeg ?? 0) % 360 + 360) % 360;
   const form = new FormData();
   form.append("doc_type", params.docType);
+  form.append("rotate_cw_deg", String(rotateCwDeg));
   const res = await fetchWithTenant(requestUrl, {
     method: "POST",
     body: form,

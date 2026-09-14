@@ -259,6 +259,7 @@ describe("DlCapturePage upload hang / retry", () => {
     expect(host!.textContent).not.toContain("Back Driver Licence");
     expect(host!.textContent).not.toContain("Front accepted");
     expect(button("Retake")).toBeTruthy();
+    expect(button("Rotate")).toBeTruthy();
     expect(button("Use This Photo")).toBeTruthy();
     expect(button("Take Front DL")).toBeUndefined();
     const img = host!.querySelector("img") as HTMLImageElement | null;
@@ -282,11 +283,41 @@ describe("DlCapturePage upload hang / retry", () => {
       (c) => typeof c[0] === "string" && String(c[0]).includes("/confirm"),
     );
     expect(confirmCall).toBeTruthy();
+    const confirmBody = confirmCall?.[1]?.body as FormData;
+    expect(confirmBody.get("doc_type")).toBe("CDL_FRONT");
+    expect(confirmBody.get("rotate_cw_deg")).toBe("0");
     expect(host!.textContent).toContain("Back Driver Licence");
     expect(host!.textContent).toContain("Take Back DL");
     expect(host!.textContent).toContain("Choose Existing Photo");
     expect(host!.textContent).toContain("Front accepted");
     expect(button("Use This Photo")).toBeUndefined();
+  });
+
+  it("Rotate twice then Use This Photo sends 180 without uploading again", async () => {
+    await loadFrontSession();
+    fetchMock.mockResolvedValueOnce(jsonResponse(FRONT_PROCESSED_UNCONFIRMED));
+    await choosePhoto();
+    await flush();
+    const callsAfterProcessed = fetchMock.mock.calls.length;
+
+    await act(async () => {
+      button("Rotate")?.click();
+      button("Rotate")?.click();
+    });
+    expect(fetchMock.mock.calls.length).toBe(callsAfterProcessed);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(FRONT_CONFIRMED_BACK_READY));
+    await act(async () => {
+      button("Use This Photo")?.click();
+    });
+    await flush();
+
+    const confirmCall = fetchMock.mock.calls.find(
+      (c) => typeof c[0] === "string" && String(c[0]).includes("/confirm"),
+    );
+    const confirmBody = confirmCall?.[1]?.body as FormData;
+    expect(confirmBody.get("rotate_cw_deg")).toBe("180");
+    expect(confirmBody.get("doc_type")).toBe("CDL_FRONT");
   });
 
   it("Retake on FRONT stays on FRONT and can replace the processed image", async () => {

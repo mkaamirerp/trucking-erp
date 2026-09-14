@@ -591,6 +591,92 @@ def _dl_processed_storage_key(intake: dict, side: str) -> str | None:
     return None
 
 
+_ALLOWED_MANUAL_ROTATE_CW = frozenset({0, 90, 180, 270})
+
+
+def _parse_manual_rotate_cw(rotate_cw_deg: int) -> int:
+    deg = int(rotate_cw_deg) % 360
+    if deg not in _ALLOWED_MANUAL_ROTATE_CW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="rotate_cw_deg must be 0, 90, 180, or 270",
+        )
+    return deg
+
+
+def _replace_processed_file_meta(
+    intake: dict,
+    side: str,
+    *,
+    storage_key: str,
+    original_filename: str | None,
+    rotate_cw_deg: int,
+) -> dict:
+    """Point FRONT/BACK processed keys at a new JPEG. Does not change original upload."""
+    intake = dict(intake)
+    files = dict(intake.get("files") or {})
+    side_meta = dict(files.get(side) or {})
+    side_meta["enh_file_id"] = storage_key
+    side_meta["dl_manual_rotate_cw_deg"] = int(rotate_cw_deg)
+    files[side] = side_meta
+    processed_key = f"{side}_PROCESSED"
+    processed_meta = dict(files.get(processed_key) or {})
+    processed_meta["storage_key"] = storage_key
+    processed_meta["file_id"] = storage_key
+    processed_meta["enh_file_id"] = storage_key
+    if original_filename:
+        processed_meta["original_filename"] = original_filename
+    processed_meta["dl_manual_rotate_cw_deg"] = int(rotate_cw_deg)
+    files[processed_key] = processed_meta
+    intake["files"] = files
+    return intake
+
+
+async def _bake_manual_rotate_into_processed(
+    intake: dict,
+    *,
+    tenant_slug: str,
+    application_id: int,
+    doc_type: str,
+    rotate_cw_deg: int,
+) -> dict:
+    """Rotate stored processed crop pixels only. Never re-runs OpenCV geometry."""
+    if rotate_cw_deg == 0:
+        return intake
+    processed_key = _dl_processed_storage_key(intake, doc_type)
+    if not processed_key:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Processed image is required before confirming this side",
+        )
+    from app.core.storage import get_storage, save_applicant_dl_processed_bytes
+    from app.services.applicant_dl_preprocess import rotate_processed_dl_jpeg_bytes
+
+    raw = get_storage().read_bytes(processed_key, "applicant_dl", tenant_slug)
+    try:
+        rotated = await asyncio.to_thread(
+            rotate_processed_dl_jpeg_bytes, raw, rotate_cw_deg
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not rotate the processed photo",
+        ) from exc
+    stored = await save_applicant_dl_processed_bytes(
+        tenant_slug,
+        application_id,
+        rotated,
+        original_storage_key=processed_key,
+    )
+    return _replace_processed_file_meta(
+        intake,
+        doc_type,
+        storage_key=stored.storage_key,
+        original_filename=stored.original_filename,
+        rotate_cw_deg=rotate_cw_deg,
+    )
+
+
 def _pdf417_confirm_message(intake: dict) -> str | None:
     status = intake.get("license_extract_status")
     if status == "FAILED":
@@ -679,6 +765,7 @@ async def _confirm_applicant_dl_side(
     app: PersonApplication,
     tenant_slug: str,
     doc_type: str,
+    rotate_cw_deg: int = 0,
 ) -> PersonApplication:
     """Mark a PROCESSED side confirmed. CDL_BACK PDF417 reads processed first, original as fallback."""
     intake = dict(app.intake_payload or {})
@@ -690,6 +777,13 @@ async def _confirm_applicant_dl_side(
 
     already_confirmed = _dl_side_user_confirmed(intake, doc_type)
     if not already_confirmed:
+        intake = await _bake_manual_rotate_into_processed(
+            intake,
+            tenant_slug=tenant_slug,
+            application_id=app.id,
+            doc_type=doc_type,
+            rotate_cw_deg=rotate_cw_deg,
+        )
         intake = _mark_dl_side_user_confirmed(intake, doc_type)
 
     extract_status: str | None = None
@@ -1203,6 +1297,7 @@ async def upload_applicant_dl(
 async def confirm_applicant_dl(
     token: str = Query(..., description="Invite link token"),
     doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
+    rotate_cw_deg: int = Form(0, description="Manual clockwise rotation of the processed crop (0/90/180/270)"),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
@@ -1210,6 +1305,7 @@ async def confirm_applicant_dl(
     """Applicant accepts the processed preview (Use This Photo). PDF417 runs on confirmed CDL_BACK."""
     if doc_type not in ("CDL_FRONT", "CDL_BACK"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be CDL_FRONT or CDL_BACK")
+    rotate_cw_deg = _parse_manual_rotate_cw(rotate_cw_deg)
     app = await _get_application_by_token(db, tenant_id, token)
     _require_driver_workflow(app)
     if app.status != DriverOnboardingStatus.DRAFT.value:
@@ -1222,6 +1318,7 @@ async def confirm_applicant_dl(
         app=app,
         tenant_slug=tenant_slug,
         doc_type=doc_type,
+        rotate_cw_deg=rotate_cw_deg,
     )
     return _person_application_to_out(app)
 
@@ -1338,6 +1435,7 @@ async def upload_dl_capture_side(
 async def confirm_dl_capture_side(
     token: str,
     doc_type: str = Form(..., description="CDL_FRONT or CDL_BACK"),
+    rotate_cw_deg: int = Form(0, description="Manual clockwise rotation of the processed crop (0/90/180/270)"),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
@@ -1379,11 +1477,13 @@ async def confirm_dl_capture_side(
             detail=f"Expected {expected} for current capture step",
         )
 
+    rotate_cw_deg = _parse_manual_rotate_cw(rotate_cw_deg)
     app = await _confirm_applicant_dl_side(
         db=db,
         app=app,
         tenant_slug=tenant_slug,
         doc_type=doc_type,
+        rotate_cw_deg=rotate_cw_deg,
     )
     intake = dict(app.intake_payload or {})
     access = await db.get(ApplicationAccessToken, access.id)

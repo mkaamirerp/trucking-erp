@@ -19,12 +19,15 @@ from app.services.applicant_dl_opencv import (
     TARGET_H,
     TARGET_W,
     _confirm_all_four_corners,
+    encode_processed_jpeg,
+    ensure_landscape_upright_for_dl,
     map_working_corners_to_original,
     rotate_image,
 )
 from app.services.applicant_dl_preprocess import (
     WORKING_COPY_MAX_SIDE,
     _prepare_working_copy,
+    rotate_processed_dl_jpeg_bytes,
     run_applicant_dl_opencv,
 )
 
@@ -225,6 +228,7 @@ def test_confirmed_synthetic_card_output_is_1000x631(tmp_path: Path) -> None:
     assert outcome.debug.get("final_warp_source") == "original_pixels"
     assert outcome.debug.get("final_processed_dimensions") == {"width": 1000, "height": 631}
     assert outcome.debug.get("detection_source_dimensions") == {"width": 1400, "height": 900}
+    assert outcome.debug.get("dark_pixel_180_enabled") is False
     assert outcome.debug.get("original_source_dimensions") == {"width": 1400, "height": 900}
     scale = outcome.debug.get("coordinate_scale_factor") or {}
     assert scale.get("x") == pytest.approx(1.0)
@@ -248,7 +252,7 @@ def test_private_img6446_canny_working_scale_1544() -> None:
     finally:
         _cleanup_working_copy(temp_path)
 
-    outcome = run_applicant_dl_opencv(src)
+    outcome = run_applicant_dl_opencv(src, "CDL_BACK")
     assert outcome.success is True
     assert outcome.debug.get("rough_locator_used") == "CANNY"
     assert outcome.debug.get("opencv_input_shape", {}).get("height") == 1544
@@ -268,7 +272,7 @@ def test_private_img6446_processed_back_pdf417_fields(tmp_path: Path) -> None:
     """Operator battery — not a hermetic CI gate. Requires private fixture."""
     src = _private_img6446()
     assert src is not None
-    outcome = run_applicant_dl_opencv(src)
+    outcome = run_applicant_dl_opencv(src, "CDL_BACK")
     assert outcome.success is True
     assert outcome.jpeg_bytes
     out = tmp_path / "processed.jpg"
@@ -284,6 +288,7 @@ def test_private_img6446_processed_back_pdf417_fields(tmp_path: Path) -> None:
     fields = meaningful_license_field_count(aamva_intake_from_pdf417_text(text))
     assert fields >= 15
     assert outcome.debug.get("final_warp_source") == "original_pixels"
+    assert outcome.debug.get("dark_pixel_180_enabled") is True
 
 
 def _decode_processed_fields(jpeg_bytes: bytes, tmp_path: Path) -> tuple[int, str | None]:
@@ -303,7 +308,7 @@ def _decode_processed_fields(jpeg_bytes: bytes, tmp_path: Path) -> tuple[int, st
 
 @pytest.mark.skipif(not _LIVE_0084.is_file(), reason="live 1800x2400 IMG_0084 original not on host")
 def test_live_img0084_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> None:
-    outcome = run_applicant_dl_opencv(_LIVE_0084)
+    outcome = run_applicant_dl_opencv(_LIVE_0084, "CDL_BACK")
     assert outcome.success is True
     assert outcome.jpeg_bytes
     assert outcome.debug.get("final_warp_source") == "original_pixels"
@@ -328,7 +333,7 @@ def test_live_img0084_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> Non
 
 @pytest.mark.skipif(not _LIVE_6446.is_file(), reason="live IMG_6446 original not on host")
 def test_live_img6446_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> None:
-    outcome = run_applicant_dl_opencv(_LIVE_6446)
+    outcome = run_applicant_dl_opencv(_LIVE_6446, "CDL_BACK")
     assert outcome.success is True
     assert outcome.jpeg_bytes
     assert outcome.debug.get("final_warp_source") == "original_pixels"
@@ -341,3 +346,68 @@ def test_live_img6446_original_pixel_warp_pdf417_succeeds(tmp_path: Path) -> Non
 
     payload = aamva_intake_from_pdf417_text(text)
     assert payload.get("sex") == "F"
+
+
+def _right_darker_landscape() -> np.ndarray:
+    """Light left / dark right — the production FRONT false-positive pattern."""
+    img = np.full((200, 400, 3), 200, dtype=np.uint8)
+    img[:, 220:] = 20
+    return img
+
+
+def test_front_dark_pixel_180_is_not_applied() -> None:
+    src = _right_darker_landscape()
+    out = ensure_landscape_upright_for_dl(src, apply_dark_pixel_180=False)
+    assert out.shape == src.shape
+    assert np.array_equal(out, src)
+
+
+def test_back_dark_pixel_180_still_applied() -> None:
+    src = _right_darker_landscape()
+    out = ensure_landscape_upright_for_dl(src, apply_dark_pixel_180=True)
+    assert out.shape == src.shape
+    assert not np.array_equal(out, src)
+    assert np.array_equal(out, cv2.rotate(src, cv2.ROTATE_180))
+
+
+def test_landscape_normalization_still_rotates_portrait_90() -> None:
+    src = np.full((400, 200, 3), 80, dtype=np.uint8)
+    out = ensure_landscape_upright_for_dl(src, apply_dark_pixel_180=False)
+    assert out.shape[1] >= out.shape[0]
+    assert out.shape == (200, 400, 3)
+
+
+def test_manual_rotate_processed_jpeg_keeps_no_geometry_pass() -> None:
+    src = np.zeros((631, 1000, 3), dtype=np.uint8)
+    src[0:40, :, :] = (255, 0, 0)
+    src[40:80, :, :] = (0, 255, 0)
+    jpeg = encode_processed_jpeg(src)
+    rot90 = rotate_processed_dl_jpeg_bytes(jpeg, 90)
+    rot180 = rotate_processed_dl_jpeg_bytes(jpeg, 180)
+    rot270 = rotate_processed_dl_jpeg_bytes(jpeg, 270)
+    a90 = cv2.imdecode(np.frombuffer(rot90, dtype=np.uint8), cv2.IMREAD_COLOR)
+    a180 = cv2.imdecode(np.frombuffer(rot180, dtype=np.uint8), cv2.IMREAD_COLOR)
+    a270 = cv2.imdecode(np.frombuffer(rot270, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert a90 is not None and a180 is not None and a270 is not None
+    assert a90.shape[:2] == (1000, 631)
+    assert a180.shape[:2] == (631, 1000)
+    assert a270.shape[:2] == (1000, 631)
+    identity = rotate_processed_dl_jpeg_bytes(jpeg, 0)
+    assert identity == jpeg
+
+
+_WOOD_FRONT = Path("/home/admin/dl_ori_exp/front_on_wood_20260910_original.jpg")
+
+
+@pytest.mark.skipif(not _WOOD_FRONT.is_file(), reason="production upright FRONT fixture not on host")
+def test_production_upright_front_is_not_auto_flipped_180() -> None:
+    outcome = run_applicant_dl_opencv(_WOOD_FRONT, "CDL_FRONT")
+    assert outcome.success is True
+    assert outcome.jpeg_bytes
+    assert outcome.debug.get("dark_pixel_180_enabled") is False
+    arr = cv2.imdecode(np.frombuffer(outcome.jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert arr is not None
+    top = float(arr[:40].mean())
+    bot = float(arr[-40:].mean())
+    # Upright Ontario header is the darker blue band at the top.
+    assert top < bot

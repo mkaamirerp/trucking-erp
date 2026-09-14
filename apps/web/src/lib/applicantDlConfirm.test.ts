@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicantDlConfirmRequestUrl } from "./applicantDlConfirm";
+import { applicantDlConfirmRequestUrl, nextDlManualRotateCw } from "./applicantDlConfirm";
 
 const TOKEN = "Iij8sN52eiWNUcoVKfVNT8G04s5lQYGpBGvuhPelVFc";
 const PAGE = "https://demo.truckerp.me";
@@ -66,5 +66,14 @@ describe("applicantDlConfirmRequestUrl", () => {
     expect(out.startsWith("/api/v1")).toBe(true);
     expect(out).toContain(`token=${encodeURIComponent(`${PAGE}/evil`)}`);
     expect(out).not.toContain("https://demo.truckerp.me/driver-onboarding");
+  });
+});
+
+describe("nextDlManualRotateCw", () => {
+  it("steps 90 degrees clockwise", () => {
+    expect(nextDlManualRotateCw(0)).toBe(90);
+    expect(nextDlManualRotateCw(90)).toBe(180);
+    expect(nextDlManualRotateCw(180)).toBe(270);
+    expect(nextDlManualRotateCw(270)).toBe(0);
   });
 });

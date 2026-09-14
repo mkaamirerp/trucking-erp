@@ -578,7 +578,7 @@ export default function OnboardingApplicantPage() {
     return uploadDl(docType, file);
   }
 
-  async function handleDlConfirmSide(side: "front" | "back"): Promise<boolean> {
+  async function handleDlConfirmSide(side: "front" | "back", rotateCwDeg = 0): Promise<boolean> {
     if (!app || !token) return false;
     const docType: DocType = side === "front" ? "CDL_FRONT" : "CDL_BACK";
     setError(null);
@@ -587,7 +587,11 @@ export default function OnboardingApplicantPage() {
       [docType]: docType === "CDL_BACK" ? "Reading licence barcode…" : "Saving photo…",
     }));
     try {
-      const resp = await confirmPersonApplicationDlSide({ onboardingToken: token, docType });
+      const resp = await confirmPersonApplicationDlSide({
+        onboardingToken: token,
+        docType,
+        rotateCwDeg,
+      });
       setApp((prev) => (prev ? { ...prev, intake_payload: resp.intake_payload ?? prev.intake_payload } : prev));
       const extract = resp.license_extract_status;
       if (docType === "CDL_BACK" && extract && extract !== "SUCCESS") {

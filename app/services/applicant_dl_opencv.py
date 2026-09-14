@@ -102,10 +102,21 @@ def angle_at(p_prev: np.ndarray, p: np.ndarray, p_next: np.ndarray) -> float:
     cos_ang = float(np.dot(v1, v2) / ((np.linalg.norm(v1) * np.linalg.norm(v2)) + 1e-6))
     return float(np.degrees(np.arccos(np.clip(cos_ang, -1.0, 1.0))))
 
-def ensure_landscape_upright_for_dl(image_bgr: np.ndarray) -> np.ndarray:
+def ensure_landscape_upright_for_dl(
+    image_bgr: np.ndarray,
+    *,
+    apply_dark_pixel_180: bool = True,
+) -> np.ndarray:
+    """Normalize to landscape. Dark-pixel 180 is BACK gold only — never FRONT.
+
+    FRONT portrait vs floral-panel darkness is not a face detector; it inverted a
+    known-good upright production warp. Semantic uprighting is manual Rotate.
+    """
     out = image_bgr.copy()
     if out.shape[0] > out.shape[1]:
         out = cv2.rotate(out, cv2.ROTATE_90_CLOCKWISE)
+    if not apply_dark_pixel_180:
+        return out
     gray = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape[:2]
     y0, y1 = int(h * 0.18), int(h * 0.82)
@@ -1153,7 +1164,7 @@ def _attempt_short_side_edge_repair(
         "edge_points": edge_points,
     }
 
-def _warp_confirmed_card(image_bgr, corners):
+def _warp_confirmed_card(image_bgr, corners, *, apply_dark_pixel_180: bool = True):
     src = order_corners(corners).astype(np.float32)
     dst = np.array(
         [
@@ -1166,7 +1177,7 @@ def _warp_confirmed_card(image_bgr, corners):
     )
     matrix = cv2.getPerspectiveTransform(src, dst)
     warped = cv2.warpPerspective(image_bgr, matrix, (TARGET_W, TARGET_H))
-    return ensure_landscape_upright_for_dl(warped)
+    return ensure_landscape_upright_for_dl(warped, apply_dark_pixel_180=apply_dark_pixel_180)
 
 
 def map_working_corners_to_original(
@@ -1211,6 +1222,8 @@ def warp_confirmed_card_from_original(
     working_bgr: np.ndarray,
     work_corners: np.ndarray,
     orientation: str,
+    *,
+    apply_dark_pixel_180: bool = True,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Perspective-warp TARGET_W×TARGET_H from original pixels using mapped corners."""
     orig_oriented, mapped, meta = map_working_corners_to_original(
@@ -1219,7 +1232,9 @@ def warp_confirmed_card_from_original(
         original_bgr=original_bgr,
         working_bgr=working_bgr,
     )
-    warped = _warp_confirmed_card(orig_oriented, mapped)
+    warped = _warp_confirmed_card(
+        orig_oriented, mapped, apply_dark_pixel_180=apply_dark_pixel_180
+    )
     meta["final_warp_source"] = "original_pixels"
     meta["final_processed_dimensions"] = {
         "width": int(warped.shape[1]),
@@ -1245,6 +1260,8 @@ def _failure_result(image_bgr: np.ndarray, report: dict[str, Any]) -> tuple[Proc
 def process_driver_license_image(
     image_bgr: np.ndarray,
     debug_dir: Optional[Path] = None,
+    *,
+    apply_dark_pixel_180: bool = True,
 ) -> tuple[ProcessResult, np.ndarray]:
     """
     Production wrapper around the exact successful sandbox processor.
@@ -1294,7 +1311,9 @@ def process_driver_license_image(
     diagnostics = best["diagnostics"]
 
     # Exact historical sandbox final correction. Do not classify/reinterpret.
-    final = _warp_confirmed_card(oriented, corners)
+    final = _warp_confirmed_card(
+        oriented, corners, apply_dark_pixel_180=apply_dark_pixel_180
+    )
 
     post_ok = bool(
         final is not None
@@ -1352,6 +1371,7 @@ def process_driver_license_image(
         "post_validation": post_report,
         "final_dimensions": {"width": int(final.shape[1]), "height": int(final.shape[0])},
         "preprocess_version": PREPROCESS_VERSION,
+        "dark_pixel_180_enabled": bool(apply_dark_pixel_180),
         "sandbox_base_sha256": SANDBOX_BASE_SHA256,
         "sandbox_refinement_sha256": SANDBOX_REFINEMENT_SHA256,
     }
@@ -1411,6 +1431,8 @@ def process_driver_license_image(
 def process_applicant_dl_image_path(
     image_path: str | Path,
     debug_dir: Optional[Path] = None,
+    *,
+    apply_dark_pixel_180: bool = True,
 ) -> tuple[ProcessResult, np.ndarray]:
     image = cv2.imread(str(image_path))
     if image is None:
@@ -1423,7 +1445,9 @@ def process_applicant_dl_image_path(
             "sandbox_refinement_sha256": SANDBOX_REFINEMENT_SHA256,
         }
         return _failure_result(blank, report)
-    return process_driver_license_image(image, debug_dir)
+    return process_driver_license_image(
+        image, debug_dir, apply_dark_pixel_180=apply_dark_pixel_180
+    )
 
 
 def encode_processed_jpeg(image_bgr: np.ndarray, quality: int = 92) -> bytes:

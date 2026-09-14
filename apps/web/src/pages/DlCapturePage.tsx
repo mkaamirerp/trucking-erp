@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { useParams } from "react-router-dom";
 import { normalizeDlUpload } from "../lib/normalizeDlUpload";
 import { API_BASE, fetchWithTenant } from "../api";
+import { nextDlManualRotateCw } from "../lib/applicantDlConfirm";
 
 type CaptureStep = "FRONT" | "BACK" | "COMPLETE";
 type SideStatus = "MISSING" | "FAILED" | "PROCESSED";
@@ -73,6 +74,7 @@ export default function DlCapturePage() {
   const [localPreview, setLocalPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [rotateCw, setRotateCw] = useState(0);
   const takeInputRef = useRef<HTMLInputElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const sessionRef = useRef<CaptureSession | null>(null);
@@ -135,6 +137,7 @@ export default function DlCapturePage() {
     const current = sessionRef.current;
     if (!token || !current || current.step === "COMPLETE") return;
     setError(null);
+    setRotateCw(0);
     let normalized: File;
     try {
       normalized = await normalizeDlUpload(file);
@@ -238,6 +241,7 @@ export default function DlCapturePage() {
     try {
       const form = new FormData();
       form.append("doc_type", docType);
+      form.append("rotate_cw_deg", String(rotateCw));
       const res = await fetchWithTenant(captureUrl(token, "/confirm"), {
         method: "POST",
         body: form,
@@ -258,6 +262,7 @@ export default function DlCapturePage() {
       const next = (await res.json()) as CaptureSession;
       setSession(next);
       sessionRef.current = next;
+      setRotateCw(0);
       clearLocalPreview();
       if (next.step === "COMPLETE") {
         tryCloseCaptureTab();
@@ -406,7 +411,13 @@ export default function DlCapturePage() {
             <img
               src={previewSrc}
               alt="Licence preview"
-              style={{ width: "100%", height: "100%", objectFit: "contain", maxHeight: 320 }}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                maxHeight: 320,
+                transform: confirming ? `rotate(${rotateCw}deg)` : undefined,
+              }}
             />
           ) : (
             <div style={{ padding: 24, textAlign: "center", color: "var(--trk-text-muted, #94a3b8)" }}>
@@ -441,7 +452,16 @@ export default function DlCapturePage() {
         />
 
         {confirming ? (
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
+            <button
+              type="button"
+              style={{ ...btn, marginTop: 0 }}
+              disabled={busy}
+              onClick={() => setRotateCw((deg) => nextDlManualRotateCw(deg))}
+            >
+              Rotate
+            </button>
+            <div style={{ display: "flex", gap: 10 }}>
             <button
               type="button"
               style={{ ...btn, flex: 1, marginTop: 0 }}
@@ -458,6 +478,7 @@ export default function DlCapturePage() {
             >
               Use This Photo
             </button>
+            </div>
           </div>
         ) : (
           <>

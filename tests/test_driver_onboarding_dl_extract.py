@@ -399,7 +399,7 @@ async def test_img0084_original_pixel_processed_succeeds_without_fallback(tmp_pa
 
     from app.services.applicant_dl_preprocess import run_applicant_dl_opencv
 
-    outcome = run_applicant_dl_opencv(_IMG0084_ORIGINAL)
+    outcome = run_applicant_dl_opencv(_IMG0084_ORIGINAL, "CDL_BACK")
     assert outcome.success is True
     assert outcome.jpeg_bytes
     assert outcome.debug.get("final_warp_source") == "original_pixels"

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "react-qr-code";
 import { issueApplicantDlCaptureLink } from "../api";
 import { normalizeDlUpload } from "../lib/normalizeDlUpload";
+import { nextDlManualRotateCw } from "../lib/applicantDlConfirm";
 import {
   copyTextToClipboard,
   NO_APPLICANT_EMAIL_MESSAGE,
@@ -24,7 +25,7 @@ type Props = {
   frontMessage?: string;
   backMessage?: string;
   onUploadSide: (side: Side, file: File) => Promise<boolean> | boolean;
-  onConfirmSide?: (side: Side) => Promise<boolean> | boolean;
+  onConfirmSide?: (side: Side, rotateCwDeg?: number) => Promise<boolean> | boolean;
   onNormalizeError?: (message: string) => void;
   onboardingToken?: string;
   intake?: Record<string, unknown>;
@@ -139,6 +140,7 @@ export default function DLUploadStep({
   const [emailNote, setEmailNote] = useState<string | null>(null);
   const [emailFailed, setEmailFailed] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState<Side | null>(null);
+  const [rotateCw, setRotateCw] = useState<{ front: number; back: number }>({ front: 0, back: 0 });
 
   useEffect(() => {
     return () => {
@@ -154,10 +156,18 @@ export default function DLUploadStep({
   }, [frontPreviewUrl, localPreview.front]);
 
   useEffect(() => {
+    setRotateCw((prev) => (prev.front === 0 ? prev : { ...prev, front: 0 }));
+  }, [frontPreviewUrl]);
+
+  useEffect(() => {
     if (!backPreviewUrl || !localPreview.back) return;
     URL.revokeObjectURL(localPreview.back);
     setLocalPreview((prev) => ({ ...prev, back: null }));
   }, [backPreviewUrl, localPreview.back]);
+
+  useEffect(() => {
+    setRotateCw((prev) => (prev.back === 0 ? prev : { ...prev, back: 0 }));
+  }, [backPreviewUrl]);
 
   useEffect(() => {
     if (!onboardingToken) {
@@ -240,7 +250,7 @@ export default function DLUploadStep({
     if (!onConfirmSide || confirmBusy) return;
     setConfirmBusy(side);
     try {
-      await onConfirmSide(side);
+      await onConfirmSide(side, rotateCw[side]);
     } finally {
       setConfirmBusy(null);
     }
@@ -374,6 +384,7 @@ export default function DLUploadStep({
               src={preview}
               alt={`${label} preview`}
               className="max-h-[140px] w-full rounded-md object-contain"
+              style={{ transform: `rotate(${rotateCw[side]}deg)` }}
             />
           ) : (
             <>
@@ -395,7 +406,16 @@ export default function DLUploadStep({
         )}
 
         {awaitingConfirm ? (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              disabled={disabled || stageBusy}
+              onClick={() => setRotateCw((prev) => ({ ...prev, [side]: nextDlManualRotateCw(prev[side]) }))}
+              className="flex w-full items-center justify-center rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-400 transition-all hover:border-orange-500 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Rotate
+            </button>
+            <div className="flex gap-2">
             <button
               type="button"
               disabled={disabled || stageBusy}
@@ -412,6 +432,7 @@ export default function DLUploadStep({
             >
               {confirmBusy === side ? "Saving…" : "Use This Photo"}
             </button>
+            </div>
           </div>
         ) : (
         <button
@@ -440,7 +461,7 @@ export default function DLUploadStep({
               Driver&apos;s <span className="text-orange-400">License</span>
             </h2>
           </div>
-          <p className="mt-1 text-sm text-gray-400 sm:ml-3">
+          <p className="mt-1 hidden text-sm text-gray-400 md:block sm:ml-3">
             Upload clear photos of both sides of your current, valid commercial driver&apos;s license.
             You can upload from this computer or use your phone.
           </p>
