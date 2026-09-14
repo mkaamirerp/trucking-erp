@@ -13,11 +13,17 @@
 
 | Item | Value |
 |---|---|
-| Manual-rotate fix commit | `a99d65461f4ec98edb101e73cbcdd93dc39decfd` — `fix(dl): use manual rotation for front orientation` |
+| Manual-rotate fix commit (clean closeout) | `a99d65461f4ec98edb101e73cbcdd93dc39decfd` — `fix(dl): use manual rotation for front orientation` |
+| Same fix on `main` (cherry-pick) | `f91aed51` |
+| Manifest commit | `b15cd987d36f9feb907e712269fef9e656f7d6e3` — `docs(dl): record manual-rotate front orientation closeout` |
 | Pre-integration `origin/main` | `e20d05a75b4022805a3f8cf95534c9e3a744bd46` |
-| Focused tests (pre-deploy) | Python **95 passed, 12 skipped**; frontend **19 passed** |
-| Live verification | pending deploy (see closeout report) |
-| New immutable tag (planned) | `dl-gold-2026-09-14-manual-rotate` |
+| Post-integration `main` / `gold/dl` | `8d9bf3cf71943e902671568b5d688865a8f40398` |
+| Focused tests (integrate worktree) | Python **95 passed, 12 skipped**; frontend **19 passed** |
+| Live verification | **2026-09-14** — demo.truckerp.me @ `TRUCKERP_APP_GIT_SHA=b15cd987`; wood-table FRONT upright (`dark_pixel_180_enabled=false`); BACK `dark_pixel_180_enabled=true`; first confirm bakes manual rotation (90° → 631×1000); confirm/dl-upload **200**; no new 5xx in API logs |
+| Production API image | `sha256:d6c193fbaf9d8f036498d247ed49ba6bed00764c30cd18588fa89b07bf6086e1` |
+| Production nginx image | `sha256:6da0e9f3bfad1056430a9da38651ac7707e7b23ecd331854eaeea55b68c61889` (bundle `DlCapturePage-ChLbCjV2.js` includes **Rotate** / `rotate_cw_deg`) |
+| Schema migration | none for this slice |
+| New immutable tag | `dl-gold-2026-09-14-manual-rotate` → `8d9bf3cf71943e902671568b5d688865a8f40398` |
 
 ---
 
