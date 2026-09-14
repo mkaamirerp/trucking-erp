@@ -1,6 +1,27 @@
 # DL Gold manifest
 
-**Gold point:** `5c445494` (`5c445494908dbfc9a11538dc6af462aeaf62a6a8`)  
+## Manual rotate closeout (2026-09-14)
+
+**Root cause:** Production source images were often already upright. OpenCV four-corner geometry and original-pixel warp were correct. The FRONT `left_dark` / `right_dark` heuristic in `ensure_landscape_upright_for_dl()` falsely forced 180° when the floral/security panel was darker than the portrait side (confirmed on a live Ontario FRONT).
+
+**Final design (production):**
+
+- OpenCV remains geometry authority: detect, crop, perspective, 1000×631 normalization.
+- **FRONT:** no dark-pixel 180° heuristic; show the OpenCV processed crop; user **Rotate** (+90° CW on preview only, no OpenCV rerun); **Use This Photo** sends `rotate_cw_deg` 0/90/180/270; backend bakes rotation into the stored processed JPEG; PDF417 runs after confirm on the confirmed processed key.
+- **BACK:** existing gold behavior unchanged (dark-pixel 180° still allowed for `CDL_BACK` only).
+- Paddle/PaddleX orientation experiment was evaluated in isolation and **not** added to production (no ML dependency, no worker, no model weights in repo).
+
+| Item | Value |
+|---|---|
+| Manual-rotate fix commit | `a99d65461f4ec98edb101e73cbcdd93dc39decfd` — `fix(dl): use manual rotation for front orientation` |
+| Pre-integration `origin/main` | `e20d05a75b4022805a3f8cf95534c9e3a744bd46` |
+| Focused tests (pre-deploy) | Python **95 passed, 12 skipped**; frontend **19 passed** |
+| Live verification | pending deploy (see closeout report) |
+| New immutable tag (planned) | `dl-gold-2026-09-14-manual-rotate` |
+
+---
+
+**Prior gold point:** `5c445494` (`5c445494908dbfc9a11538dc6af462aeaf62a6a8`)  
 **Reason this SHA:** original-pixel warp + processed-first PDF417 (`ac650fff`), plus AAMVA segmentation: `DAY` as a delimiter (sex) and generic `Z[A-Z0-9]{2}` as jurisdiction-extension boundaries. OpenCV / ZXing decode behaviour is unchanged.
 
 | Item | Value |
@@ -50,6 +71,8 @@ Do not treat Load Parser, Fuel, or Trip/Dispatch files as DL gold.
 - `apps/web/src/lib/dlCaptureHandoff.ts`
 - `apps/web/src/lib/normalizeDlUpload.ts`
 - `apps/web/src/pages/DlCapturePage.tsx`
+- `apps/web/src/pages/DlCapturePage.test.tsx`
+- `apps/web/src/pages/OnboardingApplicantPage.tsx` (DL confirm `rotateCwDeg` only — no unrelated onboarding-field WIP in this commit)
 
 ### Frozen scale contract
 
@@ -305,7 +328,8 @@ Front OCR/AI must not overwrite a successful trusted PDF417 field merely because
 
 - **IF** EXIF exists, use it only to normalize the starting image; **OR** if it does not exist, continue from the pixels as received.
 - **IF** OpenCV finds and rectifies the card, continue; **OR** if four corners cannot be confirmed, use the existing capture/retry path.
-- **IF** the orientation model is confident, rotate the actual pixels to the predicted upright angle; **OR** if confidence is weak, do not guess and let the user review/correct it.
+- **FRONT (implemented 2026-09-14):** show the processed crop; user rotates in 90° steps and confirms; bake rotation on confirm — **do not** auto-flip FRONT with dark-pixel heuristics.
+- **BACK:** dark-pixel 180° heuristic remains part of gold until separately revised.
 - **IF** the image is FRONT, allow low resolution when OpenCV succeeds and attempt OCR; **OR** use manual verification when OCR is weak.
 - **IF** the image is BACK and processed PDF417 succeeds, use it; **OR** try the original stored BACK.
 - **IF** both BACK PDF417 attempts fail and a FRONT image exists, later allow FRONT OCR/AI as recovery; **OR** require manual entry.
@@ -315,7 +339,7 @@ Front OCR/AI must not overwrite a successful trusted PDF417 field merely because
 
 - Do not change current OpenCV detector scale, corner confirmation, or original-pixel warp while implementing orientation unless separate evidence requires it.
 - Do not depend on EXIF to decide final human-readable orientation.
-- Do not silently rotate on low-confidence model output.
+- Do not silently auto-rotate FRONT with heuristic darkness comparisons; user confirm + optional manual rotate is the FRONT orientation path.
 - Bake the selected orientation into actual pixels before saving/preview/extraction so downstream code does not depend on metadata.
 - Add tests first; implement in a small isolated DL commit; live-verify fixtures; only then consider moving `gold/dl`.
 - Keep this future work independent of Load Parser, Fuel, Trip/Dispatch, and unrelated dirty-tree changes.
