@@ -19,8 +19,10 @@ When you **finish changing or implementing** code that affects **production Dock
 After any `app/` change that ships in `truckerp-api`:
 
 ```bash
-/home/admin/trucking_erp/scripts/reload_api.sh
+/home/admin/trucking_erp-prod-main/scripts/reload_api.sh
 ```
+
+Do **not** `cd /home/admin/trucking_erp` or run `docker compose build` / `up -d truckerp-api` directly.
 
 Then verify, e.g. `docker exec truckerp-api grep -n 'audit-log' /app/app/routers/people_workspace.py` or hit a health/read endpoint.
 
