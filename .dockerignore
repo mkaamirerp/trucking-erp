@@ -1,4 +1,6 @@
 venv
+.venv
+.venv*
 .git
 __pycache__
 *.pyc
@@ -8,8 +10,12 @@ __pycache__
 .pytest_cache
 node_modules
 apps/web/node_modules
+apps/web
 artifacts
 archive
 vault
 vault-data
 vault.BAK_20260117_045113
+.cursor
+tests
+storage

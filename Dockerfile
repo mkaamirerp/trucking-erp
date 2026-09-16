@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ---------- Builder (has compilers) ----------
 FROM python:3.13-slim-bookworm AS builder
 WORKDIR /build
@@ -13,16 +14,14 @@ RUN python -m pip wheel --wheel-dir /wheels -r requirements.lock.txt
 
 # ---------- Runtime (no compilers) ----------
 FROM python:3.13-slim-bookworm AS prod
-# Baked images omit .git (.dockerignore). Pass at build for tenant preflight / upgrade logs:
-#   docker build --build-arg TRUCKERP_APP_GIT_SHA=$(git rev-parse --short HEAD) ...
-ARG TRUCKERP_APP_GIT_SHA=
-ENV TRUCKERP_APP_GIT_SHA=${TRUCKERP_APP_GIT_SHA}
 WORKDIR /app
 
 # Runtime libs and migration wrapper tooling: libpq5, curl, jq, ca-certificates,
 # postgresql-client for psql preflight checks, git for repo drift proof,
 # tesseract-ocr + poppler-utils for image-only PDF OCR fallback.
 # Workaround for CI/sandbox: allow insecure repos if apt GPG verification fails.
+# TRUCKERP_APP_GIT_SHA is declared AFTER these layers so a SHA-only rebuild
+# reuses apt + pip (see reload_api.sh / compose build-arg).
 RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         -o Acquire::AllowInsecureRepositories=true \
         -o Acquire::AllowDowngradeFromInsecureRepositories=true \
@@ -38,9 +37,10 @@ RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
         poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /wheels /wheels
 COPY requirements.lock.txt .
-RUN python -m pip install --no-cache-dir /wheels/*
+# Bind-mount builder wheels so they are not copied into a ~120MB image layer.
+RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
+    python -m pip install --no-cache-dir /wheels/*
 
 RUN python -m pip check
 RUN python - <<'PY'
@@ -50,6 +50,11 @@ PY
 
 COPY . .
 RUN chmod +x scripts/start_api_with_ssm.sh
+
+# Baked images omit .git (.dockerignore). Pass at build for tenant preflight / upgrade logs:
+#   docker build --build-arg TRUCKERP_APP_GIT_SHA=$(git rev-parse --short HEAD) ...
+ARG TRUCKERP_APP_GIT_SHA=
+ENV TRUCKERP_APP_GIT_SHA=${TRUCKERP_APP_GIT_SHA}
 
 CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
