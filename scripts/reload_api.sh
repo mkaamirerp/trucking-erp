@@ -1,22 +1,57 @@
 #!/usr/bin/env bash
-# Reload API: rebuild + restart + show status and logs.
-# Run after any backend code change. No exceptions.
-# Usage: ./scripts/reload_api.sh   or   bash /home/admin/trucking_erp/scripts/reload_api.sh
+# Reload production API: rebuild API image and recreate the API container only.
+# Does not rebuild nginx.
+#
+# Usage: /home/admin/trucking_erp-prod-main/scripts/reload_api.sh
 
-set -e
-REPO_ROOT="${REPO_ROOT:-/home/admin/trucking_erp}"
+set -euo pipefail
+
+PROD_ROOT="/home/admin/trucking_erp-prod-main"
+FORBIDDEN_ROOT="/home/admin/trucking_erp"
+
+REPO_ROOT="$(cd "${REPO_ROOT:-$PROD_ROOT}" && pwd)"
+
+if [ "$REPO_ROOT" != "$PROD_ROOT" ]; then
+  echo "ERROR: production API reload must use ${PROD_ROOT} (got ${REPO_ROOT})." >&2
+  echo "       ${FORBIDDEN_ROOT} is not a production deploy tree." >&2
+  exit 1
+fi
+
 cd "$REPO_ROOT"
+
+if [ -n "${COMPOSE_PROJECT_NAME:-}" ] && [ "$COMPOSE_PROJECT_NAME" != "trucking_erp" ]; then
+  echo "ERROR: COMPOSE_PROJECT_NAME must be trucking_erp (got ${COMPOSE_PROJECT_NAME})." >&2
+  exit 1
+fi
+export COMPOSE_PROJECT_NAME=trucking_erp
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$branch" != "main" ]; then
+  echo "ERROR: production reload requires branch main (got ${branch})." >&2
+  exit 1
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: production reload requires a clean worktree." >&2
+  git status -sb >&2
+  exit 1
+fi
+
+if [ -z "${TRUCKERP_APP_GIT_SHA:-}" ]; then
+  TRUCKERP_APP_GIT_SHA="$(git rev-parse --short HEAD)"
+fi
+export TRUCKERP_APP_GIT_SHA
+
+echo "==> REPO_ROOT=${REPO_ROOT}"
+echo "==> branch=${branch}"
+echo "==> HEAD=$(git rev-parse HEAD)"
+echo "==> TRUCKERP_APP_GIT_SHA=${TRUCKERP_APP_GIT_SHA}"
+echo "==> COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}"
+echo "==> Rebuilding and recreating truckerp-api only (no nginx)..."
 
 COMPOSE="docker compose -f docker-compose.yml"
 
-# Bake git short SHA into the image for tenant preflight / upgrade logs (.dockerignore excludes .git).
-if [ -z "${TRUCKERP_APP_GIT_SHA:-}" ] && command -v git >/dev/null 2>&1 \
-   && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  export TRUCKERP_APP_GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
-fi
-
-echo "==> Rebuilding and starting truckerp-api..."
-$COMPOSE build truckerp-api && $COMPOSE up -d truckerp-api
+$COMPOSE build truckerp-api && $COMPOSE up -d --no-deps truckerp-api
 
 bash "$REPO_ROOT/scripts/api_import_smoke.sh"
 
