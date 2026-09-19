@@ -1,0 +1,413 @@
+{
+  "BVD": {
+    "provider_code": "BVD",
+    "profile_version": "2026-09-19",
+    "display_name": "BVD fuel-card statement (invoice 972201 layout)",
+    "evidence": {
+      "source_pdf": "docs/fixtures/fuel/BVD_invoice_972201.pdf",
+      "extracted_text": "docs/fixtures/fuel/BVD_invoice_972201.extracted_text.json",
+      "invoice_number": "972201",
+      "notes": "First evidence-backed Fuel provider profile. Maps BVD source labels into generic Fuel canonical fields. Not a BVD parser engine."
+    },
+    "layout_recognition": {
+      "required_anchors": [
+        "Fuel Card Transactions",
+        "Auth Code",
+        "Driver Name",
+        "Unit #",
+        "Final AMT",
+        "CUR"
+      ],
+      "optional_anchors": [
+        "Invoice",
+        "Pre Tax AMT",
+        "HST",
+        "GST",
+        "PST",
+        "QST",
+        "Grand Totals",
+        "Legend"
+      ],
+      "unrecognized_status": "PROVIDER_LAYOUT_UNRECOGNIZED"
+    },
+    "row_classification": {
+      "transaction_field_markers": [
+        "Auth Code"
+      ],
+      "control_match_rules": [
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "SUBTOTAL"
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "SUBTOTAL TA"
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "Fuel Total"
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "Grand Totals"
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "Grand Total"
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "Sub Total"
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "SUBTOTAL"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "Fuel Total"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "Grand Total"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "Grand Totals"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "Sub Total"
+          ]
+        }
+      ],
+      "unknown_is_review": true,
+      "never_infer_purchase_from_amount_alone": true
+    },
+    "field_aliases": {
+      "Auth Code": "provider_transaction_identity",
+      "Driver Name": "driver_name_snapshot",
+      "Unit #": "unit_number_snapshot",
+      "Date": "transaction_datetime_source",
+      "Site #": "site_number",
+      "Site Name": "site_name",
+      "Site City": "city",
+      "Prov/ST": "province_state",
+      "Prod": "product_code_raw",
+      "QTY": "quantity",
+      "Billed": "unit_price",
+      "Pre Tax AMT": "pre_tax_amount",
+      "HST": "hst_amount",
+      "GST": "gst_amount",
+      "PST": "pst_amount",
+      "QST": "qst_amount",
+      "Disc Rate": "provider_discount_rate",
+      "Disc AMT": "provider_discount_amount",
+      "Final AMT": "total_amount",
+      "FINAL AMOUNT": "total_amount",
+      "CUR": "currency_raw",
+      "Card": "card_or_account_id"
+    },
+    "field_semantics": {
+      "unit_price_basis_when_alias_source_present": {
+        "Billed": "BILLED"
+      },
+      "retail_is_provider_raw_not_unit_price_by_default": true,
+      "quantity_unit": {
+        "explicit_source_first": true,
+        "fallback_when_absent": null,
+        "notes": "BVD PDF sample does not print an explicit UOM column; do not invent litres/gallons without source evidence."
+      }
+    },
+    "currency_mappings": {
+      "CN": "CAD"
+    },
+    "tax_labels": {
+      "HST": "hst_amount",
+      "GST": "gst_amount",
+      "PST": "pst_amount",
+      "QST": "qst_amount"
+    },
+    "product_code_legend": {
+      "TA": "Tractor",
+      "TF": "Trailer",
+      "DF": "DEF",
+      "S": "Scale",
+      "C": "Cash",
+      "AD": "Additive",
+      "O": "Oil",
+      "L": "Lubricant"
+    },
+    "header_aliases": {
+      "Invoice Number": "invoice_number",
+      "Invoice Date": "invoice_date",
+      "Start Date": "statement_start",
+      "End Date": "statement_end",
+      "Due Date": "due_date"
+    },
+    "ai_forbidden_authority_fields_note": "Provider profile must not authorize truck_id, driver_id, payee, O/O pricing, settlement, or posting. Same forbidden list as Fuel AI contract.",
+    "structured_export": {
+      "status": "BLOCKED_BY_SOURCE_EVIDENCE",
+      "reason": "No evidenced T-Chek/BVD structured export sample (e.g. TcheckDATTransplus) is available in this worktree. Do not invent the file layout."
+    }
+  },
+  "NATIONWIDE": {
+    "provider_code": "NATIONWIDE",
+    "profile_version": "2026-09-19",
+    "display_name": "Nationwide fuel invoice (20250522B-06142026 layout)",
+    "evidence": {
+      "source_pdf": "docs/fixtures/fuel/nationwide_fuel.pdf",
+      "extracted_text": "docs/fixtures/fuel/nationwide_fuel.extracted_text.json",
+      "account_code": "20250522B",
+      "invoice_number": "20250522B-06142026",
+      "notes": "Second evidence-backed Fuel provider profile. Same generic Fuel parser as BVD. Not a Nationwide parser engine.",
+      "uom_fallback_evidence": [
+        "Page 1 billing summary: 'Total Volume 674.17 Litres' for the CAD invoice section.",
+        "Page 1 header area prints 'Gallons' adjacent to the USD billing block.",
+        "Page 2 footnote: 'For US Transactions this column shows final gallon price (no GST/HST on US fuel)'.",
+        "Per-row Volume column has no explicit UOM; fallback is scoped to this profile/version only. Explicit source UOM always wins."
+      ],
+      "price_basis_evidence": [
+        "Column header 'Ex-GST ($/U)' on the transaction table.",
+        "Page 2 footnote: US uses that column as final gallon price.",
+        "Page 2 footnote: Ex-HST/Ex-GST for applicable Canadian provinces → EX_TAX.",
+        "Mappings CAD→EX_TAX and USD→FINAL_GALLON_PRICE live only in this Nationwide profile."
+      ]
+    },
+    "layout_recognition": {
+      "required_anchors": [
+        "FUEL INVOICE",
+        "TRANSACTION BREAKDOWN BY CARD",
+        "Account Code",
+        "Card Number",
+        "Unit #",
+        "Ex-GST ($/U)",
+        "Network",
+        "Currency"
+      ],
+      "optional_anchors": [
+        "nationwidefuel.ca",
+        "BILLING SUMMARY",
+        "Total Ex-GST & PST",
+        "GST",
+        "QST",
+        "USA Discount",
+        "Missed Disc",
+        "OON Fees",
+        "For US Transactions this column shows final gallon price"
+      ],
+      "unrecognized_status": "PROVIDER_LAYOUT_UNRECOGNIZED"
+    },
+    "row_classification": {
+      "transaction_field_markers": [
+        "Card Number",
+        "Volume",
+        "Ex-GST ($/U)"
+      ],
+      "control_match_rules": [
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "CARD_TOTAL"
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "INVOICE_SUMMARY"
+        },
+        {
+          "kind": "field_equals",
+          "field": "control_type_raw",
+          "value": "CARD_TOTAL"
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "xxxxx"
+          ],
+          "requires_contains": [
+            " total"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "this weeks invoice"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "total outstanding balance"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "total ex-gst & pst"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "billing summary"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "gst $"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "qst $"
+          ]
+        },
+        {
+          "kind": "line_equals",
+          "value": "TRANSACTION BREAKDOWN BY CARD"
+        }
+      ],
+      "unknown_is_review": true,
+      "never_infer_purchase_from_amount_alone": true
+    },
+    "control_type_hints": [
+      {
+        "kind": "line_contains",
+        "value": " total gst",
+        "control_type": "CARD_TOTAL"
+      },
+      {
+        "kind": "line_prefix",
+        "prefixes": [
+          "xxxxx"
+        ],
+        "control_type": "CARD_TOTAL"
+      },
+      {
+        "kind": "line_contains",
+        "value": "total ex-gst & pst",
+        "control_type": "INVOICE_SUMMARY"
+      },
+      {
+        "kind": "line_contains",
+        "value": "this weeks invoice",
+        "control_type": "INVOICE_TOTAL"
+      },
+      {
+        "kind": "line_contains",
+        "value": "total outstanding balance",
+        "control_type": "STATEMENT_TOTAL"
+      },
+      {
+        "kind": "line_contains",
+        "value": "billing summary",
+        "control_type": "INVOICE_SUMMARY"
+      },
+      {
+        "kind": "line_prefix",
+        "prefixes": [
+          "gst $"
+        ],
+        "control_type": "TAX_CONTROL"
+      },
+      {
+        "kind": "field_equals",
+        "field": "row_label",
+        "value": "CARD_TOTAL",
+        "control_type": "CARD_TOTAL"
+      }
+    ],
+    "field_aliases": {
+      "Account Code": "account_reference",
+      "Card Number": "card_or_account_id",
+      "Unit #": "unit_number_snapshot",
+      "Date": "transaction_datetime_source",
+      "City": "city",
+      "Pr/St": "province_state",
+      "Product": "product",
+      "Volume": "quantity",
+      "Ex-GST ($/U)": "unit_price",
+      "Total": "total_amount",
+      "Network": "merchant_network",
+      "Currency": "currency_raw",
+      "USA Discount": "provider_discount_amount",
+      "Missed Disc": "missed_discount_amount",
+      "OON Fees": "out_of_network_fee"
+    },
+    "field_semantics": {
+      "unit_price_source_column": "Ex-GST ($/U)",
+      "unit_price_basis_by_currency": {
+        "CAD": "EX_TAX",
+        "USD": "FINAL_GALLON_PRICE"
+      },
+      "quantity_unit_by_currency_fallback": {
+        "CAD": "litres",
+        "USD": "gallons"
+      },
+      "network_is_not_exact_merchant_site": true,
+      "driver_absent_on_source": true,
+      "per_row_tax_absent_on_transactions": true,
+      "date_only_when_time_absent": true,
+      "notes": [
+        "PDF footnote: US transactions use Ex-GST column as final gallon price (no GST/HST on US fuel).",
+        "PDF footnote: Ex-HST/Ex-GST for Canadian provinces → unit_price_basis EX_TAX.",
+        "Billing summary prints CAD volume in Litres and USD section references Gallons; per-row Volume has no UOM column — currency fallback only on this profile.",
+        "Network (Esso/TA-Petro/Independent) is preserved as merchant_network, not assumed to be physical merchant_site.",
+        "No Driver column on this PDF → driver_name_snapshot remains null.",
+        "Canadian GST/QST appear on CARD_TOTAL / billing controls; do not invent per-row GST on CAD or USD transactions."
+      ]
+    },
+    "currency_mappings": {
+      "CAD": "CAD",
+      "USD": "USD"
+    },
+    "tax_labels": {
+      "GST": "gst_amount",
+      "QST": "qst_amount",
+      "PST": "pst_amount",
+      "HST": "hst_amount"
+    },
+    "product_code_legend": {
+      "DIESEL": "DIESEL",
+      "REEFER": "REEFER",
+      "SCALE": "SCALE"
+    },
+    "header_aliases": {
+      "Account Code": "account_reference",
+      "Invoice Number": "invoice_number",
+      "Invoice Start Date:": "statement_start",
+      "Invoice End Date:": "statement_end",
+      "Due Date:": "due_date",
+      "Customer Name": "customer_name_raw"
+    },
+    "ai_forbidden_authority_fields_note": "Provider profile must not authorize truck_id, driver_id, payee, O/O pricing, settlement, or posting.",
+    "structured_export": {
+      "status": "BLOCKED_BY_SOURCE_EVIDENCE",
+      "reason": "PDF says 'See attached CSV file for further transactional detail' but no Nationwide CSV sample is present in this worktree. Do not invent the CSV layout."
+    },
+    "review_conditions": [
+      "Ambiguous row that is neither transaction markers nor control rules → REVIEW",
+      "Claimed Nationwide document missing required layout anchors → PROVIDER_LAYOUT_UNRECOGNIZED → REVIEW",
+      "Do not prorate control GST into transaction rows",
+      "Do not infer Canadian tax on USD rows"
+    ]
+  }
+}

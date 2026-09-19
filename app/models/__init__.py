@@ -70,6 +70,16 @@ from app.models.email_intake_review import EmailIntakeReview, EmailIntakeReviewE
 from app.models.email_attachment import EmailMessageAttachment
 from app.models.email_intake_qr_extraction import EmailIntakeQrExtraction
 from app.models.domain_event_outbox import DomainEventOutbox
+from app.models.fuel import (
+    FuelCardAccountAssignment,
+    FuelExtractionCorrection,
+    FuelOwnerOperatorPricingRule,
+    FuelProviderConnection,
+    FuelSourceBatch,
+    FuelSourceControl,
+    FuelTransaction,
+)
+from app.models.truck_history import TruckOwnershipHistory, TruckUnitNumberHistory
 
 # Payroll foundations (B6)
 from app.models.payroll import PayPeriod, PayProfile, PayEntry, PayRun, PayRunItem

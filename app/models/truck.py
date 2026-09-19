@@ -25,6 +25,7 @@ from app.models.base import Base
 class Truck(Base):
     __tablename__ = "trucks"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_trucks_tenant_id_id"),
         UniqueConstraint("tenant_id", "unit_number", name="uq_trucks_tenant_unit_number"),
         UniqueConstraint("tenant_id", "vin", name="uq_trucks_tenant_vin"),
         ForeignKeyConstraint(

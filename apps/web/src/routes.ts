@@ -43,6 +43,9 @@ export const OPS = {
   PAY_RUN_DETAIL: (id: number | string) => `/payroll/pay-runs/${id}`,
   PAY_PERIODS: "/payroll/pay-periods",
   DOCUMENTS: "/payroll/documents",
+  FUEL_PROVIDERS: "/fuel/providers",
+  FUEL_REVIEW: "/fuel/review",
+  FUEL_REVIEW_BATCH: (id: number | string) => `/fuel/review/${id}`,
 } as const;
 
 /** Apex-only platform control plane (X-Platform-Admin-Key). */

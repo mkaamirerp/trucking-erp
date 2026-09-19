@@ -2,6 +2,22 @@
 
 This folder contains **committed regression/test evidence**, not product architecture documents.
 
+## `fuel/`
+
+Evidence-backed Fuel/Card fixtures for the **generic Fuel parser + provider profiles** architecture.
+
+Current active files:
+
+- `BVD_invoice_972201.pdf` — real BVD statement PDF (invoice 972201); first provider-profile proof
+- `BVD_invoice_972201.extracted_text.json` — page text extracted for layout-anchor tests (not the digital-PDF AI input)
+- `nationwide_fuel.pdf` — real Nationwide fuel invoice PDF; second provider-profile proof
+- `nationwide_fuel.extracted_text.json` — page text for Nationwide layout-anchor tests
+
+Provider profiles (data, not engines) — **one master JSON**, one current section per provider:
+
+- `app/contracts/fuel_provider_profiles.json` — top-level keys exactly `BVD` and `NATIONWIDE`
+  (identity: `provider_code` + `profile_version` stamp; no `profile_code` / `statement_v1`)
+
 ## `load_lab/`
 
 The `load_lab` directory name is historical provenance. The files that remain there are still used by current parser tests and **do not mean Load Lab owns the production parser**.

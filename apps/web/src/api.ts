@@ -3729,6 +3729,144 @@ export type DriverSummary = {
   }>;
 };
 
+export type FuelConnectionFieldDef = {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  secret: boolean;
+};
+
+export type FuelConnectionMethodDef = {
+  connection_method: string;
+  label: string;
+  evidence_status: "evidenced" | "unverified" | string;
+  selectable: boolean;
+  live_adapter_implemented: boolean;
+  test_connection_capability: boolean;
+  sync_capability: boolean;
+  scheduling_capability: boolean;
+  fields: FuelConnectionFieldDef[];
+};
+
+export type FuelProviderCatalog = {
+  provider_code: string;
+  display_name: string;
+  enabled: boolean;
+  supported_connection_methods: string[];
+  unverified_connection_methods: string[];
+  default_connection_method?: string | null;
+  parser_profile_code?: string | null;
+  expected_file_formats: string[];
+  filename_pattern?: string | null;
+  instructions: string;
+  live_adapter_implemented: boolean;
+  connection_methods: FuelConnectionMethodDef[];
+};
+
+export type FuelSecretState = {
+  configured: boolean;
+  masked_display?: string | null;
+};
+
+export type FuelProviderConnection = {
+  id: number;
+  tenant_id: number;
+  provider_code: string;
+  connection_method: string;
+  display_name?: string | null;
+  account_reference?: string | null;
+  enabled: boolean;
+  auto_sync_enabled: boolean;
+  sync_frequency?: string | null;
+  config: Record<string, unknown>;
+  secrets: Record<string, FuelSecretState>;
+  last_sync_at?: string | null;
+  last_sync_status?: string | null;
+  last_sync_result?: string | null;
+  last_tested_at?: string | null;
+  last_test_status?: string | null;
+  last_test_result?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FuelProviderConnectionWrite = {
+  provider_code: string;
+  connection_method: string;
+  enabled?: boolean;
+  auto_sync_enabled?: boolean;
+  sync_frequency?: string | null;
+  fields: Record<string, string>;
+};
+
+export type FuelAdapterAction = {
+  success: boolean;
+  attempted: boolean;
+  result: string;
+  provider_code: string;
+  connection_method: string;
+  message: string;
+};
+
+export async function listFuelProviders(): Promise<FuelProviderCatalog[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/providers`);
+  return handle<FuelProviderCatalog[]>(res);
+}
+
+export async function getFuelProvider(providerCode: string): Promise<FuelProviderCatalog> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/providers/${encodeURIComponent(providerCode)}`);
+  return handle<FuelProviderCatalog>(res);
+}
+
+export async function listFuelProviderConnections(): Promise<FuelProviderConnection[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/provider-connections`);
+  return handle<FuelProviderConnection[]>(res);
+}
+
+export async function createFuelProviderConnection(
+  payload: FuelProviderConnectionWrite,
+): Promise<FuelProviderConnection> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/provider-connections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<FuelProviderConnection>(res);
+}
+
+export async function updateFuelProviderConnection(
+  id: number,
+  payload: {
+    connection_method?: string;
+    enabled?: boolean;
+    auto_sync_enabled?: boolean;
+    sync_frequency?: string | null;
+    fields?: Record<string, string>;
+  },
+): Promise<FuelProviderConnection> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/provider-connections/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<FuelProviderConnection>(res);
+}
+
+export async function testFuelProviderConnection(id: number): Promise<FuelAdapterAction> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/provider-connections/${id}/test`, {
+    method: "POST",
+  });
+  return handle<FuelAdapterAction>(res);
+}
+
+export async function syncFuelProviderConnection(id: number): Promise<FuelAdapterAction> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/provider-connections/${id}/sync`, {
+    method: "POST",
+  });
+  return handle<FuelAdapterAction>(res);
+}
+
 export type Driver = {
   id: number;
   first_name: string;
@@ -3740,3 +3878,159 @@ export type Driver = {
   license_expiry_date?: string | null;
 };
 
+
+// --- Fuel Segment 8: source review ---
+
+export type FuelReviewQueueItem = {
+  batch_id: number;
+  tenant_id: number;
+  provider_code: string;
+  source_type: string;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  statement_start?: string | null;
+  statement_end?: string | null;
+  account_reference?: string | null;
+  remote_filename?: string | null;
+  source_storage_ref?: string | null;
+  parser_rule_version?: string | null;
+  provider_profile_code?: string | null;
+  layout_status?: string | null;
+  status: string;
+  review_version: number;
+  currencies: string[];
+  transaction_count: number;
+  control_count: number;
+  pending_review_count: number;
+  problem_count: number;
+  layout_problems: string[];
+  problem_summary: Record<string, unknown>;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_started_by?: string | null;
+  review_started_at?: string | null;
+  imported_at: string;
+};
+
+export type FuelReviewRow = {
+  entity_type: "TRANSACTION" | "CONTROL" | string;
+  entity_id: number;
+  source_row_order?: number | null;
+  review_status: string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  parsed_row_role: string;
+  reviewed_row_role?: string | null;
+  effective_row_role: string;
+  requires_review: boolean;
+  review_reason?: string | null;
+  warnings: string[];
+  provider_raw: Record<string, unknown>;
+  fields: Record<string, unknown>;
+  editable_fields: string[];
+};
+
+export type FuelReviewWorkspace = {
+  batch: FuelReviewQueueItem;
+  rows: FuelReviewRow[];
+  current_row: FuelReviewRow | null;
+  progress: { total_rows: number; confirmed_rows: number; pending_rows: number };
+  corrections: Array<Record<string, unknown>>;
+  document: {
+    source_storage_ref?: string | null;
+    remote_filename?: string | null;
+    source_type?: string | null;
+    immutable: boolean;
+    note?: string | null;
+  };
+  process_boundary: {
+    action: string;
+    reconciliation_implemented: boolean;
+    finalization_implemented: boolean;
+    message: string;
+  };
+};
+
+export type FuelReviewCorrectionWrite = {
+  field: string;
+  reviewed_value: unknown;
+  reason: string;
+};
+
+export async function listFuelReviewQueue(statuses?: string[]): Promise<FuelReviewQueueItem[]> {
+  const qs =
+    statuses && statuses.length
+      ? `?${statuses.map((s) => `status=${encodeURIComponent(s)}`).join("&")}`
+      : "";
+  const res = await fetchWithTenant(`${API_BASE}/fuel/review/queue${qs}`);
+  return handle<FuelReviewQueueItem[]>(res);
+}
+
+export async function getFuelReviewWorkspace(batchId: number): Promise<FuelReviewWorkspace> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/review/batches/${batchId}`);
+  return handle<FuelReviewWorkspace>(res);
+}
+
+export function fuelReviewDocumentUrl(batchId: number): string {
+  return `${API_BASE}/fuel/review/batches/${batchId}/document`;
+}
+
+export async function startFuelBatchReview(
+  batchId: number,
+  expectedVersion?: number | null,
+): Promise<FuelReviewQueueItem> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/review/batches/${batchId}/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_version: expectedVersion ?? null }),
+  });
+  return handle<FuelReviewQueueItem>(res);
+}
+
+export async function confirmFuelReviewRow(
+  batchId: number,
+  entityType: string,
+  entityId: number,
+  payload: { expected_version?: number | null; corrections?: FuelReviewCorrectionWrite[] },
+): Promise<{
+  batch_id: number;
+  review_version: number;
+  confirmed: Record<string, unknown>;
+  next_row: FuelReviewRow | null;
+  progress: FuelReviewWorkspace["progress"];
+  batch_status: string;
+}> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/review/batches/${batchId}/rows/${encodeURIComponent(entityType)}/${entityId}/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expected_version: payload.expected_version ?? null,
+        corrections: payload.corrections ?? [],
+      }),
+    },
+  );
+  return handle(res);
+}
+
+export async function processFuelBatchReview(
+  batchId: number,
+  expectedVersion?: number | null,
+): Promise<{
+  batch_id: number;
+  status: string;
+  review_version: number;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  reconciliation_implemented: boolean;
+  finalization_implemented: boolean;
+  message: string;
+}> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/review/batches/${batchId}/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_version: expectedVersion ?? null }),
+  });
+  return handle(res);
+}

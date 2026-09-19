@@ -39,6 +39,9 @@ import AdminPlaceholderPage from "./pages/AdminPlaceholderPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
 import AddWorkspacePage from "./pages/AddWorkspacePage";
 import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
+import FuelProviderConnectionsPage from "./pages/FuelProviderConnectionsPage";
+import FuelReviewQueuePage from "./pages/FuelReviewQueuePage";
+import FuelReviewWorkspacePage from "./pages/FuelReviewWorkspacePage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
 import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
@@ -79,6 +82,7 @@ function App() {
     /^\/trips/.test(location.pathname) ||
     /^\/operations/.test(location.pathname) ||
     /^\/admin/.test(location.pathname) ||
+    /^\/fuel/.test(location.pathname) ||
     /^\/profile/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
@@ -301,6 +305,36 @@ function App() {
       <Route path="/operations/people/*" element={<Layout><PeopleWorkspacePage /></Layout>} />
       <Route path="/operations/driver-onboarding-review" element={<Layout><DriverOnboardingAdminListPage /></Layout>} />
       <Route path="/operations/driver-onboarding-review/:id" element={<Layout><DriverOnboardingAdminDetailPage /></Layout>} />
+      <Route
+        path="/fuel/providers"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <FuelProviderConnectionsPage entryPoint="fuel" />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
+      <Route
+        path="/fuel/review"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <FuelReviewQueuePage />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
+      <Route
+        path="/fuel/review/:batchId"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <FuelReviewWorkspacePage />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
       {/* Redirect legacy /admin/driver-onboarding to operations namespace */}
       <Route path="/admin/driver-onboarding" element={<Navigate to={OPS.DRIVER_ONBOARDING_REVIEW} replace />} />
       <Route path="/admin/driver-onboarding/:id" element={<RedirectDriverOnboardingDetail />} />
@@ -323,7 +357,7 @@ function App() {
         <Route path="settings/email" element={<AdminEmailConfigPage />} />
         <Route path="integrations/smtp" element={<Navigate to="/admin/settings/email" replace />} />
         <Route path="integrations/eld" element={<AdminIntegrationsPage />} />
-        <Route path="integrations/fuel" element={<AdminIntegrationsPage />} />
+        <Route path="integrations/fuel" element={<FuelProviderConnectionsPage entryPoint="admin" />} />
         <Route path="onboarding" element={<AdminPlaceholderPage title="Onboarding Settings" description="Onboarding workflow and invite defaults." />} />
         <Route path="documents" element={<AdminPlaceholderPage title="Document Rules" description="Required documents and expiry rules." />} />
       </Route>

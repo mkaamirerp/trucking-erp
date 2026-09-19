@@ -46,6 +46,7 @@ from app.routers.dev_tools_db import router as dev_tools_db_router
 from app.routers.tenant_admin import router as tenant_admin_router
 from app.routers.dispatch_numbering_admin import router as dispatch_numbering_admin_router
 from app.routers.admin_email_config import router as admin_email_config_router
+from app.routers.fuel import router as fuel_router
 from app.routers.email_threads import router as email_threads_router
 from app.routers.gmail_pubsub import router as gmail_pubsub_router
 from app.routers.microsoft_graph_webhook import router as microsoft_graph_webhook_router
@@ -163,6 +164,7 @@ if settings.allows_tenant_resolution_shortcuts():
 app.include_router(tenant_admin_router)
 app.include_router(dispatch_numbering_admin_router)
 app.include_router(admin_email_config_router)
+app.include_router(fuel_router, prefix="/api/v1")
 app.include_router(email_threads_router, prefix="/api/v1")
 app.include_router(gmail_pubsub_router, prefix="/api/v1")
 app.include_router(microsoft_graph_webhook_router, prefix="/api/v1")

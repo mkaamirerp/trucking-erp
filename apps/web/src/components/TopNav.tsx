@@ -44,6 +44,8 @@ const settingsGroups = [
       { label: "Email", to: ADMIN.SETTINGS_EMAIL },
       { label: "ELD", to: ADMIN.INTEGRATIONS_ELD },
       { label: "Fuel", to: ADMIN.INTEGRATIONS_FUEL },
+      { label: "Fuel Providers", to: OPS.FUEL_PROVIDERS },
+      { label: "Fuel Review", to: OPS.FUEL_REVIEW },
     ],
   },
   {
@@ -85,6 +87,8 @@ function usePageLabel(): string {
   if (pathname.startsWith("/admin/settings/email")) return "Email Settings";
   if (pathname.startsWith("/admin/integrations/eld")) return "ELD";
   if (pathname.startsWith("/admin/integrations/fuel")) return "Fuel";
+  if (pathname.startsWith("/fuel/review")) return "Fuel Review";
+  if (pathname.startsWith("/fuel/providers")) return "Fuel Providers";
   if (pathname.startsWith("/admin/onboarding")) return "Onboarding Settings";
   if (pathname.startsWith("/admin/documents")) return "Document Rules";
   if (pathname.startsWith("/profile")) return "My Profile";

@@ -13,6 +13,7 @@ DEFAULT_SENSITIVE_FIELD_SUBSTRINGS = (
     "ssn",
     "routing_number",
     "bank_account",
+    "credential_ref",
 )
 
 
