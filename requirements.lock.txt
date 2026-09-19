@@ -43,7 +43,7 @@ click==8.3.3
     # via uvicorn
 colorama==0.4.6
     # via awscli
-cryptography==48.0.0
+cryptography==50.0.0
     # via
     #   -r requirements.in
     #   google-auth
