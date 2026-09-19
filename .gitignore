@@ -21,6 +21,23 @@ audit_*.txt
 *_inspect*.json
 
 # =========================
+# Local cookie / session jars (curl dumps)
+# =========================
+# Tight names only — do not ignore *cookie* (would hide login_trust_cookie source).
+cookies.txt
+cookie.txt
+cookies.jar
+cookie.jar
+cookiejar.txt
+*.cookiejar
+.curl_cookies
+curl_cookies.txt
+netscape_cookies.txt
+access_token.txt
+refresh_token.txt
+session_cookies.txt
+
+# =========================
 # Internal scratch
 # =========================
 writing/
