@@ -1,7 +1,7 @@
 # Fuel / BVD — Implementation 1
 
 **Status:** LOCKED BVD schema design checkpoint  
-**Scope:** BVD PDF source table + TruckERP-owned operational/resolution fields.  
+**Scope:** one BVD source table + TruckERP-owned operational/resolution fields.  
 **Backend authority:** all matching, validation, reconciliation, pricing, settlement, and posting logic stays in the backend.  
 **No migration/deployment is authorized by this document alone.**
 
@@ -35,7 +35,7 @@ BVD source values must never be overwritten by TruckERP resolution.
 Example:
 
 ```text
-BVD Unit #       = 1104
+BVD Unit #        = 1104
 TruckERP truck_id = 87
 ```
 
@@ -64,9 +64,29 @@ GRAND_TOTAL
 LEGEND
 ```
 
-Invoice/header information may repeat across rows from the same PDF. This is intentional in Implementation 1 to keep the BVD source model simple.
+Invoice/header information and import-level processing metadata may repeat across rows from the same PDF. This is intentional in Implementation 1 to keep the BVD model simple and in one table.
 
 Rows from the same uploaded/processed PDF share the same `import_id`.
+
+```text
+same PDF
+    ↓
+same import_id on every row
+```
+
+`parse_status` is an **import/PDF processing status** and therefore normally has the same value on every row for the same `import_id`.
+
+`review_status` is a **row-level review status** and may differ from one row to another.
+
+Example:
+
+```text
+import_id = 8f24...same UUID...
+
+row 1  parse_status = SUCCESS  review_status = APPROVED
+row 2  parse_status = SUCCESS  review_status = REVIEW
+row 3  parse_status = SUCCESS  review_status = APPROVED
+```
 
 ---
 
@@ -296,6 +316,8 @@ import_id
 
 `import_id` groups all rows created from the same uploaded/processed BVD PDF.
 
+Implementation 1 intentionally keeps this grouping key in the one-table design rather than creating a separate BVD import table.
+
 ## 7.2 Source / audit
 
 ```text
@@ -330,6 +352,8 @@ parse_status
 
 `processing_duration_ms` is backend-measured processing time.
 
+Keep both timestamps and duration so backend diagnostics can distinguish when processing started/finished and how long the processing itself took.
+
 Example:
 
 ```text
@@ -350,13 +374,16 @@ REVIEW
 FAILED
 ```
 
-## 7.4 Review audit
+`parse_status` describes the processing result for the imported PDF and is expected to be consistent across rows sharing the same `import_id`.
+
+## 7.4 Row-level review audit
 
 ```text
 review_status
 reviewed_at
 reviewed_by
 review_reason
+extraction_warnings
 ```
 
 Initial `review_status` values:
@@ -364,8 +391,22 @@ Initial `review_status` values:
 ```text
 PENDING
 APPROVED
+REVIEW
 REJECTED
 ```
+
+`extraction_warnings` is TruckERP-owned structured warning data for parser/extraction concerns on the row. It does not alter any BVD source value.
+
+Examples of warning reasons may include:
+
+```text
+LOW_CONFIDENCE_FIELD
+FIELD_UNREADABLE
+EXPECTED_FIELD_MISSING
+AMBIGUOUS_ROW
+```
+
+The exact warning vocabulary is a backend contract and must be validated server-side.
 
 Review/approval authority is enforced by the backend.
 
@@ -378,6 +419,9 @@ owner_operator_id
 
 truck_match_status
 driver_match_status
+
+matched_at
+ownership_resolved_at
 ```
 
 Initial match status values:
@@ -387,6 +431,10 @@ MATCHED
 UNMATCHED
 REVIEW
 ```
+
+`matched_at` records when the backend identity-resolution process matched the source row to TruckERP identities.
+
+`ownership_resolved_at` records when the backend resolved the applicable ownership/O/O relationship for that transaction context.
 
 Example:
 
@@ -401,9 +449,20 @@ TruckERP backend resolution:
     driver_id = 214
     driver_match_status = MATCHED
     owner_operator_id = 31
+    matched_at = <backend timestamp>
+    ownership_resolved_at = <backend timestamp>
 ```
 
 BVD source fields remain unchanged after this resolution.
+
+Important:
+
+```text
+unit_number = BVD source truth
+truck_id    = TruckERP resolved FK
+```
+
+Truck ownership/assignment logic must be resolved in the backend using the transaction context/date and TruckERP history. The browser is never authoritative for this mapping.
 
 ## 7.6 Database audit
 
@@ -487,10 +546,12 @@ CREATE TABLE fuel_bvd (
     parser_version          TEXT,
     parse_status            TEXT,
 
+    -- TruckERP row-level review
     review_status           TEXT,
     reviewed_at             TIMESTAMPTZ,
     reviewed_by             TEXT,
     review_reason           TEXT,
+    extraction_warnings     JSONB,
 
     -- TruckERP identity resolution
     truck_id                BIGINT,
@@ -498,6 +559,8 @@ CREATE TABLE fuel_bvd (
     owner_operator_id       BIGINT,
     truck_match_status      TEXT,
     driver_match_status     TEXT,
+    matched_at              TIMESTAMPTZ,
+    ownership_resolved_at   TIMESTAMPTZ,
 
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -545,21 +608,35 @@ The frontend must never be the authority for money, ownership, matching, reconci
 
 ---
 
-# 10. What is deliberately NOT in Implementation 1
+# 10. Financial separation lock
 
-Do not add these calculations to `fuel_bvd` yet:
+Do not add these calculated/decision fields to `fuel_bvd`:
 
 ```text
 O/O fuel charge
 payroll deduction
 settlement amount
 TruckERP discount calculation
+functional_amount / FX-converted accounting amount
 financial responsibility result
 reconciliation result
 posting result
 ```
 
-Those are later backend business-logic layers.
+`fuel_bvd` is BVD source evidence plus TruckERP audit/resolution metadata.
+
+Later financial decisions must live in their own backend financial/settlement records and may reference the BVD source row.
+
+This keeps the distinction explicit:
+
+```text
+BVD evidence = what the provider said
+TruckERP financial record = what TruckERP decided/charged/posted
+```
+
+---
+
+# 11. Implementation 1 lock summary
 
 Implementation 1 is limited to:
 
@@ -568,21 +645,38 @@ BVD source facts
 +
 TruckERP source/audit fields
 +
-TruckERP identity resolution fields
+TruckERP row-level review fields
++
+TruckERP identity-resolution fields
+```
+
+Locked operating decisions:
+
+```text
+ONE fuel_bvd table
+same import_id for rows from the same PDF
+parse_status = import/PDF processing status
+review_status = individual row review status
+BVD source values are never overwritten
+unit_number is not a FK
+truck_id is resolved by backend logic
+frontend is never authority for matching or money
+financial charges/settlement data do not belong in fuel_bvd
 ```
 
 ---
 
-# 11. Next design step
+# 12. Next design step
 
-Before coding the migration, review whether TruckERP needs any additional **TruckERP-owned operational fields** on `fuel_bvd`.
+The BVD source schema and current TruckERP-owned operational fields are now frozen for Implementation 1 design review.
 
-After that list is frozen:
+Before migration code is written:
 
 ```text
 1. verify existing TruckERP FK targets / ID types
-2. create migration
-3. create SQLAlchemy model
-4. add backend validation
-5. test with the verified BVD PDF
+2. verify whether any old Fuel migrations were applied to a real tenant DB
+3. create migration only after those checks
+4. create SQLAlchemy model
+5. add backend validation
+6. test with the verified BVD PDF
 ```
