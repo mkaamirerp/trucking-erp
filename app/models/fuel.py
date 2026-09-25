@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -594,8 +595,8 @@ class FuelBvd(Base):
         Index("ix_fuel_bvd_tenant_import_row", "tenant_id", "import_id", "source_row_number"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     row_type: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -650,7 +651,7 @@ class FuelBvd(Base):
     uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    processing_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    processing_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     processed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     parser_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     parse_status: Mapped[str | None] = mapped_column(Text, nullable=True)

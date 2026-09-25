@@ -8,6 +8,12 @@ from pathlib import Path
 import pytest
 
 from app.models.fuel import FuelBvd, FuelSourceControl, FuelTransaction
+from app.services.fuel_digital_pdf_extract import (
+    FuelDigitalPdfExtractError,
+    parse_header_datetime_tokens,
+    parse_money_tokens_from_right,
+    _split_site_name_city,
+)
 from app.services.fuel_bvd_extraction import (
     ROW_GRAND_TOTAL,
     ROW_HEADER,
@@ -15,8 +21,10 @@ from app.services.fuel_bvd_extraction import (
     ROW_PAGE1_SUMMARY,
     ROW_TRANSACTION,
     ROW_TRANSACTION_SUBTOTAL,
+    assert_bvd_extraction_uses_generic_digital_pdf_path,
     extract_bvd_rows_from_digital_pdf,
 )
+from app.services.fuel_provider_profile import assert_no_separate_provider_parser_engines, load_provider_profile
 from app.services.fuel_bvd_import import (
     BVD_SOURCE_FIELD_NAMES,
     fuel_bvd_row_to_dict,
@@ -156,6 +164,55 @@ async def test_import_persists_fuel_bvd_only(monkeypatch: pytest.MonkeyPatch) ->
 
     assert "fuel_reconciliation" not in mod.__dict__
     assert "fuel_ingestion" not in mod.__dict__
+
+
+def test_production_extraction_has_no_fixture_invoice_literal() -> None:
+    fixture_invoice = "972" + "201"
+    for rel in (
+        "fuel_bvd_extraction.py",
+        "fuel_digital_pdf_extract.py",
+        "fuel_bvd_column_map.py",
+    ):
+        text = (REPO / "app" / "services" / rel).read_text(encoding="utf-8")
+        assert fixture_invoice not in text
+
+
+def test_bvd_extraction_delegates_to_generic_digital_pdf_extract() -> None:
+    assert_bvd_extraction_uses_generic_digital_pdf_path()
+    assert assert_no_separate_provider_parser_engines() == []
+
+
+def test_header_datetime_does_not_invent_missing_time() -> None:
+    parsed = parse_header_datetime_tokens(["2026-07-29", "2026-07-22"])
+    assert parsed == ["2026-07-29", "2026-07-22"]
+    assert "00:00:00" not in " ".join(parsed)
+
+
+def test_parse_money_tokens_len_eight_branch() -> None:
+    tokens = [
+        "1.00",
+        "2.00",
+        "3.00",
+        "4.00",
+        "5.00",
+        "6.00",
+        "0.0000",
+        "7.00",
+        "CN",
+    ]
+    fields = parse_money_tokens_from_right(tokens)
+    assert fields["QTY"] == "1.00"
+    assert fields["Pre Tax AMT"] == "2.00"
+    assert fields["Disc Rate"] == "0.0000"
+    assert fields["Final AMT"] == "7.00"
+    assert fields["CUR"] == "CN"
+
+
+def test_site_name_city_three_all_caps_is_ambiguous() -> None:
+    profile = load_provider_profile("BVD")
+    with pytest.raises(FuelDigitalPdfExtractError) as exc:
+        _split_site_name_city(["FOO", "BAR", "BAZ"], profile=profile)
+    assert exc.value.code == "SITE_NAME_CITY_AMBIGUOUS"
 
 
 def test_bvd_api_routes_registered() -> None:
