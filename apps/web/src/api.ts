@@ -4091,7 +4091,132 @@ export type FuelBvdRow = {
   final_amount?: string | null;
   legend_code?: string | null;
   legend_product_name?: string | null;
+  review_status?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  field_corrections?: Record<
+    string,
+    {
+      extracted_value: string;
+      reviewed_value: string;
+      reviewed_by?: string | null;
+      reviewed_at?: string | null;
+      correction_reason?: string | null;
+    }
+  > | null;
 };
+
+export type FuelBvdReviewSummary = {
+  import_id: string;
+  invoice_number: string;
+  row_count: number;
+  transaction_count: number;
+  correction_count: number;
+  review_status: string;
+  final_amount?: string | null;
+  currency?: string | null;
+};
+
+export type FuelBvdCorrectionInput = {
+  fuel_bvd_id: number;
+  field_name: string;
+  reviewed_value: string;
+  correction_reason?: string | null;
+};
+
+export async function saveFuelBvdReview(
+  importId: string,
+  corrections: FuelBvdCorrectionInput[],
+): Promise<{ saved_corrections: number }> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/save-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ corrections }),
+  });
+  return handle(res);
+}
+
+export async function getFuelBvdImportSummary(importId: string): Promise<FuelBvdReviewSummary> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/summary`);
+  return handle(res);
+}
+
+export async function processFuelBvdImport(importId: string): Promise<FuelBvdReviewSummary> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/process`, {
+    method: "POST",
+  });
+  return handle(res);
+}
+
+export type FuelBvdUploadErrorDisplay = {
+  title: string;
+  message: string;
+};
+
+/** Turn FastAPI fuel BVD upload errors into operator-facing title + message (not raw JSON). */
+export function getFuelBvdUploadErrorDisplay(err: unknown): FuelBvdUploadErrorDisplay {
+  const fallback: FuelBvdUploadErrorDisplay = {
+    title: "Upload failed",
+    message: "Use a digital BVD fuel card statement PDF.",
+  };
+  if (!(err instanceof Error) || !err.message.trim()) {
+    return fallback;
+  }
+  const raw = err.message.trim();
+  if (!raw.startsWith("{")) {
+    if (raw.length <= 300) {
+      return { title: "Upload failed", message: raw };
+    }
+    return fallback;
+  }
+  try {
+    const body = JSON.parse(raw) as { detail?: unknown };
+    const d = body.detail;
+    if (typeof d === "string") {
+      if (d === "Internal server error") {
+        return {
+          title: "Upload failed",
+          message:
+            "Something went wrong on the server while processing the PDF. Try again; if it persists, contact support.",
+        };
+      }
+      return { title: "Upload failed", message: d };
+    }
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const rec = d as Record<string, unknown>;
+      const code = typeof rec.code === "string" ? rec.code : "";
+      const detail = typeof rec.detail === "string" ? rec.detail : "";
+      if (
+        code === "LAYOUT_UNRECOGNIZED" ||
+        code === "PROVIDER_LAYOUT_UNRECOGNIZED" ||
+        detail.includes("PROVIDER_LAYOUT_UNRECOGNIZED")
+      ) {
+        return {
+          title: "PDF not recognized",
+          message:
+            "This doesn't match a standard BVD fuel card statement.\nUpload a BVD invoice PDF.",
+        };
+      }
+      if (code === "NOT_PDF") {
+        return {
+          title: "Invalid file",
+          message: detail || "Upload must be a PDF file.",
+        };
+      }
+      if (detail) return { title: "Upload rejected", message: detail };
+      if (code) return { title: "Upload rejected", message: code };
+    }
+  } catch {
+    /* fall through */
+  }
+  return fallback;
+}
+
+/** @deprecated Prefer getFuelBvdUploadErrorDisplay for UI */
+export function formatFuelBvdUploadError(err: unknown): string {
+  const { title, message } = getFuelBvdUploadErrorDisplay(err);
+  return `${title}: ${message}`;
+}
 
 export async function uploadFuelBvdPdf(file: File): Promise<FuelBvdImportResult> {
   const form = new FormData();

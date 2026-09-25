@@ -163,6 +163,7 @@ async def import_bvd_digital_pdf(
             processed_by=uploaded_by,
             parser_version=parser_version,
             parse_status=parse_status,
+            review_status="PENDING",
             extraction_warnings=warnings_payload,
         )
         _apply_extracted_fields(row, item.fields)

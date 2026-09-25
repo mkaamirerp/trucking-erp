@@ -10,7 +10,9 @@ __pycache__
 .pytest_cache
 node_modules
 apps/web/node_modules
-apps/web
+apps/web/*
+!apps/web/dist
+!apps/web/dist/**
 artifacts
 archive
 vault

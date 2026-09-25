@@ -39,6 +39,8 @@ from app.schemas.fuel import (
     FuelProviderConnectionUpdate,
     FuelProviderConnectionWrite,
     FuelBvdImportOut,
+    FuelBvdReviewSaveIn,
+    FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
     FuelReconciliationOut,
     FuelReconciliationRunIn,
@@ -53,6 +55,7 @@ from app.schemas.fuel import (
 from app.services.fuel_provider_catalog import get_provider_catalog_entry, list_provider_catalog
 from app.services import fuel_provider_connections as connections_service
 from app.services import fuel_bvd_import as bvd_import_service
+from app.services import fuel_bvd_review as bvd_review_service
 from app.services import fuel_reconciliation as reconciliation_service
 from app.services import fuel_review as review_service
 from app.services.fuel_bvd_import import FuelBvdImportError
@@ -438,12 +441,61 @@ async def list_bvd_import_rows(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     _ = user
-    rows = await bvd_import_service.list_bvd_import_rows(
+    rows = await bvd_review_service.list_bvd_import_rows_for_review(
         db, tenant_id=tenant_id, import_id=import_id
     )
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
-    return [FuelBvdRowOut(**bvd_import_service.fuel_bvd_row_to_dict(r)) for r in rows]
+    return [FuelBvdRowOut(**r) for r in rows]
+
+
+@router.get("/bvd/imports/{import_id}/summary", response_model=FuelBvdReviewSummaryOut)
+async def get_bvd_import_summary(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    summary = await bvd_review_service.get_bvd_import_review_summary(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    return FuelBvdReviewSummaryOut(**summary)
+
+
+@router.post("/bvd/imports/{import_id}/save-review")
+async def save_bvd_import_review(
+    import_id: UUID,
+    body: FuelBvdReviewSaveIn,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    reviewed_by = str(user.user_id) if user.user_id is not None else user.email
+    written = await bvd_review_service.save_bvd_import_review(
+        db,
+        tenant_id=tenant_id,
+        import_id=import_id,
+        reviewed_by=reviewed_by,
+        corrections=[c.model_dump() for c in body.corrections],
+    )
+    return {"saved_corrections": written}
+
+
+@router.post("/bvd/imports/{import_id}/process", response_model=FuelBvdReviewSummaryOut)
+async def process_bvd_import_review(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    reviewed_by = str(user.user_id) if user.user_id is not None else user.email
+    summary = await bvd_review_service.process_bvd_import_review(
+        db,
+        tenant_id=tenant_id,
+        import_id=import_id,
+        reviewed_by=reviewed_by,
+    )
+    return FuelBvdReviewSummaryOut(**summary)
 
 
 @router.get("/bvd/imports/{import_id}/document")

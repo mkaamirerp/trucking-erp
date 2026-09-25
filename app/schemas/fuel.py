@@ -693,3 +693,30 @@ class FuelBvdRowOut(BaseModel):
     final_amount: str | None = None
     legend_code: str | None = None
     legend_product_name: str | None = None
+
+    review_status: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by: str | None = None
+    field_corrections: dict[str, Any] | None = None
+
+
+class FuelBvdCorrectionItemIn(BaseModel):
+    fuel_bvd_id: int
+    field_name: str
+    reviewed_value: str
+    correction_reason: str | None = None
+
+
+class FuelBvdReviewSaveIn(BaseModel):
+    corrections: list[FuelBvdCorrectionItemIn] = Field(default_factory=list)
+
+
+class FuelBvdReviewSummaryOut(BaseModel):
+    import_id: str
+    invoice_number: str
+    row_count: int
+    transaction_count: int
+    correction_count: int
+    review_status: str
+    final_amount: str | None = None
+    currency: str | None = None

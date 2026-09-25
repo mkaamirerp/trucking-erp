@@ -668,3 +668,37 @@ class FuelBvd(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class FuelBvdFieldCorrection(Base):
+    """Append-only human correction overlay for BVD Implementation 1.
+
+    Never updates fuel_bvd extracted TEXT columns. Latest row per (fuel_bvd_id, field_name) wins.
+    """
+
+    __tablename__ = "fuel_bvd_field_correction"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_fuel_bvd_field_correction_tenant_id_id"),
+        Index("ix_fuel_bvd_field_correction_tenant", "tenant_id"),
+        Index("ix_fuel_bvd_field_correction_tenant_import", "tenant_id", "import_id"),
+        Index(
+            "ix_fuel_bvd_field_correction_tenant_row_field",
+            "tenant_id",
+            "fuel_bvd_id",
+            "field_name",
+            "id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    fuel_bvd_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extracted_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
