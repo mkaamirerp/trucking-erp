@@ -1755,7 +1755,7 @@ Every source transaction accounted exactly once; provider controls/currency tota
 
 **Execution Record:**
 ```text
-Status: CODED (worktree; not committed / not migrated / not deployed)
+Status: CODED + CORRECTNESS PASS VERIFIED (worktree; not committed / not migrated / not deployed)
 Files:
   - app/services/fuel_reconciliation.py (new)
   - app/routers/fuel.py (GET/POST /fuel/reconciliation/batches/{id})
