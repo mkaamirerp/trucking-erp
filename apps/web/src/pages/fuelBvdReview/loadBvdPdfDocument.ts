@@ -1,10 +1,11 @@
 import * as pdfjs from "pdfjs-dist";
+import PdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?worker";
 import { fetchWithTenant } from "../../api";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
+/** Vite bundles the worker — avoids brittle runtime `import(workerSrc)` against /assets/*.mjs */
+if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerPort) {
+  pdfjs.GlobalWorkerOptions.workerPort = new PdfjsWorker();
+}
 
 export async function loadBvdPdfDocument(documentUrl: string) {
   const res = await fetchWithTenant(documentUrl);

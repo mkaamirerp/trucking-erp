@@ -1,0 +1,82 @@
+/* Scoped PDF.js viewer shell for BVD review (official styles from pdf_viewer.css). */
+.bvd-pdf-scroll {
+  overflow: auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.bvd-review-scroll-row {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.bvd-line-gutter {
+  flex-shrink: 0;
+  width: 2rem;
+  position: relative;
+  border-right: 1px solid var(--trk-border, #333);
+  background: var(--trk-surface, #1a1a1a);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--trk-text-muted, #888);
+}
+
+.bvd-line-gutter__n {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding-right: 4px;
+  text-align: right;
+  pointer-events: none;
+  user-select: none;
+}
+
+.bvd-line-gutter__n--active {
+  color: var(--trk-accent, #3b82f6);
+  font-weight: 700;
+}
+
+.bvd-unmapped-hit {
+  border-color: var(--trk-warning, #f59e0b);
+  background: color-mix(in srgb, var(--trk-warning, #f59e0b) 25%, transparent);
+}
+
+.bvd-unmapped-mirror {
+  border: 1px dashed var(--trk-warning, #f59e0b);
+  background: color-mix(in srgb, var(--trk-warning, #f59e0b) 12%, var(--trk-surface, #1a1a1a));
+  color: var(--trk-text, #eee);
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 2px 4px;
+  pointer-events: auto;
+}
+
+.bvd-pdf-viewer.pdfViewer {
+  --scale-factor: 1;
+}
+
+.bvd-pdf-viewer.pdfViewer .page {
+  margin: 0;
+  border: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+
+.bvd-pdf-viewer .bvd-highlight-layer {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+}
+
+.bvd-pdf-viewer .bvd-field-highlight {
+  position: absolute;
+  border: 2px solid var(--trk-warning, #f59e0b);
+  background: color-mix(in srgb, var(--trk-warning, #f59e0b) 25%, transparent);
+  border-radius: 2px;
+  box-sizing: border-box;
+}

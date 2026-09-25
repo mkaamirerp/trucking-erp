@@ -30,6 +30,7 @@ describe("bvdPdfHighlight", () => {
       value: "0.00",
       rowType: "TRANSACTION",
       sourceRowNumber: 2,
+      selectionKey: "2:gst",
       anchorField: "auth_code",
       anchorValue: "A204040667-TA",
     });
@@ -45,6 +46,7 @@ describe("bvdPdfHighlight", () => {
       value: "0.00",
       rowType: "TRANSACTION",
       sourceRowNumber: 4,
+      selectionKey: "4:gst",
       anchorField: "auth_code",
       anchorValue: "A208448597-TA",
     });
@@ -60,6 +62,7 @@ describe("bvdPdfHighlight", () => {
       value: "0.00",
       rowType: "TRANSACTION",
       sourceRowNumber: 2,
+      selectionKey: "2:gst",
     });
     expect(rect?.ambiguous).toBe(true);
   });
