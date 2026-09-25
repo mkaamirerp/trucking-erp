@@ -631,3 +631,65 @@ class FuelReconciliationOut(BaseModel):
     ai_authority: bool = False
     reconciled_at: str | None = None
     reconciled_by: str | None = None
+
+
+# --- BVD Implementation 1 (source fidelity) ---
+
+
+class FuelBvdImportOut(BaseModel):
+    import_id: str
+    row_count: int
+    parse_status: str
+
+
+class FuelBvdRowOut(BaseModel):
+    id: int
+    import_id: str
+    row_type: str
+    source_file_name: str | None = None
+    source_file_sha256: str | None = None
+    source_storage_ref: str | None = None
+    source_page: int | None = None
+    source_row_number: int | None = None
+    parse_status: str | None = None
+    parser_version: str | None = None
+    extraction_warnings: dict[str, Any] | None = None
+
+    invoice_number: str | None = None
+    invoice_date: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    due_date: str | None = None
+    client_name: str | None = None
+    client_address: str | None = None
+    client_phone: str | None = None
+    client_email: str | None = None
+    card_number: str | None = None
+    hst_number: str | None = None
+    qst_number: str | None = None
+    auth_code: str | None = None
+    driver_name: str | None = None
+    unit_number: str | None = None
+    transaction_date: str | None = None
+    site_number: str | None = None
+    site_name: str | None = None
+    site_city: str | None = None
+    prov_st: str | None = None
+    prod: str | None = None
+    qty: str | None = None
+    retail: str | None = None
+    billed: str | None = None
+    pre_tax_amt: str | None = None
+    hst: str | None = None
+    gst: str | None = None
+    pst: str | None = None
+    qst: str | None = None
+    disc_rate: str | None = None
+    disc_amt: str | None = None
+    final_amt: str | None = None
+    cur: str | None = None
+    row_label: str | None = None
+    product: str | None = None
+    final_amount: str | None = None
+    legend_code: str | None = None
+    legend_product_name: str | None = None

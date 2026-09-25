@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.storage import PROJECT_ROOT
+from app.core.storage import PROJECT_ROOT, serve_file
 from app.deps.auth import CurrentUser
 from app.deps.entitlements import require_entitlement
 from app.deps.fuel_rbac import (
@@ -28,7 +30,7 @@ from app.deps.fuel_rbac import (
     FUEL_REVIEW_VIEW,
     require_fuel_capability,
 )
-from app.deps.tenant import require_tenant
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.fuel import (
     FuelAdapterActionOut,
@@ -36,6 +38,8 @@ from app.schemas.fuel import (
     FuelProviderConnectionOut,
     FuelProviderConnectionUpdate,
     FuelProviderConnectionWrite,
+    FuelBvdImportOut,
+    FuelBvdRowOut,
     FuelReconciliationOut,
     FuelReconciliationRunIn,
     FuelReviewConfirmIn,
@@ -48,8 +52,10 @@ from app.schemas.fuel import (
 )
 from app.services.fuel_provider_catalog import get_provider_catalog_entry, list_provider_catalog
 from app.services import fuel_provider_connections as connections_service
+from app.services import fuel_bvd_import as bvd_import_service
 from app.services import fuel_reconciliation as reconciliation_service
 from app.services import fuel_review as review_service
+from app.services.fuel_bvd_import import FuelBvdImportError
 
 router = APIRouter(
     prefix="/fuel",
@@ -387,3 +393,78 @@ async def run_fuel_batch_reconciliation(
         await db.rollback()
         reconciliation_service.raise_http(exc)
         raise
+
+
+# --- BVD Implementation 1 (extraction fidelity; not Segment 10) ---
+
+
+@router.post("/bvd/imports", response_model=FuelBvdImportOut)
+async def upload_bvd_import(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    body = await file.read()
+    filename = file.filename or "bvd.pdf"
+    uploaded_by = str(user.user_id) if user.user_id is not None else user.email
+    try:
+        import_id, row_count, parse_status = await bvd_import_service.import_bvd_digital_pdf(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            pdf_bytes=body,
+            filename=filename,
+            uploaded_by=uploaded_by,
+        )
+    except FuelBvdImportError as exc:
+        raise HTTPException(
+            status_code=exc.http_status,
+            detail={"code": exc.code, "detail": exc.message},
+        ) from exc
+    return FuelBvdImportOut(
+        import_id=str(import_id),
+        row_count=row_count,
+        parse_status=parse_status,
+    )
+
+
+@router.get("/bvd/imports/{import_id}/rows", response_model=list[FuelBvdRowOut])
+async def list_bvd_import_rows(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    rows = await bvd_import_service.list_bvd_import_rows(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
+    return [FuelBvdRowOut(**bvd_import_service.fuel_bvd_row_to_dict(r)) for r in rows]
+
+
+@router.get("/bvd/imports/{import_id}/document")
+async def get_bvd_import_document(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    ref = await bvd_import_service.get_bvd_import_storage_ref(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    if ref is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
+    storage_key, filename = ref
+    return serve_file(
+        storage_key,
+        bvd_import_service.FUEL_BVD_STORAGE_MODULE,
+        tenant_slug=tenant_slug,
+        filename=filename or "bvd.pdf",
+        content_type="application/pdf",
+    )

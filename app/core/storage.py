@@ -549,6 +549,25 @@ async def save_company_doc_upload(tenant_slug: str, company_id: int, file: Uploa
     )
 
 
+async def save_fuel_bvd_import_bytes(
+    tenant_slug: str,
+    import_id: str,
+    body: bytes,
+    *,
+    filename_hint: str,
+) -> StoredFile:
+    """Store original BVD PDF for Implementation 1 extraction review."""
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "fuel_bvd",
+        "import",
+        import_id,
+        body,
+        filename_hint=filename_hint,
+        content_type="application/pdf",
+    )
+
+
 def _content_type_from_suffix(storage_key: str, default: str = "application/octet-stream") -> str:
     suf = Path(storage_key).suffix.lower()
     if suf in (".jpg", ".jpeg"):

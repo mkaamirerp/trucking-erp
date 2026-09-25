@@ -10,6 +10,7 @@ Segment 8: source review queue — extraction corrections + review provenance.
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -29,7 +30,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -573,6 +574,92 @@ class FuelCardAccountAssignment(Base):
     effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     changed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelBvd(Base):
+    """BVD source-fidelity rows (Implementation 1). One row per extracted BVD structure."""
+
+    __tablename__ = "fuel_bvd"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_fuel_bvd_tenant_id_id"),
+        Index("ix_fuel_bvd_tenant_id", "tenant_id"),
+        Index("ix_fuel_bvd_tenant_import", "tenant_id", "import_id"),
+        Index("ix_fuel_bvd_tenant_import_row", "tenant_id", "import_id", "source_row_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    row_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    card_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hst_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qst_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    auth_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    driver_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prov_st: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prod: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    billed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pre_tax_amt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disc_rate: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disc_amt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_amt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cur: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    row_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_amount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legend_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legend_product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    source_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_storage_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    processed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    review_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_warnings: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

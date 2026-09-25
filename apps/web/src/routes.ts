@@ -46,6 +46,8 @@ export const OPS = {
   FUEL_PROVIDERS: "/fuel/providers",
   FUEL_REVIEW: "/fuel/review",
   FUEL_REVIEW_BATCH: (id: number | string) => `/fuel/review/${id}`,
+  FUEL_BVD_UPLOAD: "/fuel/bvd/upload",
+  FUEL_BVD_REVIEW: (importId: string) => `/fuel/bvd/${importId}/review`,
 } as const;
 
 /** Apex-only platform control plane (X-Platform-Admin-Key). */

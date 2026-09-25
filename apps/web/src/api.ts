@@ -4034,3 +4034,80 @@ export async function processFuelBatchReview(
   });
   return handle(res);
 }
+
+export type FuelBvdImportResult = {
+  import_id: string;
+  row_count: number;
+  parse_status: string;
+};
+
+export type FuelBvdRow = {
+  id: number;
+  import_id: string;
+  row_type: string;
+  source_file_name?: string | null;
+  source_file_sha256?: string | null;
+  source_storage_ref?: string | null;
+  source_page?: number | null;
+  source_row_number?: number | null;
+  parse_status?: string | null;
+  parser_version?: string | null;
+  extraction_warnings?: Record<string, unknown> | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  due_date?: string | null;
+  client_name?: string | null;
+  client_address?: string | null;
+  client_phone?: string | null;
+  client_email?: string | null;
+  card_number?: string | null;
+  hst_number?: string | null;
+  qst_number?: string | null;
+  auth_code?: string | null;
+  driver_name?: string | null;
+  unit_number?: string | null;
+  transaction_date?: string | null;
+  site_number?: string | null;
+  site_name?: string | null;
+  site_city?: string | null;
+  prov_st?: string | null;
+  prod?: string | null;
+  qty?: string | null;
+  retail?: string | null;
+  billed?: string | null;
+  pre_tax_amt?: string | null;
+  hst?: string | null;
+  gst?: string | null;
+  pst?: string | null;
+  qst?: string | null;
+  disc_rate?: string | null;
+  disc_amt?: string | null;
+  final_amt?: string | null;
+  cur?: string | null;
+  row_label?: string | null;
+  product?: string | null;
+  final_amount?: string | null;
+  legend_code?: string | null;
+  legend_product_name?: string | null;
+};
+
+export async function uploadFuelBvdPdf(file: File): Promise<FuelBvdImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports`, {
+    method: "POST",
+    body: form,
+  });
+  return handle(res);
+}
+
+export async function getFuelBvdImportRows(importId: string): Promise<FuelBvdRow[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/rows`);
+  return handle(res);
+}
+
+export function fuelBvdDocumentUrl(importId: string): string {
+  return `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/document`;
+}

@@ -46,6 +46,7 @@ const settingsGroups = [
       { label: "Fuel", to: ADMIN.INTEGRATIONS_FUEL },
       { label: "Fuel Providers", to: OPS.FUEL_PROVIDERS },
       { label: "Fuel Review", to: OPS.FUEL_REVIEW },
+      { label: "BVD Extract", to: OPS.FUEL_BVD_UPLOAD },
     ],
   },
   {
