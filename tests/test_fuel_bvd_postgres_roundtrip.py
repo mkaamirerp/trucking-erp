@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -38,6 +38,15 @@ REQUIRES_TENANT_DB = _tenant_url() is None
 
 def _golden_rows() -> list[dict]:
     return json.loads(GOLDEN.read_text(encoding="utf-8"))["rows"]
+
+
+async def _safe_table_row_count(session: AsyncSession, table_name: str) -> int:
+    """Count rows when the table exists; isolated tenant_pytest may not have Fuel segment tables."""
+    reg = await session.scalar(text("SELECT to_regclass(:name)"), {"name": table_name})
+    if reg is None:
+        return 0
+    result = await session.execute(text(f"SELECT count(*) FROM {table_name}"))
+    return int(result.scalar_one())
 
 
 def _db_shaped_from_orm(rows: list[FuelBvd]) -> list[dict]:
@@ -78,8 +87,8 @@ async def test_bvd_import_postgres_roundtrip_matches_golden(monkeypatch: pytest.
 
     import_id: uuid.UUID
     async with session_factory() as session:
-        txn_before = await session.scalar(select(func.count()).select_from(FuelTransaction))
-        ctrl_before = await session.scalar(select(func.count()).select_from(FuelSourceControl))
+        txn_before = await _safe_table_row_count(session, FuelTransaction.__tablename__)
+        ctrl_before = await _safe_table_row_count(session, FuelSourceControl.__tablename__)
         import_id, count, status = await import_bvd_digital_pdf(
             session,
             tenant_id=INTEGRATION_TENANT_ID,
@@ -90,8 +99,8 @@ async def test_bvd_import_postgres_roundtrip_matches_golden(monkeypatch: pytest.
         )
         assert status == "SUCCESS"
         assert count == 24
-        txn_after = await session.scalar(select(func.count()).select_from(FuelTransaction))
-        ctrl_after = await session.scalar(select(func.count()).select_from(FuelSourceControl))
+        txn_after = await _safe_table_row_count(session, FuelTransaction.__tablename__)
+        ctrl_after = await _safe_table_row_count(session, FuelSourceControl.__tablename__)
         assert txn_after == txn_before
         assert ctrl_after == ctrl_before
 
