@@ -1,62 +1,71 @@
 # Fuel / BVD — Implementation 1
 
-**Status:** LOCKED BVD schema design checkpoint  
-**Scope:** one BVD source table + TruckERP-owned operational/resolution fields.  
-**Backend authority:** all matching, validation, reconciliation, pricing, settlement, and posting logic stays in the backend.  
+**Status:** LOCKED  
+**Scope:** BVD extraction fidelity only.  
+**Goal:** upload the verified BVD PDF, extract every known BVD field, save the extracted values in PostgreSQL, and show the original PDF beside the saved database values for human comparison.  
 **No migration/deployment is authorized by this document alone.**
 
 ---
 
-# 1. Core decision
+# 1. First milestone
 
-Implementation 1 uses **one BVD table**.
+Implementation 1 does only this:
 
 ```text
 BVD PDF
    ↓
-extract known BVD fields
+backend extraction engine
    ↓
-fuel_bvd
+exact BVD fields saved to fuel_bvd
    ↓
-backend resolves TruckERP identities / status
-   ↓
-later financial logic
+side-by-side review
+
+LEFT  = original BVD PDF
+RIGHT = values actually saved in PostgreSQL
 ```
 
-The table stores two clearly separated kinds of data:
+The test question is only:
+
+> Did TruckERP extract and save exactly what the BVD PDF contains?
+
+Implementation 1 does **not** perform:
 
 ```text
-A. BVD source fields
-B. TruckERP-owned fields
+truck matching
+driver matching
+company / owner-operator lookup
+fuel responsibility
+fuel discount calculation
+reconciliation
+settlement
+payroll deduction
+posting
 ```
 
-BVD source values must never be overwritten by TruckERP resolution.
-
-Example:
-
-```text
-BVD Unit #        = 1104
-TruckERP truck_id = 87
-```
-
-Both are retained.
-
-`unit_number` is BVD source truth.  
-`truck_id` is TruckERP's resolved internal identity.
-
-Do **not** make BVD `Unit #` a foreign key to TruckERP `truck_number`.
+Those are later backend workflows after extraction fidelity is proven.
 
 ---
 
-# 2. One-row model
+# 2. One-table decision
 
-One `fuel_bvd` row represents one source row/record from the BVD PDF.
-
-`row_type` identifies what kind of BVD record it represents.
-
-Initial allowed values:
+Implementation 1 uses **one table**:
 
 ```text
+fuel_bvd
+```
+
+Do not create separate BVD invoice, import, transaction, control, Grand Total, or Legend tables for this milestone.
+
+One `fuel_bvd` row represents one extracted BVD source row/record.
+
+Rows from the same uploaded PDF share the same `import_id`.
+
+`row_type` identifies the BVD source structure represented by the row.
+
+Initial structural values:
+
+```text
+HEADER
 TRANSACTION
 TRANSACTION_SUBTOTAL
 PAGE1_SUMMARY
@@ -64,33 +73,36 @@ GRAND_TOTAL
 LEGEND
 ```
 
-Invoice/header information and import-level processing metadata may repeat across rows from the same PDF. This is intentional in Implementation 1 to keep the BVD model simple and in one table.
-
-Rows from the same uploaded/processed PDF share the same `import_id`.
-
-```text
-same PDF
-    ↓
-same import_id on every row
-```
-
-`parse_status` is an **import/PDF processing status** and therefore normally has the same value on every row for the same `import_id`.
-
-`review_status` is a **row-level review status** and may differ from one row to another.
-
-Example:
-
-```text
-import_id = 8f24...same UUID...
-
-row 1  parse_status = SUCCESS  review_status = APPROVED
-row 2  parse_status = SUCCESS  review_status = REVIEW
-row 3  parse_status = SUCCESS  review_status = APPROVED
-```
+This structural classification is only for preserving/displaying the BVD document. It is not financial business logic.
 
 ---
 
-# 3. BVD invoice/header source fields
+# 3. Source-fidelity rule
+
+BVD source fields are stored as **TEXT** in Implementation 1.
+
+Reason: the first milestone is exact extraction fidelity, not financial typing or normalization.
+
+Examples:
+
+```text
+PDF:  1,425.63
+DB:   "1,425.63"
+
+PDF:  0.0000
+DB:   "0.0000"
+
+PDF:  2026-07-29 00:00:00
+DB:   "2026-07-29 00:00:00"
+```
+
+Do not remove commas, trailing zeros, date/time text, provider abbreviations, or other source formatting before it is saved in `fuel_bvd`.
+
+Typed amounts, dates, currencies, truck identities, ownership, pricing, and financial meaning come later in backend processing.
+
+---
+
+# 4. BVD invoice/header fields
 
 Verified BVD invoice/header information:
 
@@ -102,13 +114,13 @@ End Date
 Due Date
 
 Client info
-    customer-name value is printed on an unlabeled line
+    [unlabeled customer-name line]
     Address:
     Phone:
     Email:
 
 Transactions for card
-    card value
+    [card value]
 
 HST #
 QST #
@@ -122,29 +134,26 @@ invoice_date
 start_date
 end_date
 due_date
-
 client_name
 client_address
 client_phone
 client_email
-
 card_number
-
 hst_number
 qst_number
 ```
 
 Notes:
 
-- `client_name` stores the BVD customer-name value even though the source line itself is unlabeled.
-- `card_number` stores the value from `Transactions for card`.
-- BVD card number is source data; it is not a TruckERP truck/driver identifier.
+- `client_name` stores the customer-name value even though the source line is unlabeled.
+- `card_number` stores the value belonging to `Transactions for card`.
+- These are BVD source values, not TruckERP business decisions.
 
 ---
 
-# 4. Exact BVD transaction fields — 21
+# 5. Exact BVD transaction fields — 21
 
-The BVD transaction contract is these exact source columns, in this order:
+The BVD transaction contract is exactly these source columns, in this order:
 
 ```text
 1.  Auth Code
@@ -170,7 +179,7 @@ The BVD transaction contract is these exact source columns, in this order:
 21. CUR
 ```
 
-Database columns:
+SQL-safe database columns:
 
 ```text
 auth_code
@@ -196,30 +205,22 @@ final_amt
 cur
 ```
 
-The database column names are SQL-safe names for the exact BVD source fields. The BVD meaning must not be changed during extraction.
+The source meaning is unchanged.
 
 Example:
 
 ```text
 BVD PDF: Unit # = 1104
-DB:      unit_number = 1104
+DB:      unit_number = "1104"
 ```
 
-Later backend resolution may add:
-
-```text
-truck_id = 87
-```
-
-but `unit_number = 1104` remains unchanged.
+Implementation 1 stops there. It does not resolve `1104` to any TruckERP truck record.
 
 ---
 
-# 5. BVD control / summary / Grand Totals fields
+# 6. BVD page-1 controls / summary
 
-The same `fuel_bvd` table also stores BVD control and summary rows using `row_type`.
-
-Known page-1 source/control labels include:
+Known source/control labels in the verified fixture include:
 
 ```text
 SUBTOTAL
@@ -229,7 +230,38 @@ DF
 Sub Total
 ```
 
-Known Grand Totals columns are exactly:
+The observed post-transaction sequence is preserved by `source_row_number` and the source values stored on the row.
+
+Additional source columns used where applicable:
+
+```text
+row_label
+product
+```
+
+Shared BVD source fields are reused when the control row contains them:
+
+```text
+qty
+pre_tax_amt
+hst
+gst
+pst
+qst
+disc_rate
+disc_amt
+final_amt
+cur
+card_number
+```
+
+No reconciliation meaning is applied in Implementation 1.
+
+---
+
+# 7. BVD Grand Totals
+
+Exact Grand Totals columns:
 
 ```text
 PRODUCT
@@ -245,7 +277,7 @@ FINAL AMOUNT
 CUR
 ```
 
-Observed Grand Totals row labels:
+Observed row labels:
 
 ```text
 TA
@@ -256,23 +288,31 @@ Express
 Grand Total
 ```
 
-Additional columns in `fuel_bvd` used for these rows:
+Database support:
 
 ```text
-row_label
 product
+qty
+pre_tax_amt
+hst
+gst
+pst
+qst
+disc_rate
+disc_amt
 final_amount
+cur
 ```
 
-Shared monetary/source columns such as `qty`, `pre_tax_amt`, `hst`, `gst`, `pst`, `qst`, `disc_rate`, `disc_amt`, and `cur` are reused where the BVD row supplies them.
+`final_amount` is separate from transaction `final_amt` because BVD uses different source labels: `FINAL AMOUNT` vs `Final AMT`.
 
-Do not classify `Manual` or `Express` as Legend product codes unless BVD source evidence explicitly establishes that later.
+`Manual` and `Express` are preserved exactly as BVD Grand Totals row values. No additional meaning is assigned in Implementation 1.
 
 ---
 
-# 6. BVD Legend fields
+# 8. BVD Legend
 
-The BVD PDF Legend uses:
+The BVD Legend uses:
 
 ```text
 Code
@@ -292,33 +332,37 @@ O  = Oil
 L  = Lubricant
 ```
 
-The same `fuel_bvd` table stores Legend rows with:
+Database columns:
 
 ```text
-row_type = LEGEND
 legend_code
 legend_product_name
 ```
 
+Legend rows use:
+
+```text
+row_type = LEGEND
+```
+
 ---
 
-# 7. TruckERP-owned fields
+# 9. TruckERP-owned metadata fields
 
-These fields do **not** come from BVD. They belong to TruckERP.
+These fields do not come from BVD. They exist only to identify the source, measure processing, and support the side-by-side extraction review.
 
-## 7.1 Identity / tenancy
+## Identity / grouping
 
 ```text
 id
 tenant_id
 import_id
+row_type
 ```
 
-`import_id` groups all rows created from the same uploaded/processed BVD PDF.
+`import_id` is the same for every row extracted from one uploaded BVD PDF.
 
-Implementation 1 intentionally keeps this grouping key in the one-table design rather than creating a separate BVD import table.
-
-## 7.2 Source / audit
+## Source traceability
 
 ```text
 source_file_name
@@ -328,42 +372,17 @@ source_page
 source_row_number
 ```
 
-Purpose:
-
-- identify the original source PDF;
-- prevent/identify duplicate imports;
-- retain source traceability;
-- identify where a row came from in the PDF.
-
-## 7.3 Upload / processing timing
+## Upload / processing audit
 
 ```text
 uploaded_at
 uploaded_by
-
 processing_started_at
 processing_completed_at
 processing_duration_ms
 processed_by
-
 parser_version
 parse_status
-```
-
-`processing_duration_ms` is backend-measured processing time.
-
-Keep both timestamps and duration so backend diagnostics can distinguish when processing started/finished and how long the processing itself took.
-
-Example:
-
-```text
-uploaded_at             = 2026-09-20 21:30:02-04
-processing_started_at   = 2026-09-20 21:30:05-04
-processing_completed_at = 2026-09-20 21:30:07-04
-processing_duration_ms  = 1842
-processed_by            = <TruckERP user id>
-parser_version          = BVD_PDF_V1
-parse_status            = SUCCESS
 ```
 
 Initial `parse_status` values:
@@ -374,9 +393,7 @@ REVIEW
 FAILED
 ```
 
-`parse_status` describes the processing result for the imported PDF and is expected to be consistent across rows sharing the same `import_id`.
-
-## 7.4 Row-level review audit
+## Extraction review metadata
 
 ```text
 review_status
@@ -386,85 +403,9 @@ review_reason
 extraction_warnings
 ```
 
-Initial `review_status` values:
+These fields describe extraction review only. They do not authorize money movement.
 
-```text
-PENDING
-APPROVED
-REVIEW
-REJECTED
-```
-
-`extraction_warnings` is TruckERP-owned structured warning data for parser/extraction concerns on the row. It does not alter any BVD source value.
-
-Examples of warning reasons may include:
-
-```text
-LOW_CONFIDENCE_FIELD
-FIELD_UNREADABLE
-EXPECTED_FIELD_MISSING
-AMBIGUOUS_ROW
-```
-
-The exact warning vocabulary is a backend contract and must be validated server-side.
-
-Review/approval authority is enforced by the backend.
-
-## 7.5 TruckERP identity resolution
-
-```text
-truck_id
-driver_id
-owner_operator_id
-
-truck_match_status
-driver_match_status
-
-matched_at
-ownership_resolved_at
-```
-
-Initial match status values:
-
-```text
-MATCHED
-UNMATCHED
-REVIEW
-```
-
-`matched_at` records when the backend identity-resolution process matched the source row to TruckERP identities.
-
-`ownership_resolved_at` records when the backend resolved the applicable ownership/O/O relationship for that transaction context.
-
-Example:
-
-```text
-BVD source:
-    unit_number = 1104
-    driver_name = JASPREET CHOKAR
-
-TruckERP backend resolution:
-    truck_id = 87
-    truck_match_status = MATCHED
-    driver_id = 214
-    driver_match_status = MATCHED
-    owner_operator_id = 31
-    matched_at = <backend timestamp>
-    ownership_resolved_at = <backend timestamp>
-```
-
-BVD source fields remain unchanged after this resolution.
-
-Important:
-
-```text
-unit_number = BVD source truth
-truck_id    = TruckERP resolved FK
-```
-
-Truck ownership/assignment logic must be resolved in the backend using the transaction context/date and TruckERP history. The browser is never authoritative for this mapping.
-
-## 7.6 Database audit
+## Database audit
 
 ```text
 created_at
@@ -473,70 +414,98 @@ updated_at
 
 ---
 
-# 8. Implementation 1 table shape
+# 10. Fields explicitly NOT allowed in fuel_bvd Implementation 1
+
+Do not add any of the following to this source-extraction table:
+
+```text
+truck_id
+driver_id
+owner_operator_id
+payee_id
+truck_match_status
+driver_match_status
+ownership_resolved_at
+matched_at
+company / O/O ownership flag
+fuel responsibility
+fuel discount rule
+calculated discount
+O/O fuel charge
+payroll deduction
+settlement amount
+reconciliation result
+posting result
+functional / FX-converted accounting amount
+```
+
+The BVD database has one job in Implementation 1:
+
+> Preserve exactly what was extracted from BVD, plus TruckERP source/processing/review audit metadata.
+
+---
+
+# 11. Locked table shape
 
 ```sql
 CREATE TABLE fuel_bvd (
     id                      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id               BIGINT NOT NULL,
     import_id               UUID NOT NULL,
-
     row_type                TEXT NOT NULL,
 
-    -- BVD invoice/header source fields
+    -- BVD invoice/header source values: exact source text
     invoice_number          TEXT,
-    invoice_date            TIMESTAMP,
-    start_date              TIMESTAMP,
-    end_date                TIMESTAMP,
-    due_date                TIMESTAMP,
-
+    invoice_date            TEXT,
+    start_date              TEXT,
+    end_date                TEXT,
+    due_date                TEXT,
     client_name             TEXT,
     client_address          TEXT,
     client_phone            TEXT,
     client_email            TEXT,
-
     card_number             TEXT,
     hst_number              TEXT,
     qst_number              TEXT,
 
-    -- Exact 21 BVD transaction fields
-    auth_code               TEXT,           -- Auth Code
-    driver_name             TEXT,           -- Driver Name
-    unit_number             TEXT,           -- Unit #
-    transaction_date        TIMESTAMP,      -- Date
-    site_number             TEXT,           -- Site #
-    site_name               TEXT,           -- Site Name
-    site_city               TEXT,           -- Site City
-    prov_st                 TEXT,           -- Prov/ST
-    prod                    TEXT,           -- Prod
-    qty                     NUMERIC(14,4),  -- QTY
-    retail                  NUMERIC(14,6),  -- Retail
-    billed                  NUMERIC(14,6),  -- Billed
-    pre_tax_amt             NUMERIC(14,4),  -- Pre Tax AMT
-    hst                     NUMERIC(14,4),  -- HST
-    gst                     NUMERIC(14,4),  -- GST
-    pst                     NUMERIC(14,4),  -- PST
-    qst                     NUMERIC(14,4),  -- QST
-    disc_rate               NUMERIC(14,6),  -- Disc Rate
-    disc_amt                NUMERIC(14,4),  -- Disc AMT
-    final_amt               NUMERIC(14,4),  -- Final AMT
-    cur                     TEXT,           -- CUR
+    -- Exact BVD transaction fields: exact source text
+    auth_code               TEXT, -- Auth Code
+    driver_name             TEXT, -- Driver Name
+    unit_number             TEXT, -- Unit #
+    transaction_date        TEXT, -- Date
+    site_number             TEXT, -- Site #
+    site_name               TEXT, -- Site Name
+    site_city               TEXT, -- Site City
+    prov_st                 TEXT, -- Prov/ST
+    prod                    TEXT, -- Prod
+    qty                     TEXT, -- QTY
+    retail                  TEXT, -- Retail
+    billed                  TEXT, -- Billed
+    pre_tax_amt             TEXT, -- Pre Tax AMT
+    hst                     TEXT, -- HST
+    gst                     TEXT, -- GST
+    pst                     TEXT, -- PST
+    qst                     TEXT, -- QST
+    disc_rate               TEXT, -- Disc Rate
+    disc_amt                TEXT, -- Disc AMT
+    final_amt               TEXT, -- Final AMT
+    cur                     TEXT, -- CUR
 
-    -- BVD control / Grand Totals / Legend support
+    -- BVD control / Grand Totals / Legend source values
     row_label               TEXT,
-    product                 TEXT,
-    final_amount            NUMERIC(14,4),
-    legend_code             TEXT,
-    legend_product_name     TEXT,
+    product                 TEXT, -- PRODUCT
+    final_amount            TEXT, -- FINAL AMOUNT
+    legend_code             TEXT, -- Code
+    legend_product_name     TEXT, -- Product Name
 
-    -- Source traceability
+    -- TruckERP source traceability
     source_file_name        TEXT,
     source_file_sha256      TEXT,
     source_storage_ref      TEXT,
     source_page             INTEGER,
     source_row_number       INTEGER,
 
-    -- TruckERP processing/audit
+    -- TruckERP processing audit
     uploaded_at             TIMESTAMPTZ,
     uploaded_by             TEXT,
     processing_started_at   TIMESTAMPTZ,
@@ -546,137 +515,81 @@ CREATE TABLE fuel_bvd (
     parser_version          TEXT,
     parse_status            TEXT,
 
-    -- TruckERP row-level review
+    -- Extraction-review audit only
     review_status           TEXT,
     reviewed_at             TIMESTAMPTZ,
     reviewed_by             TEXT,
     review_reason           TEXT,
     extraction_warnings     JSONB,
 
-    -- TruckERP identity resolution
-    truck_id                BIGINT,
-    driver_id               BIGINT,
-    owner_operator_id       BIGINT,
-    truck_match_status      TEXT,
-    driver_match_status     TEXT,
-    matched_at              TIMESTAMPTZ,
-    ownership_resolved_at   TIMESTAMPTZ,
-
     created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
-This SQL is the **Implementation 1 design shape**. Before migration code is written, foreign-key targets and existing TruckERP model/type conventions must be checked against the repository so we do not guess table names or ID types.
+This is the Implementation 1 design shape. Migration code must follow existing TruckERP tenant conventions, but it must not change the locked BVD source-field contract above.
 
 ---
 
-# 9. Backend authority lock
-
-The browser does not own Fuel business logic.
-
-Frontend responsibilities:
-
-```text
-show original PDF
-show BVD extracted values
-show backend statuses/results
-allow authorized user review/correction actions
-send actions to API
-```
+# 12. Backend / browser boundary for Implementation 1
 
 Backend responsibilities:
 
 ```text
-BVD extraction validation
-row classification
-field validation
-unit_number -> truck_id resolution
-driver matching
-owner-operator/company ownership resolution
-date-effective history lookup
-reconciliation
-fuel pricing rules
-deductions
-settlement logic
-posting gates
-audit trail
-RBAC / permissions
+receive PDF
+store original PDF
+recognize approved BVD layout
+extract known BVD source structures
+save exact source values in fuel_bvd
+return saved rows for review
+stream original PDF for review
 ```
 
-The frontend must never be the authority for money, ownership, matching, reconciliation, or posting.
+Browser responsibilities:
+
+```text
+upload BVD PDF
+show original PDF on the left
+show values read back from fuel_bvd on the right
+```
+
+For the first fidelity test, the right side must display the values **read back from PostgreSQL**, not temporary parser output held in browser memory.
+
+No calculation or business decision belongs in the browser.
 
 ---
 
-# 10. Financial separation lock
+# 13. Implementation 1 acceptance test
 
-Do not add these calculated/decision fields to `fuel_bvd`:
-
-```text
-O/O fuel charge
-payroll deduction
-settlement amount
-TruckERP discount calculation
-functional_amount / FX-converted accounting amount
-financial responsibility result
-reconciliation result
-posting result
-```
-
-`fuel_bvd` is BVD source evidence plus TruckERP audit/resolution metadata.
-
-Later financial decisions must live in their own backend financial/settlement records and may reference the BVD source row.
-
-This keeps the distinction explicit:
+Using the verified BVD invoice fixture, prove:
 
 ```text
-BVD evidence = what the provider said
-TruckERP financial record = what TruckERP decided/charged/posted
+1. PDF uploads successfully.
+2. Original PDF remains available for the left-side viewer.
+3. Backend extracts the known BVD structures.
+4. Every extracted BVD value is inserted into fuel_bvd.
+5. Source formatting is preserved as text.
+6. Review page reads the saved values back from PostgreSQL.
+7. PDF and database values can be compared side-by-side.
+8. No fuel_transactions, reconciliation, truck, driver, O/O, pricing, settlement, or posting logic runs.
 ```
+
+Examples that must remain exact:
+
+```text
+"1,425.63"
+"0.0000"
+"CN"
+"1104"
+"2026-07-27 13:38:39"
+```
+
+Implementation 1 passes only when the verified BVD fixture is reproduced field-for-field from the database for human review.
 
 ---
 
-# 11. Implementation 1 lock summary
+# 14. Next step after Implementation 1 passes
 
-Implementation 1 is limited to:
+Only after BVD extraction fidelity is proven do we design the next backend step that publishes accepted fuel transactions into TruckERP operational fuel history for the applicable unit.
 
-```text
-BVD source facts
-+
-TruckERP source/audit fields
-+
-TruckERP row-level review fields
-+
-TruckERP identity-resolution fields
-```
-
-Locked operating decisions:
-
-```text
-ONE fuel_bvd table
-same import_id for rows from the same PDF
-parse_status = import/PDF processing status
-review_status = individual row review status
-BVD source values are never overwritten
-unit_number is not a FK
-truck_id is resolved by backend logic
-frontend is never authority for matching or money
-financial charges/settlement data do not belong in fuel_bvd
-```
-
----
-
-# 12. Next design step
-
-The BVD source schema and current TruckERP-owned operational fields are now frozen for Implementation 1 design review.
-
-Before migration code is written:
-
-```text
-1. verify existing TruckERP FK targets / ID types
-2. verify whether any old Fuel migrations were applied to a real tenant DB
-3. create migration only after those checks
-4. create SQLAlchemy model
-5. add backend validation
-6. test with the verified BVD PDF
-```
+That later step is separate from `fuel_bvd` source evidence.
