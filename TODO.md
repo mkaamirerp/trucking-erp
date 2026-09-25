@@ -1,5 +1,31 @@
 # TruckERP TODO
 
+## Fuel Card Adjustments — provider-authorized corrections
+
+**Status:** TODO — future Fuel operationalization; do not pull into the current BVD source-review milestone.
+
+**Design:** `docs/FUEL_CARD_ADJUSTMENTS.md`
+
+**Implementation checklist:** `docs/FUEL_CARD_ADJUSTMENTS_TODO.md`
+
+**Architecture reference:** `docs/FUEL_CARD_MODULE_DESIGN.md`
+
+Core rule: a provider correction never overwrites the original provider transaction. TruckERP records a linked adjustment so the company can search a disputed invoice/transaction, capture the provider-authorized correction and evidence, and preserve the original → adjustment(s) → effective-cost audit chain.
+
+Primary relationship:
+
+```text
+Fuel-card provider
+        ↕
+Fleet / company account
+        ↕
+TruckERP company financial history
+```
+
+This is not a driver-dispute or owner-operator-dispute workflow.
+
+---
+
 ## Load parser — restore and verify principal load identifier label fallback
 
 **Status:** TODO — do not implement blindly; verify against current rules/tests first.
