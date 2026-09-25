@@ -1,120 +1,31 @@
 # TruckERP Fuel / Fuel-Card Implementation Plan
 
-**Status:** Execution plan for Cursor. Companion to `docs/FUEL_CARD_MODULE_DESIGN.md`; does not replace the architecture/design document.
+**Status:** Execution plan for Cursor. Companion to `docs/FUEL_CARD_MODULE_DESIGN.md`; does not replace the architecture source of truth.
 
-**Source of truth:** `docs/FUEL_CARD_MODULE_DESIGN.md` governs architecture. This plan governs execution sequence and does not replace the design.
+**Source of truth:** `docs/FUEL_CARD_MODULE_DESIGN.md`
 
-**Current execution scope:** tenant provider configuration + provider/file intake + BVD/Nationwide document rules + canonical transaction normalization + review + reconciliation + historical truck/ownership resolution + O/O pricing + settlement/audit + UI.
+**Current execution focus:** BVD provider-native extraction foundation first; Nationwide second. Canonical financial semantics, reconciliation math and settlement work come after source/structure completeness is proven.
 
-**Explicitly deferred unless reopened:** unverified provider APIs, OAuth/data-sharing flows whose exact provider contract is not yet known, automatic provider-specific rounding tolerances without evidence, and any direct provider machine feed that has not been confirmed by real credentials/specifications.
+**Important:** Existing Fuel code already contains partial implementations. This document does not infer completion from file presence. A segment is complete only after code + required tests + recorded evidence pass the gates below.
 
 ---
 
 # 0. Operating contract
 
-Fuel/Card is a money-moving subsystem. Do not treat it as normal CRUD.
+Fuel/Card is a money-moving subsystem. Do not treat it as ordinary CRUD.
 
 ## 0.1 One segment at a time
 
-Cursor completes one segment only, runs its required tests, records exact results in this file, and stops for review.
+For each segment:
 
-Do not begin the next segment until the current segment has:
+1. inspect current implementation before editing;
+2. change only the segment scope;
+3. run required tests;
+4. record exact results;
+5. record known risks/TODO;
+6. stop for review before moving to the next segment.
 
-1. code complete,
-2. required tests complete,
-3. results recorded,
-4. risks/TODO recorded,
-5. user/ChatGPT review allowed to happen.
-
-## 0.2 No second parser stack
-
-Reuse existing TruckERP tenancy, people/payee, truck, audit, storage, permissions, settlement and shared Document Platform patterns.
-
-Fuel/Card attaches a Fuel profile to the existing shared document architecture. Do not build a second independent end-to-end PDF/OCR/OpenAI framework.
-
-## 0.3 Provider connectivity rule
-
-Do not assume every fuel-card provider uses REST/API.
-
-TruckERP must support connection/source methods such as:
-
-```text
-PDF_UPLOAD
-STRUCTURED_FILE_UPLOAD
-FILE_EXPORT
-SFTP
-DATA_SHARING / PARTNER_AUTH      future when provider contract is proven
-REST_API                         future when provider contract is proven
-MANUAL_DRIVER
-```
-
-The backend provider catalog decides which methods exist for each vendor. React must not invent provider fields or connection types.
-
-## 0.4 Provider facts are evidence; parser output cannot move money
-
-Never mutate source facts to force reconciliation.
-
-Parser/AI output must never decide:
-
-- `truck_id`,
-- `driver_id`,
-- owner/payee,
-- O/O pricing,
-- financial responsibility,
-- settlement eligibility,
-- posting.
-
-Those are backend resolution/gate decisions after source extraction/review.
-
-## 0.5 Money rules
-
-No transaction may post while a required gate is `FAIL` or `REVIEW`.
-
-Grand-total equality alone is insufficient. Row identity, transaction date, unit/card relationship, currency controls, truck/ownership history, financial destination and pricing must also be valid.
-
-### 0.5.1 Decimal arithmetic and column precision
-
-Lock before Segment 1 schema implementation. See Module Design §1.5.
-
-Financial math uses `Decimal` / PostgreSQL `NUMERIC` only. Never binary floating point.
-
-Locked canonical scales:
-
-```text
-quantity                      NUMERIC(14, 4)
-unit_price                    NUMERIC(14, 6)
-provider_discount_rate        NUMERIC(10, 6)
-provider_discount_amount      NUMERIC(14, 4)
-tax amounts                   NUMERIC(14, 4)
-transaction totals / fees     NUMERIC(14, 4)
-owner-operator charge         NUMERIC(14, 4)
-```
-
-Preserve exact source numeric strings in `provider_raw`. Round only at documented boundaries (canonical column hydration; currency minor-unit at settlement/payroll posting or an evidenced provider rounding policy). Never round to force totals equal.
-
-JSON/API money and quantity values must be decimal-safe, not native float.
-
-## 0.6 Transaction date/time is authoritative
-
-Historical truck, unit-number history, ownership/payee, O/O pricing and settlement eligibility use the **transaction date/time**, not invoice date, import time or today's relationships.
-
-### 0.6.1 Transaction timezone provenance
-
-`transaction_datetime` is authoritative only with provenance. See Module Design §14.1.
-
-Preserve the provider timestamp exactly as supplied. Retain timezone, UTC offset, or timezone-source separately when the provider supplies it.
-
-If the provider supplies local time without timezone, do not silently reinterpret it using server or tenant timezone. Historical truck/card/ownership resolution uses that documented interpretation.
-
-`transaction_date` is the provider/source-local calendar date when that date is determinable from the provider source. Do not derive or overwrite it from UTC `transaction_datetime`. A provider-local late-night event must not move to another transaction date merely because UTC conversion crosses midnight.
-
-## 0.7 Branch discipline
-
-Do not create a new branch merely because a segment starts. Use the current agreed working branch unless explicitly asked otherwise.
-
-## 0.8 Execution record template
-
-At the end of every segment update its record with:
+Execution record template:
 
 ```text
 Status: NOT STARTED | IN PROGRESS | PASS | PASS WITH NOTES | BLOCKED | FAIL
@@ -129,1369 +40,899 @@ Architecture deviations: NONE or exact explanation
 Date:
 ```
 
-Do not mark `PASS` when required tests were skipped.
+Do not mark PASS when required tests were skipped.
+
+## 0.2 Branch discipline
+
+Do not create a new branch merely because a segment starts. Use the agreed working branch unless explicitly asked otherwise.
+
+## 0.3 No second document stack
+
+Reuse existing TruckERP tenancy, storage, audit, permissions, document-processing, people/payee, truck and settlement patterns where they fit.
+
+Do not create a separate generic PDF/OCR/OpenAI platform just for Fuel.
+
+## 0.4 No generic provider fallback
+
+Unsupported provider/profile/layout must not silently enter financial staging.
+
+```text
+approved provider/profile -> process
+unknown provider/profile  -> reject or review
+```
+
+## 0.5 API-first provider rule
+
+For a provider with a usable authorized production API:
+
+```text
+API ONLY by default
+```
+
+Do not build a parallel PDF parser merely because PDFs exist.
+
+If no usable authorized API exists, use the specifically approved PDF/CSV/export contract.
+
+Current foundation:
+
+```text
+BVD        -> approved digital PDF path
+Nationwide -> approved digital PDF path
+```
+
+## 0.6 Parser output cannot move money
+
+Parser/AI/native extraction never decides:
+
+- `truck_id`;
+- `driver_id`;
+- owner/payee;
+- financial responsibility;
+- O/O pricing;
+- settlement eligibility;
+- posting.
+
+Those are later backend decisions after source evidence and review.
 
 ---
 
-# 1. Locked source -> canonical -> presentation architecture
+# 1. Current execution sequence (locked precedence)
 
-This is a core Fuel/Card rule.
+**BVD contract for the current milestone:** `docs/FUEL_BVD_IMPLEMENTATION_1.md` — not superseded by the segment letters below.
 
-TruckERP keeps three separate layers:
+The **active** execution order is:
 
-```text
-1. PROVIDER / SOURCE TRUTH
-   Exact provider values + original source file/payload
+## PHASE 1 — BVD IMPLEMENTATION 1
 
-2. CANONICAL TRUCKERP DATA
-   Stable internal meanings used for queries, matching, reconciliation and settlement
+- exact BVD digital-PDF extraction
+- one `fuel_bvd` table
+- exact TEXT source values
+- PostgreSQL round-trip
+- side-by-side review (PDF left / PostgreSQL values right)
+- no truck matching, driver matching, O/O logic, reconciliation, settlement, or posting
 
-3. FRONTEND PRESENTATION
-   TruckERP-controlled labels, grouping, ordering and display formatting
-```
+**Status:** CODE/TEST ACCEPTANCE PASSED. Live application migration/browser acceptance still pending.
 
-## 1.1 Source truth is lossless
+## PHASE 2 — BVD LIVE ACCEPTANCE
 
-For every provider transaction preserve:
+- controlled tenant migration
+- upload verified BVD PDF through the application
+- PDF left / PostgreSQL values right
+- visually confirm extraction fidelity
+- no downstream financial processing
 
-- original PDF/DAT/CSV/file/API payload reference,
-- source hash,
-- exact source row values,
-- source row order/identity,
-- provider-specific fields in `provider_raw` or equivalent,
-- provider raw currency/unit/product codes when normalization is applied.
+## PHASE 3 — BVD HARDENING
 
-When we say “map every field byte-for-byte,” implementation meaning is:
+- additional real BVD invoices/layout cases
+- no fixture-specific assumptions
+- ambiguous source structure → REVIEW, never guess
 
-> Do not discard or silently rewrite any provider-supplied field/value required to reproduce and audit what the provider sent.
+## PHASE 4 — NATIONWIDE SOURCE-FIDELITY PROOF
 
-The original source file itself remains the ultimate evidence.
+- reuse generic digital PDF capability/profile framework where appropriate
+- exact Nationwide source contract
+- do not force BVD columns/structure onto Nationwide
 
-## 1.2 Canonical data is stable and provider-independent
+## PHASE 5 — LATER ARCHITECTURE / OPERATIONALIZATION
 
-Provider-specific columns map into a small canonical transaction model. A BVD row, Nationwide row, structured Pilot/Love's feed row or future API row ultimately hydrates the same core record.
+Only after source fidelity is proven for the supported providers:
 
-## 1.3 Frontend wording is ours
+- generalized provider-native framework (`fuel_source_document`, parse runs, blocks/records) if still needed
+- canonical semantic mapping
+- truck/driver/history resolution
+- reconciliation
+- financial responsibility
+- O/O pricing
+- settlement/posting
 
-The UI may rename/reorder/group fields for clarity without changing source truth.
-
-Example:
-
-```text
-BVD source:        Final AMT
-Canonical field:  total_amount
-TruckERP UI:       Total Charged
-```
-
-Another example:
-
-```text
-Nationwide source: Ex-GST ($/U)
-Canonical field:   unit_price + unit_price_basis=EX_TAX
-TruckERP UI:        Price Before Tax
-```
-
-Changing a frontend label must never require rewriting source data or reparsing historical transactions.
-
-## 1.4 Three transaction identities
-
-These are not the same as provider vs processing network vs merchant (section 2).
-
-Keep separate:
-
-```text
-provider transaction identity     auth/txn number when the source supplies one
-provider source-row identity      batch + source order / row id inside the file
-TruckERP canonical transaction id TruckERP surrogate of the canonical record
-```
-
-A provider auth/transaction number is never automatically the canonical primary key. Dedupe/idempotency must handle omitted, reused, or differently scoped provider identifiers. See Module Design §1.6.
+Do not pull Phase 5 semantic/math work forward merely because the source contains prices, taxes or totals.
 
 ---
 
-# 2. Provider, processing network and merchant are different concepts
+# 1A. Reference segment map (architecture decomposition — not current execution authority)
 
-Do not collapse these into one `vendor` field.
-
-A real transaction can have three separate identities:
+The letters **A–O** below decompose the **future** provider-native and financial layers from `docs/FUEL_CARD_MODULE_DESIGN.md`. They are **not** the current execution order while BVD Implementation 1 is in flight.
 
 ```text
-PROGRAM / ACCOUNT PROVIDER
-    who owns the fleet program/account relationship
-
-PROCESSING / PAYMENT NETWORK
-    underlying authorization/payment rail when known
-
-MERCHANT / ACCEPTANCE NETWORK
-    where the truck actually bought fuel/product
+A. provider registry / profile whitelist
+B. immutable source document
+C. versioned parse run
+D. block/group classification
+E. provider-native field hydration
+F. append-only native storage
+G. append-only review/correction overlay
+H. provider-native review UI
+I. BVD field/structure completeness tests
+J. Nationwide framework proof
+-------------------------------
+THEN (Phase 5)
+K. canonical semantic mapping
+L. reconciliation / financial gates
+M. historical truck/ownership resolution
+N. O/O pricing / financial responsibility
+O. settlement / posting / cross-module routing
 ```
 
-Example based on the observed BVD/Love's workflow:
+# 2. Segment A — provider profile whitelist
 
-```text
-program_provider     = BVD
-processing_network   = T_CHEK       when source/configuration proves it
-merchant_network     = LOVES
-merchant_site        = actual station/site when available
-```
+Implement or reconcile the provider-profile registry.
 
-The provider/account that supplies TruckERP's statement/feed remains the **source vendor**. A purchase at Love's does not automatically mean `source_vendor=LOVES` when the carrier used a BVD account/card.
+Required behavior:
 
-Do not infer a processing network unless provider/card configuration or source evidence establishes it. BVD may support more than one underlying card/network arrangement.
+- provider + profile version is unique;
+- profile state supports at least `approved` and `retired`;
+- retired profiles remain readable historically;
+- only approved profiles may start new ingestion;
+- allowed block/structure types are registered per profile/version;
+- unknown structure types are rejected/reviewed rather than accepted silently;
+- tenant configuration can use only supported provider profiles.
 
----
-
-# 3. Locked provider intake strategy
-
-Prefer the most structured source the provider actually supports.
-
-```text
-Structured API / SFTP / DAT / CSV available
-        -> deterministic provider adapter
-        -> canonical Fuel/Card staging
-
-Only PDF/report available
-        -> Fuel document profile + provider JSON rules
-        -> canonical Fuel/Card staging
-```
-
-Do not send a structured DAT/CSV feed to AI just because the Fuel module also has a PDF parser.
-
-## 3.1 Current provider matrix
-
-| Provider | Current TruckERP intake direction | Notes |
-|---|---|---|
-| BVD | PDF + structured BVD/T-Chek export file where available | First production provider. Direct automated API/SFTP still unconfirmed. |
-| Nationwide | PDF; CSV companion may be added when real contract/file is captured | Second real provider/layout proof. |
-| Pilot Flying J | structured partner/SFTP-style connection when actual tenant credentials/spec are available | Do not invent a public fuel-transaction REST API. |
-| Love's | structured partner/SFTP-style connection when actual tenant credentials/spec are available | Public Love's APIs are not assumed to equal fleet transaction feed. |
-| WEX/EFS/T-Chek | structured partner/data-sharing/API/feed when exact account contract is confirmed | Provider catalog remains ready for this. |
-| Comdata | structured partner/web-service/feed when exact account contract is confirmed | Do not guess required fields before onboarding documentation. |
-
-## 3.2 BVD structured export path
-
-BVD is not PDF-only.
-
-Industry documentation confirms BVD can produce a T-Chek-compatible transaction export such as `TcheckDATTransplus` for TMS import.
-
-TruckERP must therefore support the architecture:
-
-```text
-BVD portal / BVD export
-        -> structured DAT/file upload
-        -> deterministic BVD file adapter
-        -> preserve original file + hash + raw row
-        -> canonical Fuel/Card staging
-        -> reconciliation / ownership / settlement gates
-```
-
-This path **bypasses AI document extraction** because the file is already structured.
-
-Do not claim BVD direct SFTP/API until BVD provides the actual machine-feed contract.
-
-## 3.3 Nationwide path
-
-Nationwide remains PDF-first with provider-specific row/control rules. A CSV companion path may be added once a real sample/spec is captured.
-
-## 3.4 JSON rules remain versioned and adjustable
-
-BVD/Nationwide JSON rules are not frozen forever after first draft.
-
-Testing loop:
-
-```text
-real provider source
-    -> parse
-    -> compare parsed JSON to source
-    -> mechanical/reconciliation tests
-    -> identify error
-    -> update provider field/rule JSON
-    -> increment/version rule contract
-    -> rerun same fixture
-    -> lock regression test
-```
-
-Rules may be refined as real provider documents expose new layouts.
-
-Unfinalized/review batches may be reparsed under an explicitly selected newer rule version. Finalized financial history is never silently rewritten by a new parser version; corrections require the established audited correction/reversal workflow.
-
-Store the parser/rule version used for every parsed batch.
-
----
-
-# 4. Shared document parser architecture
-
-Fuel mirrors the Load parser contract pattern:
-
-```text
-Calling Fuel module chooses explicit Fuel profile/provider context
-        ↓
-Shared Document Platform
-        ↓
-Fuel profile
-  + global rules
-  + provider rules
-  + field rules
-  + strict JSON output schema
-        ↓
-OpenAI/shared model transport when required
-        ↓
-Mechanical validator
-        ↓
-Canonical parsed statement JSON
-        ↓
-Admin review
-        ↓
-Backend reconciliation / ownership / pricing gates
-```
-
-The Document Platform does not autonomously assign financial meaning by guessing a provider.
-
-For a usable digital PDF, follow the current shared policy: send the original PDF with the Fuel JSON rules/schema on the model path. Scanned/image-only sources use shared OCR fallback.
-
-AI performs semantic extraction. Mechanical backend code validates money.
-
----
-
-# 5. Tenant provider configuration and backend wiring
-
-Fuel provider configuration is tenant-scoped and backend-driven.
-
-## 5.1 Backend provider catalog
-
-The backend owns the supported provider catalog. Initial conceptual entries:
+Current supported/test provider profiles:
 
 ```text
 BVD
 NATIONWIDE
-PILOT_FLYING_J
-LOVES
-WEX
-EFS_TCHEK
-COMDATA
 ```
 
-Each catalog entry defines:
+Do not add a third production provider during this foundation phase.
 
-- stable provider code,
-- display name,
-- supported/enabled state,
-- supported connection methods,
-- preferred/default connection method,
-- parser/adapter/profile code,
-- expected file formats,
-- optional filename pattern,
-- connection field-definition schema,
-- credential requirements,
-- test-connection capability,
-- sync capability,
-- scheduling capability,
-- provider instructions/help text,
-- provider-specific validation rules.
+### Segment A tests
 
-Tenant configuration selects from this catalog. The tenant does not redefine what BVD, Pilot or Love's means.
-
-### 5.1.1 Evidence gate for advertised methods
-
-A catalog method is **selectable/configurable** only when Fuel design/research already captured evidence for that intake path.
-
-Unverified methods may remain listed with `evidence_status=unverified` and `selectable=false` so operators can see the research direction. They must not be presented as a working setup form, must not collect SFTP/API secrets, and POST/PUT must reject them.
-
-Segment 0A selectable methods from captured evidence:
-
-```text
-BVD            PDF_UPLOAD, STRUCTURED_FILE_UPLOAD   (PDF baseline + documented T-Chek-compatible export file)
-NATIONWIDE     PDF_UPLOAD                           (second real layout proof; CSV not selectable until a sample exists)
-```
-
-Pilot Flying J, Love's, WEX, EFS/T-Chek, and Comdata remain in the catalog as named providers, but their SFTP/API/data-sharing/file-export methods stay unverified until a real contract, sample, or credentials exist.
-
-Live adapters stay unimplemented for every method.
-
-## 5.2 Vendor dropdown -> provider-defined fields
-
-```text
-Fuel Provider
-   [Select vendor ▼]
-        BVD
-        Nationwide
-        Pilot Flying J
-        Love's
-        WEX
-        EFS/T-Chek
-        Comdata
-
-Select vendor
-        ↓
-Backend returns supported connection methods + field schema
-        ↓
-Frontend renders only those fields
-        ↓
-Authorized user enters tenant-specific values
-        ↓
-Save
-        ↓
-Test Connection (when supported)
-        ↓
-Enable
-```
-
-No giant universal form and no frontend-hardcoded provider credential schema.
-
-## 5.3 Example dynamic SFTP schema
-
-Conceptual only; exact provider fields must come from actual provider contracts:
-
-```json
-{
-  "provider_code": "PILOT_FLYING_J",
-  "connection_method": "SFTP",
-  "fields": [
-    {
-      "key": "account_reference",
-      "label": "Account / Customer Reference",
-      "type": "text",
-      "required": false,
-      "secret": false
-    },
-    {
-      "key": "sftp_username",
-      "label": "SFTP Username",
-      "type": "text",
-      "required": true,
-      "secret": false
-    },
-    {
-      "key": "sftp_password",
-      "label": "SFTP Password",
-      "type": "secret",
-      "required": true,
-      "secret": true
-    }
-  ]
-}
-```
-
-Provider endpoints/hosts should preferably be backend-known/allowlisted. Do not create an arbitrary-host SSRF/network escape surface.
-
-## 5.4 Same backend from two UI entry points
-
-Provider configuration may be opened from:
-
-```text
-Admin -> Integrations -> Fuel
-```
-
-or, when RBAC allows:
-
-```text
-Fuel -> Providers / Connections -> Add Provider
-```
-
-Both are views over the same tenant provider-connection records and endpoints. Do not create duplicate Admin vs Fuel configuration stores.
-
-## 5.5 RBAC is backend enforced
-
-Conceptual capabilities; final names follow repo convention:
-
-```text
-fuel.providers.view
-fuel.providers.manage
-fuel.providers.test_connection
-fuel.providers.sync
-fuel.imports.review
-fuel.imports.process
-fuel.imports.finalize
-```
-
-Hiding a button is not authorization. Backend must reject unauthorized direct endpoint calls.
-
-**Segment 0A enforcement (temporary):** the `fuel.providers.*` capability names are checked in code, but they currently map onto existing `is_tenant_admin`. This is reuse of tenant-admin enforcement, **not** fully granular Fuel RBAC. Do not describe Segment 0A as having Fuel-specific roles/permissions. `fuel.imports.*` remains a future conceptual set and is **not** implemented in Segment 0A.
-
-## 5.6 Secret handling
-
-Provider secrets are accepted on write but never returned after save.
-
-```text
-secret entered
-   -> server-side protected storage/reference
-   -> later GET:
-      configured=true
-      masked_display=********
-      actual_secret NEVER RETURNED
-```
-
-Secrets must be redacted from logs, audit payloads, exceptions and parser/OpenAI handoffs.
-
-## 5.7 Multiple providers and multiple accounts
-
-One tenant may use many providers and multiple accounts under one provider. Do not make provider code alone unique per tenant.
-
-## 5.8 Conceptual backend endpoints
-
-Final paths follow repo conventions, but the backend should provide behavior equivalent to:
-
-```text
-GET  /api/v1/fuel/providers
-GET  /api/v1/fuel/providers/{provider_code}
-
-GET  /api/v1/fuel/provider-connections
-POST /api/v1/fuel/provider-connections
-GET  /api/v1/fuel/provider-connections/{id}
-PUT  /api/v1/fuel/provider-connections/{id}
-
-POST /api/v1/fuel/provider-connections/{id}/test
-POST /api/v1/fuel/provider-connections/{id}/sync
-```
-
-A provider whose live adapter is not implemented returns HTTP 200 with an explicit unsuccessful payload (`success=false`, `attempted=false`, `result=connection_method_not_implemented`). HTTP 200 means the request was processed, not that connectivity succeeded. The UI must never treat this as a successful test or sync.
-
-## 5.9 Adapter boundary
-
-Define the provider adapter contract before implementing every vendor:
-
-```text
-validate_configuration()
-test_connection()
-fetch_or_receive_source()
-parse_structured_source()      when structured
-```
-
-BVD/Nationwide PDF extraction remains under the shared Fuel document profile, not under a fake API adapter.
+- unsupported provider cannot start ingestion;
+- unknown profile version cannot start ingestion;
+- retired profile remains readable but cannot start a new parse;
+- unknown structure type cannot be silently stored as valid;
+- Tenant A cannot use Tenant B provider configuration.
 
 ---
 
-# 6. Canonical Fuel/Card data model
+# 3. Segment B — immutable source document + parse run separation
 
-## 6.1 Import/source batch
+The source file/payload and its parser interpretation are separate concepts.
 
-One uploaded/downloaded statement/file/feed batch = one source batch.
+## 3.1 Source document
 
-Preserve at minimum:
-
-- tenant scope,
-- provider code,
-- provider connection/account reference,
-- source type (`PDF`, `STRUCTURED_FILE`, `SFTP_FILE`, `MANUAL_DRIVER`, future `API`),
-- invoice/statement number,
-- invoice date,
-- statement start/end,
-- due date,
-- original source storage reference,
-- cryptographic hash,
-- remote filename/timestamp when applicable,
-- imported timestamp,
-- parser/adapter/rule version,
-- review/process/finalize state,
-- reviewer/finalizer/time.
-
-Provider control totals by currency are **not** stored on the batch. They belong on `fuel_source_controls` (see §6.5).
-
-## 6.2 Canonical transaction core
-
-| Canonical field | Meaning |
-|---|---|
-| `transaction_datetime` | Normalized timezone-aware datetime only when the provider supplied enough timezone/offset context. |
-| `transaction_date` | Provider/source-local calendar date when determinable from the source. Never derived from UTC `transaction_datetime`. |
-| `transaction_datetime_source` | Exact provider timestamp text. |
-| `unit_number_snapshot` | Unit exactly as provider reported it. |
-| `card_or_account_id` | Provider card/account identifier used for mapping/audit. |
-| `driver_name_snapshot` | Provider-reported driver only; nullable; never backfilled. |
-| `merchant_site` | Provider site/merchant/network label. |
-| `city` | Provider-reported city. |
-| `province_state` | Provider-reported province/state. |
-| `product` | Controlled canonical product/category label. Raw provider code remains preserved. |
-| `quantity` | Provider volume/quantity. |
-| `quantity_unit` | `L`, `GAL`, `ITEM`, etc.; source-supported/derived by locked rule. |
-| `unit_price` | Canonical provider unit-cost input. |
-| `unit_price_basis` | `BILLED`, `EX_TAX`, `FINAL_GALLON_PRICE`, `RETAIL_FALLBACK`, etc. |
-| `tax_amount` | Per-row tax only when the provider actually supports it. |
-| `discount_amount` | Canonical supported provider discount amount; nullable. |
-| `total_amount` | Provider transaction total/final amount; reconciliation anchor. |
-| `provider_event_type_raw` | Exact provider event terminology when supplied. |
-| `provider_event_type` | TruckERP classification: `PURCHASE`, `CREDIT`, `REFUND`, `REVERSAL`, `VOID`, `OTHER`, `UNKNOWN`. |
-| `currency` | Canonical ISO-style currency (example: `CAD`). |
-| `currency_raw` | Exact provider currency representation (example: BVD `CN`). Never destroyed when mapping to ISO. |
-| `source_vendor` | BVD, NATIONWIDE, PILOT_FLYING_J, LOVES, WEX, etc. |
-| `processing_network` | Optional known payment/processing rail; nullable when unproven. |
-| `merchant_network` | Optional merchant/acceptance network when known. |
-
-Provider-specific missing fields remain null; do not invent values to satisfy a universal shape.
-
-### 6.2.1 Locked decimal precision
-
-Apply Module Design §1.5 before creating Segment 1 columns.
+Store at minimum:
 
 ```text
-quantity                      NUMERIC(14, 4)
-unit_price                    NUMERIC(14, 6)
-provider_discount_rate        NUMERIC(10, 6)
-provider_discount_amount      NUMERIC(14, 4)
-tax amounts                   NUMERIC(14, 4)
-transaction totals / fees     NUMERIC(14, 4)
-owner-operator charge         NUMERIC(14, 4)
+id
+tenant_id
+source_type
+file_sha256
+storage_ref
+original_name
+content_type
+created_at
 ```
-
-Python `Decimal` only. Source numeric strings stay in `provider_raw`.
-
-### 6.2.2 Three transaction identities
-
-Canonical schema must persist all three identities from Module Design §1.6. Do not use provider auth/transaction number as the table primary key.
-
-### 6.2.3 Credits / refunds / reversals / voids
-
-Canonical rows must distinguish purchase/charge from credit, refund, reversal, void, other, and unknown. Persist `provider_event_type_raw` separately from canonical `provider_event_type`. Preserve provider sign. Do not coerce negatives into positive purchases. An unknown provider value must never become `PURCHASE`; keep the raw value and classify `UNKNOWN` (REVIEW-eligible later). See Module Design §1.7 and §9.2.
-
-### 6.2.4 Transaction timezone provenance
-
-Persist provider timestamp as supplied plus timezone/offset/timezone-source when available. Date-only remains allowed when the source has no time. Persist source-local `transaction_date` independently of UTC `transaction_datetime`. See Module Design §14.1.
-
-### 6.2.5 Currency raw vs canonical
-
-Persist `currency_raw` and canonical `currency` separately. Evidenced BVD `CN` maps to `CAD` without destroying `CN`. Unmapped raw values keep `currency_raw` and leave canonical `currency` null rather than inventing an ISO code. See Module Design §1.8.
-
-### 6.2.6 Owner-operator charge provenance
-
-`owner_operator_charge_amount` may remain nullable on the canonical transaction. It is derived pricing/settlement data, not provider source. Segment 1 must not populate or calculate it. Provider parsing must not hydrate it. Fuel AI extraction must not output or hydrate it. Later O/O pricing owns it. See Module Design §1.9.
-
-## 6.3 Raw provider sidecar — mandatory
-
-Every source transaction preserves provider-specific evidence in `provider_raw` or equivalent JSON.
-
-Examples:
-
-**BVD raw evidence**
-
-- Auth Code,
-- Site #,
-- original product code,
-- Retail,
-- Billed,
-- Pre Tax AMT,
-- HST,
-- GST,
-- PST,
-- QST,
-- Disc Rate,
-- Disc AMT,
-- original CUR,
-- any additional BVD export columns.
-
-**Nationwide raw evidence**
-
-- Account Code,
-- Card Number,
-- Network,
-- raw Product,
-- Ex-GST ($/U),
-- USA Discount,
-- Missed Disc,
-- OON Fees,
-- source Currency,
-- provider-specific subtotal/control information.
-
-Future providers keep their full source row in raw evidence even if only 12-16 fields are promoted to canonical columns.
-
-## 6.4 TruckERP resolution fields are separate
-
-Never mix provider facts with:
-
-- `truck_id`,
-- `driver_id`,
-- `owner_operator_payee_id`,
-- classification,
-- financial responsibility,
-- pricing agreement/rule reference,
-- settlement/payroll reference,
-- `owner_operator_charge_amount` (derived later; not source),
-- gate/readiness statuses.
-
-Nationwide can legitimately have `driver_name_snapshot=null`; backend may resolve a separate `driver_id` from historical card/unit assignment without rewriting source truth.
-
-## 6.5 Provider control records
-
-Provider control totals are first-class reconciliation evidence on `fuel_source_controls`, associated with `fuel_source_batches`. They are never `fuel_transactions` purchase rows.
-
-Physical table (Segment 2): `fuel_source_controls`
-
-Preserve at minimum:
-
-- tenant + batch association,
-- provider/raw control identity and labels (`provider_control_identity`, `control_label_raw`, `control_type_raw`),
-- canonical `control_type` including `CARD_TOTAL`, `INVOICE_SUMMARY`, tax/currency/invoice/statement/unit/product totals, `OTHER`, `UNKNOWN`,
-- optional provider-specific `control_scope` (`BATCH`/`INVOICE`/`STATEMENT`/`CARD`/`UNIT`/`GROUP`/`PRODUCT`/`CURRENCY`/`TAX`/`OTHER`/`UNKNOWN`) plus optional scope keys — not a universal hierarchy,
-- source-row order/id when the control came from a document row,
-- `currency_raw` + canonical `currency`,
-- Decimal/`NUMERIC(14, 4)` declared amount and optional quantity/tax/discount/pre-tax,
-- full `provider_raw` JSON object,
-- `requires_review` / `review_reason` so unknown controls remain REVIEW-capable.
-
-`CARD_TOTAL` / `INVOICE_SUMMARY`-style rows must not enter purchase totals merely because they contain a monetary amount. The same source row must not be stored as both a transaction and a control. The later reconciliation engine reads these records; Segment 2 does not implement that engine.
-
-The intended hydration path is `app.services.fuel_ingestion.ingest_source_row` (and `hydrate_as_transaction` / `hydrate_as_control`). It enforces `(tenant_id, batch_id, source_row_order)` exclusivity in both directions without a cross-table PostgreSQL UNIQUE.
-
-Do not store a second authoritative control-totals JSON document on `fuel_source_batches`.
-
----
-
-# 7. Dynamic quantity/unit and currency behavior — LOCKED
-
-Every fuel/product transaction line is dynamic on its own. Never use one statement-wide unit assumption.
-
-Each row carries at least:
-
-```text
-transaction_datetime
-currency
-quantity
-quantity_unit
-unit_price
-unit_price_basis
-```
-
-## 7.1 Source unit wins
-
-If the provider explicitly supplies a unit of measure, preserve/use that source unit.
-
-Example:
-
-```text
-provider says USD + Litres
--> keep Litres
--> do NOT rewrite to gallons merely because currency is USD
--> flag only if the provider/profile says the combination is invalid
-```
-
-## 7.2 Currency fallback when source UOM is absent
-
-For the BVD/Nationwide North-American profiles, when the provider does **not** explicitly supply row UOM and the provider contract supports the inference:
-
-```text
-CAD -> quantity_unit = L
-USD -> quantity_unit = GAL
-```
-
-This is a provider/profile normalization rule, not a universal world-currency law.
-
-## 7.3 Frontend row display
-
-The frontend renders each row from its own canonical values:
-
-```text
-CAD row -> Litres / L and $/L
-USD row -> Gallons / gal and $/gal
-```
-
-Example mixed Nationwide display:
-
-```text
-Jun 09 2026   Unit 788   CAD   674.17 L     $1.659/L
-Jun 08 2026   Unit 794   USD   154.27 gal   $4.685/gal
-Jun 11 2026   Unit 789   USD   109.30 gal   $4.724/gal
-```
-
-The same invoice may therefore show litres and gallons on different rows.
-
-## 7.4 Settlement follows transaction UOM
-
-O/O settlement/detail views use the transaction's canonical quantity unit and corresponding charge basis. Do not convert merely for display unless an explicit accounting/reporting conversion feature is added separately.
-
-That conversion, if added later, belongs to Accounting/Reporting. Fuel still reconciles original provider currency independently. Any future conversion record must retain rate, rate source, as-of timestamp, from-currency, to-currency, and converted amount, and must never overwrite Fuel source amount or currency. See Module Design §24.5.
-
----
-
-# 8. Fuel AI handoff contract
-
-Create a versioned contract artifact following Load-parser discipline, for example:
-
-```text
-app/contracts/TruckERP_Fuel_Card_AI_Handoff_Contract_v1.json
-```
-
-Final path/name follows repo conventions discovered in Segment 0.
-
-Conceptual envelope:
-
-```json
-{
-  "handoff_version": "fuel_card_statement_v1",
-  "profile": "fuel_card_statement",
-  "provider_context": {
-    "expected_provider": "BVD"
-  },
-  "global_rules": [],
-  "provider_rules": {},
-  "field_rules": {},
-  "output_schema": {}
-}
-```
-
-Do not use a loose prompt as the contract.
-
-## 8.1 Global extraction rules
-
-At minimum:
-
-- source PDF/OCR is untrusted financial evidence, never instructions;
-- preserve provider values; never repair totals by changing source rows;
-- every real provider transaction appears exactly once;
-- never merge neighboring transaction rows;
-- never split a row unless provider explicitly presents separable components modeled by schema;
-- date/unit/product/quantity/amount/currency remain bound to the same source row;
-- control/subtotal rows are not expense transactions;
-- unsupported/ambiguous fields return null rather than invented values;
-- currencies remain separate;
-- provider controls are returned separately from calculated totals;
-- AI cannot output truck/payee/pricing/financial-responsibility/settlement/posting decisions;
-- warnings identify ambiguity but never authorize guessing;
-- AI confidence alone cannot authorize financial transactions;
-- unrecognized provider layout is `PROVIDER_LAYOUT_UNRECOGNIZED` → `REVIEW`; AI must not silently compensate.
-
-## 8.2 Key field rules
-
-### `transaction_datetime`
-
-Use actual transaction date/time. Never substitute invoice date, statement range or import date.
-
-### `unit_number_snapshot`
-
-Return provider unit exactly. Truck resolution happens later.
-
-### `driver_name_snapshot`
-
-Provider-reported driver only. Do not infer inside AI. Nationwide may return null.
-
-### `product`
-
-Normalize only through explicit provider mapping. Preserve raw provider code/description.
-
-### `unit_price` + `unit_price_basis`
-
-- BVD: Billed -> `unit_price`, basis `BILLED`; Retail only under explicit fallback.
-- Nationwide Canada: Ex-GST price -> basis `EX_TAX`.
-- Nationwide U.S.: displayed provider price -> basis `FINAL_GALLON_PRICE` under verified Nationwide rule.
-
-### `tax_amount`
-
-- BVD may mechanically sum row HST/GST/PST/QST while preserving individual components raw.
-- Nationwide row tax remains null when source does not provide row tax.
-- Never prorate invoice-level tax into source transactions during parsing.
-
-### `total_amount`
-
-Always provider-reported transaction total/final amount; calculations validate but never replace it.
-
-### `currency`
-
-Preserve row currency and normalize only through explicit mapping while retaining raw source currency (`currency_raw` vs canonical `currency`). Do not overwrite Fuel source amount/currency for reporting conversion.
-
-### `quantity_unit`
-
-Use explicit source UOM first; otherwise use approved provider/currency fallback rule from Section 7.
-
----
-
-# 9. BVD provider rules — first production baseline
-
-BVD is the primary field/workflow baseline for initial Canadian production.
-
-## 9.1 Verified fixture header
-
-- Invoice `972201`
-- Invoice date `2026-07-29`
-- Statement start `2026-07-22`
-- Statement end `2026-07-28`
-- Due date `2026-07-30`
-- Client `FIRST BASE FREIGHT LTD.`
-
-## 9.2 Verified transaction 1
-
-```text
-Card              4237111
-Auth              A204040667-TA
-Driver            JASPREET CHOKAR
-Unit              1100
-Date/time         2026-07-23 02:17:56
-Site #            54228
-Site/City         BOWMANVILLE
-Province          ON
-Product           TA
-Quantity          719.50
-Retail            2.2390
-Billed            2.2390
-Pre-tax           1425.63
-HST               185.33
-Final             1610.96
-Currency raw      CN
-```
-
-## 9.3 Verified transaction 2
-
-```text
-Auth              A208448597-TA
-Driver            JASPREET CHOKAR
-Unit              1104
-Date/time         2026-07-27 13:38:39
-Site #            58073
-Site              BVD NIAGARA
-City              Niagara on the Lake
-Province          ON
-Product           TA
-Quantity          754.50
-Retail            2.3990
-Billed            2.3990
-Pre-tax           1601.81
-HST               208.24
-Final             1810.05
-Currency raw      CN
-```
-
-## 9.4 BVD controls
-
-```text
-Quantity total    1474.00
-Pre-tax total     3027.44
-HST total         393.57
-Final total       3421.01
-```
-
-Control/subtotal rows never create transactions.
-
-## 9.5 BVD canonical mapping
-
-```text
-Date/time         -> transaction_datetime
-Unit #            -> unit_number_snapshot
-Card              -> card_or_account_id
-Driver Name       -> driver_name_snapshot
-Site Name         -> merchant_site
-Site City         -> city
-Prov/ST           -> province_state
-Prod              -> controlled product; raw code retained
-QTY               -> quantity
-Billed            -> unit_price, basis BILLED
-Retail            -> provider_raw; optional explicit fallback only
-HST/GST/PST/QST   -> raw components; sum to tax_amount where valid
-Disc AMT          -> discount_amount
-Final AMT         -> total_amount
-CUR               -> normalized currency + raw CUR retained
-```
-
-BVD product/source codes (`TA`, `TF`, `DF`, `S`, `C`, `AD`, `O`, `L`, future codes) remain preserved independently of TruckERP classification.
-
-## 9.6 BVD example: source -> canonical -> frontend
-
-Source evidence:
-
-```json
-{
-  "Prod": "TA",
-  "QTY": "719.50",
-  "Billed": "2.2390",
-  "Final AMT": "1610.96",
-  "CUR": "CN"
-}
-```
-
-Canonical staging:
-
-```json
-{
-  "transaction_datetime": "2026-07-23T02:17:56",
-  "unit_number_snapshot": "1100",
-  "driver_name_snapshot": "JASPREET CHOKAR",
-  "merchant_site": "BOWMANVILLE",
-  "product": "FUEL",
-  "quantity": 719.50,
-  "quantity_unit": "L",
-  "unit_price": 2.2390,
-  "unit_price_basis": "BILLED",
-  "tax_amount": 185.33,
-  "total_amount": 1610.96,
-  "currency": "CAD",
-  "source_vendor": "BVD",
-  "provider_raw": {
-    "Prod": "TA",
-    "QTY": "719.50",
-    "Billed": "2.2390",
-    "Final AMT": "1610.96",
-    "CUR": "CN",
-    "auth_code": "A204040667-TA",
-    "site_number": "54228"
-  }
-}
-```
-
-Possible TruckERP frontend presentation:
-
-```text
-Date              Jul 23, 2026 02:17
-Unit              1100
-Driver            Jaspreet Chokar
-Fuel Type         Tractor Diesel
-Location          Bowmanville, ON
-Quantity          719.50 L
-Price / Litre     $2.2390
-Tax               $185.33
-Total Charged     $1,610.96 CAD
-```
-
-Frontend labels are presentation only. Provider source remains unchanged underneath.
-
----
-
-# 10. Nationwide provider rules — second real layout proof
-
-Nationwide proves that provider layouts can differ materially without forcing BVD-shaped tables.
-
-## 10.1 Row type first — critical
-
-Determine row type before interpreting visual positions:
-
-```text
-TRANSACTION
-CARD_TOTAL
-INVOICE_SUMMARY
-```
-
-`XXXXX... Total` is a control row, never a purchase.
-
-Canadian control rows may place GST/QST text visually under transaction columns. Fixed x-position interpretation without row classification is unsafe.
-
-## 10.2 Verified Canadian transaction
-
-```text
-Account           20250522B
-Card              XXXXX87195
-Unit              788
-Date              2026-06-09
-City              NIAGARA-ON-THE-LAKE
-Province          ON
-Product           DIESEL
-Volume            674.17
-Unit price        1.659
-Total             1263.85
-Network           Esso
-Currency          CAD
-USA Discount      0.00
-Missed Disc       0.00
-```
-
-Invoice/control evidence:
-
-```text
-Canadian volume       674.17 Litres
-Total Ex-GST & PST    1118.45
-GST                   145.40
-PST                   0.00
-CAD subtotal          1263.85
-```
-
-## 10.3 Explicit Nationwide Canadian GST rule — locked
-
-When a Nationwide `CARD_TOTAL` or `INVOICE_SUMMARY` row is in Canadian context and explicitly contains:
-
-```text
-GST 145.40
-```
-
-map `145.40` **only** to the GST control field.
-
-Likewise explicit `QST`, `PST` or `HST` label/value pairs map only to their matching control tax field.
 
 Rules:
 
-- classify row type first;
-- require explicit tax label/value ownership;
-- never interpret GST as Date, City, Product, Volume or transaction Total due to visual position;
-- keep tax at control level when Nationwide does not provide per-transaction tax;
-- do not prorate invoice/control tax into transaction rows during parsing;
-- U.S. rows do not receive inferred Canadian GST/HST/QST/PST.
+- source bytes live in object/file storage;
+- Postgres stores the storage reference and SHA-256;
+- same tenant + same file hash is idempotent at source-document level;
+- source document is immutable after insert;
+- `file_sha256` is 32 bytes when stored as binary SHA-256.
 
-## 10.4 Verified U.S. transaction
+## 3.2 Parse run
 
-```text
-Card              XXXXX07588
-Unit              794
-Date              2026-06-08
-City              PAULSBORO
-State             NJ
-Product           DIESEL
-Volume            154.27
-Unit price        4.685
-Total             722.75
-Network           TA-Petro
-Currency          USD
-USA Discount      34.56
-```
-
-Canonical rules:
+Store separately:
 
 ```text
-Date              -> transaction_datetime (date-only)
-Unit #            -> unit_number_snapshot
-Card/Account      -> card_or_account_id
-Driver            -> null unless source supplies one
-Network           -> merchant_site / raw network evidence
-City              -> city
-Pr/St             -> province_state
-Product           -> controlled product + raw source
-Volume            -> quantity
-CAD Ex-GST price  -> unit_price, basis EX_TAX
-USD displayed     -> unit_price, basis FINAL_GALLON_PRICE
-Per-row tax       -> null when unsupported
-USA Discount      -> supported discount mapping + raw value
-Total             -> total_amount
-Currency          -> currency
+id
+tenant_id
+document_id
+provider
+profile_version
+parse_status
+review_status
+created_at
 ```
 
-## 10.5 Mixed currency/UOM example
+The same immutable source document may have multiple explicit parse runs under different profile versions.
 
-One Nationwide statement can render dynamically:
+A newer profile never silently rewrites finalized history.
 
-```text
-Jun 09 2026   Unit 788   CAD   674.17 L     $1.659/L   Total $1,263.85 CAD
-Jun 08 2026   Unit 794   USD   154.27 gal   $4.685/gal Total $722.75 USD
-Jun 11 2026   Unit 789   USD   109.30 gal   $4.724/gal Total $516.33 USD
-```
+### Segment B tests
 
-Each row decides its own currency/UOM presentation. The statement does not have one global measurement unit.
-
-## 10.6 Currency controls
-
-```text
-CAD provider total = 1263.85
-USD provider total = 5197.69
-```
-
-Reconcile independently. Never create a fake CAD+USD provider total.
-
-## 10.7 Rounding
-
-Preserve:
-
-- provider detail rows,
-- calculated row sum,
-- printed card/invoice control,
-- variance.
-
-Never alter row amounts to force equality. Until a provider-specific tolerance is explicitly approved, unexplained variance remains `REVIEW`.
+- duplicate source file for same tenant does not create a second source document;
+- same document can have explicit v1 and v2 parse runs;
+- changing parse rules does not mutate original source hash/reference;
+- Tenant A parse cannot reference Tenant B document.
 
 ---
 
-# 11. Provider control totals and row/control separation
+# 4. Segment C — source blocks/groups
 
-Provider controls are reconciliation evidence, never purchases.
+Implement first-class source structures rather than forcing every source element into a row.
 
-Support control types such as:
-
-- card subtotal,
-- unit/group subtotal,
-- product subtotal,
-- currency subtotal,
-- invoice/grand total,
-- tax control,
-- discount control,
-- provider-declared total,
-- calculated detail-row total,
-- variance.
-
-Required invariant per provider/currency:
+Conceptual block fields:
 
 ```text
-all validated source transactions
-+ explicitly approved provider rounding/control adjustment only when policy allows
-= provider declared control total
-= validated total
+id
+tenant_id
+parse_run_id
+parent_block_id nullable
+block_sequence
+block_type
+provider_native_fields jsonb
+inherited_context_fields jsonb
+raw_text / raw_source_evidence
+page / source coordinates
+confidence
+requires_review
 ```
 
-And:
+Required examples:
 
 ```text
-missing source transactions = 0
-unintended duplicates = 0
-unresolved financial destinations = 0
-unexplained variance = 0
+BVD Client info
+BVD Transactions for card 4237111
+BVD transaction table
+BVD page-1 controls
+BVD Grand Totals
+BVD Legend
+Nationwide ACCOUNT INFORMATION
+Nationwide BILLING SUMMARY
+Nationwide TRANSACTION BREAKDOWN BY CARD
 ```
 
-Grand-total equality never excuses wrong unit/date/card assignment.
+### Segment C tests
+
+- BVD card group has a persistent block id;
+- BVD child transactions can reference/inherit that group context;
+- Client info and Legend have a home without pretending they are transactions;
+- nested/child blocks cannot cross tenant/parse-run boundaries.
 
 ---
 
-# 12. Historical truck, driver and ownership resolution
+# 5. Segment D — provider-native record storage
 
-`truck_id` is permanent physical asset identity. Unit number is operational and can change.
+Implement provider-native rows/records under a block.
 
-Required unit history concept:
-
-```text
-truck_id
-unit_number
-effective_from
-effective_to
-reason
-changed_by
-```
-
-Resolution:
+Conceptual fields:
 
 ```text
-unit_number_snapshot + transaction_datetime
-        -> exactly one truck_id
+id
+tenant_id
+parse_run_id
+block_id
+seq
+page
+structure_type
+fields jsonb
+inherited_context_snapshot jsonb
+raw_text / raw_source_evidence
+confidence
+requires_review
 ```
 
-Zero/multiple matches = `REVIEW`; never current-truck fallback.
+Use an ordered JSONB **array**, not an object:
 
-Ownership/payee is also effective-dated and resolves at transaction time.
-
-Same physical truck renumbered -> same `truck_id`; replacement truck -> new `truck_id`.
-
-Driver identity follows the same source-vs-resolution rule:
-
-```text
-driver_name_snapshot = only what provider reported
-resolved driver_id   = TruckERP historical relationship
+```json
+[
+  {"label":"QTY","raw":"719.50","evidence":{}},
+  {"label":"Pre Tax AMT","raw":"1,425.63","evidence":{}},
+  {"label":"HST","raw":"185.33","evidence":{}}
+]
 ```
 
-Do not backfill provider snapshots.
+Rules:
 
-Effective-dated **card/account assignment** follows the same rule as unit and ownership history. Resolve at `transaction_datetime`. A later card move must not rewrite historical truck, driver, account, or financial responsibility. Ambiguous/missing assignment is `REVIEW`; never fall back to the current assignment. See Module Design §15.3.
+- source field order is preserved;
+- duplicate labels are allowed/preserved;
+- every provider-native raw value is stored as a JSON string;
+- native records are append-only;
+- application role cannot UPDATE/DELETE native evidence after insert;
+- ordered identity is unique within a parse run.
+
+Do not add a GIN index on native JSONB fields during this phase unless a real query requires it.
+
+### Segment D tests
+
+- `1,425.63` remains exactly `1,425.63`;
+- `0.0000` keeps trailing zeros as source text;
+- repeated labels remain distinct array entries;
+- record sequence is stable;
+- native UPDATE/DELETE is blocked;
+- confidence/page checks work if implemented in schema.
 
 ---
 
-# 13. O/O pricing and financial responsibility
+# 6. Segment E — append-only review/correction overlay
 
-Provider amount/cost and O/O contractual settlement charge are separate.
+Review never mutates the native record.
 
-Supported O/O fuel pricing modes:
+Support at least:
 
-- pump price / no provider discount passed through,
-- full provider/company discount,
-- fixed cents per litre/gallon passed through,
-- percentage of provider discount passed through.
-
-Percentage means percentage of the **provider discount**, not pump price.
+```text
+CONFIRM
+RECLASSIFY
+FIELD_CORRECTION
+REJECT
+```
 
 Example:
 
-```text
-Pump price             3.00
-Provider discount      0.25
-Company/provider cost  2.75
-O/O discount allowed   0.05
-O/O charged price      2.95
+```json
+{
+  "field": "Unit #",
+  "native_raw": "110A",
+  "reviewed_raw": "1104",
+  "reason": "PDF visual confirmation"
+}
 ```
 
-Agreement belongs to the O/O/payee settlement relationship and is effective-dated.
+Store reviewer identity, reason and timestamp.
 
-Classification and financial responsibility are separate questions.
+The effective reviewed structure/value must be what later mapping/reconciliation consumes, while original native evidence remains intact.
 
-Company truck/company driver baseline:
+### Segment E tests
 
-- Fuel/DEF/company operating product -> company expense.
-- Coolant/oil/additive for company truck -> company expense; no driver deduction.
-- Cash advance -> driver receivable/deduction under policy.
-
-O/O truck baseline:
-
-- Fuel -> O/O charge under effective fuel agreement.
-- DEF/product/coolant/oil/additive -> O/O deduction under policy.
-- Cash advance -> O/O/payee unless explicitly driver-specific policy.
-
-Cross-module:
-
-- Lumper -> Fuel/Card preserves source/classification; Dispatch/Load owns load association/reimbursement.
-- Toll -> Toll module/policy owns toll-specific processing.
-
-Every finalized provider transaction must have exactly one allowed financial destination.
+- field correction leaves native JSON unchanged;
+- structure reclassification leaves native structure unchanged but changes effective reviewed classification;
+- review history is append-only;
+- unresolved review prevents later financial PASS;
+- Tenant A reviewer cannot modify Tenant B evidence.
 
 ---
 
-# 14. Admin review workflow
+# 7. Segment F — BVD profile v1 structure contract
 
-For document sources:
+BVD is the first production provider contract.
+
+Use the approved BVD fixture(s). Freeze **source labels**, not convenience names.
+
+## 7.1 Header / Client info
+
+Exact invoice/header labels:
 
 ```text
-Upload one or many PDFs
--> Parse
--> review queue
--> LEFT original PDF / RIGHT parsed canonical/provider data
--> Admin checks/corrects
--> Save & Next
--> next PDF auto-loads
--> after queue: Process
--> backend gates
--> Summary
--> Finalize/OK only when allowed
--> close/done
+Invoice Number
+Invoice Date
+Start Date
+End Date
+Due Date
 ```
 
-`Save & Next` means source review only. It never posts money.
-
-Right pane may present fields in TruckERP-friendly order/labels while retaining a way to inspect provider/raw detail.
-
-Corrections retain:
+Client block:
 
 ```text
-parsed_value
-reviewed_value
-review_reason
-reviewed_by
-reviewed_at
+Client info
+[unlabeled customer-name line]
+Address:
+Phone:
+Email:
 ```
 
-Human extraction correction is **not** a provider amendment. A provider-issued credit, refund, reversal, void, or corrected transaction is a separate source financial event with its own source identity. Do not store one as the other. See Module Design §30.4. Confirmed source facts are immutable after source review (§30.2); flags/disputes/adjustments are separate concepts (§30.5–§30.9).
+Do not invent a source `Client` label for the unlabeled customer name.
 
-Do not use AI confidence alone to authorize financial transactions. Bulk acceptance / straight-through processing is eligible only after deterministic parser validation, provider controls, reconciliation, and required business gates pass. Exception/`REVIEW` rows require human handling. Tenant straight-through policy can be considered later. See Module Design §11.4.
+## 7.2 Card-group context
 
-Provider parser profiles must be versioned/fingerprinted on deterministic expected anchors/header/control/layout markers. Unrecognized layout is `PROVIDER_LAYOUT_UNRECOGNIZED` → `REVIEW`. AI must not silently compensate. Implementation belongs with provider parsing segments. See Module Design §8.4.
+```text
+Transactions for card
+```
+
+The value `4237111` in the approved fixture is **group context**, not a per-row Card column.
+
+Child transaction records inherit/reference the card-group value.
+
+## 7.3 Exact BVD transaction columns — 21
+
+```text
+Auth Code
+Driver Name
+Unit #
+Date
+Site #
+Site Name
+Site City
+Prov/ST
+Prod
+QTY
+Retail
+Billed
+Pre Tax AMT
+HST
+GST
+PST
+QST
+Disc Rate
+Disc AMT
+Final AMT
+CUR
+```
+
+## 7.4 Page-1 control inventory — exact current fixture
+
+Transaction-level control label:
+
+```text
+SUBTOTAL
+```
+
+Observed post-transaction control sequence:
+
+```text
+SUBTOTAL | TA
+Card #   | TF
+4237111  | Fuel Total
+[blank]  | DF
+[blank]  | Sub Total
+```
+
+Do not write “including ...” and leave the inventory open-ended for an approved profile. Unknown new structure causes review/profile-version work.
+
+The summary `Card #` / `4237111 Fuel Total` relationship must be linked to the `Transactions for card 4237111` group explicitly.
+
+## 7.5 Grand Totals exact columns — 11
+
+```text
+PRODUCT
+QTY
+PRE TAX AMT
+HST
+GST
+PST
+QST
+DISC RATE
+DISC AMT
+FINAL AMOUNT
+CUR
+```
+
+Observed row labels:
+
+```text
+TA
+TF
+DF
+Manual
+Express
+Grand Total
+```
+
+`Manual` and `Express` are Grand Totals labels, not Legend product codes.
+
+## 7.6 Legend block
+
+```text
+Legend
+Code
+Product Name
+```
+
+Observed pairs:
+
+```text
+TF  Trailer
+TA  Tractor
+DF  DEF
+S   Scale
+C   Cash
+AD  Additive
+O   Oil
+L   Lubricant
+```
+
+### Segment F tests
+
+- exact 21 transaction labels match fixture;
+- `Pre Tax AMT` and `Disc Rate` cannot disappear from manifest;
+- transaction 2 correctly inherits card group even without a row Card column;
+- SUBTOTAL never becomes a purchase;
+- full page-1 control sequence is recognized;
+- exact 11 Grand Totals columns match fixture;
+- `Manual`/`Express` do not enter Legend code mapping;
+- Legend rows never become purchases;
+- unknown BVD layout/field/structure is review/reject, not silent acceptance.
 
 ---
 
-# 15. Fuel Operations workspace
+# 8. Segment G — BVD digital-PDF extraction
 
-Minimum filters:
+Extraction order is locked:
 
-- date/period,
-- provider,
-- processing network when known,
-- merchant/network,
-- card/account,
-- unit/truck,
-- driver,
-- O/O/payee,
-- product/category,
-- source,
-- currency,
-- company vs O/O responsibility,
-- matched/unmatched,
-- reconciled/unreconciled,
-- posted/unposted.
+```text
+recognize BVD profile/version
+-> classify block/group
+-> classify row/structure type
+-> hydrate exact structure fields
+-> attach inherited group context
+-> store native evidence
+-> review overlay if required
+```
 
-Unit/truck is a primary grouping.
+For a digital PDF, use embedded digital content first. OCR is fallback only when the source is actually scanned/unusable.
 
-Exception rows drill to exact source batch/PDF/file/raw evidence.
+The parser may use deterministic extraction and constrained AI assistance, but it must return only the approved provider structures/fields.
 
-If RBAC allows, the Fuel page may also expose provider connection cards/settings using the same backend provider-connection model as Admin.
+Do **not** perform semantic price/tax/O/O calculations in this segment.
 
----
+### Segment G tests
 
-# 16. Manual driver entry
-
-Manual entry is a first-class source but not a separate accounting path.
-
-Driver supplies practical fields:
-
-- assigned unit when reliable,
-- transaction date/time,
-- location/station,
-- product,
-- quantity,
-- quantity unit,
-- amount,
-- currency,
-- receipt/photo where available.
-
-Authenticated context supplies driver identity where possible.
-
-When later provider PDF/DAT/SFTP/API evidence arrives, duplicate matching must prevent a second financial charge. Strong exact matches follow proven rules; ambiguous matches remain review-required.
+- approved fixture parses all expected structures;
+- no data-bearing field/label is omitted;
+- source record order is preserved;
+- evidence links to page/row/source position where available;
+- missing required source field causes review;
+- provider control rows never increment transaction count;
+- native raw values remain exact strings.
 
 ---
 
-# 17. Settlement/payroll handoff
+# 9. Segment H — BVD provider-native review UI
 
-Provider invoice total is not one O/O settlement deduction.
+For BVD source review:
 
-Settlement selects only transactions matching:
+```text
+LEFT  -> original BVD PDF
+RIGHT -> BVD-native blocks/records
+```
 
-- correct O/O/payee,
-- correct historical truck,
-- transaction date in settlement period,
-- effective pricing agreement,
-- correct financial-responsibility route,
-- all mandatory gates passed.
+Right side should show the exact BVD field labels and card-group context.
 
-Required drill-down:
+Frontend may group for usability, but it must not hide structural evidence required to audit the extraction.
+
+`Save & Next` confirms source review only. It never posts money.
+
+### Segment H tests/manual checks
+
+- card-group context visible;
+- 21 BVD columns display correctly;
+- Client info / controls / Grand Totals / Legend are inspectable;
+- field corrections create review records rather than editing native data;
+- structure corrections affect effective reviewed classification;
+- backend rejects unauthorized review actions.
+
+---
+
+# 10. Segment I — BVD foundation gate
+
+BVD foundation is complete only when all are true:
+
+```text
+[ ] approved profile/version exists
+[ ] every data-bearing block/group in approved fixtures inventoried
+[ ] exact invoice-header labels frozen
+[ ] Client info represented correctly
+[ ] Transactions for card stored as group context
+[ ] child transactions inherit/reference group context
+[ ] exact 21 transaction columns frozen
+[ ] transaction SUBTOTAL rows classified as controls
+[ ] full page-1 control sequence frozen
+[ ] Card # summary relationship represented
+[ ] exact 11 Grand Totals columns frozen
+[ ] Grand Totals row labels inventoried
+[ ] Manual/Express kept out of Legend product-code set
+[ ] Legend block preserved
+[ ] native raw values stored as strings in ordered arrays
+[ ] native evidence append-only
+[ ] review overlay append-only
+[ ] unknown structure/layout requires review
+[ ] field-completeness tests PASS
+[ ] structural-completeness tests PASS
+[ ] document-level regression fixture PASS
+[ ] generic fallback cannot silently post money
+```
+
+Do not claim “100% known field extraction” before this gate is satisfied for the approved profile/version.
+
+---
+
+# 11. Segment J — Nationwide profile/framework proof
+
+Nationwide validates that the framework is reusable without copying BVD's fields.
+
+## 11.1 Exact data-bearing blocks
+
+```text
+PROVIDER / CONTACT BLOCK
+ACCOUNT INFORMATION
+BILLING SUMMARY
+TRANSACTION BREAKDOWN BY CARD
+TRANSACTION
+CARD_TOTAL
+```
+
+## 11.2 Exact transaction columns
+
+```text
+Account Code
+Card Number
+Unit #
+Date
+City
+Pr/St
+Product
+Volume
+Ex-GST ($/U)
+Total
+Network
+Currency
+USA Discount
+Missed Disc
+OON Fees
+```
+
+Unlike BVD, `Account Code` and `Card Number` are per-transaction columns in the current fixture.
+
+`XXXXX... Total` rows are `CARD_TOTAL` controls.
+
+Explicit `GST`/`QST` labels in Canadian control rows own those values; visual x-position does not convert them into transaction fields.
+
+### Segment J tests
+
+- exact source labels, not convenience labels;
+- transaction vs CARD_TOTAL classification happens before hydration;
+- Canadian card-total GST/QST stays control data;
+- Account Code and Card Number remain row fields;
+- currencies/values remain raw source strings at native layer;
+- unknown Nationwide layout/structure causes review;
+- no BVD-shaped assumptions leak into Nationwide.
+
+---
+
+# 12. Segment K — canonical semantic mapping (later)
+
+Do not begin until BVD native foundation and Nationwide framework proof are stable.
+
+This segment decides what provider-native fields mean to TruckERP.
+
+Work includes:
+
+- canonical transaction fields;
+- provider-specific semantic mapping;
+- quantity/UOM semantics;
+- price basis;
+- tax meaning;
+- discount meaning;
+- transaction/control semantic mapping;
+- raw provider values retained alongside canonical values.
+
+This is where questions such as tax-inclusive vs ex-tax pricing belong.
+
+Do not back-port these interpretations into native extraction.
+
+---
+
+# 13. Segment L — reconciliation and financial-control fixes
+
+Before financial posting, fix and test the confirmed audit issues.
+
+Required fixes:
+
+1. CAD and USD can never be summed into one fake control total.
+2. Review-required/invalid controls cannot authorize reconciliation PASS.
+3. Effective reviewed structure/classification must drive reconciliation without mutating native evidence.
+4. Every source row/control is accounted for exactly once.
+5. Provider totals reconcile independently by currency.
+6. Grand-total equality alone does not excuse wrong row/date/unit/card assignment.
+7. Source amounts are never edited to force balance.
+8. Credit/refund/reversal sign rules become hard gates where applicable.
+9. `READY_FOR_RECONCILIATION` reflects all unresolved conditions, not only pending counts.
+
+### Segment L tests
+
+Include explicit regressions for:
+
+```text
+CAD 100 + USD 100 + control 200/no currency -> MUST NOT PASS
+requires_review control matching amount       -> MUST NOT PASS
+reviewed role UNKNOWN/TRANSACTION             -> MUST NOT act as valid control
+```
+
+---
+
+# 14. Segment M — historical truck/ownership resolution
+
+Use transaction date/time, not invoice/import/current date.
+
+Required concepts:
+
+```text
+permanent truck_id
+unit_number_snapshot
+unit-number history
+effective-dated ownership/payee
+provider/source timezone for date-only evidence
+```
+
+Fix the confirmed DATE_ONLY timezone-boundary bug before financial use.
+
+Zero or multiple historical matches -> review.
+
+---
+
+# 15. Segment N — O/O pricing and financial responsibility
+
+Commercial truck/fuel responsibility decides who pays. Driver employment type must not suppress an O/O charge merely because the person driving is a company employee.
+
+Supported later O/O fuel-pricing modes:
+
+- pump price / no provider discount passed through;
+- full provider/company discount;
+- fixed cents per litre/gallon;
+- percentage of provider discount.
+
+Add hard validation for:
+
+- negative quantity where invalid;
+- discount greater than applicable price/basis where invalid;
+- negative charge price;
+- negative settlement charge unless explicitly represented as a valid credit/reversal.
+
+Classification and financial responsibility remain separate decisions.
+
+---
+
+# 16. Segment O — settlement/payroll and cross-module routing
+
+Only transactions with all required gates passed may enter settlement/posting.
+
+Provider amount and contractual O/O charge remain separate.
+
+Multi-truck O/O drilldown:
 
 ```text
 O/O/payee
- -> Unit 1100
-    -> exact transaction rows
- -> Unit 1104
-    -> exact transaction rows
- -> total Fuel/Card deduction
+  -> Unit 1100
+      -> transaction detail
+  -> Unit 1104
+      -> transaction detail
+  -> Fuel/Card deduction total
 ```
 
-Each deduction retains source transaction context, currency, quantity/UOM, provider amount and calculated O/O charge.
+Cross-module boundaries remain:
 
-The calculated O/O charge (`owner_operator_charge_amount`) is later pricing/settlement output. Segment 1 and provider parsing must not populate it.
+- Lumper -> Dispatch/Load workflow after Fuel/Card source/classification;
+- Toll -> Toll module/policy;
+- Cash advance -> driver/O/O receivable/deduction policy.
+
+Posted corrections use audited adjustment/reversal.
 
 ---
 
-# 18. Audit, correction, reversal and immutability
+# 17. Provider onboarding after BVD/Nationwide
 
-Preserve:
+For every future provider/program:
 
-- original source file/reference/hash,
-- provider connection/account,
-- parser/adapter/rule version,
-- parser output,
-- raw provider row,
-- parsed/reviewed values,
-- reviewer/time/reason,
-- truck/card/unit resolution,
-- ownership/payee resolution,
-- financial responsibility,
-- pricing rule/version,
-- settlement posting,
-- adjustment/reversal.
+1. identify the actual vendor/program the carrier contracts with;
+2. identify the interface the carrier can authorize TruckERP to use;
+3. if usable production API exists, prefer API;
+4. otherwise approve a specific PDF/CSV/export contract;
+5. inventory exact source blocks/groups;
+6. inventory exact native labels/keys;
+7. define inherited-context behavior;
+8. define row/control types;
+9. freeze fixtures;
+10. prove field + structural completeness;
+11. version the profile;
+12. only then enable the provider.
 
-Use existing `audit_events` where appropriate.
+Underlying EFS/Comdata/WEX/etc. network is informational lineage and does not grant access to white-label customer data.
 
-Provider connection changes are auditable but secrets never enter audit payloads.
+---
 
-After posting, do not silently rewrite financial history. Use audited adjustment/reversal.
+# 18. Core regression families
 
-Finalization must be **idempotent and atomic**. Retrying a finalized batch must not post twice. A mid-batch posting failure must not leave uncontrolled partial financial posts. Use one database transaction where practical, or a deterministic recoverable posting state with explicit completion/failure tracking. See Module Design §29.1.
+At minimum maintain tests for:
 
-Credits/refunds/reversals/voids keep provider sign and source identity. Reconciliation and settlement tests must include them.
+1. tenant isolation for provider/document/parse/block/record/review;
+2. provider/profile whitelist;
+3. retired-profile ingestion block;
+4. immutable source hash/reference;
+5. repeat source-file idempotency;
+6. multiple parse runs on same source;
+7. native raw string preservation;
+8. ordered/repeated JSONB field preservation;
+9. append-only native evidence;
+10. append-only review overlay;
+11. BVD exact header/client/card-group structures;
+12. BVD exact 21 transaction fields;
+13. BVD page-1 control inventory;
+14. BVD exact 11 Grand Totals columns;
+15. BVD Legend and Manual/Express separation;
+16. Nationwide exact 15 transaction columns;
+17. Nationwide CARD_TOTAL classification;
+18. unknown provider/layout/structure review/reject;
+19. CAD/USD independent reconciliation;
+20. reviewed control cannot bypass gates;
+21. historical date-only timezone resolution;
+22. O/O ownership responsibility independent of driver employment type;
+23. O/O numeric sanity gates;
+24. credit/refund/reversal sign gates;
+25. finalization idempotency;
+26. posted adjustment/reversal audit;
+27. existing Load/People/Truck regressions remain green.
 
-For transactions classified to Toll, Lumper, or another module, Fuel must retain downstream acknowledgement that the other module accepted/accounted for the item, or leave it unresolved/`REVIEW`. `routed` alone is not completeness. See Module Design §23.1.
+---
 
-Future-state acknowledgement support (do not implement scheduler/workflow now):
+# 19. Current confirmed audit checkpoint
+
+From the uploaded Fuel archive review:
 
 ```text
-ROUTING_PENDING
-ROUTED_AWAITING_ACK
-ACKNOWLEDGED
-ROUTING_FAILED
+102 tests passed
 ```
 
-Retain timestamps, error, and retry information, plus configurable aging/escalation.
+Three additional test modules did not collect in that audit runtime because `asyncpg` was not installed there while repository requirements included `asyncpg==0.31.0`. Treat that as an audit-environment issue unless reproduced in the real project environment.
 
-Finalization approval policy is tenant-configurable: `SINGLE_ADMIN` (same reviewer/finalizer allowed but explicitly audited) or `SEPARATE_APPROVER` (backend requires finalizer != reviewer). Architecture lock only; do not build finalization workflow in Segment 1. See Module Design §29.2.
+Confirmed code issues still requiring remediation before financial posting:
+
+```text
+- O/O responsibility incorrectly influenced by is_company_driver
+- DATE_ONLY historical timezone boundary error
+- mixed CAD/USD reconciliation can pass
+- unresolved control can authorize PASS
+- review role change can fail to affect effective reconciliation role
+- impossible negative O/O pricing can return CALCULATED
+- credit/refund/reversal sign rule not enforced end-to-end
+- review readiness too shallow
+```
+
+Do not establish Fuel Gold while any required financial blocker remains open.
 
 ---
 
-# 19. Implementation segments
+# 20. Review protocol for every segment
 
-## Segment 0 — Repository archaeology
+Before accepting a segment, verify:
 
-Inspect/reuse:
+- provider/profile support is explicit;
+- exact source structure is classified before hydration;
+- source labels are provider labels, not invented convenience labels;
+- group/inherited context is represented;
+- source order and raw formatting are preserved;
+- source evidence is immutable;
+- review is an overlay, not mutation;
+- tenant isolation is backend/database enforced;
+- UI cannot bypass backend money gates;
+- no premature semantic/math rule leaked into native extraction;
+- tests actually ran and counts are recorded.
 
-- tenant DB/migrations,
-- truck ownership/unit history,
-- people/payee/compensation,
-- Document Platform and Load-parser contract pattern,
-- audit events,
-- storage,
-- `/admin/integrations/fuel`,
-- RBAC,
-- secret-storage patterns,
-- scheduler/background job patterns,
-- settlement/payroll models.
+Any failed answer leaves the segment open.
 
-**Execution Record:** NOT STARTED
+---
+
+# 21. Gold readiness boundary
+
+Fuel Gold is a later milestone. It requires at minimum:
+
+- BVD native foundation complete;
+- Nationwide framework proof complete;
+- immutable storage/review model verified;
+- unsupported providers/layouts blocked;
+- required semantic/reconciliation layers verified;
+- all confirmed financial audit bugs closed;
+- end-to-end company/O-O/settlement scenarios green;
+- audit/reversal behavior green;
+- deployment artifact/commit frozen and documented in `FUEL_GOLD_MANIFEST.md`.
+
+---
+
+# 22. Historical Fuel implementation checkpoints
+
+**Not current execution-order authority.** The checkpoints below record factual commit/test evidence from prior `feat/fuel-card` segment work (Segments 0A–15 narrative). The **current** execution sequence is **§1 Current execution sequence** (Phases 1–5) and `docs/FUEL_BVD_IMPLEMENTATION_1.md`.
 
 ## Segment 0A — Provider catalog + tenant connection backend
 
@@ -1850,188 +1291,3 @@ Do **not** move these concerns into Segment 9 or Segment 10.
 
 **Execution Record:** NOT STARTED
 
----
-
-# 20. Required test families
-
-At minimum test:
-
-1. Tenant A cannot access Tenant B provider connection/import.
-2. Backend provider catalog drives frontend fields.
-3. Unauthorized user cannot manage/test/sync provider connection.
-4. Secret write succeeds but secret never returns/logs/audits.
-5. Multiple provider accounts under one tenant remain distinct.
-6. BVD PDF exact fixture extraction.
-7. BVD structured file adapter preserves every source field when fixture becomes available.
-8. BVD raw `CN` currency remains preserved while canonical mapping is explicit.
-9. BVD controls excluded from transactions and reconcile.
-10. Nationwide `TRANSACTION` vs `CARD_TOTAL` vs `INVOICE_SUMMARY` classification.
-11. Nationwide `GST 145.40` Canadian control maps only to GST control.
-12. Nationwide U.S. row receives no inferred GST/HST/QST/PST.
-13. Nationwide driver snapshot remains null when source has no driver.
-14. Nationwide CAD and USD reconcile independently.
-15. Nationwide mixed statement renders CAD rows in litres and USD rows in gallons when no explicit source UOM overrides.
-16. Explicit source UOM always wins over currency fallback.
-17. Unit-price basis matches provider semantics (`BILLED`, `EX_TAX`, `FINAL_GALLON_PRICE`).
-18. Row boundary contamination is rejected.
-19. Parser rule version stored with batch.
-20. Reparse with newer rules allowed only under explicit unfinalized workflow.
-21. New parser version never silently changes finalized financial history.
-22. Historical unit renumber resolves correct permanent truck.
-23. Ownership change routes transaction according to transaction date.
-24. Company coolant/product purchase does not create driver deduction.
-25. O/O fuel pricing modes calculate correctly without changing provider amount.
-26. Manual then provider source produces one financial charge after resolution.
-27. Lumper remains source-accounted but does not auto-link to arbitrary active load.
-28. Provider file/hash idempotency prevents duplicate batch.
-29. Transaction-level dedupe works independently of file-level dedupe.
-30. Finalization is idempotent.
-31. Existing Load parser remains green.
-32. Relevant People/Payee/Truck regressions remain green.
-33. Quantity/price/tax/discount/total/O-O charge use Decimal/NUMERIC only; no float financial math.
-34. Provider transaction id, source-row id, and TruckERP transaction id remain distinct; omitted/reused provider ids do not silently merge.
-35. Card/account assignment resolves at transaction datetime; a later card move does not rewrite history.
-36. Human extraction correction retains parsed/reviewed/reason/reviewer/timestamp and is not stored as a provider amendment.
-37. Provider credit/refund/reversal/void keeps provider sign and is not rewritten as a positive purchase.
-38. Toll/Lumper (or other) routing without downstream acknowledgement remains unresolved/REVIEW.
-39. Finalization retry does not double-post; a mid-batch failure does not leave uncontrolled partial posts.
-40. Provider local time without timezone is stored with that provenance and is not silently converted using server/tenant zone.
-41. Unknown provider event values keep `provider_event_type_raw` and canonical `UNKNOWN`; they are never coerced to `PURCHASE`.
-42. BVD `CN` remains in `currency_raw` while canonical `currency` maps to `CAD`.
-43. Provider-local late-night `transaction_date` does not change when UTC `transaction_datetime` crosses midnight.
-44. Source/parser hydration rejects `owner_operator_charge_amount`; Segment 1 does not calculate it.
-45. Unrecognized provider layout is `PROVIDER_LAYOUT_UNRECOGNIZED` → `REVIEW` (parser segments).
-46. Bulk/straight-through eligibility requires deterministic validation/controls/reconciliation/gates, not AI confidence alone.
-47. Downstream routing without acknowledgement remains unresolved; future ack states/timestamps/error/retry/aging are retained when that workflow is built.
-48. Reporting-currency conversion, if added later, retains rate/rate source/as-of/from/to/converted amount and does not overwrite Fuel source amount/currency.
-49. Same exact PDF uploaded twice → second blocked before parsing; references existing batch.
-50. Two simultaneous uploads of same PDF → one financial source only (race-safe).
-51. Same BVD invoice number + same supporting facts → hard duplicate (BVD-scoped only).
-52. Same Nationwide invoice number + same supporting facts → hard duplicate (Nationwide-scoped only).
-53. BVD invoice number is never compared to Nationwide invoice number for duplicate suppression.
-54. Same provider/invoice but different totals/dates → `INVOICE_IDENTITY_CONFLICT` → REVIEW.
-55. Disabled historical provider can still be identified from manual upload.
-56. Unknown provider → `DOCUMENT_PROVIDER_UNKNOWN` → REVIEW.
-57. Ambiguous profile match → `DOCUMENT_PROVIDER_AMBIGUOUS` → REVIEW.
-58. Original provider amount remains unchanged after flag.
-59. Flag resolution `RESOLVED_VALID` → no adjustment created.
-60. Provider full credit → new linked negative adjustment; original amount unchanged.
-61. Partial provider credit → original + adjustment produces correct net.
-62. Evidence attachment remains linked to dispute case / source transaction.
-63. Source reconciliation remains PASS when a correctly captured transaction is disputed.
-64. Year-end provider totals equal original source activity plus credits/reversals/adjustments.
-65. Settlement adjustment does not overwrite provider source amount.
-66. Duplicate modal / view / compare does not destroy the user's current review context.
-67. One uploaded file produces one `fuel_source_batches` row (multi-file upload → N independent batches).
-68. Async Fuel parse (if implemented) survives API process/container restart via durable job/outbox — not an in-process FastAPI background task.
-
-These duplicate / flag / dispute / async requirements belong to Segments 13–15 (and related future work). They are **not** Segment 9 reconciliation or Segment 10 financial-responsibility scope.
-
----
-
-# 21. End-to-end mandatory scenarios
-
-### A. BVD company truck
-
-BVD source -> parse/map -> review -> controls reconcile -> historical truck -> company expense -> no O/O deduction.
-
-### B. BVD multi-truck O/O
-
-Two BVD units -> same O/O payee -> effective pricing -> unit drilldown -> exact settlement total.
-
-### C. BVD structured export
-
-Real T-Chek-compatible BVD export -> deterministic adapter -> same canonical records as equivalent PDF source -> no AI required.
-
-### D. BVD card used at Love's
-
-Source/account provider remains BVD; merchant may be Love's; processing network stored only when proven. No duplicate “Love's provider” transaction is created merely because merchant is Love's.
-
-### E. Nationwide mixed CAD/USD
-
-CAD line -> litres/$ per litre; USD line -> gallons/$ per gallon unless explicit source UOM says otherwise; currencies reconcile independently.
-
-### F. Nationwide control trap
-
-Canadian GST/QST control row never becomes a fake transaction/date/city.
-
-### G. Nationwide rounding variance
-
-Preserve provider rows and provider control; variance remains review until policy proven.
-
-### H. Manual then provider source
-
-Driver enters transaction manually -> provider source later arrives -> candidate duplicate -> one financial charge.
-
-### I. Historical renumber
-
-Old provider unit snapshot resolves correct permanent truck by transaction date.
-
-### J. Ownership change
-
-Transactions before/after ownership effective date route to correct financial party.
-
-### K. Posted correction
-
-Normal edit blocked -> audited reversal/adjustment.
-
-### L. RBAC provider setup
-
-Authorized user can add provider from Admin or Fuel page using same backend record; unauthorized user blocked server-side.
-
----
-
-# 22. Review protocol
-
-For each returned implementation segment verify:
-
-- shared TruckERP services were reused;
-- provider catalog, not frontend, drives connection fields;
-- RBAC is backend enforced;
-- secrets never return to browser/log/audit/parser;
-- provider source/raw values remain lossless;
-- canonical values remain separate from presentation labels;
-- provider/program vs processing network vs merchant are not conflated;
-- transaction datetime drives historical decisions;
-- explicit source UOM wins; approved currency fallback is per-row only;
-- control rows are excluded from transactions;
-- currencies reconcile independently;
-- ambiguous relationships block rather than guess;
-- UI cannot bypass backend money gates;
-- provider amount and O/O charge remain separate;
-- final result traces to exact source evidence;
-- tests actually ran with counts recorded.
-- decimal/`NUMERIC` money rules were followed (no float);
-- three transaction identities were not collapsed;
-- card/account history resolved at transaction time;
-- extraction corrections were not stored as provider amendments;
-- credits/refunds/reversals/voids kept provider sign;
-- downstream routing required acknowledgement or stayed review-required;
-- finalization was idempotent and atomic;
-- timezone provenance was preserved;
-- provider event type raw vs canonical remained separate and unknown values were not coerced to `PURCHASE`;
-- currency raw vs canonical remained separate;
-- `transaction_date` stayed source-local and was not overwritten from UTC;
-- `owner_operator_charge_amount` stayed derived and unpopulated by source hydration;
-- AI confidence was not treated as financial authorization;
-- unrecognized layouts were review-required rather than silently repaired.
-
-Any failed answer leaves the segment open.
-
----
-
-# 23. Explicitly deferred
-
-Unless explicitly reopened:
-
-- unverified BVD direct API/SFTP connection,
-- Nationwide automated machine feed beyond captured PDF/real CSV evidence,
-- provider APIs/data-sharing flows without actual onboarding contract,
-- automatic provider-specific rounding tolerance without proof,
-- automatic lumper-to-load matching beyond a separately safe workflow,
-- new O/O subsidy rule allowing more discount than provider actually gave,
-- currency conversion/accounting translation that rewrites source transaction currency/UOM.
-
-Architecture locks that remain documentation-only until their later segments: finalization separation of duties (§29.2), provider layout fingerprinting (§8.4), bulk/straight-through policy beyond the authorization rule (§11.4), downstream ack scheduler/aging (§23.1), reporting-currency conversion records (§24.5). Do not implement those workflows inside Segment 1.
-
-These deferrals must not be silently implemented inside another segment.
