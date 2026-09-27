@@ -642,6 +642,14 @@ class FuelBvdImportOut(BaseModel):
     parse_status: str
 
 
+class FuelBvdImportListItemOut(BaseModel):
+    import_id: str
+    invoice_number: str
+    review_status: str
+    uploaded_at: str | None = None
+    source_file_name: str | None = None
+
+
 class FuelBvdRowOut(BaseModel):
     id: int
     import_id: str

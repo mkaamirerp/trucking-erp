@@ -1073,3 +1073,70 @@ At minimum prove:
 7. Fuel-only external card-loan/use records never enter Payroll in either mode.
 8. Company-paid/non-deductible items do not become driver deductions.
 ```
+
+---
+
+# 25. DUPLICATE SOURCE INGESTION GATE (LOCKED)
+
+Every Fuel source upload is checked **before** a new import is created. Checks are **tenant-scoped** and **provider-scoped** (BVD today).
+
+## Authoritative identity (PDF)
+
+Invoice number, invoice date, charge period start/end, and due date come from **parsed PDF HEADER fields** — never from the upload filename.
+
+Filename (e.g. `BVD_invoice_972201.pdf`) is a **signal only** (`matched_on: FILE_NAME`). Filename alone does **not** hard-block.
+
+## PDF layers
+
+| Layer | Field / input | Hard block? |
+|-------|----------------|-------------|
+| A | `source_file_name` | Signal only |
+| B | provider `BVD` + `invoice_number` + `invoice_date` + `start_date` + `end_date` | Yes when full identity matches |
+| C | raw file SHA-256 (upload bytes) | Yes — exact duplicate |
+
+## PDF decision matrix
+
+- **Same SHA-256** → `FUEL_DUPLICATE_EXACT` (409) — no new import, no storage, no rows.
+- **Same document identity, different hash** → `FUEL_DUPLICATE_DOCUMENT` (409).
+- **Same invoice number, different date/period** → `FUEL_POSSIBLE_REVISION` (409) — admin must inspect; no silent accept.
+- **Same filename only** → allow if identity + hash differ.
+- **New identity + new hash** → accept.
+
+## CSV (hook)
+
+CSV uses layers A–C plus **normalized transaction fingerprint** (order-independent SHA-256 over stable parsed txn fields). Regenerated exports with different raw bytes but identical transactions must fingerprint-match. Partial txn ID overlap → `FUEL_TRANSACTION_OVERLAP` (no silent import).
+
+## Queue / Process
+
+- Duplicate upload must **not** create another Fuel/BVD queue import row.
+- **Process** on the same `import_id` is idempotent: already `SOURCE_REVIEWED` returns existing summary without re-publishing downstream (when publication exists).
+
+## Implementation
+
+- Service: `app/services/fuel_source_duplicate_gate.py`
+- BVD ingestion boundary: `import_bvd_digital_pdf` in `app/services/fuel_bvd_import.py` (hash → extract → duplicate check → advisory lock → re-check → store).
+- No DB uniqueness migration on historical demo duplicates; future constraint requires separate backfill design.
+
+## Concurrency (PostgreSQL advisory lock)
+
+**Lock key (business document):** `tenant_id` + `provider_code` + `invoice_number` (e.g. BVD `972201`). **Not** raw SHA-256.
+
+After the lock is acquired, **re-check** before insert:
+
+- `invoice_number`, `invoice_date`, `start_date`, `end_date`
+- `source_file_sha256`
+
+This prevents two simultaneous uploads of different byte streams (different hashes) for the same BVD invoice from creating two imports.
+
+Helper: `business_document_advisory_lock_key(tenant_id, provider_code, invoice_number)`.
+
+## CSV concurrency (future ingestion)
+
+Provider CSV ingestion is **not** complete — only the **normalized transaction fingerprint** and `evaluate_csv_duplicate_layers` hook exist today.
+
+When CSV ingestion is implemented, concurrency must use the **strongest available** key:
+
+1. Provider document identity (when header/statement identity exists), else
+2. Normalized transaction fingerprint
+
+Advisory locks must align with that business key (not raw file bytes alone). Same post-lock re-check pattern as PDF: identity fields + raw SHA + fingerprint.

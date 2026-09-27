@@ -4151,6 +4151,7 @@ export async function processFuelBvdImport(importId: string): Promise<FuelBvdRev
 export type FuelBvdUploadErrorDisplay = {
   title: string;
   message: string;
+  duplicateImportId?: string;
 };
 
 /** Turn FastAPI fuel BVD upload errors into operator-facing title + message (not raw JSON). */
@@ -4203,6 +4204,32 @@ export function getFuelBvdUploadErrorDisplay(err: unknown): FuelBvdUploadErrorDi
           message: detail || "Upload must be a PDF file.",
         };
       }
+      if (
+        code === "FUEL_DUPLICATE_EXACT" ||
+        code === "FUEL_DUPLICATE_DOCUMENT" ||
+        code === "FUEL_POSSIBLE_REVISION" ||
+        code === "FUEL_DUPLICATE_TRANSACTIONS"
+      ) {
+        const invoice = typeof rec.invoice_number === "string" ? rec.invoice_number : undefined;
+        const invDate = typeof rec.invoice_date === "string" ? rec.invoice_date.slice(0, 10) : undefined;
+        const start = typeof rec.start_date === "string" ? rec.start_date.slice(0, 10) : undefined;
+        const end = typeof rec.end_date === "string" ? rec.end_date.slice(0, 10) : undefined;
+        const status = typeof rec.existing_status === "string" ? rec.existing_status : "PENDING";
+        const period =
+          start && end ? `Charge period: ${start} – ${end}` : start ? `Charge period starts: ${start}` : "";
+        const lines = [
+          invoice ? `BVD Invoice ${invoice}` : "BVD invoice",
+          invDate ? `Invoice date: ${invDate}` : "",
+          period,
+          `Status: ${status === "SOURCE_REVIEWED" ? "Completed" : status === "IN_REVIEW" ? "In review" : "Pending"}`,
+        ].filter(Boolean);
+        return {
+          title: "Invoice already uploaded",
+          message: lines.join("\n"),
+          duplicateImportId:
+            typeof rec.existing_import_id === "string" ? rec.existing_import_id : undefined,
+        };
+      }
       if (detail) return { title: "Upload rejected", message: detail };
       if (code) return { title: "Upload rejected", message: code };
     }
@@ -4216,6 +4243,19 @@ export function getFuelBvdUploadErrorDisplay(err: unknown): FuelBvdUploadErrorDi
 export function formatFuelBvdUploadError(err: unknown): string {
   const { title, message } = getFuelBvdUploadErrorDisplay(err);
   return `${title}: ${message}`;
+}
+
+export type FuelBvdImportListItem = {
+  import_id: string;
+  invoice_number: string;
+  review_status: string;
+  uploaded_at?: string | null;
+  source_file_name?: string | null;
+};
+
+export async function listFuelBvdImports(): Promise<FuelBvdImportListItem[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports`);
+  return handle(res);
 }
 
 export async function uploadFuelBvdPdf(file: File): Promise<FuelBvdImportResult> {

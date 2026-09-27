@@ -16,6 +16,12 @@ from app.services.fuel_bvd_extraction import (
     FuelBvdExtractedRow,
     extract_bvd_rows_from_digital_pdf,
 )
+from app.services.fuel_source_duplicate_gate import (
+    acquire_bvd_import_advisory_lock,
+    check_bvd_pdf_duplicate_before_import,
+    document_identity_from_extracted_rows,
+    sha256_hex,
+)
 
 FUEL_BVD_STORAGE_MODULE = "fuel_bvd"
 
@@ -62,11 +68,19 @@ BVD_SOURCE_FIELD_NAMES: tuple[str, ...] = (
 
 
 class FuelBvdImportError(Exception):
-    def __init__(self, code: str, message: str, http_status: int = 400) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        http_status: int = 400,
+        *,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.http_status = http_status
+        self.detail = detail or {}
 
 
 def fuel_bvd_row_to_dict(row: FuelBvd) -> dict[str, Any]:
@@ -124,13 +138,47 @@ async def import_bvd_digital_pdf(
     if not pdf_bytes.startswith(b"%PDF"):
         raise FuelBvdImportError("NOT_PDF", "Upload must be a PDF file", http_status=400)
 
-    import_id = uuid.uuid4()
     started = datetime.now(timezone.utc)
 
     try:
         extracted, extract_warnings, parser_version = extract_bvd_rows_from_digital_pdf(pdf_bytes)
     except FuelBvdExtractionError as exc:
         raise FuelBvdImportError(exc.code, exc.message, http_status=422) from exc
+
+    file_sha256 = sha256_hex(pdf_bytes)
+    duplicate = await check_bvd_pdf_duplicate_before_import(
+        db,
+        tenant_id=tenant_id,
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+        extracted_rows=extracted,
+    )
+    if duplicate is not None:
+        raise FuelBvdImportError(
+            duplicate.code,
+            duplicate.message,
+            http_status=duplicate.http_status,
+            detail=duplicate.to_detail(),
+        )
+
+    identity = document_identity_from_extracted_rows(extracted)
+    await acquire_bvd_import_advisory_lock(db, tenant_id=tenant_id, identity=identity)
+    duplicate = await check_bvd_pdf_duplicate_before_import(
+        db,
+        tenant_id=tenant_id,
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+        extracted_rows=extracted,
+    )
+    if duplicate is not None:
+        raise FuelBvdImportError(
+            duplicate.code,
+            duplicate.message,
+            http_status=duplicate.http_status,
+            detail=duplicate.to_detail(),
+        )
+
+    import_id = uuid.uuid4()
 
     storage_key, sha256 = await save_bvd_pdf_to_storage(
         tenant_slug=tenant_slug,
@@ -151,7 +199,7 @@ async def import_bvd_digital_pdf(
             import_id=import_id,
             row_type=item.row_type,
             source_file_name=filename,
-            source_file_sha256=sha256,
+            source_file_sha256=file_sha256,
             source_storage_ref=storage_key,
             source_page=item.source_page,
             source_row_number=order,
@@ -172,6 +220,43 @@ async def import_bvd_digital_pdf(
 
     await db.commit()
     return import_id, len(orm_rows), parse_status
+
+
+async def list_bvd_import_headers(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    limit: int = 40,
+    dedupe_by_invoice: bool = True,
+) -> list[dict[str, Any]]:
+    """Recent BVD uploads (HEADER rows). By default one row per invoice (latest upload)."""
+    fetch_cap = limit * 8 if dedupe_by_invoice else limit
+    result = await db.execute(
+        select(FuelBvd)
+        .where(FuelBvd.tenant_id == tenant_id, FuelBvd.row_type == "HEADER")
+        .order_by(FuelBvd.id.desc())
+        .limit(fetch_cap)
+    )
+    items: list[dict[str, Any]] = []
+    seen_invoices: set[str] = set()
+    for row in result.scalars().all():
+        invoice_key = (row.invoice_number or "").strip() or str(row.import_id)
+        if dedupe_by_invoice and invoice_key in seen_invoices:
+            continue
+        if dedupe_by_invoice:
+            seen_invoices.add(invoice_key)
+        items.append(
+            {
+                "import_id": str(row.import_id),
+                "invoice_number": row.invoice_number or "—",
+                "review_status": row.review_status or "PENDING",
+                "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
+                "source_file_name": row.source_file_name,
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
 
 
 async def list_bvd_import_rows(

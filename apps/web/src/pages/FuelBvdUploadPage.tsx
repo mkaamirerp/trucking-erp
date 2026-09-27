@@ -1,14 +1,33 @@
-import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getFuelBvdUploadErrorDisplay, type FuelBvdUploadErrorDisplay, uploadFuelBvdPdf } from "../api";
+import { FormEvent, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  getFuelBvdUploadErrorDisplay,
+  listFuelBvdImports,
+  type FuelBvdImportListItem,
+  type FuelBvdUploadErrorDisplay,
+  uploadFuelBvdPdf,
+} from "../api";
+import BvdImportsTable from "./fuelBvdReview/BvdImportsTable";
 import { OPS } from "../routes";
+import { duplicateStatusLabel, formatBvdSourceDate, parseFuelBvdDuplicateDetail } from "./fuelBvdReview/bvdUploadDuplicate";
 
-function FuelBvdUploadAlert({ title, message }: FuelBvdUploadErrorDisplay) {
+function FuelBvdUploadAlert({
+  title,
+  message,
+  duplicateImportId,
+  duplicateDetail,
+}: FuelBvdUploadErrorDisplay & { duplicateDetail?: ReturnType<typeof parseFuelBvdDuplicateDetail> }) {
+  const isDuplicate = Boolean(duplicateImportId);
   return (
     <div
       role="alert"
-      className="flex gap-3 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-4 py-3"
+      className={
+        isDuplicate
+          ? "flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700 dark:bg-amber-950/30"
+          : "flex gap-3 rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-4 py-3"
+      }
     >
+      <div className="flex gap-3">
       <div
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--trk-heading)]/15"
         aria-hidden
@@ -35,7 +54,44 @@ function FuelBvdUploadAlert({ title, message }: FuelBvdUploadErrorDisplay) {
             </span>
           ))}
         </p>
+        {duplicateDetail ? (
+          <dl className="mt-3 space-y-1 text-sm text-[var(--trk-text-muted)]">
+            {duplicateDetail.invoice_number ? (
+              <div>
+                <dt className="inline font-medium text-[var(--trk-text)]">BVD Invoice </dt>
+                <dd className="inline">{duplicateDetail.invoice_number}</dd>
+              </div>
+            ) : null}
+            {duplicateDetail.invoice_date ? (
+              <div>
+                <dt className="inline font-medium text-[var(--trk-text)]">Invoice date: </dt>
+                <dd className="inline">{formatBvdSourceDate(duplicateDetail.invoice_date)}</dd>
+              </div>
+            ) : null}
+            {duplicateDetail.start_date && duplicateDetail.end_date ? (
+              <div>
+                <dt className="inline font-medium text-[var(--trk-text)]">Charge period: </dt>
+                <dd className="inline">
+                  {formatBvdSourceDate(duplicateDetail.start_date)} – {formatBvdSourceDate(duplicateDetail.end_date)}
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt className="inline font-medium text-[var(--trk-text)]">Status: </dt>
+              <dd className="inline">{duplicateStatusLabel(duplicateDetail.existing_status)}</dd>
+            </div>
+          </dl>
+        ) : null}
       </div>
+      </div>
+      {duplicateImportId ? (
+        <Link
+          to={OPS.FUEL_BVD_REVIEW(duplicateImportId)}
+          className="inline-flex w-fit rounded-md bg-[var(--trk-btn-primary)] px-4 py-2 text-sm font-semibold text-[var(--trk-btn-text)]"
+        >
+          Open existing invoice
+        </Link>
+      ) : null}
     </div>
   );
 }
@@ -45,6 +101,14 @@ export default function FuelBvdUploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<FuelBvdUploadErrorDisplay | null>(null);
+  const [duplicateDetail, setDuplicateDetail] = useState<ReturnType<typeof parseFuelBvdDuplicateDetail>>(null);
+  const [recentBvd, setRecentBvd] = useState<FuelBvdImportListItem[]>([]);
+
+  useEffect(() => {
+    listFuelBvdImports()
+      .then(setRecentBvd)
+      .catch(() => setRecentBvd([]));
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -54,10 +118,12 @@ export default function FuelBvdUploadPage() {
     }
     setBusy(true);
     setError(null);
+    setDuplicateDetail(null);
     try {
       const out = await uploadFuelBvdPdf(file);
       navigate(OPS.FUEL_BVD_REVIEW(out.import_id));
     } catch (err: unknown) {
+      setDuplicateDetail(parseFuelBvdDuplicateDetail(err));
       setError(getFuelBvdUploadErrorDisplay(err));
     } finally {
       setBusy(false);
@@ -65,7 +131,7 @@ export default function FuelBvdUploadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-6">
+    <div className="mx-auto max-w-3xl px-4 py-6">
       <h1 className="text-lg font-semibold text-[var(--trk-text)]">BVD PDF upload (Implementation 1)</h1>
       <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
         Digital BVD PDF only. Extracts exact source fields into{" "}
@@ -81,10 +147,18 @@ export default function FuelBvdUploadPage() {
           onChange={(ev) => {
             setFile(ev.target.files?.[0] ?? null);
             setError(null);
+            setDuplicateDetail(null);
           }}
           className="block w-full text-sm text-[var(--trk-text-muted)] file:mr-3 file:rounded-md file:border file:border-[var(--trk-border)] file:bg-[var(--trk-surface)] file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-[var(--trk-text)] hover:file:bg-[var(--trk-surface-2)]"
         />
-        {error ? <FuelBvdUploadAlert title={error.title} message={error.message} /> : null}
+        {error ? (
+          <FuelBvdUploadAlert
+            title={error.title}
+            message={error.message}
+            duplicateImportId={error.duplicateImportId}
+            duplicateDetail={duplicateDetail}
+          />
+        ) : null}
         <button
           type="submit"
           disabled={busy || !file}
@@ -93,6 +167,12 @@ export default function FuelBvdUploadPage() {
           {busy ? "Uploading…" : "Upload and extract"}
         </button>
       </form>
+
+      <BvdImportsTable
+        items={recentBvd}
+        title="Recent BVD uploads"
+        emptyMessage="Upload a BVD PDF to start source review."
+      />
     </div>
   );
 }

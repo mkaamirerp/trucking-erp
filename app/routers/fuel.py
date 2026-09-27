@@ -8,7 +8,7 @@ Segment 9: deterministic reconciliation engine (not financial responsibility).
 from __future__ import annotations
 
 from pathlib import Path
-
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -39,6 +39,7 @@ from app.schemas.fuel import (
     FuelProviderConnectionUpdate,
     FuelProviderConnectionWrite,
     FuelBvdImportOut,
+    FuelBvdImportListItemOut,
     FuelBvdReviewSaveIn,
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
@@ -422,15 +423,26 @@ async def upload_bvd_import(
             uploaded_by=uploaded_by,
         )
     except FuelBvdImportError as exc:
-        raise HTTPException(
-            status_code=exc.http_status,
-            detail={"code": exc.code, "detail": exc.message},
-        ) from exc
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message, **exc.detail}
+        if "detail" not in detail and exc.message:
+            detail["detail"] = exc.message
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
     return FuelBvdImportOut(
         import_id=str(import_id),
         row_count=row_count,
         parse_status=parse_status,
     )
+
+
+@router.get("/bvd/imports", response_model=list[FuelBvdImportListItemOut])
+async def list_bvd_imports(
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    items = await bvd_import_service.list_bvd_import_headers(db, tenant_id=tenant_id)
+    return [FuelBvdImportListItemOut(**item) for item in items]
 
 
 @router.get("/bvd/imports/{import_id}/rows", response_model=list[FuelBvdRowOut])
