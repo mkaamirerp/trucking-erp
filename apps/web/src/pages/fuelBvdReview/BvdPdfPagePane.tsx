@@ -16,7 +16,9 @@ type Props = {
   pageNumber: number;
   zoomPercent: number;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
-  pageOpacity?: number;
+  /** Dim PDF canvas/text only (mirror right pane); page div stays opacity 1. */
+  dimPdfTemplate?: boolean;
+  templateOpacity?: number;
   pointerEvents?: "none" | "auto";
   onTextLayerReady?: (payload: TextLayerReadyPayload) => void;
   /** When true, parent owns scroll container (line gutter + sync scroll). */
@@ -28,7 +30,8 @@ export default function BvdPdfPagePane({
   pageNumber,
   zoomPercent,
   scrollRef: externalScrollRef,
-  pageOpacity = 1,
+  dimPdfTemplate = false,
+  templateOpacity = 0.35,
   pointerEvents = "auto",
   onTextLayerReady,
   embedded = false,
@@ -84,7 +87,12 @@ export default function BvdPdfPagePane({
         pageView.setPdfPage(pdfPage);
         pageViewRef.current = pageView;
         pageView.div.style.position = "relative";
-        pageView.div.style.opacity = String(pageOpacity);
+        pageView.div.style.opacity = "1";
+        pageView.div.classList.remove("bvd-pdf-page--mirror-template");
+        if (dimPdfTemplate) {
+          pageView.div.classList.add("bvd-pdf-page--mirror-template");
+          pageView.div.style.setProperty("--bvd-mirror-template-opacity", String(templateOpacity));
+        }
 
         onTextLayerRendered = (evt) => {
           if (evt.pageNumber !== pageNumber) return;
@@ -106,8 +114,11 @@ export default function BvdPdfPagePane({
     return () => {
       cancelled = true;
       if (onTextLayerRendered && eventBus) eventBus.off("textlayerrendered", onTextLayerRendered);
+      pageViewRef.current?.destroy();
+      pageViewRef.current = null;
+      if (viewerRef.current) viewerRef.current.innerHTML = "";
     };
-  }, [pdfDocument, pageNumber, zoomPercent, pageOpacity]);
+  }, [pdfDocument, pageNumber, zoomPercent, dimPdfTemplate, templateOpacity]);
 
   const viewer = (
     <>

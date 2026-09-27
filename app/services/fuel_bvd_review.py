@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fuel import FuelBvd, FuelBvdFieldCorrection
 from app.services.fuel_bvd_import import BVD_SOURCE_FIELD_NAMES, fuel_bvd_row_to_dict
+from app.services.fuel_bvd_source_reconciliation import (
+    reconcile_bvd_source_rows,
+)
 
 BVD_REVIEW_PENDING = "PENDING"
 BVD_REVIEW_IN_PROGRESS = "IN_REVIEW"
@@ -81,10 +84,25 @@ async def list_bvd_import_rows_for_review(
         corr_map = await _latest_corrections_by_row(db, tenant_id=tenant_id, import_id=import_id)
     except Exception as exc:
         if "fuel_bvd_field_correction" in str(exc) or "does not exist" in str(exc):
+            # Missing corrections table poisons the PG transaction; rollback before further reads.
+            await db.rollback()
+            rows = await list_bvd_import_rows(db, tenant_id=tenant_id, import_id=import_id)
             corr_map = {}
         else:
             raise
     return [fuel_bvd_row_to_review_dict(r, corr_map.get(r.id)) for r in rows]
+
+
+async def get_bvd_source_reconciliation_report(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    import_id: uuid.UUID,
+) -> dict[str, Any]:
+    rows = await list_bvd_import_rows_for_review(db, tenant_id=tenant_id, import_id=import_id)
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
+    return reconcile_bvd_source_rows(rows).to_dict()
 
 
 async def get_bvd_import_review_summary(
@@ -205,6 +223,18 @@ async def process_bvd_import_review(
     summary = await get_bvd_import_review_summary(db, tenant_id=tenant_id, import_id=import_id)
     if summary["review_status"] == BVD_REVIEW_SOURCE_COMPLETE:
         return summary
+
+    rows = await list_bvd_import_rows_for_review(db, tenant_id=tenant_id, import_id=import_id)
+    reconciliation = reconcile_bvd_source_rows(rows)
+    if not reconciliation.passed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "BVD_SOURCE_RECONCILIATION_FAILED",
+                "message": "Required BVD source validations did not pass",
+                "reconciliation": reconciliation.to_dict(),
+            },
+        )
 
     now = datetime.now(timezone.utc)
     await db.execute(

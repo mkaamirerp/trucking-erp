@@ -15,7 +15,10 @@
 .bvd-line-gutter {
   flex-shrink: 0;
   width: 2rem;
-  position: relative;
+  position: sticky;
+  left: 0;
+  z-index: 8;
+  align-self: flex-start;
   border-right: 1px solid var(--trk-border, #333);
   background: var(--trk-surface, #1a1a1a);
   font-size: 10px;
@@ -55,6 +58,20 @@
 
 .bvd-pdf-viewer.pdfViewer {
   --scale-factor: 1;
+}
+
+/* Right mirror: dim only PDF.js source layers, not TruckERP overlay siblings. */
+.bvd-pdf-page--mirror-template {
+  --bvd-mirror-template-opacity: 0.35;
+}
+
+.bvd-pdf-page--mirror-template .canvasWrapper,
+.bvd-pdf-page--mirror-template .textLayer {
+  opacity: var(--bvd-mirror-template-opacity);
+}
+
+.bvd-mirror-overlay-layer {
+  opacity: 1;
 }
 
 .bvd-pdf-viewer.pdfViewer .page {

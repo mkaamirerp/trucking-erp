@@ -40,6 +40,7 @@ from app.schemas.fuel import (
     FuelProviderConnectionWrite,
     FuelBvdImportOut,
     FuelBvdImportListItemOut,
+    FuelBvdCompletedBasicOut,
     FuelBvdReviewSaveIn,
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
@@ -439,10 +440,45 @@ async def list_bvd_imports(
     user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
     tenant_id: int = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
+    review_status: str | None = Query(None),
+    exclude_review_status: str | None = Query(None),
 ):
     _ = user
-    items = await bvd_import_service.list_bvd_import_headers(db, tenant_id=tenant_id)
+    items = await bvd_import_service.list_bvd_import_headers(
+        db,
+        tenant_id=tenant_id,
+        review_status=review_status,
+        exclude_review_status=exclude_review_status,
+    )
     return [FuelBvdImportListItemOut(**item) for item in items]
+
+
+@router.get("/bvd/history", response_model=list[FuelBvdCompletedBasicOut])
+async def list_bvd_completed_history(
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    items = await bvd_import_service.list_bvd_completed_history(db, tenant_id=tenant_id)
+    return [FuelBvdCompletedBasicOut(**item) for item in items]
+
+
+@router.get("/bvd/imports/{import_id}/completed-basic", response_model=FuelBvdCompletedBasicOut)
+async def get_bvd_completed_basic(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    try:
+        payload = await bvd_import_service.get_bvd_completed_basic_projection(
+            db, tenant_id=tenant_id, import_id=import_id
+        )
+    except bvd_import_service.FuelBvdImportNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found") from None
+    return FuelBvdCompletedBasicOut(**payload)
 
 
 @router.get("/bvd/imports/{import_id}/rows", response_model=list[FuelBvdRowOut])

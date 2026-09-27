@@ -37,17 +37,14 @@ export function buildReviewLogicalRows(rows: FuelBvdRow[]): BvdReviewLogicalRow[
 
   const header = sorted.find((r) => r.row_type === "HEADER");
   if (header) {
-    for (const field of BVD_HEADER_FIELDS) {
-      n += 1;
-      out.push({
-        reviewLineNumber: n,
-        fuelBvdId: header.id,
-        rowType: "HEADER",
-        page: header.source_page ?? 1,
-        headerField: field,
-        label: BVD_FIELD_LABELS[field] ?? field,
-      });
-    }
+    n += 1;
+    out.push({
+      reviewLineNumber: n,
+      fuelBvdId: header.id,
+      rowType: "HEADER",
+      page: header.source_page ?? 1,
+      label: "Invoice header",
+    });
   }
 
   for (const row of sorted) {
@@ -144,7 +141,7 @@ export function reviewLineForSelection(
   rowType: string,
 ): number | null {
   if (rowType === "HEADER") {
-    return lines.find((l) => l.fuelBvdId === fuelBvdId && l.headerField === fieldName)?.reviewLineNumber ?? null;
+    return lines.find((l) => l.fuelBvdId === fuelBvdId && l.rowType === "HEADER")?.reviewLineNumber ?? null;
   }
   return lines.find((l) => l.fuelBvdId === fuelBvdId && !l.headerField)?.reviewLineNumber ?? null;
 }
@@ -164,6 +161,7 @@ export function gutterMetricsForLine(
   }
   const rowSlots = slots.filter((s) => {
     if (s.fuelBvdId !== line.fuelBvdId) return false;
+    if (line.rowType === "HEADER") return s.rowType === "HEADER";
     if (line.headerField) return s.fieldName === line.headerField;
     return true;
   });
@@ -175,6 +173,16 @@ export function gutterMetricsForLine(
 
 export function linesOnPage(lines: BvdReviewLogicalRow[], page: number): BvdReviewLogicalRow[] {
   return lines.filter((l) => l.page === page);
+}
+
+/** Gutter shows only rows we can place on the current page geometry (avoids empty number gaps). */
+export function visibleLinesOnPage(
+  lines: BvdReviewLogicalRow[],
+  page: number,
+  slots: BvdFieldSlot[],
+  unmapped?: BvdUnmappedSourceField[],
+): BvdReviewLogicalRow[] {
+  return linesOnPage(lines, page).filter((line) => gutterMetricsForLine(slots, line, unmapped) !== null);
 }
 
 export function formatReviewLineNumber(n: number): string {

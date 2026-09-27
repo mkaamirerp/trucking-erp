@@ -650,6 +650,30 @@ class FuelBvdImportListItemOut(BaseModel):
     source_file_name: str | None = None
 
 
+class FuelBvdCompletedBasicLineOut(BaseModel):
+    key: str
+    label: str
+    amount: str
+
+
+class FuelBvdCompletedBasicOut(BaseModel):
+    provider: str
+    import_id: str
+    invoice_number: str
+    review_status: str
+    read_only: bool
+    processed_at: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    card_number: str | None = None
+    unit_count: int
+    unit_numbers: list[str] = Field(default_factory=list)
+    total_amount: str
+    currency: str | None = None
+    categories: list[FuelBvdCompletedBasicLineOut] = Field(default_factory=list)
+    taxes: list[FuelBvdCompletedBasicLineOut] = Field(default_factory=list)
+
+
 class FuelBvdRowOut(BaseModel):
     id: int
     import_id: str

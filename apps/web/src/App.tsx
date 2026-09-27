@@ -44,6 +44,8 @@ import FuelReviewQueuePage from "./pages/FuelReviewQueuePage";
 import FuelReviewWorkspacePage from "./pages/FuelReviewWorkspacePage";
 import FuelBvdUploadPage from "./pages/FuelBvdUploadPage";
 import FuelBvdExtractionReviewPage from "./pages/FuelBvdExtractionReviewPage";
+import FuelBvdHistoryPage from "./pages/FuelBvdHistoryPage";
+import FuelBvdFullDetailPage from "./pages/FuelBvdFullDetailPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
 import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
@@ -353,6 +355,26 @@ function App() {
           <AdminRouteGuard>
             <Layout>
               <FuelBvdExtractionReviewPage />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
+      <Route
+        path="/fuel/history"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <FuelBvdHistoryPage />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
+      <Route
+        path="/fuel/bvd/:importId/detail"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <FuelBvdFullDetailPage />
             </Layout>
           </AdminRouteGuard>
         }

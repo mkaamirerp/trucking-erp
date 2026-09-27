@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { listFuelReviewQueue, type FuelReviewQueueItem } from "../api";
+import { listFuelBvdImports, listFuelReviewQueue, type FuelBvdImportListItem, type FuelReviewQueueItem } from "../api";
 import { OPS } from "../routes";
+import BvdImportsTable from "./fuelBvdReview/BvdImportsTable";
 
 /**
  * Generic Fuel source review queue (provider-neutral).
@@ -9,12 +10,17 @@ import { OPS } from "../routes";
  */
 export default function FuelReviewQueuePage() {
   const [rows, setRows] = useState<FuelReviewQueueItem[]>([]);
+  const [bvdImports, setBvdImports] = useState<FuelBvdImportListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const data = await listFuelReviewQueue();
-    setRows(data);
+    const [queue, bvd] = await Promise.all([
+      listFuelReviewQueue(),
+      listFuelBvdImports({ excludeReviewStatus: "SOURCE_REVIEWED" }),
+    ]);
+    setRows(queue);
+    setBvdImports(bvd);
   }, []);
 
   useEffect(() => {
@@ -34,18 +40,26 @@ export default function FuelReviewQueuePage() {
             Completing review does not post, reconcile, or settle.
           </p>
         </div>
-        <Link to={OPS.FUEL_PROVIDERS} className="text-sm text-blue-700 hover:underline">
-          Providers
-        </Link>
+        <div className="flex gap-3 text-sm">
+          <Link to={OPS.FUEL_HISTORY} className="text-blue-700 hover:underline">Fuel history</Link>
+          <Link to={OPS.FUEL_PROVIDERS} className="text-blue-700 hover:underline">Providers</Link>
+        </div>
       </div>
 
       {error && (
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
       )}
+      <BvdImportsTable
+        items={bvdImports}
+        title="BVD PDF source reviews"
+        emptyMessage="No BVD PDF uploads for this tenant yet."
+      />
+
+      <h2 className="mt-10 text-base font-semibold text-gray-900">Provider import batches</h2>
       {loading ? (
-        <p className="text-sm text-gray-500">Loading…</p>
+        <p className="mt-2 text-sm text-gray-500">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-500">No batches currently in the review queue.</p>
+        <p className="mt-2 text-sm text-gray-500">No provider batches currently in the review queue.</p>
       ) : (
         <div className="overflow-x-auto rounded border border-gray-200 bg-white">
           <table className="min-w-full text-left text-sm">

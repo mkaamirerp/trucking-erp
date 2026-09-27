@@ -1,0 +1,121 @@
+.bvd-review-form {
+  background: var(--trk-bg, #0f0f0f);
+}
+
+.bvd-review-form__section {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--trk-border, #333);
+}
+
+.bvd-review-form__section--active-line {
+  border-left: 3px solid var(--trk-warning, #f59e0b);
+  padding-left: 0.5rem;
+  margin-left: -0.5rem;
+}
+
+.bvd-review-form__line-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.bvd-review-form__line-n {
+  flex-shrink: 0;
+  width: 1.75rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--trk-text-muted, #888);
+  text-align: right;
+}
+
+.bvd-review-form__line-n--active {
+  color: var(--trk-warning, #f59e0b);
+}
+
+.bvd-review-form__line-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--trk-text-muted, #aaa);
+}
+
+.bvd-review-form__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding-left: 2rem;
+}
+
+.bvd-review-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 7rem;
+}
+
+.bvd-review-field__label {
+  font-size: 10px;
+  color: var(--trk-text-muted, #999);
+}
+
+.bvd-review-field__input {
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--trk-warning, #f59e0b) 55%, var(--trk-border, #444));
+  background: color-mix(in srgb, var(--trk-warning, #f59e0b) 8%, var(--trk-surface, #1a1a1a));
+  color: var(--trk-text, #f0f0f0);
+  font-size: 12px;
+  padding: 0.35rem 0.5rem;
+  outline: none;
+}
+
+.bvd-review-field__input--narrow {
+  width: 5.5rem;
+  max-width: 100%;
+}
+
+.bvd-review-field__input--medium {
+  width: 11rem;
+  max-width: 100%;
+}
+
+.bvd-review-field__input--wide {
+  width: 16rem;
+  max-width: 100%;
+}
+
+.bvd-review-field__input:hover:not(:disabled) {
+  border-color: var(--trk-warning, #f59e0b);
+}
+
+.bvd-review-field__input--selected {
+  border-width: 2px;
+  border-color: var(--trk-warning, #f59e0b);
+  background: color-mix(in srgb, var(--trk-warning, #f59e0b) 18%, var(--trk-surface, #1a1a1a));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--trk-warning, #f59e0b) 40%, transparent);
+}
+
+.bvd-review-field__input--corrected {
+  border-color: color-mix(in srgb, var(--trk-warning, #f59e0b) 80%, #fff);
+}
+
+.bvd-review-field__missing {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 11px;
+  color: var(--trk-danger, #ef4444);
+  border: 1px solid color-mix(in srgb, var(--trk-danger, #ef4444) 50%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--trk-danger, #ef4444) 8%, var(--trk-surface, #1a1a1a));
+}
+
+.bvd-review-field__corrected-tag {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--trk-warning, #f59e0b);
+}

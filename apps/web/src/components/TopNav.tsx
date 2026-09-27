@@ -88,7 +88,9 @@ function usePageLabel(): string {
   if (pathname.startsWith("/admin/settings/email")) return "Email Settings";
   if (pathname.startsWith("/admin/integrations/eld")) return "ELD";
   if (pathname.startsWith("/admin/integrations/fuel")) return "Fuel";
+  if (pathname.startsWith("/fuel/history")) return "Fuel History";
   if (pathname.startsWith("/fuel/review")) return "Fuel Review";
+  if (pathname.startsWith("/fuel/bvd") && pathname.endsWith("/detail")) return "Fuel Detail";
   if (pathname.startsWith("/fuel/providers")) return "Fuel Providers";
   if (pathname.startsWith("/admin/onboarding")) return "Onboarding Settings";
   if (pathname.startsWith("/admin/documents")) return "Document Rules";

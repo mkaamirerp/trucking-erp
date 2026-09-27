@@ -80,6 +80,27 @@ export const BVD_HEADER_FIELDS: string[] = [
   "qst_number",
 ];
 
+/** Second header band: identity + validation (matches BVD PDF footer of page 1 / tax block). */
+export const BVD_HEADER_IDENTITY_STRIP_FIELDS: string[] = [
+  "client_email",
+  "card_number",
+  "hst_number",
+  "qst_number",
+];
+
+export const BVD_HEADER_MAIN_FIELDS: string[] = BVD_HEADER_FIELDS.filter(
+  (f) => !BVD_HEADER_IDENTITY_STRIP_FIELDS.includes(f),
+);
+
+export const BVD_HEADER_DATE_FIELDS: string[] = [
+  "invoice_date",
+  "start_date",
+  "end_date",
+  "due_date",
+];
+
+export const BVD_HEADER_CLIENT_FIELDS: string[] = ["client_name", "client_address", "client_phone"];
+
 export const BVD_REVIEW_TABS = [
   { id: "HEADER" as const, label: "Header" },
   { id: "TRANSACTIONS" as const, label: "Transactions" },

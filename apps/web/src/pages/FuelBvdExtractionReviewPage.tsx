@@ -11,9 +11,12 @@ import {
   type FuelBvdRow,
 } from "../api";
 import { OPS } from "../routes";
-import BvdReviewWorkspace, { type BvdReviewBlockers } from "./fuelBvdReview/BvdReviewWorkspace";
+import BvdParsedStatementView from "./fuelBvdReview/BvdParsedStatementView";
+import BvdPdfPopupModal from "./fuelBvdReview/BvdPdfPopupModal";
 import { loadBvdPdfDocument } from "./fuelBvdReview/loadBvdPdfDocument";
 import { draftKey, extractedValue, type DraftMap, reviewedValue } from "./fuelBvdReview/bvdReviewValues";
+import { formatFuelBvdReviewActionError } from "./fuelBvdReview/bvdReviewActionErrors";
+import { buildBvdUploadCompletedPath } from "./fuelBvdReview/bvdUploadCompletion";
 import { BVD_FIELD_LABELS, reviewStatusLabel } from "./fuelBvdReviewLabels";
 
 function ProcessConfirmModal({
@@ -82,27 +85,24 @@ function ProcessConfirmModal({
 export default function FuelBvdExtractionReviewPage() {
   const { importId } = useParams();
   const [rows, setRows] = useState<FuelBvdRow[]>([]);
-  const [drafts, setDrafts] = useState<DraftMap>({});
+  const [drafts] = useState<DraftMap>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [processOpening, setProcessOpening] = useState(false);
   const [confirmSummary, setConfirmSummary] = useState<FuelBvdReviewSummary | null>(null);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
-  const [reviewBlockers, setReviewBlockers] = useState<BvdReviewBlockers>({
-    unmappedCount: 0,
-    possibleUnmappedCount: 0,
-    unmapped: [],
-    possible: [],
-  });
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [showCompletedStatement, setShowCompletedStatement] = useState(false);
 
   const load = useCallback(async () => {
     if (!importId) return;
     setRows(await getFuelBvdImportRows(importId));
-    setDrafts({});
   }, [importId]);
 
   useEffect(() => {
@@ -117,18 +117,34 @@ export default function FuelBvdExtractionReviewPage() {
       .finally(() => setLoading(false));
   }, [importId, load]);
 
-  useEffect(() => {
-    if (!importId) return;
+  const ensurePdfLoaded = useCallback(async () => {
+    if (!importId || pdfDoc) return;
     setPdfLoading(true);
     setPdfError(null);
-    loadBvdPdfDocument(fuelBvdDocumentUrl(importId))
-      .then((doc) => setPdfDoc(doc))
-      .catch((e: unknown) => setPdfError(e instanceof Error ? e.message : "PDF load failed"))
-      .finally(() => setPdfLoading(false));
-  }, [importId]);
+    try {
+      setPdfDoc(await loadBvdPdfDocument(fuelBvdDocumentUrl(importId)));
+    } catch (e: unknown) {
+      setPdfError(e instanceof Error ? e.message : "PDF load failed");
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [importId, pdfDoc]);
+
+  const openPdf = () => {
+    setPdfOpen(true);
+    void ensurePdfLoaded();
+  };
 
   const header = useMemo(() => rows.find((r) => r.row_type === "HEADER"), [rows]);
-  const reviewStatus = header?.review_status ?? "PENDING";
+  const reviewStatus = useMemo(() => {
+    if (rows.some((r) => r.review_status === "SOURCE_REVIEWED")) {
+      return "SOURCE_REVIEWED";
+    }
+    if (rows.some((r) => r.review_status === "IN_REVIEW")) {
+      return "IN_REVIEW";
+    }
+    return header?.review_status ?? "PENDING";
+  }, [rows, header]);
   const readOnly = reviewStatus === "SOURCE_REVIEWED";
 
   const buildCorrectionsPayload = useCallback(() => {
@@ -147,27 +163,31 @@ export default function FuelBvdExtractionReviewPage() {
     return corrections;
   }, [rows, drafts]);
 
-  const onDraft = (rowId: number, field: string, value: string) => {
-    setDrafts((prev) => ({ ...prev, [draftKey(rowId, field)]: value }));
-  };
-
   const handleSaveReview = async () => {
-    if (!importId) return;
+    if (!importId || readOnly) return;
     setSaving(true);
     setActionError(null);
+    setActionSuccess(null);
     try {
-      await saveFuelBvdReview(importId, buildCorrectionsPayload());
+      const result = await saveFuelBvdReview(importId, buildCorrectionsPayload());
       await load();
+      setActionSuccess(
+        result.saved_corrections > 0
+          ? `Review saved (${result.saved_corrections} correction${result.saved_corrections === 1 ? "" : "s"})`
+          : "Review saved",
+      );
     } catch (e: unknown) {
-      setActionError(e instanceof Error ? e.message : "Save failed");
+      setActionError(formatFuelBvdReviewActionError(e));
     } finally {
       setSaving(false);
     }
   };
 
   const openProcessConfirm = async () => {
-    if (!importId) return;
+    if (!importId || readOnly) return;
+    setProcessOpening(true);
     setActionError(null);
+    setActionSuccess(null);
     try {
       const pending = buildCorrectionsPayload();
       if (pending.length) {
@@ -176,25 +196,31 @@ export default function FuelBvdExtractionReviewPage() {
       }
       setConfirmSummary(await getFuelBvdImportSummary(importId));
     } catch (e: unknown) {
-      setActionError(e instanceof Error ? e.message : "Could not load summary");
+      setActionError(formatFuelBvdReviewActionError(e));
+    } finally {
+      setProcessOpening(false);
     }
   };
 
   const handleConfirmProcess = async () => {
     if (!importId) return;
     setProcessing(true);
+    setActionError(null);
+    setActionSuccess(null);
     try {
-      await processFuelBvdImport(importId);
+      const result = await processFuelBvdImport(importId);
       setConfirmSummary(null);
-      await load();
+      window.location.assign(buildBvdUploadCompletedPath(result.invoice_number));
+      return;
     } catch (e: unknown) {
-      setActionError(e instanceof Error ? e.message : "Process failed");
+      setConfirmSummary(null);
+      setActionError(formatFuelBvdReviewActionError(e));
     } finally {
       setProcessing(false);
     }
   };
 
-  if (loading) return <div className="p-6 text-sm text-[var(--trk-text-muted)]">Loading BVD review…</div>;
+  if (loading) return <div className="p-6 text-sm text-[var(--trk-text-muted)]">Loading BVD…</div>;
   if (error) {
     return (
       <div className="p-6">
@@ -204,8 +230,51 @@ export default function FuelBvdExtractionReviewPage() {
     );
   }
 
-  const invoiceLabel = header?.invoice_number ? `Invoice ${header.invoice_number}` : "BVD review";
-  const cardLabel = header?.card_number ? `Card ${header.card_number}` : "";
+  const pdfTitle = header?.invoice_number ? `BVD ${header.invoice_number}` : "Original BVD PDF";
+
+  if (readOnly && !showCompletedStatement) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-10">
+        <div
+          role="status"
+          className="rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] px-5 py-6 shadow-sm"
+        >
+          <h1 className="text-lg font-semibold text-[var(--trk-text)]">BVD source review completed</h1>
+          <p className="mt-2 text-sm text-[var(--trk-text-muted)]">
+            {header?.invoice_number ? `Invoice ${header.invoice_number} ` : "This import "}
+            is marked completed. BVD reviews are finished here — they do not appear on{" "}
+            <Link to={OPS.FUEL_REVIEW} className="text-[var(--trk-accent)] hover:underline">
+              Fuel source review
+            </Link>{" "}
+            (that queue is for separate provider import batches).
+          </p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            {importId ? (
+              <Link
+                to={OPS.FUEL_BVD_DETAIL(importId)}
+                className="rounded-md bg-[var(--trk-btn-primary)] px-4 py-2 text-sm font-semibold text-[var(--trk-btn-text)]"
+              >
+                Full stored detail
+              </Link>
+            ) : null}
+            <Link
+              to={OPS.FUEL_HISTORY}
+              className="rounded-md border border-[var(--trk-border-strong)] px-4 py-2 text-sm"
+            >
+              Fuel history
+            </Link>
+            <button
+              type="button"
+              onClick={() => setShowCompletedStatement(true)}
+              className="rounded-md border border-[var(--trk-border-strong)] px-4 py-2 text-sm"
+            >
+              View parsed statement
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -217,37 +286,59 @@ export default function FuelBvdExtractionReviewPage() {
           onConfirm={() => void handleConfirmProcess()}
         />
       ) : null}
-      <div className="flex items-center justify-end px-3 pt-1">
-        <Link to={OPS.FUEL_BVD_UPLOAD} className="text-xs text-[var(--trk-accent)]">Upload another</Link>
-      </div>
-      <BvdReviewWorkspace
+      <BvdPdfPopupModal
+        open={pdfOpen}
+        onClose={() => setPdfOpen(false)}
+        title={pdfTitle}
         pdfDocument={pdfDoc}
-        rows={rows}
-        drafts={drafts}
-        onDraft={onDraft}
-        readOnly={readOnly}
-        invoiceLabel={invoiceLabel}
-        cardLabel={cardLabel}
-        statusLabel={reviewStatusLabel(reviewStatus)}
-        pdfLoading={pdfLoading}
-        pdfError={pdfError}
-        onReviewBlockersChange={setReviewBlockers}
-        footer={
-          <div className="flex items-center justify-between gap-3">
-            {actionError ? (
-              <p className="text-xs text-[var(--trk-danger)]">{actionError}</p>
-            ) : reviewBlockers.unmappedCount > 0 ? (
-              <p className="text-xs text-[var(--trk-warning)]">
-                Process blocked: {reviewBlockers.unmappedCount} unmapped source field
-                {reviewBlockers.unmappedCount === 1 ? "" : "s"} require review (backend guard recommended).
-              </p>
-            ) : (
-              <p className="text-xs text-[var(--trk-text-muted)]">Side-by-side source review. Tab moves field order.</p>
-            )}
+        loading={pdfLoading}
+        error={pdfError}
+      />
+      <div className="bvd-review-page">
+        <div className="flex items-center justify-end px-3 py-1">
+          <Link to={OPS.FUEL_BVD_UPLOAD} className="text-xs text-[var(--trk-accent)]">Upload another</Link>
+        </div>
+        {readOnly ? (
+          <div
+            role="status"
+            className="mx-3 mb-2 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-4 py-3 text-sm"
+          >
+            <p className="font-medium text-[var(--trk-text)]">BVD source review completed</p>
+            <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
+              This invoice is marked completed here. Fuel source review lists separate provider import batches — BVD
+              uploads do not appear in that queue.
+            </p>
+            <Link to={OPS.FUEL_BVD_UPLOAD} className="mt-2 inline-block text-xs font-medium text-[var(--trk-accent)]">
+              Upload another BVD
+            </Link>
+          </div>
+        ) : null}
+        <BvdParsedStatementView
+          rows={rows}
+          statusLabel={reviewStatusLabel(reviewStatus)}
+          onOpenPdf={openPdf}
+        />
+        <footer className="bvd-statement__footer-bar sticky bottom-0 z-20">
+          <div className="flex w-full flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              {actionError ? (
+                <p className="text-xs font-medium text-[var(--trk-danger)]" role="alert">
+                  {actionError}
+                </p>
+              ) : actionSuccess ? (
+                <p className="text-xs font-medium text-[var(--trk-success)]" role="status">
+                  {actionSuccess}
+                </p>
+              ) : (
+                <p className="text-xs text-[var(--trk-text-muted)]">
+                  Parsed BVD view — open PDF to compare against the original document.
+                </p>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={readOnly || saving}
+                disabled={readOnly || saving || processing || processOpening}
                 onClick={() => void handleSaveReview()}
                 className="rounded-md border border-[var(--trk-border-strong)] px-4 py-2 text-sm disabled:opacity-50"
               >
@@ -255,21 +346,16 @@ export default function FuelBvdExtractionReviewPage() {
               </button>
               <button
                 type="button"
-                disabled={readOnly || processing || reviewBlockers.unmappedCount > 0}
-                title={
-                  reviewBlockers.unmappedCount > 0
-                    ? `${reviewBlockers.unmappedCount} unmapped source field(s) must be reviewed first`
-                    : undefined
-                }
+                disabled={readOnly || saving || processing || processOpening}
                 onClick={() => void openProcessConfirm()}
                 className="rounded-md bg-[var(--trk-btn-primary)] px-4 py-2 text-sm font-semibold text-[var(--trk-btn-text)] disabled:opacity-50"
               >
-                Process
+                {processOpening ? "Loading…" : processing ? "Processing…" : readOnly ? "Completed" : "Process"}
               </button>
             </div>
           </div>
-        }
-      />
+        </footer>
+      </div>
     </>
   );
 }

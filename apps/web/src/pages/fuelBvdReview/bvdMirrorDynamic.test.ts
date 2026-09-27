@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { FuelBvdRow } from "../../api";
-import { BVD_HEADER_FIELDS } from "../fuelBvdReviewLabels";
 import { buildFieldSlotsForPage } from "./bvdFieldSlots";
 import { getReviewFieldState } from "./bvdFieldCapture";
 import { buildReviewLogicalRows, buildReviewLogicalRowsMerged } from "./bvdReviewLines";
@@ -53,13 +52,7 @@ describe("BVD mirror dynamic layout (not fixture-shaped)", () => {
     const lines = buildReviewLogicalRows([header, ...txns]);
     const txnLines = lines.filter((l) => l.rowType === "TRANSACTION");
     expect(txnLines).toHaveLength(5);
-    expect(txnLines.map((l) => l.reviewLineNumber)).toEqual([
-      BVD_HEADER_FIELDS.length + 1,
-      BVD_HEADER_FIELDS.length + 2,
-      BVD_HEADER_FIELDS.length + 3,
-      BVD_HEADER_FIELDS.length + 4,
-      BVD_HEADER_FIELDS.length + 5,
-    ]);
+    expect(txnLines.map((l) => l.reviewLineNumber)).toEqual([2, 3, 4, 5, 6]);
   });
 
   it("B: unit column slots follow arbitrary unit numbers (not 1100/1104)", () => {
@@ -157,6 +150,6 @@ describe("BVD mirror dynamic layout (not fixture-shaped)", () => {
     const merged = buildReviewLogicalRowsMerged([header], unmapped, []);
     const unmappedLine = merged.find((l) => l.rowType === "UNMAPPED_SOURCE");
     expect(unmappedLine?.reviewLineNumber).toBeGreaterThan(0);
-    expect(merged.length).toBe(BVD_HEADER_FIELDS.length + 1);
+    expect(merged.length).toBe(2);
   });
 });

@@ -1140,3 +1140,70 @@ When CSV ingestion is implemented, concurrency must use the **strongest availabl
 2. Normalized transaction fingerprint
 
 Advisory locks must align with that business key (not raw file bytes alone). Same post-lock re-check pattern as PDF: identity fields + raw SHA + fingerprint.
+
+---
+
+# 26. COMPLETED FUEL PRESENTATION MODEL (LOCKED)
+
+One processed BVD `import_id` — **three views**, same underlying `fuel_bvd` rows. No second copy of provider evidence.
+
+## PROCESSING REVIEW (full detail)
+
+Route: `/fuel/bvd/{import_id}/review`
+
+Purpose: verify extraction, compare PDF, correct mistakes, reconciliation, **Process**.
+
+Keeps **all** provider fields, tax columns, product rows, grand totals, PDF, correction overlay, and reconciliation checks. **Do not** simplify this screen into the operational history summary.
+
+## COMPLETED BASIC REVIEW (Fuel history)
+
+Route: `/fuel/history` (BVD today; provider-neutral later)
+
+After `review_status = SOURCE_REVIEWED`, the invoice appears in **Fuel history** as a **clean operational card**:
+
+- Provider, invoice number (linkable), process date, status, charge period, card, unit count, total + currency
+- **Non-zero only** category and tax lines (dynamic — never hardcode “show HST / hide GST”)
+- **Read-only** — no silent edits from history cards/tables
+
+Zero-value provider fields (e.g. `GST = 0.00`) remain **stored**; the BASIC view simply **omits** them from rendering.
+
+## FULL STORED DETAIL (read-only evidence)
+
+Route: `/fuel/bvd/{import_id}/detail`
+
+Opened from invoice number / “Full stored detail”. Shows **every** stored BVD field (including zero taxes), all transaction columns, legend, corrections, reconciliation, source metadata, and **original PDF** link. Read-only after Process except where an explicit audited correction workflow already allows changes — **never** rewrite immutable extracted source values.
+
+## Data principle
+
+| View | Projection |
+|------|------------|
+| Processing review | Full editable-review projection |
+| Completed basic | TruckERP operational projection |
+| Full stored detail | Complete auditable provider projection |
+
+## Linkable fields (operational drill-down)
+
+Structure BASIC UI so these can become links later: invoice → full detail; unit → unit transactions; category/tax → filtered transaction lists. Destinations may be stubbed until built.
+
+## History / queue dedupe key (LOCKED)
+
+Completed history and BVD source-review lists dedupe legacy uploads by **full document identity**:
+
+```text
+tenant_id + provider BVD + invoice_number + invoice_date + start_date + end_date
+```
+
+**Not** invoice number alone (e.g. 972201 Jul 2026 vs Jul 2027 remain two records).
+
+When multiple legacy rows share the same identity, the canonical representative is:
+
+1. `SOURCE_REVIEWED` over `IN_REVIEW` over `PENDING`/null
+2. Newest upload within the same status
+
+Other imports are **not** deleted.
+
+## Implementation hooks
+
+- BASIC projection: `app/services/fuel_bvd_completed_basic.py`, `apps/web/src/pages/fuelBvdReview/bvdCompletedBasicProjection.ts`
+- API: `GET /fuel/bvd/history`, `GET /fuel/bvd/imports/{id}/completed-basic`
+- UI: `FuelBvdHistoryPage`, `FuelBvdFullDetailPage`, `BvdCompletedBasicCard`

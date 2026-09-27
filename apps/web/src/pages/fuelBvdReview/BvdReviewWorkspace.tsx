@@ -3,20 +3,20 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { PDFPageView } from "pdfjs-dist/web/pdf_viewer.mjs";
 import type { FuelBvdRow } from "../../api";
 import BvdPdfPagePane, { type TextLayerReadyPayload } from "./BvdPdfPagePane";
+import BvdReviewFormPane from "./BvdReviewFormPane";
 import {
   BVD_PDF_ZOOM_DEFAULT,
   BVD_PDF_ZOOM_MAX,
   BVD_PDF_ZOOM_MIN,
   BVD_PDF_ZOOM_STEP,
 } from "./bvdPdfConstants";
-import { getReviewFieldState } from "./bvdFieldCapture";
+import { resetScrollContainersToOrigin, type PageTransitionIntent } from "./bvdPageScroll";
 import {
   buildReviewLogicalRowsMerged,
   formatReviewLineNumber,
   gutterMetricsForLine,
-  linesOnPage,
   reviewLineForSelection,
-  reviewLineForUnmapped,
+  visibleLinesOnPage,
   type BvdReviewLogicalRow,
 } from "./bvdReviewLines";
 import {
@@ -33,14 +33,8 @@ import {
 } from "./bvdFieldSlots";
 import { mapPdfJsTextItems } from "./bvdPdfHighlight";
 import { scrollContainerToHighlight } from "./bvdPdfDomHighlight";
-import { useSynchronizedScroll } from "./useSynchronizedScroll";
-import {
-  draftKey,
-  extractedValue,
-  type DraftMap,
-  isFieldCorrected,
-  reviewedValue,
-} from "./bvdReviewValues";
+import type { DraftMap } from "./bvdReviewValues";
+import "./bvd-review-form.css";
 
 function ReviewLineGutter({
   lines,
@@ -86,25 +80,57 @@ export type BvdReviewBlockers = {
   possible: BvdPossibleUnmappedContent[];
 };
 
-function PageOverlay({
+function PageAlignedOverlay({
+  containerRef,
   pageView,
+  pageNumber,
   children,
 }: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
   pageView: PDFPageView;
+  pageNumber: number;
   children: React.ReactNode;
 }) {
-  const hostRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+
   useLayoutEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    pageView.div.style.position = "relative";
-    pageView.div.append(host);
-    return () => {
-      host.remove();
+    if (pageView.id !== pageNumber) {
+      setBox(null);
+      return;
+    }
+    const pageDiv = pageView.div;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const sync = () => {
+      if (pageView.id !== pageNumber) return;
+      const cr = container.getBoundingClientRect();
+      const pr = pageDiv.getBoundingClientRect();
+      setBox({
+        left: pr.left - cr.left + container.scrollLeft,
+        top: pr.top - cr.top + container.scrollTop,
+        width: pr.width,
+        height: pr.height,
+      });
     };
-  }, [pageView]);
+
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(pageDiv);
+    container.addEventListener("scroll", sync, { passive: true });
+    return () => {
+      ro.disconnect();
+      container.removeEventListener("scroll", sync);
+    };
+  }, [containerRef, pageView, pageNumber]);
+
+  if (!box || pageView.id !== pageNumber) return null;
+
   return (
-    <div ref={hostRef} className="pointer-events-none absolute inset-0 z-[6]">
+    <div
+      className="pointer-events-none absolute z-[6]"
+      style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+    >
       <div className="pointer-events-auto relative h-full w-full">{children}</div>
     </div>
   );
@@ -141,9 +167,7 @@ export default function BvdReviewWorkspace({
 }: Props) {
   const [currentPage, setCurrentPage] = useState(1);
   const [zoomPercent, setZoomPercent] = useState(BVD_PDF_ZOOM_DEFAULT);
-  const [syncScroll, setSyncScroll] = useState(true);
   const [selected, setSelected] = useState<BvdFieldRef | null>(null);
-  const [selectedUnmappedId, setSelectedUnmappedId] = useState<string | null>(null);
   const [slots, setSlots] = useState<BvdFieldSlot[]>([]);
   const [unmappedOnPage, setUnmappedOnPage] = useState<BvdUnmappedSourceField[]>([]);
   const [allUnmapped, setAllUnmapped] = useState<BvdUnmappedSourceField[]>([]);
@@ -153,16 +177,16 @@ export default function BvdReviewWorkspace({
   const [slotGeneration, setSlotGeneration] = useState(0);
   const [ambiguousMsg, setAmbiguousMsg] = useState<string | null>(null);
   const [leftPageView, setLeftPageView] = useState<PDFPageView | null>(null);
-  const [rightPageView, setRightPageView] = useState<PDFPageView | null>(null);
 
   const leftScrollRef = useRef<HTMLDivElement>(null);
-  const rightScrollRef = useRef<HTMLDivElement>(null);
+  const leftPaneRef = useRef<HTMLDivElement>(null);
+  const pageTransitionIntentRef = useRef<PageTransitionIntent>(null);
   const slotBuildGenRef = useRef(0);
 
-  const pageCount = useMemo(
-    () => Math.max(1, rows.reduce((m, r) => Math.max(m, r.source_page ?? 1), 1)),
-    [rows],
-  );
+  const pageCount = useMemo(() => {
+    if (pdfDocument?.numPages && pdfDocument.numPages > 0) return pdfDocument.numPages;
+    return Math.max(1, rows.reduce((m, r) => Math.max(m, r.source_page ?? 1), 1));
+  }, [pdfDocument, rows]);
 
   const fieldSequence = useMemo(() => orderedFieldRefsForRows(rows), [rows]);
   const logicalRows = useMemo(
@@ -170,15 +194,13 @@ export default function BvdReviewWorkspace({
     [rows, allUnmapped, slots],
   );
   const logicalLinesOnPage = useMemo(
-    () => linesOnPage(logicalRows, currentPage),
-    [logicalRows, currentPage],
+    () => visibleLinesOnPage(logicalRows, currentPage, slots, unmappedOnPage),
+    [logicalRows, currentPage, slots, unmappedOnPage],
   );
   const rowsOnPage = useMemo(
     () => rows.filter((r) => (r.source_page ?? 1) === currentPage),
     [rows, currentPage],
   );
-
-  useSynchronizedScroll(leftScrollRef, rightScrollRef, syncScroll);
 
   const rebuildSlots = useCallback(
     async (pageView: PDFPageView, page: number) => {
@@ -218,23 +240,12 @@ export default function BvdReviewWorkspace({
     [currentPage, rebuildSlots],
   );
 
-  const onRightTextLayer = useCallback(
-    (payload: TextLayerReadyPayload) => {
-      if (payload.pageNumber !== currentPage) return;
-      setRightPageView(payload.pageView);
-    },
-    [currentPage],
-  );
-
   useEffect(() => {
     setSlots([]);
     setUnmappedOnPage([]);
     setLeftPageView(null);
-    setRightPageView(null);
     setAmbiguousMsg(null);
     slotBuildGenRef.current += 1;
-    setSelected((sel) => (sel && sel.page !== currentPage ? null : sel));
-    setSelectedUnmappedId(null);
   }, [currentPage, zoomPercent, pdfDocument]);
 
   useEffect(() => {
@@ -242,7 +253,7 @@ export default function BvdReviewWorkspace({
     possibleByPageRef.current.clear();
     setAllUnmapped([]);
     setPossibleUnmapped([]);
-  }, [pdfDocument, rows, zoomPercent]);
+  }, [pdfDocument, rows]);
 
   useEffect(() => {
     onReviewBlockersChange?.({
@@ -254,66 +265,79 @@ export default function BvdReviewWorkspace({
   }, [allUnmapped, possibleUnmapped, onReviewBlockersChange]);
 
   const activeSlot = useMemo(() => slotForRef(slots, selected), [slots, selected]);
-  const activeUnmapped = useMemo(
-    () => unmappedOnPage.find((u) => u.id === selectedUnmappedId) ?? null,
-    [unmappedOnPage, selectedUnmappedId],
-  );
+  const leftPaneReady = leftPageView?.id === currentPage;
 
   useEffect(() => {
-    if (activeUnmapped) {
-      setAmbiguousMsg(null);
-      const rect = {
-        left: activeUnmapped.left,
-        top: activeUnmapped.top,
-        width: activeUnmapped.width,
-        height: activeUnmapped.height,
-      };
+    if (!leftPaneReady) return;
+    const intent = pageTransitionIntentRef.current;
+    if (intent === "manual") {
       requestAnimationFrame(() => {
-        if (leftScrollRef.current && leftPageView) {
-          scrollContainerToHighlight(leftScrollRef.current, leftPageView.div, rect);
-        }
-        if (rightScrollRef.current && rightPageView) {
-          scrollContainerToHighlight(rightScrollRef.current, rightPageView.div, rect);
-        }
+        requestAnimationFrame(() => {
+          resetScrollContainersToOrigin(leftScrollRef.current);
+          pageTransitionIntentRef.current = null;
+        });
       });
       return;
     }
+    if (intent !== "field") return;
+    if (!activeSlot || activeSlot.ambiguous) return;
+    const rect = {
+      left: activeSlot.left,
+      top: activeSlot.top,
+      width: activeSlot.width,
+      height: activeSlot.height,
+    };
+    requestAnimationFrame(() => {
+      if (leftScrollRef.current && leftPageView) {
+        scrollContainerToHighlight(leftScrollRef.current, leftPageView.div, rect);
+      }
+      pageTransitionIntentRef.current = null;
+    });
+  }, [leftPaneReady, currentPage, slotGeneration, leftPageView, activeSlot]);
+
+  useEffect(() => {
+    if (pageTransitionIntentRef.current) return;
+    if (!leftPaneReady) return;
     if (!activeSlot || activeSlot.ambiguous) {
       setAmbiguousMsg(activeSlot?.ambiguous ? "Source location ambiguous" : null);
       return;
     }
+    if (activeSlot.page !== currentPage) return;
     setAmbiguousMsg(null);
     const rect = { left: activeSlot.left, top: activeSlot.top, width: activeSlot.width, height: activeSlot.height };
     requestAnimationFrame(() => {
       if (leftScrollRef.current && leftPageView) {
         scrollContainerToHighlight(leftScrollRef.current, leftPageView.div, rect);
       }
-      if (rightScrollRef.current && rightPageView) {
-        scrollContainerToHighlight(rightScrollRef.current, rightPageView.div, rect);
-      }
     });
-  }, [activeSlot, activeUnmapped, slotGeneration, leftPageView, rightPageView]);
+  }, [activeSlot, slotGeneration, leftPageView, leftPaneReady, currentPage]);
 
   const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
 
   const activeLineNumber = useMemo(() => {
-    if (selectedUnmappedId) return reviewLineForUnmapped(logicalRows, selectedUnmappedId);
     if (!selected) return null;
     const row = rowById.get(selected.fuelBvdId);
     if (!row) return null;
     return reviewLineForSelection(logicalRows, selected.fuelBvdId, selected.fieldName, row.row_type);
-  }, [selected, selectedUnmappedId, logicalRows, rowById]);
+  }, [selected, logicalRows, rowById]);
 
-  const selectRef = (ref: BvdFieldRef) => {
-    if (ref.page !== currentPage) setCurrentPage(ref.page);
-    setSelectedUnmappedId(null);
-    setSelected(ref);
+  const goToPageForField = (page: number) => {
+    if (page === currentPage) return;
+    pageTransitionIntentRef.current = "field";
+    setLeftPageView(null);
+    setCurrentPage(page);
   };
 
-  const selectUnmapped = (field: BvdUnmappedSourceField) => {
-    if (field.page !== currentPage) setCurrentPage(field.page);
+  const goToPageManual = (page: number) => {
+    pageTransitionIntentRef.current = "manual";
     setSelected(null);
-    setSelectedUnmappedId(field.id);
+    setLeftPageView(null);
+    setCurrentPage(page);
+  };
+
+  const selectRef = (ref: BvdFieldRef) => {
+    if (ref.page !== currentPage) goToPageForField(ref.page);
+    setSelected(ref);
   };
 
   const onTabFromField = (backward: boolean) => {
@@ -324,7 +348,7 @@ export default function BvdReviewWorkspace({
     if (idx < 0) idx = backward ? seq.length : -1;
     const next = backward ? seq[idx - 1] : seq[idx + 1];
     if (!next) return;
-    if (next.page !== currentPage) setCurrentPage(next.page);
+    if (next.page !== currentPage) goToPageForField(next.page);
     setSelected(next);
   };
 
@@ -350,10 +374,7 @@ export default function BvdReviewWorkspace({
           <button
             type="button"
             disabled={currentPage <= 1}
-            onClick={() => {
-              setSelected(null);
-              setCurrentPage((p) => p - 1);
-            }}
+            onClick={() => goToPageManual(currentPage - 1)}
             className="rounded border border-[var(--trk-border)] px-2 py-0.5 disabled:opacity-40"
           >
             Previous
@@ -362,10 +383,7 @@ export default function BvdReviewWorkspace({
           <button
             type="button"
             disabled={currentPage >= pageCount}
-            onClick={() => {
-              setSelected(null);
-              setCurrentPage((p) => p + 1);
-            }}
+            onClick={() => goToPageManual(currentPage + 1)}
             className="rounded border border-[var(--trk-border)] px-2 py-0.5 disabled:opacity-40"
           >
             Next
@@ -385,28 +403,19 @@ export default function BvdReviewWorkspace({
           >
             +
           </button>
-          <label className="flex items-center gap-1 text-[var(--trk-text-muted)]">
-            <input type="checkbox" checked={syncScroll} onChange={(e) => setSyncScroll(e.target.checked)} />
-            Sync scroll
-          </label>
         </div>
       </header>
 
       {ambiguousMsg ? <p className="px-3 py-1 text-xs text-[var(--trk-warning)]">{ambiguousMsg}</p> : null}
       {allUnmapped.length > 0 ? (
         <p className="px-3 py-1 text-xs text-[var(--trk-warning)]">
-          {allUnmapped.length} unmapped source field{allUnmapped.length === 1 ? "" : "s"} on this import — Process is
-          blocked until resolved or the BVD contract is extended.
-        </p>
-      ) : null}
-      {possibleUnmapped.length > 0 && allUnmapped.length === 0 ? (
-        <p className="px-3 py-1 text-xs text-[var(--trk-text-muted)]">
-          Possible unmapped source content on {possibleUnmapped.length} line(s) — review PDF context (low confidence).
+          ⚠ {allUnmapped.length} unmapped source field{allUnmapped.length === 1 ? "" : "s"} — Process blocked until
+          resolved.
         </p>
       ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-2">
-        <div className="flex min-h-0 min-w-0 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-col border-r border-[var(--trk-border)]">
           <p className="shrink-0 border-b border-[var(--trk-border)] px-2 py-1 text-[10px] font-semibold uppercase text-[var(--trk-text-muted)]">
             Original BVD PDF
           </p>
@@ -417,7 +426,7 @@ export default function BvdReviewWorkspace({
               unmappedOnPage={unmappedOnPage}
               activeLineNumber={activeLineNumber}
             />
-            <div className="relative min-h-0 min-w-0 flex-1">
+            <div ref={leftPaneRef} className="relative min-h-0 min-w-0 flex-1">
               <BvdPdfPagePane
                 pdfDocument={pdfDocument}
                 pageNumber={currentPage}
@@ -425,135 +434,46 @@ export default function BvdReviewWorkspace({
                 embedded
                 onTextLayerReady={onLeftTextLayer}
               />
-            {leftPageView ? (
-              <PageOverlay pageView={leftPageView}>
-                {slotsForRows.map((slot) => {
-                  const isSel = selected?.selectionKey === slot.selectionKey;
-                  return (
-                    <button
-                      key={`hit-${slot.selectionKey}`}
-                      type="button"
-                      onClick={() => selectRef(slot)}
-                      className={`absolute rounded border-2 ${
-                        isSel
-                          ? "border-[var(--trk-warning)] bg-[var(--trk-warning)]/30"
-                          : "border-transparent hover:border-[var(--trk-warning)]/40"
-                      }`}
-                      style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
-                    />
-                  );
-                })}
-                {unmappedOnPage.map((u) => {
-                  const isSel = selectedUnmappedId === u.id;
-                  return (
-                    <button
-                      key={`unmapped-hit-${u.id}`}
-                      type="button"
-                      title="Unmapped source field"
-                      onClick={() => selectUnmapped(u)}
-                      className={`absolute rounded border-2 bvd-unmapped-hit ${
-                        isSel ? "ring-2 ring-[var(--trk-warning)]" : "opacity-90"
-                      }`}
-                      style={{ left: u.left, top: u.top, width: u.width, height: Math.max(u.height, 24) }}
-                    />
-                  );
-                })}
-              </PageOverlay>
-            ) : null}
+              {leftPageView && leftPageView.id === currentPage ? (
+                <PageAlignedOverlay containerRef={leftPaneRef} pageView={leftPageView} pageNumber={currentPage}>
+                  {slotsForRows.map((slot) => {
+                    const isSel = selected?.selectionKey === slot.selectionKey;
+                    return (
+                      <button
+                        key={`hit-${slot.selectionKey}`}
+                        type="button"
+                        onClick={() => selectRef(slot)}
+                        className={`absolute rounded border-2 ${
+                          isSel
+                            ? "border-[var(--trk-warning)] bg-[var(--trk-warning)]/30"
+                            : "border-transparent hover:border-[var(--trk-warning)]/40"
+                        }`}
+                        style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
+                      />
+                    );
+                  })}
+                </PageAlignedOverlay>
+              ) : null}
             </div>
           </div>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <p className="shrink-0 border-b border-[var(--trk-border)] px-2 py-1 text-[10px] font-semibold uppercase text-[var(--trk-text-muted)]">
-            Digital BVD review
+        <div className="flex min-h-0 min-w-0 flex-col bg-[var(--trk-surface)]">
+          <p className="shrink-0 border-b border-[var(--trk-border)] px-2 py-1 text-[10px] font-semibold uppercase text-[var(--trk-warning)]">
+            TruckERP review
           </p>
-          <div ref={rightScrollRef} className="bvd-review-scroll-row bvd-pdf-scroll min-h-0 flex-1">
-            <ReviewLineGutter
-              lines={logicalLinesOnPage}
-              slots={slotsForRows}
-              unmappedOnPage={unmappedOnPage}
-              activeLineNumber={activeLineNumber}
-            />
-            <div className="relative min-h-0 min-w-0 flex-1">
-              <BvdPdfPagePane
-                pdfDocument={pdfDocument}
-                pageNumber={currentPage}
-                zoomPercent={zoomPercent}
-                embedded
-                pageOpacity={0.22}
-                onTextLayerReady={onRightTextLayer}
-              />
-            {rightPageView ? (
-              <PageOverlay pageView={rightPageView}>
-                {slotsForRows.map((slot) => {
-                  const row = rowById.get(slot.fuelBvdId);
-                  if (!row) return null;
-                  const fieldState = getReviewFieldState(row, slot.fieldName, slot);
-                  const captured = extractedValue(row, slot.fieldName);
-                  const value = reviewedValue(row, slot.fieldName, drafts);
-                  const corrected = isFieldCorrected(row, slot.fieldName, drafts);
-                  const isSel = selected?.selectionKey === slot.selectionKey;
-                  const showEditable = fieldState === "captured" || fieldState === "valid_blank";
-                  return (
-                    <div
-                      key={`mirror-${slot.selectionKey}`}
-                      className="absolute"
-                      style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
-                    >
-                      {showEditable ? (
-                        <input
-                          type="text"
-                          disabled={readOnly}
-                          value={value}
-                          placeholder={fieldState === "valid_blank" ? "Blank" : undefined}
-                          title={corrected ? `Original: ${captured}` : undefined}
-                          onChange={(e) => onDraft(row.id, slot.fieldName, e.target.value)}
-                          onFocus={() => selectRef(slot)}
-                          className={`h-full w-full bg-[var(--trk-surface)]/95 px-0.5 text-xs text-[var(--trk-text)] outline-none placeholder:text-[var(--trk-text-muted)]/40 ${
-                            isSel ? "ring-2 ring-[var(--trk-accent)]" : "border border-transparent hover:border-[var(--trk-border)]"
-                          } ${corrected ? "text-[var(--trk-warning)]" : ""}`}
-                        />
-                      ) : (
-                        <span
-                          className="flex h-full w-full items-center bg-[var(--trk-surface)]/95 px-0.5 text-[10px] text-[var(--trk-danger)] ring-1 ring-[var(--trk-danger)]/50"
-                          title="Not captured in TruckERP"
-                        >
-                          Not captured
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-                {unmappedOnPage.map((u) => {
-                  const isSel = selectedUnmappedId === u.id;
-                  return (
-                    <button
-                      key={`unmapped-mirror-${u.id}`}
-                      type="button"
-                      onClick={() => selectUnmapped(u)}
-                      className={`bvd-unmapped-mirror absolute text-left ${isSel ? "ring-2 ring-[var(--trk-warning)]" : ""}`}
-                      style={{
-                        left: u.left,
-                        top: u.top,
-                        width: Math.max(u.width, 120),
-                        minHeight: Math.max(u.height, 36),
-                      }}
-                    >
-                      <span className="block font-semibold text-[var(--trk-warning)]">Unmapped source field</span>
-                      <span className="block text-[var(--trk-text-muted)]">Label: {u.label}</span>
-                      {u.sourceValue ? (
-                        <span className="block">Source: {u.sourceValue}</span>
-                      ) : (
-                        <span className="block text-[var(--trk-text-muted)]">Source: —</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </PageOverlay>
-            ) : null}
-            </div>
-          </div>
+          <BvdReviewFormPane
+            rows={rows}
+            logicalRows={logicalRows}
+            currentPage={currentPage}
+            drafts={drafts}
+            readOnly={readOnly}
+            selected={selected}
+            activeLineNumber={activeLineNumber}
+            onSelect={selectRef}
+            onDraft={onDraft}
+            slots={slots}
+          />
         </div>
       </div>
 

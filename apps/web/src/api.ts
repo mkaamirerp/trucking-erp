@@ -4253,8 +4253,51 @@ export type FuelBvdImportListItem = {
   source_file_name?: string | null;
 };
 
-export async function listFuelBvdImports(): Promise<FuelBvdImportListItem[]> {
-  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports`);
+export type FuelBvdCompletedBasicLine = {
+  key: string;
+  label: string;
+  amount: string;
+};
+
+export type FuelBvdCompletedBasic = {
+  provider: string;
+  import_id: string;
+  invoice_number: string;
+  review_status: string;
+  read_only: boolean;
+  processed_at?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  card_number?: string | null;
+  unit_count: number;
+  unit_numbers: string[];
+  total_amount: string;
+  currency?: string | null;
+  categories: FuelBvdCompletedBasicLine[];
+  taxes: FuelBvdCompletedBasicLine[];
+};
+
+export async function listFuelBvdImports(options?: {
+  reviewStatus?: string;
+  excludeReviewStatus?: string;
+}): Promise<FuelBvdImportListItem[]> {
+  const params = new URLSearchParams();
+  if (options?.reviewStatus) params.set("review_status", options.reviewStatus);
+  if (options?.excludeReviewStatus) params.set("exclude_review_status", options.excludeReviewStatus);
+  const qs = params.toString();
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports${qs ? `?${qs}` : ""}`);
+  return handle(res);
+}
+
+export async function listFuelBvdCompletedHistory(): Promise<FuelBvdCompletedBasic[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/history`);
+  return handle(res);
+}
+
+export async function getFuelBvdCompletedBasic(importId: string): Promise<FuelBvdCompletedBasic> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/completed-basic`,
+  );
   return handle(res);
 }
 

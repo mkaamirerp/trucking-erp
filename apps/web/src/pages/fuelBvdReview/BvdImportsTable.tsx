@@ -15,7 +15,9 @@ export default function BvdImportsTable({ items, title, emptyMessage }: Props) {
       {title ? (
         <div>
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-          <p className="mt-1 text-xs text-gray-500">Latest upload per invoice — re-uploads replace older rows here.</p>
+          <p className="mt-1 text-xs text-gray-500">
+            One row per BVD document (invoice # + dates). Legacy duplicate uploads with the same identity collapse here.
+          </p>
         </div>
       ) : null}
       {items.length === 0 ? (
