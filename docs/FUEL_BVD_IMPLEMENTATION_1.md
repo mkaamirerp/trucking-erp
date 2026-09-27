@@ -925,3 +925,151 @@ UNIT CHECK
 ```
 
 The provider source evidence remains immutable throughout.
+
+---
+
+# 24. Fuel Process → Payroll handoff modes
+
+Fuel `Process` finalizes the Fuel-side import/review. It does **not** by itself mean that a driver or owner-operator deduction has already been applied to a payroll statement.
+
+TruckERP must support both small one-person fleets and companies where Fuel and Payroll are separate roles.
+
+## Tenant-level backend setting
+
+Use a tenant/company setting:
+
+```text
+fuel_payroll_handoff_mode
+```
+
+Locked values:
+
+```text
+PAYROLL_STAGED   = default
+IMMEDIATE        = one-man-show automatic handoff
+```
+
+This is a tenant-level operating policy, not an invoice-by-invoice choice.
+
+It must not be stored in immutable `fuel_bvd` source rows.
+
+## PAYROLL_STAGED — default
+
+This is the default because the person parsing Fuel may not have Payroll authority.
+
+Flow:
+
+```text
+Fuel user clicks Process
+      ↓
+Fuel import becomes accepted/final on the Fuel side
+      ↓
+eligible operational Fuel items become READY_FOR_PAYROLL
+      ↓
+NO payroll deduction is applied yet
+      ↓
+Payroll user later generates the applicable payroll/settlement cycle
+      ↓
+Payroll backend consumes the eligible READY_FOR_PAYROLL items
+      ↓
+those items are included exactly once
+```
+
+The Fuel user's job ends at successful Fuel Process.
+
+Fuel Process must not require the Fuel user to have Payroll permissions.
+
+## IMMEDIATE — one-man-show mode
+
+For a tenant where the same owner/person handles Fuel and Payroll, `IMMEDIATE` removes the second manual handoff step.
+
+Flow:
+
+```text
+Fuel user clicks Process
+      ↓
+Fuel import becomes accepted/final on the Fuel side
+      ↓
+eligible operational Fuel items are handed off immediately
+      ↓
+they become visible/available to the downstream payroll/settlement workflow
+      ↓
+actual payroll calculation, statement finalization, payment, and closed-cycle rules still belong to Payroll
+```
+
+`IMMEDIATE` does **not** mean Fuel Process may directly change a closed or paid payroll, create a payment, or bypass payroll-cycle controls.
+
+It means only that a separate person does not need to manually approve the Fuel-to-Payroll handoff.
+
+## Eligibility boundary
+
+Only Fuel operational items that are actually eligible under the applicable ownership/pay policy may enter the Payroll handoff.
+
+Do not infer payroll responsibility from BVD source text alone.
+
+In particular:
+
+```text
+Fuel-only external card-loan/use records
+```
+
+must remain entirely outside Payroll, HR, People, Drivers, and Dispatch.
+
+Company-paid/non-deductible Fuel items must not become driver deductions merely because the Fuel import was Processed.
+
+## Idempotency / no duplicate deduction
+
+A processed Fuel item must never be handed to Payroll twice.
+
+The operational handoff layer must support an idempotent lifecycle equivalent to:
+
+```text
+NOT_APPLICABLE
+READY_FOR_PAYROLL
+HANDED_OFF
+INCLUDED_IN_PAYROLL
+```
+
+Operational records should retain enough linkage to prove which Fuel source transaction produced which payroll/settlement item, for example:
+
+```text
+fuel_transaction_id
+payroll_handoff_status
+payroll_item_id          nullable
+handed_off_at
+handed_off_by
+```
+
+Exact field/table names may follow TruckERP conventions, but the one-source-item / one-payroll-consumption rule is locked.
+
+## Payroll cycle remains authoritative
+
+Even in `IMMEDIATE` mode, Payroll remains authoritative for:
+
+```text
+which pay cycle receives the item
+cutoff rules
+payee eligibility
+statement calculation
+approval
+partial payment
+final payment
+closed/paid-cycle protection
+```
+
+Fuel Process publishes accepted operational Fuel data; Payroll decides how and when eligible items affect a payroll/settlement statement.
+
+## Required tests for this rule
+
+At minimum prove:
+
+```text
+1. New tenant defaults to PAYROLL_STAGED.
+2. In PAYROLL_STAGED, Fuel Process succeeds without creating an applied payroll deduction.
+3. Eligible item becomes READY_FOR_PAYROLL and is consumed when Payroll generates the applicable cycle.
+4. In IMMEDIATE mode, eligible item is handed off automatically after Fuel Process.
+5. IMMEDIATE mode still does not modify closed/paid payroll.
+6. The same Fuel item cannot be included twice.
+7. Fuel-only external card-loan/use records never enter Payroll in either mode.
+8. Company-paid/non-deductible items do not become driver deductions.
+```
