@@ -323,15 +323,69 @@ async def check_bvd_pdf_duplicate_before_import(
     pdf_bytes: bytes,
     filename: str,
     extracted_rows: list[FuelBvdExtractedRow],
+    permanent_only: bool = False,
+    exclude_import_id: uuid.UUID | None = None,
 ) -> FuelDuplicateIngestionConflict | None:
     file_sha = sha256_hex(pdf_bytes)
     identity = document_identity_from_extracted_rows(extracted_rows)
-    sha_matches = await _load_bvd_sha_matches(db, tenant_id=tenant_id, file_sha256=file_sha)
-    invoice_matches: list[ExistingBvdImportMatch] = []
-    if identity.invoice_number:
-        invoice_matches = await _load_bvd_header_matches(
-            db, tenant_id=tenant_id, invoice_number=identity.invoice_number
+    if permanent_only:
+        sha_result = await db.execute(
+            select(FuelBvd).where(
+                FuelBvd.tenant_id == tenant_id,
+                FuelBvd.source_file_sha256 == file_sha,
+                FuelBvd.review_status == "SOURCE_REVIEWED",
+            )
         )
+        sha_matches: list[ExistingBvdImportMatch] = []
+        by_import: dict[uuid.UUID, ExistingBvdImportMatch] = {}
+        for row in sha_result.scalars().all():
+            if row.import_id not in by_import or row.row_type == "HEADER":
+                by_import[row.import_id] = ExistingBvdImportMatch(
+                    import_id=row.import_id,
+                    review_status=row.review_status,
+                    uploaded_at=row.uploaded_at,
+                    source_file_sha256=row.source_file_sha256,
+                    source_file_name=row.source_file_name,
+                    invoice_number=row.invoice_number,
+                    invoice_date=row.invoice_date,
+                    start_date=row.start_date,
+                    end_date=row.end_date,
+                )
+        sha_matches = list(by_import.values())
+        invoice_matches: list[ExistingBvdImportMatch] = []
+        if identity.invoice_number:
+            hdr_result = await db.execute(
+                select(FuelBvd).where(
+                    FuelBvd.tenant_id == tenant_id,
+                    FuelBvd.row_type == "HEADER",
+                    FuelBvd.invoice_number == identity.invoice_number,
+                    FuelBvd.review_status == "SOURCE_REVIEWED",
+                )
+            )
+            for row in hdr_result.scalars().all():
+                invoice_matches.append(
+                    ExistingBvdImportMatch(
+                        import_id=row.import_id,
+                        review_status=row.review_status,
+                        uploaded_at=row.uploaded_at,
+                        source_file_sha256=row.source_file_sha256,
+                        source_file_name=row.source_file_name,
+                        invoice_number=row.invoice_number,
+                        invoice_date=row.invoice_date,
+                        start_date=row.start_date,
+                        end_date=row.end_date,
+                    )
+                )
+    else:
+        sha_matches = await _load_bvd_sha_matches(db, tenant_id=tenant_id, file_sha256=file_sha)
+        invoice_matches = []
+        if identity.invoice_number:
+            invoice_matches = await _load_bvd_header_matches(
+                db, tenant_id=tenant_id, invoice_number=identity.invoice_number
+            )
+    if exclude_import_id is not None:
+        sha_matches = [m for m in sha_matches if m.import_id != exclude_import_id]
+        invoice_matches = [m for m in invoice_matches if m.import_id != exclude_import_id]
     return evaluate_bvd_pdf_duplicate(
         file_sha256=file_sha,
         filename=filename,

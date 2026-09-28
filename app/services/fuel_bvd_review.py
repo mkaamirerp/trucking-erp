@@ -11,8 +11,14 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fuel import FuelBvd, FuelBvdFieldCorrection
+from app.services.fuel_bvd_correction_validate import (
+    BvdCorrectionValidationError,
+    validate_reviewed_bvd_field,
+)
+from app.services.fuel_bvd_effective import build_effective_bvd_rows
 from app.services.fuel_bvd_import import BVD_SOURCE_FIELD_NAMES, fuel_bvd_row_to_dict
 from app.services.fuel_bvd_source_reconciliation import (
+    BvdSourceReconciliationResult,
     reconcile_bvd_source_rows,
 )
 
@@ -75,6 +81,12 @@ async def list_bvd_import_rows_for_review(
     tenant_id: int,
     import_id: uuid.UUID,
 ) -> list[dict[str, Any]]:
+    from app.services.fuel_bvd_stage import list_stage_rows_for_review
+
+    staged = await list_stage_rows_for_review(db, tenant_id=tenant_id, stage_id=import_id)
+    if staged:
+        return staged
+
     from app.services.fuel_bvd_import import list_bvd_import_rows
 
     rows = await list_bvd_import_rows(db, tenant_id=tenant_id, import_id=import_id)
@@ -93,6 +105,11 @@ async def list_bvd_import_rows_for_review(
     return [fuel_bvd_row_to_review_dict(r, corr_map.get(r.id)) for r in rows]
 
 
+def reconcile_bvd_import_review_rows(rows: list[dict[str, Any]]) -> BvdSourceReconciliationResult:
+    """Authoritative reconciliation: effective reviewed values, not raw fuel_bvd columns."""
+    return reconcile_bvd_source_rows(build_effective_bvd_rows(rows))
+
+
 async def get_bvd_source_reconciliation_report(
     db: AsyncSession,
     *,
@@ -102,7 +119,7 @@ async def get_bvd_source_reconciliation_report(
     rows = await list_bvd_import_rows_for_review(db, tenant_id=tenant_id, import_id=import_id)
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
-    return reconcile_bvd_source_rows(rows).to_dict()
+    return reconcile_bvd_import_review_rows(rows).to_dict()
 
 
 async def get_bvd_import_review_summary(
@@ -111,6 +128,26 @@ async def get_bvd_import_review_summary(
     tenant_id: int,
     import_id: uuid.UUID,
 ) -> dict[str, Any]:
+    from app.services.fuel_bvd_stage import get_active_stage, list_stage_rows_for_review
+
+    stage = await get_active_stage(db, tenant_id=tenant_id, stage_id=import_id)
+    if stage is not None:
+        rows = await list_stage_rows_for_review(db, tenant_id=tenant_id, stage_id=import_id)
+        header = next((r for r in rows if r.get("row_type") == "HEADER"), None)
+        transactions = [r for r in rows if r.get("row_type") == "TRANSACTION"]
+        correction_count = sum(len(r.get("field_corrections") or {}) for r in rows)
+        grand = next((r for r in rows if r.get("row_type") == "GRAND_TOTAL" and r.get("row_label") == "Grand Total"), None)
+        return {
+            "import_id": str(import_id),
+            "invoice_number": (header or {}).get("invoice_number"),
+            "row_count": len(rows),
+            "transaction_count": len(transactions),
+            "correction_count": correction_count,
+            "review_status": "IN_REVIEW" if correction_count else "PENDING",
+            "final_amount": (grand or {}).get("final_amount") or (grand or {}).get("final_amt"),
+            "currency": (grand or {}).get("cur"),
+        }
+
     rows = await list_bvd_import_rows_for_review(db, tenant_id=tenant_id, import_id=import_id)
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
@@ -141,6 +178,32 @@ async def get_bvd_import_review_summary(
     }
 
 
+async def _assert_bvd_import_review_editable(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    import_id: uuid.UUID,
+) -> None:
+    """Process (SOURCE_REVIEWED) locks corrections — no further review saves."""
+    locked = await db.execute(
+        select(FuelBvd.id)
+        .where(
+            FuelBvd.tenant_id == tenant_id,
+            FuelBvd.import_id == import_id,
+            FuelBvd.review_status == BVD_REVIEW_SOURCE_COMPLETE,
+        )
+        .limit(1)
+    )
+    if locked.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "BVD_REVIEW_LOCKED",
+                "message": "BVD source review is complete; corrections are locked.",
+            },
+        )
+
+
 async def save_bvd_import_review(
     db: AsyncSession,
     *,
@@ -150,6 +213,19 @@ async def save_bvd_import_review(
     corrections: list[dict[str, Any]],
 ) -> int:
     """Append correction rows; does not mutate fuel_bvd source columns."""
+    from app.services.fuel_bvd_stage import get_active_stage, save_stage_import_review
+
+    if await get_active_stage(db, tenant_id=tenant_id, stage_id=import_id) is not None:
+        return await save_stage_import_review(
+            db,
+            tenant_id=tenant_id,
+            stage_id=import_id,
+            reviewed_by=reviewed_by,
+            corrections=corrections,
+        )
+
+    await _assert_bvd_import_review_editable(db, tenant_id=tenant_id, import_id=import_id)
+
     if not corrections:
         await db.execute(
             update(FuelBvd)
@@ -187,6 +263,17 @@ async def save_bvd_import_review(
         reviewed_value = str(item.get("reviewed_value", ""))
         if reviewed_value == extracted_str:
             continue
+        try:
+            validate_reviewed_bvd_field(
+                field_name,
+                reviewed_value,
+                row_type=row.row_type,
+            )
+        except BvdCorrectionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "BVD_CORRECTION_INVALID", "field": exc.field_name, "message": str(exc)},
+            ) from exc
         db.add(
             FuelBvdFieldCorrection(
                 tenant_id=tenant_id,
@@ -218,14 +305,32 @@ async def process_bvd_import_review(
     import_id: uuid.UUID,
     reviewed_by: str,
     review_reason: str | None = None,
+    tenant_slug: str | None = None,
 ) -> dict[str, Any]:
     """Mark import source review complete — not settlement/posting."""
+    from app.services.fuel_bvd_stage import get_active_stage, process_stage_to_permanent
+
+    if await get_active_stage(db, tenant_id=tenant_id, stage_id=import_id) is not None:
+        if not tenant_slug:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="tenant_slug required for BVD stage process",
+            )
+        return await process_stage_to_permanent(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            stage_id=import_id,
+            reviewed_by=reviewed_by,
+            review_reason=review_reason,
+        )
+
     summary = await get_bvd_import_review_summary(db, tenant_id=tenant_id, import_id=import_id)
     if summary["review_status"] == BVD_REVIEW_SOURCE_COMPLETE:
         return summary
 
     rows = await list_bvd_import_rows_for_review(db, tenant_id=tenant_id, import_id=import_id)
-    reconciliation = reconcile_bvd_source_rows(rows)
+    reconciliation = reconcile_bvd_import_review_rows(rows)
     if not reconciliation.passed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

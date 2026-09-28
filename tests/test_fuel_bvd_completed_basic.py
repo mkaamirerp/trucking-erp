@@ -74,3 +74,12 @@ def test_completed_basic_is_read_only_when_source_reviewed() -> None:
     view = _project(_golden_rows())
     assert view["read_only"] is True
     assert view["review_status"] == "SOURCE_REVIEWED"
+
+
+def test_completed_basic_includes_due_date_and_grand_total_discount() -> None:
+    view = _project(_golden_rows())
+    assert view["card_number"] == "4237111"
+    assert view["due_date"] == "2026-07-30 23:59:59"
+    assert view["invoice_disc_amt"] == "0.00"
+    assert view["total_amount"] == "3,421.01"
+    assert view["currency"] == "CN"

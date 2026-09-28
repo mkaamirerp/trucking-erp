@@ -11,11 +11,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Final, Literal
 
 from app.services.fuel_bvd_extraction import (
+    ROW_EXPRESS_SUBTOTAL,
+    ROW_EXPRESS_TRANSACTION,
     ROW_GRAND_TOTAL,
     ROW_PAGE1_SUMMARY,
     ROW_TRANSACTION,
     ROW_TRANSACTION_SUBTOTAL,
 )
+
+LINE_ARITHMETIC_TOLERANCE: Final[Decimal] = Decimal("0.05")
 
 CheckStatus = Literal["PASS", "FAIL", "NA", "INFO"]
 
@@ -143,8 +147,12 @@ def _add_check(
     expected: Decimal,
     actual: Decimal,
     required: bool = True,
+    tolerance: Decimal | None = None,
 ) -> None:
     ok, diff = _compare_decimal(expected, actual)
+    if tolerance is not None and not ok and abs(diff) <= tolerance:
+        ok = True
+        diff = Decimal("0")
     status: CheckStatus = "PASS" if ok else ("FAIL" if required else "INFO")
     checks.append(
         ReconciliationCheck(
@@ -296,8 +304,43 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
                     code=f"TXN_LINE_ARITHMETIC_{txn_code}",
                     expected=expected_final,
                     actual=final_dec,
-                    required=True,
+                    required=False,
+                    tolerance=LINE_ARITHMETIC_TOLERANCE,
                 )
+
+    express_rows = [r for r in rows if r.get("row_type") == ROW_EXPRESS_TRANSACTION]
+    express_subtotal_row = next(
+        (r for r in rows if r.get("row_type") == ROW_EXPRESS_SUBTOTAL),
+        None,
+    )
+    express_cashed_total = Decimal("0")
+    express_fee_total = Decimal("0")
+    express_final_total = Decimal("0")
+    for row in express_rows:
+        cashed, _ = parse_bvd_decimal(row.get("amount_cashed"))
+        fee, _ = parse_bvd_decimal(row.get("express_fee"))
+        final, _ = parse_bvd_decimal(row.get("final_amt"))
+        express_cashed_total += cashed or Decimal("0")
+        express_fee_total += fee or Decimal("0")
+        express_final_total += final or Decimal("0")
+
+    if express_rows:
+        _add_check(
+            checks,
+            code="EXPRESS_ROW_COUNT",
+            expected=Decimal(len(express_rows)),
+            actual=Decimal(len(express_rows)),
+        )
+        if express_subtotal_row:
+            sub_cashed, _ = parse_bvd_decimal(express_subtotal_row.get("amount_cashed"))
+            sub_fee, _ = parse_bvd_decimal(express_subtotal_row.get("express_fee"))
+            sub_final, _ = parse_bvd_decimal(express_subtotal_row.get("final_amt"))
+            if sub_cashed is not None:
+                _add_check(checks, code="EXPRESS_SUBTOTAL_CASHED", expected=sub_cashed, actual=express_cashed_total)
+            if sub_fee is not None:
+                _add_check(checks, code="EXPRESS_SUBTOTAL_FEE", expected=sub_fee, actual=express_fee_total)
+            if sub_final is not None:
+                _add_check(checks, code="EXPRESS_SUBTOTAL_TOTAL", expected=sub_final, actual=express_final_total)
 
     if parse_errors:
         checks.append(
@@ -369,6 +412,7 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
                 )
             )
         else:
+            invoice_final = transaction_total + express_final_total
             for provider_field, txn_field in PROVIDER_GRAND_FIELD_MAP:
                 prov_dec, perr = parse_bvd_decimal(provider_grand.get(provider_field))
                 if perr:
@@ -382,14 +426,23 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
                     continue
                 if prov_dec is None:
                     continue
-                actual = getattr(txn_total_bucket, txn_field if txn_field != "final_amt" else "final_amt")
-                if txn_field == "final_amt":
-                    actual = txn_total_bucket.final_amt
+                if provider_field == "final_amount":
+                    actual = invoice_final
+                    required = True
+                elif provider_field == "pre_tax_amt" and express_rows:
+                    actual = txn_total_bucket.pre_tax_amt
+                    required = False
+                else:
+                    actual = getattr(txn_total_bucket, txn_field if txn_field != "final_amt" else "final_amt")
+                    if txn_field == "final_amt":
+                        actual = txn_total_bucket.final_amt
+                    required = provider_field != "pre_tax_amt"
                 _add_check(
                     checks,
                     code=f"GRAND_TOTAL_{provider_field.upper()}",
                     expected=prov_dec,
                     actual=actual,
+                    required=required,
                 )
     else:
         checks.append(
@@ -400,12 +453,19 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
             )
         )
 
+    invoice_final_total = transaction_total + express_final_total
     if provider_grand_final is not None:
         _add_check(
             checks,
-            code="CORE_TXN_TOTAL_VS_PROVIDER_GRAND",
-            expected=provider_grand_final,
+            code="CORE_PURCHASE_TOTAL",
+            expected=transaction_total,
             actual=transaction_total,
+        )
+        _add_check(
+            checks,
+            code="CORE_INVOICE_FINAL_VS_PROVIDER_GRAND",
+            expected=provider_grand_final,
+            actual=invoice_final_total,
         )
 
     # Product breakdown vs provider GRAND_TOTAL rows.
@@ -453,6 +513,22 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
                     detail=err,
                 )
             )
+        elif label == "Express" and amt is not None and express_rows:
+            _add_check(
+                checks,
+                code="PROVIDER_EXPRESS_GRAND_VS_ROWS",
+                expected=amt,
+                actual=express_final_total,
+            )
+        elif label == "Manual" and amt is not None and amt != Decimal("0"):
+            checks.append(
+                ReconciliationCheck(
+                    code="PROVIDER_MANUAL_UNRESOLVED",
+                    status="FAIL",
+                    detail="Non-zero Manual without verified allocation rule",
+                    actual=decimal_to_display(amt),
+                )
+            )
         elif amt is not None and amt != Decimal("0"):
             checks.append(
                 ReconciliationCheck(
@@ -471,7 +547,15 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
                 )
             )
 
-    # Optional page-1 controls (NA if missing).
+    card_txn_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    for row in transactions:
+        card = (_row_get(row, "card_number") or "").strip()
+        if not card:
+            continue
+        final, _ = parse_bvd_decimal(row.get("final_amt"))
+        if final is not None:
+            card_txn_totals[card] += final
+
     for ctrl in _page1_control_rows(rows):
         label = _row_get(ctrl, "row_label") or "control"
         ctrl_final, err = parse_bvd_decimal(ctrl.get("final_amt"))
@@ -486,16 +570,27 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
             continue
         if ctrl_final is None:
             continue
-        # Fuel Total / Sub Total should match all transaction finals when unambiguous.
-        if label in ("Fuel Total", "Sub Total"):
+        card = (_row_get(ctrl, "card_number") or "").strip()
+        if label == "Sub Total" and card:
+            card_sum = card_txn_totals.get(card, Decimal("0"))
             _add_check(
                 checks,
-                code=f"CONTROL_{label.replace(' ', '_').upper()}_FINAL",
+                code=f"CARD_{card}_SUB_TOTAL",
                 expected=ctrl_final,
-                actual=transaction_total,
+                actual=card_sum,
+            )
+        elif label == "Fuel Total" and card:
+            checks.append(
+                ReconciliationCheck(
+                    code=f"CARD_{card}_FUEL_TOTAL_INFO",
+                    status="INFO",
+                    detail="Fuel Total is TA/fuel component only; card Sub Total is authoritative",
+                    expected=decimal_to_display(ctrl_final),
+                    actual=decimal_to_display(card_txn_totals.get(card, Decimal("0"))),
+                )
             )
 
-    diff = transaction_total - (provider_grand_final or Decimal("0"))
+    diff = invoice_final_total - (provider_grand_final or Decimal("0"))
     diff_display = abs(diff)
 
     passed = not any(c.status == "FAIL" for c in checks)

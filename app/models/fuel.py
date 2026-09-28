@@ -641,6 +641,16 @@ class FuelBvd(Base):
     legend_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     legend_product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    express_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_tractor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_trailer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_cdl: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_trip_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amount_cashed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_fee: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payee_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     source_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_storage_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -702,3 +712,131 @@ class FuelBvdFieldCorrection(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FuelBvdImportStage(Base):
+    """Temporary BVD upload/review session before Process commits fuel_bvd."""
+
+    __tablename__ = "fuel_bvd_import_stage"
+    __table_args__ = (
+        Index("ix_fuel_bvd_import_stage_tenant", "tenant_id"),
+        Index("ix_fuel_bvd_import_stage_tenant_status", "tenant_id", "status"),
+        Index("ix_fuel_bvd_import_stage_tenant_sha", "tenant_id", "source_file_sha256"),
+        Index("ix_fuel_bvd_import_stage_tenant_invoice", "tenant_id", "invoice_number"),
+    )
+
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provider_code: Mapped[str] = mapped_column(Text, nullable=False, default="BVD")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="ACTIVE")
+    source_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_storage_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_warnings: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelBvdStageRow(Base):
+    """Parsed BVD row in temporary staging (promoted to fuel_bvd on Process)."""
+
+    __tablename__ = "fuel_bvd_stage_row"
+    __table_args__ = (
+        Index("ix_fuel_bvd_stage_row_tenant", "tenant_id"),
+        Index("ix_fuel_bvd_stage_row_tenant_stage", "tenant_id", "stage_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    row_type: Mapped[str] = mapped_column(Text, nullable=False)
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    card_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hst_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qst_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auth_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    driver_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    site_city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prov_st: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prod: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    billed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pre_tax_amt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disc_rate: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disc_amt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_amt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cur: Mapped[str | None] = mapped_column(Text, nullable=True)
+    row_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_amount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legend_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legend_product_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_tractor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_trailer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_cdl: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_trip_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amount_cashed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    express_fee: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payee_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class FuelBvdStageFieldCorrection(Base):
+    """Append-only corrections during staging (promoted on Process)."""
+
+    __tablename__ = "fuel_bvd_stage_field_correction"
+    __table_args__ = (
+        Index("ix_fuel_bvd_stage_field_correction_tenant_stage", "tenant_id", "stage_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    stage_row_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extracted_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

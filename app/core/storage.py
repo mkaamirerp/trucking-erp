@@ -568,6 +568,97 @@ async def save_fuel_bvd_import_bytes(
     )
 
 
+async def save_fuel_bvd_stage_bytes(
+    tenant_slug: str,
+    stage_id: str,
+    body: bytes,
+    *,
+    filename_hint: str,
+    content_type: str = "application/pdf",
+) -> StoredFile:
+    """Temporary BVD source file before Process commits permanent evidence."""
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "fuel_bvd_stage",
+        "stage",
+        stage_id,
+        body,
+        filename_hint=filename_hint,
+        content_type=content_type,
+    )
+
+
+def purge_fuel_bvd_stage_files(tenant_slug: str, stage_id: str) -> int:
+    """Delete all objects under fuel_bvd_stage/stage/{stage_id}/ (idempotent)."""
+    import shutil
+
+    backend = get_storage()
+    prefix = f"{tenant_slug}/fuel_bvd_stage/stage/{stage_id}/"
+    if isinstance(backend, LocalStorageBackend):
+        dir_path = backend._key_to_path(f"{prefix}__purge__", "fuel_bvd_stage", tenant_slug).parent
+        if not dir_path.is_dir():
+            return 0
+        count = sum(1 for p in dir_path.iterdir() if p.is_file())
+        shutil.rmtree(dir_path, ignore_errors=True)
+        return count
+    if isinstance(backend, S3StorageBackend):
+        full_prefix = backend._full_key(prefix, "fuel_bvd_stage", tenant_slug)
+        deleted = 0
+        token: str | None = None
+        while True:
+            kwargs: dict = {"Bucket": backend._bucket, "Prefix": full_prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = backend._client.list_objects_v2(**kwargs)
+            contents = resp.get("Contents") or []
+            if not contents:
+                break
+            keys = [{"Key": item["Key"]} for item in contents]
+            backend._client.delete_objects(Bucket=backend._bucket, Delete={"Objects": keys})
+            deleted += len(keys)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+        return deleted
+    return 0
+
+
+def purge_fuel_bvd_import_files(tenant_slug: str, import_id: str) -> int:
+    """Best-effort delete permanent import objects (orphan cleanup on failed commit)."""
+    import shutil
+
+    backend = get_storage()
+    prefix = f"{tenant_slug}/fuel_bvd/import/{import_id}/"
+    if isinstance(backend, LocalStorageBackend):
+        dir_path = backend._key_to_path(f"{prefix}__purge__", "fuel_bvd", tenant_slug).parent
+        if not dir_path.is_dir():
+            return 0
+        count = sum(1 for p in dir_path.iterdir() if p.is_file())
+        shutil.rmtree(dir_path, ignore_errors=True)
+        return count
+    if isinstance(backend, S3StorageBackend):
+        full_prefix = backend._full_key(prefix, "fuel_bvd", tenant_slug)
+        deleted = 0
+        token: str | None = None
+        while True:
+            kwargs: dict = {"Bucket": backend._bucket, "Prefix": full_prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = backend._client.list_objects_v2(**kwargs)
+            contents = resp.get("Contents") or []
+            if not contents:
+                break
+            keys = [{"Key": item["Key"]} for item in contents]
+            backend._client.delete_objects(Bucket=backend._bucket, Delete={"Objects": keys})
+            deleted += len(keys)
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+        return deleted
+    return 0
+
+
+
 def _content_type_from_suffix(storage_key: str, default: str = "application/octet-stream") -> str:
     suf = Path(storage_key).suffix.lower()
     if suf in (".jpg", ".jpeg"):

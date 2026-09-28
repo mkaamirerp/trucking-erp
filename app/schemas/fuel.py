@@ -666,6 +666,8 @@ class FuelBvdCompletedBasicOut(BaseModel):
     period_start: str | None = None
     period_end: str | None = None
     card_number: str | None = None
+    due_date: str | None = None
+    invoice_disc_amt: str = ""
     unit_count: int
     unit_numbers: list[str] = Field(default_factory=list)
     total_amount: str
@@ -725,6 +727,15 @@ class FuelBvdRowOut(BaseModel):
     final_amount: str | None = None
     legend_code: str | None = None
     legend_product_name: str | None = None
+    express_code: str | None = None
+    express_tractor: str | None = None
+    express_trailer: str | None = None
+    express_cdl: str | None = None
+    express_trip_number: str | None = None
+    amount_cashed: str | None = None
+    express_fee: str | None = None
+    payee_raw: str | None = None
+    notes_raw: str | None = None
 
     review_status: str | None = None
     reviewed_at: str | None = None
@@ -752,3 +763,15 @@ class FuelBvdReviewSummaryOut(BaseModel):
     review_status: str
     final_amount: str | None = None
     currency: str | None = None
+
+
+class FuelBvdSourceReconciliationOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    passed: bool
+    transaction_total: str
+    all_unit_total: str
+    provider_grand_total: str | None = None
+    difference: str
+    checks: list[dict[str, Any]] = Field(default_factory=list)
+    currencies_seen: list[str] = Field(default_factory=list)

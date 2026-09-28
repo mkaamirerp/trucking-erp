@@ -1,5 +1,15 @@
 # TruckERP TODO
 
+## BVD import staging — hardening (post-rollout)
+
+**Status:** TODO — follow-up only; do not side-track staging rollout.
+
+**Checklist:** `docs/FUEL_BVD_STAGING_HARDENING_TODO.md`
+
+Covers correction revert chains, malformed payloads, storage orphans, session-safe cleanup, Process retry after partial cleanup, TTL refresh, scheduled expiry purge, duplicate lookup efficiency, and related items.
+
+---
+
 ## Fuel Card Adjustments — provider-authorized corrections
 
 **Status:** TODO — future Fuel operationalization; do not pull into the current BVD source-review milestone.

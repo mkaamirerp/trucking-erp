@@ -34,7 +34,8 @@ export default function FuelReviewQueuePage() {
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Fuel source review</h1>
+          <Link to={OPS.FUEL} className="text-sm text-blue-700 hover:underline">← Fuel home</Link>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-900">Fuel source review</h1>
           <p className="mt-1 text-sm text-gray-600">
             Verify extracted transactions and controls against the original provider source.
             Completing review does not post, reconcile, or settle.

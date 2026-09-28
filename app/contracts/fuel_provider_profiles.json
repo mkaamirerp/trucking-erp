@@ -162,10 +162,10 @@
     },
     "digital_pdf_extraction": {
       "enabled": true,
-      "transaction_auth_line_pattern": "^A\\d{6,}-[A-Z]{2}\\b",
+      "transaction_auth_line_pattern": "^A\\d{6,}-[A-Z]{1,2}\\b",
       "site_name_city_split": {
-        "mode": "uppercase_prefix_until_mixed_case_else_pair",
-        "notes": "BVD digital PDF evidenced layout: Site Name is uppercase tokens until first mixed-case token begins Site City. Two all-caps tokens map to Site Name then Site City. Single token duplicates both. Three or more all-caps tokens without mixed case are ambiguous (no column boundaries in linearized text)."
+        "mode": "pdf_column_geometry",
+        "notes": "Site Name / Site City / Prov/ST from pdfminer LTTextLine x positions anchored on each transaction table header row (re-established on repeated headers). Linearized-text token splitting is not used for BVD transactions."
       }
     },
     "ai_forbidden_authority_fields_note": "Provider profile must not authorize truck_id, driver_id, payee, O/O pricing, settlement, or posting. Same forbidden list as Fuel AI contract.",

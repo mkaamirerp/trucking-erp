@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select, text
@@ -15,8 +16,17 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
 
 from app.core.db_url import to_async_pg_url
-from app.models.fuel import FuelBvd, FuelSourceControl, FuelTransaction
-from app.services.fuel_bvd_import import BVD_SOURCE_FIELD_NAMES, import_bvd_digital_pdf, list_bvd_import_rows
+from app.models.fuel import (
+    FuelBvd,
+    FuelBvdFieldCorrection,
+    FuelBvdImportStage,
+    FuelBvdStageFieldCorrection,
+    FuelBvdStageRow,
+    FuelSourceControl,
+    FuelTransaction,
+)
+from app.services.fuel_bvd_import import BVD_SOURCE_FIELD_NAMES, import_bvd_digital_pdf
+from app.services.fuel_bvd_review import list_bvd_import_rows_for_review, process_bvd_import_review
 from tests.support.integration_isolation import require_integration_tenant_database_url
 
 REPO = Path(__file__).resolve().parents[1]
@@ -73,22 +83,44 @@ async def test_bvd_import_postgres_roundtrip_matches_golden(monkeypatch: pytest.
     engine = create_async_engine(url, pool_pre_ping=True)
 
     async with engine.begin() as conn:
-        await conn.run_sync(lambda sync: FuelBvd.__table__.create(sync, checkfirst=True))
+        for table in (
+            FuelBvd.__table__,
+            FuelBvdFieldCorrection.__table__,
+            FuelBvdImportStage.__table__,
+            FuelBvdStageRow.__table__,
+            FuelBvdStageFieldCorrection.__table__,
+        ):
+            await conn.run_sync(lambda sync, t=table: t.create(sync, checkfirst=True))
 
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=True)
 
-    async def _fake_save(**_kwargs):
-        return "pytest/fuel_bvd/import/roundtrip/file.pdf", "sha-roundtrip"
+    async def _fake_stage_save(tenant_slug: str, stage_id: str, body: bytes, **kwargs):
+        from app.core.storage import StoredFile
+        from app.services.fuel_source_duplicate_gate import sha256_hex
 
+        key = f"pytest/fuel_bvd_stage/stage/{stage_id}/file.pdf"
+        return StoredFile(key, kwargs.get("filename_hint"), "application/pdf", len(body), sha256_hex(body))
+
+    async def _fake_perm_save(tenant_slug: str, import_id: str, body: bytes, **kwargs):
+        from app.core.storage import StoredFile
+        from app.services.fuel_source_duplicate_gate import sha256_hex
+
+        key = f"pytest/fuel_bvd/import/{import_id}/file.pdf"
+        return StoredFile(key, kwargs.get("filename_hint"), "application/pdf", len(body), sha256_hex(body))
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
+    monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", AsyncMock(return_value=0))
+    monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_import_bytes", _fake_perm_save)
     monkeypatch.setattr(
-        "app.services.fuel_bvd_import.save_bvd_pdf_to_storage",
-        _fake_save,
+        "app.services.fuel_bvd_stage.get_storage",
+        lambda: type("S", (), {"read_bytes": lambda *a, **k: BVD_PDF.read_bytes()})(),
     )
 
     import_id: uuid.UUID
     async with session_factory() as session:
         txn_before = await _safe_table_row_count(session, FuelTransaction.__tablename__)
         ctrl_before = await _safe_table_row_count(session, FuelSourceControl.__tablename__)
+        bvd_before = await _safe_table_row_count(session, FuelBvd.__tablename__)
         import_id, count, status = await import_bvd_digital_pdf(
             session,
             tenant_id=INTEGRATION_TENANT_ID,
@@ -99,12 +131,29 @@ async def test_bvd_import_postgres_roundtrip_matches_golden(monkeypatch: pytest.
         )
         assert status == "SUCCESS"
         assert count == 24
+        bvd_mid = await _safe_table_row_count(session, FuelBvd.__tablename__)
+        assert bvd_mid == bvd_before
         txn_after = await _safe_table_row_count(session, FuelTransaction.__tablename__)
         ctrl_after = await _safe_table_row_count(session, FuelSourceControl.__tablename__)
         assert txn_after == txn_before
         assert ctrl_after == ctrl_before
 
     async with session_factory() as session:
+        staged = await list_bvd_import_rows_for_review(
+            session, tenant_id=INTEGRATION_TENANT_ID, import_id=import_id
+        )
+        assert len(staged) == 24
+        await process_bvd_import_review(
+            session,
+            tenant_id=INTEGRATION_TENANT_ID,
+            import_id=import_id,
+            reviewed_by="pytest",
+            tenant_slug="pytest",
+        )
+
+    async with session_factory() as session:
+        from app.services.fuel_bvd_import import list_bvd_import_rows
+
         loaded = await list_bvd_import_rows(
             session, tenant_id=INTEGRATION_TENANT_ID, import_id=import_id
         )

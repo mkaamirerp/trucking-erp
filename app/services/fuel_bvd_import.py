@@ -72,6 +72,15 @@ BVD_SOURCE_FIELD_NAMES: tuple[str, ...] = (
     "final_amount",
     "legend_code",
     "legend_product_name",
+    "express_code",
+    "express_tractor",
+    "express_trailer",
+    "express_cdl",
+    "express_trip_number",
+    "amount_cashed",
+    "express_fee",
+    "payee_raw",
+    "notes_raw",
 )
 
 
@@ -146,92 +155,18 @@ async def import_bvd_digital_pdf(
     filename: str,
     uploaded_by: str | None,
 ) -> tuple[uuid.UUID, int, str]:
-    """Store PDF, extract, insert fuel_bvd rows, commit. Does not touch fuel_transactions."""
-    if not pdf_bytes.startswith(b"%PDF"):
-        raise FuelBvdImportError("NOT_PDF", "Upload must be a PDF file", http_status=400)
+    """Parse PDF into temporary staging only — fuel_bvd rows created on Process."""
+    from app.services.fuel_bvd_stage import create_bvd_import_stage_from_pdf
 
-    started = datetime.now(timezone.utc)
-
-    try:
-        extracted, extract_warnings, parser_version = extract_bvd_rows_from_digital_pdf(pdf_bytes)
-    except FuelBvdExtractionError as exc:
-        raise FuelBvdImportError(exc.code, exc.message, http_status=422) from exc
-
-    file_sha256 = sha256_hex(pdf_bytes)
-    duplicate = await check_bvd_pdf_duplicate_before_import(
+    stage_id, row_count, parse_status, _reused = await create_bvd_import_stage_from_pdf(
         db,
         tenant_id=tenant_id,
-        pdf_bytes=pdf_bytes,
-        filename=filename,
-        extracted_rows=extracted,
-    )
-    if duplicate is not None:
-        raise FuelBvdImportError(
-            duplicate.code,
-            duplicate.message,
-            http_status=duplicate.http_status,
-            detail=duplicate.to_detail(),
-        )
-
-    identity = document_identity_from_extracted_rows(extracted)
-    await acquire_bvd_import_advisory_lock(db, tenant_id=tenant_id, identity=identity)
-    duplicate = await check_bvd_pdf_duplicate_before_import(
-        db,
-        tenant_id=tenant_id,
-        pdf_bytes=pdf_bytes,
-        filename=filename,
-        extracted_rows=extracted,
-    )
-    if duplicate is not None:
-        raise FuelBvdImportError(
-            duplicate.code,
-            duplicate.message,
-            http_status=duplicate.http_status,
-            detail=duplicate.to_detail(),
-        )
-
-    import_id = uuid.uuid4()
-
-    storage_key, sha256 = await save_bvd_pdf_to_storage(
         tenant_slug=tenant_slug,
-        import_id=import_id,
         pdf_bytes=pdf_bytes,
         filename=filename,
+        uploaded_by=uploaded_by,
     )
-
-    completed = datetime.now(timezone.utc)
-    duration_ms = int((completed - started).total_seconds() * 1000)
-    parse_status = "SUCCESS"
-    warnings_payload = {"messages": extract_warnings} if extract_warnings else None
-
-    orm_rows: list[FuelBvd] = []
-    for order, item in enumerate(extracted, start=1):
-        row = FuelBvd(
-            tenant_id=tenant_id,
-            import_id=import_id,
-            row_type=item.row_type,
-            source_file_name=filename,
-            source_file_sha256=file_sha256,
-            source_storage_ref=storage_key,
-            source_page=item.source_page,
-            source_row_number=order,
-            uploaded_at=started,
-            uploaded_by=uploaded_by,
-            processing_started_at=started,
-            processing_completed_at=completed,
-            processing_duration_ms=duration_ms,
-            processed_by=uploaded_by,
-            parser_version=parser_version,
-            parse_status=parse_status,
-            review_status="PENDING",
-            extraction_warnings=warnings_payload,
-        )
-        _apply_extracted_fields(row, item.fields)
-        orm_rows.append(row)
-        db.add(row)
-
-    await db.commit()
-    return import_id, len(orm_rows), parse_status
+    return stage_id, row_count, parse_status
 
 
 async def list_bvd_import_headers(
@@ -260,14 +195,21 @@ async def list_bvd_import_headers(
         status = row.review_status or "PENDING"
         if review_status is not None and status != review_status:
             continue
-        if exclude_review_status is not None and status == exclude_review_status:
-            continue
+        # Do not apply exclude_review_status before identity dedupe — otherwise a
+        # SOURCE_REVIEWED sibling is dropped and a stale IN_REVIEW duplicate surfaces.
         filtered.append(row)
 
     if dedupe_by_document_identity:
         chosen = dedupe_bvd_headers_by_document_identity(tenant_id, filtered, limit=limit)
     else:
         chosen = filtered[:limit]
+
+    if exclude_review_status is not None:
+        chosen = [
+            row
+            for row in chosen
+            if (row.review_status or "PENDING") != exclude_review_status
+        ]
 
     return [header_row_to_list_item(row) for row in chosen]
 
@@ -294,7 +236,14 @@ async def get_bvd_import_storage_ref(
     *,
     tenant_id: int,
     import_id: uuid.UUID,
-) -> tuple[str, str | None] | None:
+) -> tuple[str, str | None, str | None] | None:
+    """Returns (storage_ref, filename, storage_module). module None means fuel_bvd."""
+    from app.services.fuel_bvd_stage import get_stage_storage_ref
+
+    staged = await get_stage_storage_ref(db, tenant_id=tenant_id, stage_id=import_id)
+    if staged is not None:
+        return staged[0], staged[1], "fuel_bvd_stage"
+
     result = await db.execute(
         select(FuelBvd.source_storage_ref, FuelBvd.source_file_name)
         .where(FuelBvd.tenant_id == tenant_id, FuelBvd.import_id == import_id)
@@ -303,7 +252,7 @@ async def get_bvd_import_storage_ref(
     row = result.first()
     if row is None:
         return None
-    return row[0], row[1]
+    return row[0], row[1], None
 
 
 async def count_bvd_rows_for_tenant(db: AsyncSession, tenant_id: int) -> int:

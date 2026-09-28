@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { FuelBvdRow } from "../../api";
-import { getReviewFieldState } from "./bvdFieldCapture";
+import { getReviewFieldState, isFieldInReviewContract } from "./bvdFieldCapture";
 import {
   buildFormSectionsForPage,
   fieldLabel,
@@ -27,6 +27,8 @@ type Props = {
   onSelect: (ref: BvdFieldRef) => void;
   onDraft: (rowId: number, field: string, value: string) => void;
   slots: BvdFieldSlot[];
+  /** Results-first review without PDF slot geometry — editable contract fields. */
+  resultsFirstNoSlots?: boolean;
 };
 
 export default function BvdReviewFormPane({
@@ -40,6 +42,7 @@ export default function BvdReviewFormPane({
   onSelect,
   onDraft,
   slots,
+  resultsFirstNoSlots = false,
 }: Props) {
   const sections: BvdReviewFormSection[] = buildFormSectionsForPage(rows, logicalRows, currentPage);
   const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
@@ -75,7 +78,10 @@ export default function BvdReviewFormPane({
                 const row = section.row;
                 if (!row) return null;
                 const fieldState = getReviewFieldState(row, ref.fieldName, slotForRef(slots, ref));
-                const showEditable = fieldState === "captured" || fieldState === "valid_blank";
+                const showEditable =
+                  resultsFirstNoSlots && row
+                    ? isFieldInReviewContract(row, ref.fieldName)
+                    : fieldState === "captured" || fieldState === "valid_blank";
                 const value = reviewedValue(row, ref.fieldName, drafts);
                 const corrected = isFieldCorrected(row, ref.fieldName, drafts);
                 const captured = extractedValue(row, ref.fieldName);

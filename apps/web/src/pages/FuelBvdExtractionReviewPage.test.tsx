@@ -6,9 +6,7 @@ import type { FuelBvdRow } from "../api";
 
 const apiMocks = vi.hoisted(() => ({
   getFuelBvdImportRows: vi.fn(),
-  saveFuelBvdReview: vi.fn(),
-  getFuelBvdImportSummary: vi.fn(),
-  processFuelBvdImport: vi.fn(),
+  getFuelBvdSourceReconciliation: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => {
@@ -16,42 +14,27 @@ vi.mock("../api", async (importOriginal) => {
   return {
     ...actual,
     getFuelBvdImportRows: apiMocks.getFuelBvdImportRows,
-    saveFuelBvdReview: apiMocks.saveFuelBvdReview,
-    getFuelBvdImportSummary: apiMocks.getFuelBvdImportSummary,
-    processFuelBvdImport: apiMocks.processFuelBvdImport,
+    getFuelBvdSourceReconciliation: apiMocks.getFuelBvdSourceReconciliation,
   };
 });
 
-vi.mock("./fuelBvdReview/BvdParsedStatementView", () => ({
-  default: () => <div data-testid="bvd-parsed-view">statement</div>,
+vi.mock("./fuelBvdReview/FuelBvdProcessingWorkspace", () => ({
+  default: () => <div data-testid="fuel-processing-workspace">workspace</div>,
 }));
-
-vi.mock("./fuelBvdReview/BvdPdfPopupModal", () => ({
-  default: () => null,
-}));
-
-vi.mock("./fuelBvdReview/loadBvdPdfDocument", () => ({
-  loadBvdPdfDocument: vi.fn(),
-}));
-
-const assignMock = vi.hoisted(() => vi.fn());
-
-vi.stubGlobal("location", { ...window.location, assign: assignMock });
 
 import FuelBvdExtractionReviewPage from "./FuelBvdExtractionReviewPage";
-import { buildBvdUploadCompletedPath } from "./fuelBvdReview/bvdUploadCompletion";
 
 function headerRow(status: string): FuelBvdRow {
   return {
     id: 1,
-    import_id: "import-972201",
+    import_id: "import-locked",
     row_type: "HEADER",
     review_status: status,
     invoice_number: "972201",
   } as FuelBvdRow;
 }
 
-describe("FuelBvdExtractionReviewPage actions", () => {
+describe("FuelBvdExtractionReviewPage (route compatibility)", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -60,10 +43,7 @@ describe("FuelBvdExtractionReviewPage actions", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     apiMocks.getFuelBvdImportRows.mockReset();
-    apiMocks.saveFuelBvdReview.mockReset();
-    apiMocks.getFuelBvdImportSummary.mockReset();
-    apiMocks.processFuelBvdImport.mockReset();
-    assignMock.mockReset();
+    apiMocks.getFuelBvdSourceReconciliation.mockResolvedValue({ passed: true, checks: [] });
   });
 
   afterEach(() => {
@@ -71,8 +51,9 @@ describe("FuelBvdExtractionReviewPage actions", () => {
     container.remove();
   });
 
-  function renderPage() {
-    act(() => {
+  it("renders workspace for IN_REVIEW import", async () => {
+    apiMocks.getFuelBvdImportRows.mockResolvedValue([headerRow("IN_REVIEW")]);
+    await act(async () => {
       root.render(
         <MemoryRouter initialEntries={["/fuel/bvd/import-972201/review"]}>
           <Routes>
@@ -80,134 +61,24 @@ describe("FuelBvdExtractionReviewPage actions", () => {
           </Routes>
         </MemoryRouter>,
       );
-    });
-  }
-
-  function clickButton(label: string) {
-    const btn = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes(label),
-    );
-    expect(btn).toBeTruthy();
-    act(() => {
-      btn!.click();
-    });
-  }
-
-  it("Save review calls API with zero corrections and shows success", async () => {
-    apiMocks.getFuelBvdImportRows
-      .mockResolvedValueOnce([headerRow("PENDING")])
-      .mockResolvedValueOnce([headerRow("IN_REVIEW")]);
-    apiMocks.saveFuelBvdReview.mockResolvedValue({ saved_corrections: 0 });
-
-    renderPage();
-    await act(async () => {
       await Promise.resolve();
     });
-
-    clickButton("Save review");
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(apiMocks.saveFuelBvdReview).toHaveBeenCalledWith("import-972201", []);
-    expect(container.textContent).toContain("Review saved");
+    expect(container.querySelector('[data-testid="fuel-processing-workspace"]')).toBeTruthy();
   });
 
-  it("Process calls process API on confirm", async () => {
-    apiMocks.getFuelBvdImportRows
-      .mockResolvedValueOnce([headerRow("IN_REVIEW")])
-      .mockResolvedValueOnce([headerRow("SOURCE_REVIEWED")]);
-    apiMocks.getFuelBvdImportSummary.mockResolvedValue({
-      import_id: "import-972201",
-      invoice_number: "972201",
-      row_count: 24,
-      transaction_count: 2,
-      correction_count: 0,
-      review_status: "IN_REVIEW",
-    });
-    apiMocks.processFuelBvdImport.mockResolvedValue({
-      import_id: "import-972201",
-      invoice_number: "972201",
-      row_count: 24,
-      transaction_count: 2,
-      correction_count: 0,
-      review_status: "SOURCE_REVIEWED",
-    });
-    renderPage();
+  it("redirects SOURCE_REVIEWED review URL to detail", async () => {
+    apiMocks.getFuelBvdImportRows.mockResolvedValue([headerRow("SOURCE_REVIEWED")]);
     await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/fuel/bvd/import-locked/review"]}>
+          <Routes>
+            <Route path="/fuel/bvd/:importId/review" element={<FuelBvdExtractionReviewPage />} />
+            <Route path="/fuel/bvd/:importId/detail" element={<div data-testid="fuel-bvd-detail-page">detail</div>} />
+          </Routes>
+        </MemoryRouter>,
+      );
       await Promise.resolve();
     });
-
-    clickButton("Process");
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    clickButton("Confirm process");
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(apiMocks.processFuelBvdImport).toHaveBeenCalledWith("import-972201");
-    expect(assignMock).toHaveBeenCalledWith(buildBvdUploadCompletedPath("972201"));
-  });
-
-  it("shows save review API errors", async () => {
-    apiMocks.getFuelBvdImportRows.mockResolvedValue([headerRow("PENDING")]);
-    apiMocks.saveFuelBvdReview.mockRejectedValue(new Error("Network error"));
-
-    renderPage();
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    clickButton("Save review");
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(container.textContent).toContain("Network error");
-  });
-
-  it("shows reconciliation failure from process API", async () => {
-    apiMocks.getFuelBvdImportRows.mockResolvedValue([headerRow("IN_REVIEW")]);
-    apiMocks.getFuelBvdImportSummary.mockResolvedValue({
-      import_id: "import-972201",
-      invoice_number: "972201",
-      row_count: 24,
-      transaction_count: 2,
-      correction_count: 0,
-      review_status: "IN_REVIEW",
-    });
-    const err = new Error(
-      JSON.stringify({
-        detail: {
-          code: "BVD_SOURCE_RECONCILIATION_FAILED",
-          message: "Required BVD source validations did not pass",
-          reconciliation: {
-            checks: [{ code: "CORE_TXN_TOTAL_VS_PROVIDER_GRAND", status: "FAIL", difference: "0.01" }],
-          },
-        },
-      }),
-    );
-    (err as Error & { status?: number }).status = 400;
-    apiMocks.processFuelBvdImport.mockRejectedValue(err);
-
-    renderPage();
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    clickButton("Process");
-    await act(async () => {
-      await Promise.resolve();
-    });
-    clickButton("Confirm process");
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(container.textContent).toContain("Source reconciliation failed");
-    expect(container.textContent).toContain("CORE_TXN_TOTAL_VS_PROVIDER_GRAND");
+    expect(container.querySelector('[data-testid="fuel-bvd-detail-page"]')).toBeTruthy();
   });
 });

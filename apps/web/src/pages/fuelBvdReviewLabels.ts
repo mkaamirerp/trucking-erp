@@ -39,7 +39,26 @@ export const BVD_FIELD_LABELS: Record<string, string> = {
   final_amount: "FINAL AMOUNT",
   legend_code: "Code",
   legend_product_name: "Product Name",
+  express_code: "Express #",
+  express_tractor: "Unit",
+  amount_cashed: "Amount",
+  express_fee: "Fee",
+  payee_raw: "Provider Reason",
 };
+
+export const BVD_EXPRESS_COLUMNS: { field: string; label: string }[] = [
+  { field: "transaction_date", label: "Date" },
+  { field: "express_tractor", label: "Unit" },
+  { field: "driver_name", label: "Driver" },
+  { field: "express_code", label: "Express #" },
+  { field: "auth_code", label: "Auth #" },
+  { field: "amount_cashed", label: "Amount" },
+  { field: "express_fee", label: "Fee" },
+  { field: "final_amt", label: "Total" },
+  { field: "cur", label: "Currency" },
+  { field: "payee_raw", label: "Provider Reason" },
+  { field: "_category", label: "Category" },
+];
 
 export const BVD_TRANSACTION_COLUMNS: { field: string; label: string }[] = [
   "auth_code",

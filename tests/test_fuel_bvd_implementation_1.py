@@ -12,6 +12,7 @@ from app.services.fuel_digital_pdf_extract import (
     FuelDigitalPdfExtractError,
     parse_header_datetime_tokens,
     parse_money_tokens_from_right,
+    _parse_subtotal_line,
     _split_site_name_city,
 )
 from app.services.fuel_bvd_extraction import (
@@ -123,23 +124,41 @@ def test_fuel_bvd_row_to_dict_reads_orm_text() -> None:
 
 @pytest.mark.asyncio
 async def test_import_persists_fuel_bvd_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    added: list[FuelBvd] = []
+    from app.models.fuel import FuelBvdStageRow
+
+    added: list = []
 
     class _Session:
-        def add(self, obj: FuelBvd) -> None:
+        def add(self, obj) -> None:
             added.append(obj)
+
+        async def execute(self, *_a, **_k):
+            class _Scalars:
+                def all(self):
+                    return []
+
+            class _Result:
+                def scalars(self):
+                    return _Scalars()
+
+            return _Result()
 
         async def commit(self) -> None:
             for i, row in enumerate(added, start=1):
-                row.id = i
+                if hasattr(row, "id") and row.id is None:
+                    row.id = i
 
-    async def _fake_save(**_kwargs):
-        return "tenant/demo/fuel_bvd/import/x/file.pdf", "abc123"
+    async def _fake_stage_save(tenant_slug: str, stage_id: str, body: bytes, **kwargs):
+        from app.core.storage import StoredFile
+        from app.services.fuel_source_duplicate_gate import sha256_hex
 
-    monkeypatch.setattr(
-        "app.services.fuel_bvd_import.save_bvd_pdf_to_storage",
-        _fake_save,
-    )
+        return StoredFile("tenant/demo/fuel_bvd_stage/x.pdf", kwargs.get("filename_hint"), "application/pdf", len(body), sha256_hex(body))
+
+    async def _purge_zero(*_a, **_k):
+        return 0
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
+    monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", _purge_zero)
 
     import_id, count, status = await import_bvd_digital_pdf(
         _Session(),
@@ -151,11 +170,11 @@ async def test_import_persists_fuel_bvd_only(monkeypatch: pytest.MonkeyPatch) ->
     )
     assert status == "SUCCESS"
     assert count == 24
-    assert len(added) == 24
-    assert all(isinstance(r, FuelBvd) for r in added)
-    assert all(r.import_id == import_id for r in added)
-    assert added[0].row_type == ROW_HEADER
-    assert added[1].pre_tax_amt == "1,425.63"
+    stage_rows = [r for r in added if isinstance(r, FuelBvdStageRow)]
+    assert len(stage_rows) == 24
+    assert not any(isinstance(r, FuelBvd) for r in added)
+    assert stage_rows[0].row_type == ROW_HEADER
+    assert stage_rows[1].pre_tax_amt == "1,425.63"
 
     # Regression: import module must not touch canonical fuel tables.
     assert FuelTransaction.__tablename__ == "fuel_transactions"
@@ -208,10 +227,26 @@ def test_parse_money_tokens_len_eight_branch() -> None:
     assert fields["CUR"] == "CN"
 
 
+def test_parse_subtotal_three_token_abbreviated() -> None:
+    fields = _parse_subtotal_line("SUBTOTAL 1643.78 33 1676.78", with_product=False)
+    assert fields["row_label"] == "SUBTOTAL"
+    assert fields["Pre Tax AMT"] == "1643.78"
+    assert fields["HST"] == "33"
+    assert fields["Final AMT"] == "1676.78"
+    assert fields["QTY"] is None
+
+
 def test_site_name_city_three_all_caps_is_ambiguous() -> None:
     profile = load_provider_profile("BVD")
+    legacy = dict(profile)
+    legacy["digital_pdf_extraction"] = {
+        **profile["digital_pdf_extraction"],
+        "site_name_city_split": {
+            "mode": "uppercase_prefix_until_mixed_case_else_pair",
+        },
+    }
     with pytest.raises(FuelDigitalPdfExtractError) as exc:
-        _split_site_name_city(["FOO", "BAR", "BAZ"], profile=profile)
+        _split_site_name_city(["FOO", "BAR", "BAZ"], profile=legacy)
     assert exc.value.code == "SITE_NAME_CITY_AMBIGUOUS"
 
 

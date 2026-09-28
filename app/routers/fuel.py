@@ -44,6 +44,7 @@ from app.schemas.fuel import (
     FuelBvdReviewSaveIn,
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
+    FuelBvdSourceReconciliationOut,
     FuelReconciliationOut,
     FuelReconciliationRunIn,
     FuelReviewConfirmIn,
@@ -497,6 +498,23 @@ async def list_bvd_import_rows(
     return [FuelBvdRowOut(**r) for r in rows]
 
 
+@router.get(
+    "/bvd/imports/{import_id}/source-reconciliation",
+    response_model=FuelBvdSourceReconciliationOut,
+)
+async def get_bvd_import_source_reconciliation(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    report = await bvd_review_service.get_bvd_source_reconciliation_report(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    return FuelBvdSourceReconciliationOut(**report)
+
+
 @router.get("/bvd/imports/{import_id}/summary", response_model=FuelBvdReviewSummaryOut)
 async def get_bvd_import_summary(
     import_id: UUID,
@@ -534,16 +552,44 @@ async def process_bvd_import_review(
     import_id: UUID,
     user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
     tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     reviewed_by = str(user.user_id) if user.user_id is not None else user.email
-    summary = await bvd_review_service.process_bvd_import_review(
+    try:
+        summary = await bvd_review_service.process_bvd_import_review(
+            db,
+            tenant_id=tenant_id,
+            import_id=import_id,
+            reviewed_by=reviewed_by,
+            tenant_slug=tenant_slug,
+        )
+    except FuelBvdImportError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message, **exc.detail}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return FuelBvdReviewSummaryOut(**summary)
+
+
+@router.post("/bvd/imports/{import_id}/discard")
+async def discard_bvd_import_stage(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    from app.services.fuel_bvd_stage import discard_bvd_import_stage
+
+    discarded = await discard_bvd_import_stage(
         db,
         tenant_id=tenant_id,
-        import_id=import_id,
-        reviewed_by=reviewed_by,
+        tenant_slug=tenant_slug,
+        stage_id=import_id,
     )
-    return FuelBvdReviewSummaryOut(**summary)
+    if not discarded:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD stage not found")
+    return {"discarded": True}
 
 
 @router.get("/bvd/imports/{import_id}/document")
@@ -560,10 +606,11 @@ async def get_bvd_import_document(
     )
     if ref is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD import not found")
-    storage_key, filename = ref
+    storage_key, filename, storage_module = ref
+    module = storage_module or bvd_import_service.FUEL_BVD_STORAGE_MODULE
     return serve_file(
         storage_key,
-        bvd_import_service.FUEL_BVD_STORAGE_MODULE,
+        module,
         tenant_slug=tenant_slug,
         filename=filename or "bvd.pdf",
         content_type="application/pdf",

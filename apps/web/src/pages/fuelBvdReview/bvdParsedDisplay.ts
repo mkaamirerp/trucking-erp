@@ -20,3 +20,12 @@ export function displayCell(row: FuelBvdRow, field: string): string {
   if (v === null || v === undefined || v === "") return "";
   return String(v);
 }
+
+/** Finalized/reviewed operational value for Fuel UI (parser column + correction overlay). */
+export function operationalCell(row: FuelBvdRow, field: string): string {
+  const reviewed = row.field_corrections?.[field]?.reviewed_value;
+  if (reviewed !== undefined && reviewed !== null && String(reviewed).length > 0) {
+    return String(reviewed);
+  }
+  return displayCell(row, field);
+}

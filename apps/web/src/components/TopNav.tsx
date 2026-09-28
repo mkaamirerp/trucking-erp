@@ -23,13 +23,14 @@ const fleetLinks = [
   { label: "Brokers", to: OPS.BROKERS },
 ];
 
-const financeLinks = [
+export const financeLinks = [
+  { label: "Fuel", to: OPS.FUEL },
   { label: "Payroll", to: OPS.PAY_RUNS },
   { label: "Cards", to: OPS.PAY_PERIODS },
   { label: "Docs", to: OPS.DOCUMENTS },
 ];
 
-const settingsGroups = [
+export const settingsGroups = [
   {
     label: "Company",
     items: [
@@ -43,10 +44,6 @@ const settingsGroups = [
     items: [
       { label: "Email", to: ADMIN.SETTINGS_EMAIL },
       { label: "ELD", to: ADMIN.INTEGRATIONS_ELD },
-      { label: "Fuel", to: ADMIN.INTEGRATIONS_FUEL },
-      { label: "Fuel Providers", to: OPS.FUEL_PROVIDERS },
-      { label: "Fuel Review", to: OPS.FUEL_REVIEW },
-      { label: "BVD Extract", to: OPS.FUEL_BVD_UPLOAD },
     ],
   },
   {
@@ -87,11 +84,9 @@ function usePageLabel(): string {
   if (pathname.startsWith("/admin/broker-intake")) return "Broker Intake";
   if (pathname.startsWith("/admin/settings/email")) return "Email Settings";
   if (pathname.startsWith("/admin/integrations/eld")) return "ELD";
-  if (pathname.startsWith("/admin/integrations/fuel")) return "Fuel";
-  if (pathname.startsWith("/fuel/history")) return "Fuel History";
-  if (pathname.startsWith("/fuel/review")) return "Fuel Review";
-  if (pathname.startsWith("/fuel/bvd") && pathname.endsWith("/detail")) return "Fuel Detail";
-  if (pathname.startsWith("/fuel/providers")) return "Fuel Providers";
+  if (pathname.startsWith("/admin/integrations/fuel")) return "Fuel / Provider Settings";
+  if (pathname === OPS.FUEL || pathname === `${OPS.FUEL}/`) return "Fuel";
+  if (pathname.startsWith("/fuel")) return "Fuel";
   if (pathname.startsWith("/admin/onboarding")) return "Onboarding Settings";
   if (pathname.startsWith("/admin/documents")) return "Document Rules";
   if (pathname.startsWith("/profile")) return "My Profile";

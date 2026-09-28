@@ -25,6 +25,11 @@ export function formatFuelBvdReviewActionError(err: unknown): string {
     }
     if (detail && typeof detail === "object") {
       const d = detail as Record<string, unknown>;
+      if (d.code === "BVD_REVIEW_LOCKED") {
+        return typeof d.message === "string"
+          ? d.message
+          : "BVD source review is complete; corrections are locked.";
+      }
       if (d.code === "BVD_SOURCE_RECONCILIATION_FAILED") {
         const parts: string[] = ["Source reconciliation failed"];
         if (typeof d.message === "string") {

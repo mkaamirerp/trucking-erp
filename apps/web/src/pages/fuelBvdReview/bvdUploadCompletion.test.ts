@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildBvdUploadCompletedPath, readBvdUploadCompletion } from "./bvdUploadCompletion";
+import { buildFuelProcessedReturnPath, readFuelProcessedReturn } from "./bvdUploadCompletion";
 
-describe("bvdUploadCompletion", () => {
-  it("builds and reads completed upload query", () => {
-    const path = buildBvdUploadCompletedPath("972201");
-    expect(path).toContain("bvdCompleted=1");
+describe("fuel processed return", () => {
+  it("builds and reads post-process Fuel home query", () => {
+    const path = buildFuelProcessedReturnPath("972201");
+    expect(path).toContain("/fuel");
+    expect(path).toContain("fuelProcessed=1");
     expect(path).toContain("invoice=972201");
-    expect(readBvdUploadCompletion(path.split("?")[1] ?? "")).toEqual({ invoiceNumber: "972201" });
+    expect(readFuelProcessedReturn(path.split("?")[1] ?? "")).toEqual({ invoiceNumber: "972201" });
   });
 });

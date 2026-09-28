@@ -42,10 +42,10 @@ import AdminIntegrationsPage from "./pages/AdminIntegrationsPage";
 import FuelProviderConnectionsPage from "./pages/FuelProviderConnectionsPage";
 import FuelReviewQueuePage from "./pages/FuelReviewQueuePage";
 import FuelReviewWorkspacePage from "./pages/FuelReviewWorkspacePage";
-import FuelBvdUploadPage from "./pages/FuelBvdUploadPage";
 import FuelBvdExtractionReviewPage from "./pages/FuelBvdExtractionReviewPage";
 import FuelBvdHistoryPage from "./pages/FuelBvdHistoryPage";
 import FuelBvdFullDetailPage from "./pages/FuelBvdFullDetailPage";
+import FuelMainPage from "./pages/FuelMainPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
 import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
@@ -310,6 +310,14 @@ function App() {
       <Route path="/operations/driver-onboarding-review" element={<Layout><DriverOnboardingAdminListPage /></Layout>} />
       <Route path="/operations/driver-onboarding-review/:id" element={<Layout><DriverOnboardingAdminDetailPage /></Layout>} />
       <Route
+        path="/fuel"
+        element={
+          <Layout>
+            <FuelMainPage />
+          </Layout>
+        }
+      />
+      <Route
         path="/fuel/providers"
         element={
           <AdminRouteGuard>
@@ -339,24 +347,13 @@ function App() {
           </AdminRouteGuard>
         }
       />
-      <Route
-        path="/fuel/bvd/upload"
-        element={
-          <AdminRouteGuard>
-            <Layout>
-              <FuelBvdUploadPage />
-            </Layout>
-          </AdminRouteGuard>
-        }
-      />
+      <Route path="/fuel/bvd/upload" element={<Navigate to={OPS.FUEL} replace />} />
       <Route
         path="/fuel/bvd/:importId/review"
         element={
-          <AdminRouteGuard>
-            <Layout>
-              <FuelBvdExtractionReviewPage />
-            </Layout>
-          </AdminRouteGuard>
+          <Layout>
+            <FuelBvdExtractionReviewPage />
+          </Layout>
         }
       />
       <Route
@@ -372,11 +369,9 @@ function App() {
       <Route
         path="/fuel/bvd/:importId/detail"
         element={
-          <AdminRouteGuard>
-            <Layout>
-              <FuelBvdFullDetailPage />
-            </Layout>
-          </AdminRouteGuard>
+          <Layout>
+            <FuelBvdFullDetailPage />
+          </Layout>
         }
       />
       {/* Redirect legacy /admin/driver-onboarding to operations namespace */}
@@ -401,7 +396,7 @@ function App() {
         <Route path="settings/email" element={<AdminEmailConfigPage />} />
         <Route path="integrations/smtp" element={<Navigate to="/admin/settings/email" replace />} />
         <Route path="integrations/eld" element={<AdminIntegrationsPage />} />
-        <Route path="integrations/fuel" element={<FuelProviderConnectionsPage entryPoint="admin" />} />
+        <Route path="integrations/fuel" element={<Navigate to={OPS.FUEL_PROVIDERS} replace />} />
         <Route path="onboarding" element={<AdminPlaceholderPage title="Onboarding Settings" description="Onboarding workflow and invite defaults." />} />
         <Route path="documents" element={<AdminPlaceholderPage title="Document Rules" description="Required documents and expiry rules." />} />
       </Route>

@@ -5,10 +5,17 @@ import {
   BVD_HEADER_CLIENT_FIELDS,
   BVD_HEADER_DATE_FIELDS,
   BVD_HEADER_IDENTITY_STRIP_FIELDS,
+  BVD_EXPRESS_COLUMNS,
   BVD_TRANSACTION_COLUMNS,
 } from "../fuelBvdReviewLabels";
+import BvdCorrectedFieldCell from "./BvdCorrectedFieldCell";
 import { displayCell, sortBvdRows } from "./bvdParsedDisplay";
-import { computeBvdParsedValidation, type BvdValidationMetric, type BvdValidationStatus } from "./bvdParsedValidation";
+import { type BvdValidationMetric, type BvdValidationStatus } from "./bvdParsedValidation";
+import {
+  reconciliationStripFromBackend,
+  type FuelBvdSourceReconciliation,
+} from "./bvdReconciliationStrip";
+import type { DraftMap } from "./bvdReviewValues";
 import "./bvd-parsed-statement.css";
 
 const TXN_COL_CLASS: Record<string, string> = {
@@ -100,6 +107,10 @@ type Props = {
   onOpenPdf: () => void;
   /** processing review vs immutable full stored detail (same rows, different framing). */
   presentation?: "processing-review" | "full-stored-detail";
+  /** Unsaved correction drafts (processing workspace only). */
+  drafts?: DraftMap;
+  /** Authoritative backend source-reconciliation (effective reviewed values). */
+  sourceReconciliation?: FuelBvdSourceReconciliation | null;
 };
 
 export default function BvdParsedStatementView({
@@ -107,10 +118,13 @@ export default function BvdParsedStatementView({
   statusLabel,
   onOpenPdf,
   presentation = "processing-review",
+  drafts = {},
+  sourceReconciliation = null,
 }: Props) {
   const sorted = sortBvdRows(rows);
   const header = sorted.find((r) => r.row_type === "HEADER");
   const transactions = sorted.filter((r) => r.row_type === "TRANSACTION");
+  const expressCharges = sorted.filter((r) => r.row_type === "EXPRESS_TRANSACTION");
   const controlRows = sorted.filter(
     (r) => r.row_type === "TRANSACTION_SUBTOTAL" || r.row_type === "PAGE1_SUMMARY",
   );
@@ -121,7 +135,7 @@ export default function BvdParsedStatementView({
   const cardNo = header ? displayCell(header, "card_number") : "";
 
   const txnColumns = BVD_TRANSACTION_COLUMNS;
-  const validation = computeBvdParsedValidation(rows);
+  const validation = reconciliationStripFromBackend(sourceReconciliation);
 
   const invoiceMetric = validation.metrics.find((m) => m.id === "invoice_amount");
   const unitsMetric = validation.metrics.find((m) => m.id === "units_processed");
@@ -237,7 +251,7 @@ export default function BvdParsedStatementView({
             <p className="bvd-section-hint">
               Only provider purchase rows — not subtotals or reconciliation controls.
             </p>
-            <div className="bvd-statement__table-wrap">
+            <div className="bvd-statement__table-wrap" data-testid="bvd-purchases-full-table">
               <table className="bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases">
                 <colgroup>
                   {txnColumns.map((c) => (
@@ -255,7 +269,56 @@ export default function BvdParsedStatementView({
                   {transactions.map((row) => (
                     <tr key={row.id} className="bvd-purchase-row">
                       {txnColumns.map((c) => (
-                        <td key={c.field}>{displayCell(row, c.field)}</td>
+                        <td key={c.field}>
+                          <BvdCorrectedFieldCell
+                            row={row}
+                            field={c.field}
+                            drafts={presentation === "processing-review" ? drafts : {}}
+                            presentation={presentation}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
+
+        {expressCharges.length > 0 ? (
+          <section className="bvd-txn-section" aria-label="Express charges">
+            <h2 className="bvd-statement__section-title bvd-statement__section-title--purchases">
+              Express charges ({expressCharges.length})
+            </h2>
+            <p className="bvd-section-hint">
+              BVD Express Codes — provider money only; category is not assigned during extraction.
+            </p>
+            <div className="bvd-statement__table-wrap" data-testid="bvd-express-table">
+              <table className="bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases">
+                <thead>
+                  <tr>
+                    {BVD_EXPRESS_COLUMNS.map((c) => (
+                      <th key={c.field}>{c.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {expressCharges.map((row) => (
+                    <tr key={row.id} className="bvd-purchase-row">
+                      {BVD_EXPRESS_COLUMNS.map((c) => (
+                        <td key={c.field}>
+                          {c.field === "_category" ? (
+                            <span>UNMAPPED</span>
+                          ) : (
+                            <BvdCorrectedFieldCell
+                              row={row}
+                              field={c.field}
+                              drafts={presentation === "processing-review" ? drafts : {}}
+                              presentation={presentation}
+                            />
+                          )}
+                        </td>
                       ))}
                     </tr>
                   ))}

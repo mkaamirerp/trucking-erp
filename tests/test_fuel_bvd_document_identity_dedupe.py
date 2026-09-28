@@ -71,6 +71,17 @@ def test_d_legacy_duplicates_pick_source_reviewed() -> None:
     assert best.import_id == completed.import_id
 
 
+def test_f_completed_identity_suppressed_on_open_list_after_dedupe() -> None:
+    """Open review list excludes identity when canonical is SOURCE_REVIEWED (not stale IN_REVIEW)."""
+    stale = _header(row_id=1, review_status="IN_REVIEW", import_id=uuid.UUID(int=10))
+    done = _header(row_id=2, review_status="SOURCE_REVIEWED", import_id=uuid.UUID(int=11))
+    chosen = dedupe_bvd_headers_by_document_identity(53, [stale, done], limit=10)
+    assert len(chosen) == 1
+    assert chosen[0].review_status == "SOURCE_REVIEWED"
+    open_rows = [r for r in chosen if (r.review_status or "PENDING") != "SOURCE_REVIEWED"]
+    assert open_rows == []
+
+
 def test_e_tenant_isolation_on_identity_key() -> None:
     h53 = _header(tenant_id=53, row_id=1)
     h99 = _header(tenant_id=99, row_id=2)

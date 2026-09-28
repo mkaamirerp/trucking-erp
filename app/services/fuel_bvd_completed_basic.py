@@ -154,9 +154,11 @@ def build_bvd_completed_basic_projection(
 
     total_raw = None
     currency = None
+    disc_raw = None
     if grand is not None:
         total_raw = _row_get(grand, "final_amount") or _row_get(grand, "final_amt")
         currency = _row_get(grand, "cur")
+        disc_raw = _row_get(grand, "disc_amt")
     if header and not currency:
         currency = _row_get(header, "cur")
 
@@ -170,6 +172,8 @@ def build_bvd_completed_basic_projection(
         "period_start": header.get("start_date") if header else None,
         "period_end": header.get("end_date") if header else None,
         "card_number": header.get("card_number") if header else None,
+        "due_date": header.get("due_date") if header else None,
+        "invoice_disc_amt": format_money_display(disc_raw) if disc_raw is not None else "",
         "unit_count": len(units),
         "unit_numbers": units,
         "total_amount": format_money_display(total_raw) if money_is_nonzero(total_raw) else format_money_display(total_raw),

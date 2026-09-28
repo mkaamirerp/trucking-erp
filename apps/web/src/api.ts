@@ -4091,6 +4091,15 @@ export type FuelBvdRow = {
   final_amount?: string | null;
   legend_code?: string | null;
   legend_product_name?: string | null;
+  express_code?: string | null;
+  express_tractor?: string | null;
+  express_trailer?: string | null;
+  express_cdl?: string | null;
+  express_trip_number?: string | null;
+  amount_cashed?: string | null;
+  express_fee?: string | null;
+  payee_raw?: string | null;
+  notes_raw?: string | null;
   review_status?: string | null;
   reviewed_at?: string | null;
   reviewed_by?: string | null;
@@ -4138,6 +4147,32 @@ export async function saveFuelBvdReview(
 
 export async function getFuelBvdImportSummary(importId: string): Promise<FuelBvdReviewSummary> {
   const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/summary`);
+  return handle(res);
+}
+
+export type FuelBvdSourceReconciliation = {
+  passed: boolean;
+  transaction_total: string;
+  all_unit_total: string;
+  provider_grand_total: string | null;
+  difference: string;
+  checks: Array<{
+    code: string;
+    status: string;
+    expected?: string | null;
+    actual?: string | null;
+    difference?: string | null;
+    detail?: string | null;
+  }>;
+  currencies_seen?: string[];
+};
+
+export async function getFuelBvdSourceReconciliation(
+  importId: string,
+): Promise<FuelBvdSourceReconciliation> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/source-reconciliation`,
+  );
   return handle(res);
 }
 
@@ -4269,6 +4304,8 @@ export type FuelBvdCompletedBasic = {
   period_start?: string | null;
   period_end?: string | null;
   card_number?: string | null;
+  due_date?: string | null;
+  invoice_disc_amt?: string;
   unit_count: number;
   unit_numbers: string[];
   total_amount: string;
@@ -4297,6 +4334,14 @@ export async function listFuelBvdCompletedHistory(): Promise<FuelBvdCompletedBas
 export async function getFuelBvdCompletedBasic(importId: string): Promise<FuelBvdCompletedBasic> {
   const res = await fetchWithTenant(
     `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/completed-basic`,
+  );
+  return handle(res);
+}
+
+export async function discardFuelBvdStage(importId: string): Promise<{ discarded: boolean }> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/discard`,
+    { method: "POST" },
   );
   return handle(res);
 }

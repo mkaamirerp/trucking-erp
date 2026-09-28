@@ -8,8 +8,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Final, Mapping, Sequence
+from typing import Any, Final, Iterator, Mapping, Sequence
 
+from app.services.fuel_digital_pdf_express import (
+    is_express_data_line,
+    parse_express_subtotal_line,
+    parse_express_transaction_line,
+)
+from app.services.fuel_digital_pdf_table_geometry import (
+    extract_transaction_rows_from_pdf_geometry,
+    geometry_extraction_enabled,
+)
 from app.services.fuel_provider_profile import load_provider_profile, match_provider_layout
 from app.services.pdf_text_extract import extract_text_and_pages_from_pdf_bytes
 
@@ -23,14 +32,11 @@ ROW_KIND_TRANSACTION_SUBTOTAL: Final[str] = "TRANSACTION_SUBTOTAL"
 ROW_KIND_PAGE1_SUMMARY: Final[str] = "PAGE1_SUMMARY"
 ROW_KIND_GRAND_TOTAL: Final[str] = "GRAND_TOTAL"
 ROW_KIND_LEGEND: Final[str] = "LEGEND"
+ROW_KIND_EXPRESS_TRANSACTION: Final[str] = "EXPRESS_TRANSACTION"
+ROW_KIND_EXPRESS_SUBTOTAL: Final[str] = "EXPRESS_SUBTOTAL"
 
 
-class FuelDigitalPdfExtractError(Exception):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
+from app.services.fuel_digital_pdf_types import FuelDigitalPdfExtractError
 
 @dataclass
 class DigitalPdfSourceRow:
@@ -237,6 +243,16 @@ def _parse_subtotal_line(line: str, *, with_product: bool) -> dict[str, str | No
         disc_rate = None
     elif len(tokens) == 9:
         qty, pre_tax, hst, gst, pst, qst, disc_rate, disc_amt, final_amt = tokens
+    elif len(tokens) == 3:
+        # BVD card/section subtotal without per-tax columns (e.g. 1643.78 33 1676.78).
+        pre_tax, tax_total, final_amt = tokens
+        qty = None
+        hst = tax_total
+        gst = "0.00"
+        pst = "0.00"
+        qst = "0.00"
+        disc_rate = None
+        disc_amt = "0.00"
     else:
         raise FuelDigitalPdfExtractError("SUBTOTAL_PARSE", f"unexpected token count: {line!r}")
     return {
@@ -393,22 +409,58 @@ def extract_digital_pdf_source_rows(
     parser_version = f"{profile['provider_code']}:{profile['profile_version']}"
 
     spec = _digital_spec(profile)
-    auth_re = re.compile(str(spec.get("transaction_auth_line_pattern") or "^$"))
+    auth_pattern = str(spec.get("transaction_auth_line_pattern") or "^$")
+    auth_re = re.compile(auth_pattern)
+    use_geometry = geometry_extraction_enabled(profile)
+    geometry_txn_iter: Iterator[tuple[dict[str, str | None], int]] | None = None
+    if use_geometry:
+        geometry_txn_iter = iter(
+            extract_transaction_rows_from_pdf_geometry(
+                pdf_bytes,
+                profile=profile,
+                auth_line_pattern=auth_pattern,
+            )
+        )
 
     warnings = list(extract_warnings)
     rows: list[DigitalPdfSourceRow] = []
 
     page1_lines = [ln.strip() for ln in page_texts[0].splitlines() if ln.strip()]
-    page2_lines = [ln.strip() for ln in page_texts[1].splitlines() if ln.strip()] if len(page_texts) > 1 else []
+    page2_lines = (
+        [ln.strip() for ln in page_texts[1].splitlines() if ln.strip()] if len(page_texts) > 1 else []
+    )
+    page_line_blocks: list[tuple[int, list[str]]] = []
+    for page_index, page_text in enumerate(page_texts):
+        page_num = page_index + 1
+        lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
+        page_line_blocks.append((page_num, lines))
 
     header_fields = _parse_header_from_page1(page1_lines)
-    header_fields.update(_parse_tax_ids_page2(page2_lines))
+    tax_lines = page2_lines
+    for _page_num, lines in page_line_blocks:
+        if any(ln.startswith("HST#") or ln.startswith("QST#") for ln in lines):
+            tax_lines = lines
+            break
+    header_fields.update(_parse_tax_ids_page2(tax_lines))
     rows.append(DigitalPdfSourceRow(ROW_KIND_HEADER, header_fields, source_page=1))
 
-    in_grand = False
-    in_legend = False
-    for page_num, lines in ((1, page1_lines), (2, page2_lines)):
+    section: str = "FUEL"
+    current_card: str | None = header_fields.get("card_number")
+    card_by_page: dict[int, str | None] = {}
+    for page_num, lines in page_line_blocks:
+        # Grand-total / legend blocks are page-local; do not carry across pages (838710 page 3 purchases).
+        in_grand = False
+        in_legend = False
+        card_by_page[page_num] = current_card
         for line in lines:
+            if line.startswith("Fuel Card Transactions") or line.startswith("Transactions for card"):
+                section = "FUEL"
+                parts = line.split()
+                if parts and parts[-1].isdigit():
+                    current_card = parts[-1]
+                    card_by_page[page_num] = current_card
+            if line.startswith("Express Codes"):
+                section = "EXPRESS"
             if line.startswith("Auth Code"):
                 continue
             if line.startswith("Grand Totals"):
@@ -433,7 +485,7 @@ def extract_digital_pdf_source_rows(
                         )
                     )
                 continue
-            if in_grand and page_num == 2:
+            if in_grand:
                 if line.startswith("HST#") or line.startswith("QST#"):
                     continue
                 if line.startswith("PRODUCT "):
@@ -446,16 +498,64 @@ def extract_digital_pdf_source_rows(
                     )
                 )
                 continue
-            if auth_re.match(line):
-                rows.append(
-                    DigitalPdfSourceRow(
-                        ROW_KIND_TRANSACTION,
-                        _parse_transaction_line(line, profile=profile),
-                        source_page=page_num,
+            if section == "EXPRESS":
+                if is_express_data_line(line):
+                    rows.append(
+                        DigitalPdfSourceRow(
+                            ROW_KIND_EXPRESS_TRANSACTION,
+                            parse_express_transaction_line(line),
+                            source_page=page_num,
+                        )
                     )
-                )
+                    continue
+                if line.startswith("SUBTOTAL"):
+                    rows.append(
+                        DigitalPdfSourceRow(
+                            ROW_KIND_EXPRESS_SUBTOTAL,
+                            parse_express_subtotal_line(line),
+                            source_page=page_num,
+                        )
+                    )
+                    continue
                 continue
-            if line.startswith("SUBTOTAL"):
+            auth_match = auth_re.search(line)
+            if auth_match:
+                if geometry_txn_iter is not None:
+                    try:
+                        txn_fields, txn_page = next(geometry_txn_iter)
+                    except StopIteration:
+                        raise FuelDigitalPdfExtractError(
+                            "TXN_GEOMETRY",
+                            f"geometry transaction stream ended before line: {line!r}",
+                        ) from None
+                    line_auth = auth_match.group(0)
+                    if txn_fields.get("Auth Code") != line_auth:
+                        raise FuelDigitalPdfExtractError(
+                            "TXN_GEOMETRY",
+                            f"geometry/linear auth mismatch: line={line_auth!r} geometry={txn_fields.get('Auth Code')!r}",
+                        )
+                    if current_card:
+                        txn_fields = {**txn_fields, "Card #": current_card}
+                    rows.append(
+                        DigitalPdfSourceRow(
+                            ROW_KIND_TRANSACTION,
+                            txn_fields,
+                            source_page=txn_page,
+                        )
+                    )
+                else:
+                    txn_fields = _parse_transaction_line(line, profile=profile)
+                    if current_card:
+                        txn_fields = {**txn_fields, "Card #": current_card}
+                    rows.append(
+                        DigitalPdfSourceRow(
+                            ROW_KIND_TRANSACTION,
+                            txn_fields,
+                            source_page=page_num,
+                        )
+                    )
+                continue
+            if line.startswith("SUBTOTAL") and section == "FUEL":
                 with_product = line.startswith("SUBTOTAL ") and not _is_money_token(line.split()[1])
                 rows.append(
                     DigitalPdfSourceRow(
@@ -465,19 +565,34 @@ def extract_digital_pdf_source_rows(
                     )
                 )
                 continue
-            if page_num == 1 and (
+            if (
                 line.startswith("Card #")
                 or "Fuel Total" in line
                 or line.startswith("DF ")
                 or line.startswith("Sub Total")
             ):
+                summary_fields = _parse_page1_summary_line(line)
+                if current_card and "card_number" not in summary_fields:
+                    summary_fields = {**summary_fields, "card_number": current_card}
                 rows.append(
                     DigitalPdfSourceRow(
                         ROW_KIND_PAGE1_SUMMARY,
-                        _parse_page1_summary_line(line),
+                        summary_fields,
                         source_page=page_num,
                     )
                 )
+    if geometry_txn_iter is not None:
+        for txn_fields, txn_page in geometry_txn_iter:
+            card = card_by_page.get(txn_page) or current_card
+            if card:
+                txn_fields = {**txn_fields, "Card #": card}
+            rows.append(
+                DigitalPdfSourceRow(
+                    ROW_KIND_TRANSACTION,
+                    txn_fields,
+                    source_page=txn_page,
+                )
+            )
     return rows, warnings, parser_version
 
 

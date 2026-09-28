@@ -81,6 +81,7 @@ def test_d_unit_1100_includes_df_when_matching_provider_total() -> None:
             "id": max_id + 1,
             "import_id": "test-import",
             "row_type": "TRANSACTION",
+            "card_number": "4237111",
             "unit_number": "1100",
             "prod": "DF",
             "qty": "10.00",
@@ -126,6 +127,7 @@ def test_e_scale_and_cash_included_in_unit_1100() -> None:
                 "id": max_id + 1,
                 "import_id": "test-import",
                 "row_type": "TRANSACTION",
+                "card_number": "4237111",
                 "unit_number": "1100",
                 "prod": "S",
                 "final_amt": "20.00",
@@ -142,6 +144,7 @@ def test_e_scale_and_cash_included_in_unit_1100() -> None:
                 "id": max_id + 2,
                 "import_id": "test-import",
                 "row_type": "TRANSACTION",
+                "card_number": "4237111",
                 "unit_number": "1100",
                 "prod": "C",
                 "final_amt": "100.00",
@@ -277,6 +280,6 @@ def test_decimal_exact_cent_no_float_tolerance() -> None:
     txn = _find(rows, auth_code="A204040667-TA")
     txn["final_amt"] = "1,610.95"
     result = reconcile_bvd_source_rows(rows)
-    fail = next(c for c in result.checks if c.code == "CORE_TXN_TOTAL_VS_PROVIDER_GRAND")
+    fail = next(c for c in result.checks if c.code == "CORE_INVOICE_FINAL_VS_PROVIDER_GRAND")
     assert fail.difference == "0.01"
     assert Decimal(fail.difference) == Decimal("0.01")

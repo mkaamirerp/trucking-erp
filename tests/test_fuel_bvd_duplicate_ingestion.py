@@ -218,8 +218,18 @@ async def test_import_blocks_second_identical_upload(monkeypatch: pytest.MonkeyP
     async def _fake_save(**_kwargs):
         return "storage/key.pdf", sha
 
-    monkeypatch.setattr("app.services.fuel_bvd_import.acquire_bvd_import_advisory_lock", _noop_lock)
-    monkeypatch.setattr("app.services.fuel_bvd_import.save_bvd_pdf_to_storage", _fake_save)
+    monkeypatch.setattr("app.services.fuel_bvd_stage.acquire_bvd_import_advisory_lock", _noop_lock)
+    async def _purge_zero(*_a, **_k):
+        return 0
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", _purge_zero)
+
+    async def _fake_stage_save(tenant_slug: str, stage_id: str, body: bytes, **kwargs):
+        from app.core.storage import StoredFile
+
+        return StoredFile("storage/key.pdf", kwargs.get("filename_hint"), "application/pdf", len(body), sha)
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
 
     with pytest.raises(FuelBvdImportError) as exc:
         await import_bvd_digital_pdf(
@@ -248,8 +258,18 @@ async def test_import_first_upload_allowed(monkeypatch: pytest.MonkeyPatch) -> N
     async def _fake_save(**_kwargs):
         return "storage/key.pdf", sha
 
-    monkeypatch.setattr("app.services.fuel_bvd_import.acquire_bvd_import_advisory_lock", _noop_lock)
-    monkeypatch.setattr("app.services.fuel_bvd_import.save_bvd_pdf_to_storage", _fake_save)
+    monkeypatch.setattr("app.services.fuel_bvd_stage.acquire_bvd_import_advisory_lock", _noop_lock)
+    async def _purge_zero(*_a, **_k):
+        return 0
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", _purge_zero)
+
+    async def _fake_stage_save(tenant_slug: str, stage_id: str, body: bytes, **kwargs):
+        from app.core.storage import StoredFile
+
+        return StoredFile("storage/key.pdf", kwargs.get("filename_hint"), "application/pdf", len(body), sha)
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
 
     import_id, count, status = await import_bvd_digital_pdf(
         session,
@@ -261,8 +281,12 @@ async def test_import_first_upload_allowed(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert status == "SUCCESS"
     assert count == 24
-    assert len(session.added) == 24
-    assert session.added[0].tenant_id == 99
+    from app.models.fuel import FuelBvdStageRow
+
+    stage_rows = [o for o in session.added if isinstance(o, FuelBvdStageRow)]
+    assert len(stage_rows) == 24
+    assert stage_rows[0].tenant_id == 99
+    assert not any(getattr(o, "import_id", None) for o in session.added)
 
 
 @pytest.mark.asyncio
@@ -282,6 +306,7 @@ async def test_process_bvd_import_review_is_idempotent() -> None:
         "review_status": BVD_REVIEW_SOURCE_COMPLETE,
     }
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("app.services.fuel_bvd_stage.get_active_stage", AsyncMock(return_value=None))
         mp.setattr(
             "app.services.fuel_bvd_review.get_bvd_import_review_summary",
             AsyncMock(return_value=summary),
@@ -322,30 +347,38 @@ async def test_concurrent_different_hash_same_invoice_serializes_to_one_import(
                 await gate.acquire()
                 self._holding = True
                 return _FakeResult([])
-            if "source_file_sha256" in sql:
-                rows = []
-                for h in shared_headers:
-                    if h.source_file_sha256 == sha_a or h.source_file_sha256 == sha_b:
-                        rows.append(h)
-                return _FakeResult(rows)
-            if "invoice_number" in sql and "HEADER" in sql:
+            if "fuel_bvd_import_stage" in sql:
                 return _FakeResult(list(shared_headers))
+            if "source_file_sha256" in sql:
+                return _FakeResult([])
+            if "invoice_number" in sql and "HEADER" in sql and "fuel_bvd_import_stage" not in sql:
+                return _FakeResult([])
             return _FakeResult([])
 
         def add(self, obj) -> None:
             self.added.append(obj)
 
         async def commit(self) -> None:
+            from app.models.fuel import FuelBvdImportStage
+
             if self.added:
-                header = next((r for r in self.added if r.row_type == "HEADER"), self.added[0])
-                shared_headers.append(header)
+                stage_hdr = next((r for r in self.added if isinstance(r, FuelBvdImportStage)), None)
+                if stage_hdr is not None:
+                    shared_headers.append(stage_hdr)
             if self._holding:
                 gate.release()
                 self._holding = False
 
-    async def _fake_save(**kwargs):
-        pdf_bytes = kwargs["pdf_bytes"]
-        return "storage/key.pdf", sha256_hex(pdf_bytes)
+    async def _fake_stage_save(tenant_slug: str, stage_id: str, body: bytes, **kwargs):
+        from app.core.storage import StoredFile
+
+        return StoredFile(
+            "storage/key.pdf",
+            kwargs.get("filename_hint"),
+            "application/pdf",
+            len(body),
+            sha256_hex(body),
+        )
 
     async def _real_lock(db, *, tenant_id, identity):
         from sqlalchemy import text
@@ -353,11 +386,12 @@ async def test_concurrent_different_hash_same_invoice_serializes_to_one_import(
         key = identity.business_lock_key(tenant_id)
         await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
 
-    monkeypatch.setattr("app.services.fuel_bvd_import.acquire_bvd_import_advisory_lock", _real_lock)
-    monkeypatch.setattr(
-        "app.services.fuel_bvd_import.save_bvd_pdf_to_storage",
-        lambda **kw: _fake_save(pdf_bytes=kw.get("pdf_bytes")),
-    )
+    async def _purge_zero(*_a, **_k):
+        return 0
+
+    monkeypatch.setattr("app.services.fuel_bvd_stage.acquire_bvd_import_advisory_lock", _real_lock)
+    monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", _purge_zero)
+    monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
 
     results: list = []
 
@@ -379,9 +413,7 @@ async def test_concurrent_different_hash_same_invoice_serializes_to_one_import(
     await asyncio.gather(run_upload(pdf_a, "A"), run_upload(pdf_b, "B"))
 
     ok_count = sum(1 for r in results if r[0] == "ok")
-    dup_count = sum(1 for r in results if r[0] == "dup")
-    assert ok_count == 1
-    assert dup_count == 1
-    dup_exc = next(r[1] for r in results if r[0] == "dup")
-    assert dup_exc.code in (FUEL_DUPLICATE_DOCUMENT, FUEL_POSSIBLE_REVISION, FUEL_DUPLICATE_EXACT)
+    assert ok_count == 2
+    ids = {r[1][0] for r in results if r[0] == "ok"}
+    assert len(ids) == 1
     assert len(shared_headers) == 1

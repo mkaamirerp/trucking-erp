@@ -15,6 +15,7 @@ const golden = JSON.parse(
 
 const apiMocks = vi.hoisted(() => ({
   getFuelBvdImportRows: vi.fn(),
+  getFuelBvdSourceReconciliation: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => {
@@ -22,6 +23,7 @@ vi.mock("../api", async (importOriginal) => {
   return {
     ...actual,
     getFuelBvdImportRows: apiMocks.getFuelBvdImportRows,
+    getFuelBvdSourceReconciliation: apiMocks.getFuelBvdSourceReconciliation,
     fuelBvdDocumentUrl: (id: string) => `/api/fuel/bvd/imports/${id}/document`,
   };
 });
@@ -49,7 +51,13 @@ describe("FuelBvdFullDetailPage", () => {
 
   beforeEach(() => {
     apiMocks.getFuelBvdImportRows.mockReset();
+    apiMocks.getFuelBvdSourceReconciliation.mockReset();
     apiMocks.getFuelBvdImportRows.mockResolvedValue(goldenRows());
+    apiMocks.getFuelBvdSourceReconciliation.mockResolvedValue({
+      passed: true,
+      transaction_total: "3421.01",
+      checks: [],
+    });
   });
 
   afterEach(() => {
@@ -71,15 +79,19 @@ describe("FuelBvdFullDetailPage", () => {
       );
     });
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 50));
     });
   }
 
-  it("G: full stored detail still shows zero-value provider tax columns on transactions", async () => {
+  it("G/H: full stored detail shows all provider transaction columns including zero taxes", async () => {
     await renderPage();
     expect(container.textContent).toContain("BVD full stored detail");
-    expect(container.textContent).toContain("GST");
-    expect(container.textContent).toContain("0.00");
+    const purchases = container.querySelector('[data-testid="bvd-purchases-full-table"]');
+    expect(purchases).toBeTruthy();
+    expect(container.querySelector(".bvd-txn-rows")).toBeNull();
+    expect(purchases?.textContent).toContain("GST");
+    expect(purchases?.textContent).toContain("0.00");
+    expect(purchases?.textContent).toContain("Disc Rate");
   });
 
   it("H: original PDF remains accessible from full stored detail", async () => {
