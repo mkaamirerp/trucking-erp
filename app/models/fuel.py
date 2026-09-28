@@ -129,6 +129,14 @@ class FuelSourceBatch(Base):
             unique=True,
             postgresql_where=text("source_hash IS NOT NULL"),
         ),
+        Index(
+            "uq_fuel_source_batches_tenant_provider_import_ref",
+            "tenant_id",
+            "provider_code",
+            "source_import_ref",
+            unique=True,
+            postgresql_where=text("source_import_ref IS NOT NULL"),
+        ),
         Index("ix_fuel_source_batches_tenant_status", "tenant_id", "status"),
     )
 
@@ -148,6 +156,7 @@ class FuelSourceBatch(Base):
 
     source_storage_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
     source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_import_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     remote_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
     remote_timestamp: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
@@ -284,6 +293,12 @@ class FuelTransaction(Base):
     billed_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     retail_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    principal_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    provider_fee_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+
+    provider_section_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_reference_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_reason_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     provider_raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
@@ -294,6 +309,8 @@ class FuelTransaction(Base):
     driver_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     owner_operator_payee_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     classification: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    classification_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    classification_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     financial_responsibility: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pricing_agreement_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     settlement_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)

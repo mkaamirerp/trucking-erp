@@ -475,32 +475,42 @@ async def test_cleanup_after_commit_failure_best_effort_orphan_purge() -> None:
             with patch("app.services.fuel_bvd_stage.list_stage_rows_for_review", AsyncMock(return_value=rows)):
                 with patch(
                     "app.services.fuel_bvd_stage.reconcile_bvd_import_review_rows",
-                    return_value=MagicMock(passed=True),
+                    return_value=MagicMock(passed=True, provider_grand_total="100.00"),
                 ):
-                    with patch("app.services.fuel_bvd_stage.get_storage") as gs:
-                        gs.return_value.read_bytes.return_value = b"%PDF-1.4"
-                        with patch(
-                            "app.services.fuel_bvd_stage.save_fuel_bvd_import_bytes",
-                            AsyncMock(return_value=stored),
-                        ):
+                    with patch(
+                        "app.services.fuel_bvd_stage.project_bvd_rows_to_canonical",
+                        return_value=([], []),
+                    ):
+                        with patch("app.services.fuel_bvd_stage.assert_canonical_money_gate"):
                             with patch(
-                                "app.services.fuel_bvd_stage.check_bvd_pdf_duplicate_before_import",
-                                AsyncMock(return_value=None),
+                                "app.services.fuel_bvd_stage.build_fuel_source_batch",
+                                return_value=MagicMock(id=1),
                             ):
-                                with patch(
-                                    "app.services.fuel_bvd_stage.acquire_bvd_import_advisory_lock",
-                                    AsyncMock(),
-                                ):
-                                    with patch(
-                                        "app.services.fuel_bvd_stage.purge_fuel_bvd_import_files"
-                                    ) as purge:
-                                        with pytest.raises(RuntimeError):
-                                            await process_stage_to_permanent(
-                                                db,
-                                                tenant_id=53,
-                                                tenant_slug="demo",
-                                                stage_id=stage_id,
-                                                reviewed_by="u",
-                                            )
-                                        db.rollback.assert_awaited()
-                                        purge.assert_called_once()
+                                with patch("app.services.fuel_bvd_stage.finalize_batch"):
+                                    with patch("app.services.fuel_bvd_stage.get_storage") as gs:
+                                        gs.return_value.read_bytes.return_value = b"%PDF-1.4"
+                                        with patch(
+                                            "app.services.fuel_bvd_stage.save_fuel_bvd_import_bytes",
+                                            AsyncMock(return_value=stored),
+                                        ):
+                                            with patch(
+                                                "app.services.fuel_bvd_stage.check_bvd_pdf_duplicate_before_import",
+                                                AsyncMock(return_value=None),
+                                            ):
+                                                with patch(
+                                                    "app.services.fuel_bvd_stage.acquire_bvd_import_advisory_lock",
+                                                    AsyncMock(),
+                                                ):
+                                                    with patch(
+                                                        "app.services.fuel_bvd_stage.purge_fuel_bvd_import_files"
+                                                    ) as purge:
+                                                        with pytest.raises(RuntimeError):
+                                                            await process_stage_to_permanent(
+                                                                db,
+                                                                tenant_id=53,
+                                                                tenant_slug="demo",
+                                                                stage_id=stage_id,
+                                                                reviewed_by="u",
+                                                            )
+                                                        db.rollback.assert_awaited()
+                                                        purge.assert_called_once()

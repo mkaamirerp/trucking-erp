@@ -557,10 +557,13 @@ def extract_digital_pdf_source_rows(
                 continue
             if line.startswith("SUBTOTAL") and section == "FUEL":
                 with_product = line.startswith("SUBTOTAL ") and not _is_money_token(line.split()[1])
+                sub_fields = _parse_subtotal_line(line, with_product=with_product)
+                if current_card:
+                    sub_fields = {**sub_fields, "card_number": current_card}
                 rows.append(
                     DigitalPdfSourceRow(
                         ROW_KIND_TRANSACTION_SUBTOTAL,
-                        _parse_subtotal_line(line, with_product=with_product),
+                        sub_fields,
                         source_page=page_num,
                     )
                 )

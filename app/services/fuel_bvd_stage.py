@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import (
@@ -24,7 +25,20 @@ from app.models.fuel import (
     FuelBvdImportStage,
     FuelBvdStageFieldCorrection,
     FuelBvdStageRow,
+    FuelSourceBatch,
+    FuelTransaction,
 )
+from app.services.fuel_bvd_canonical_projection import (
+    BVD_VENDOR,
+    FuelBvdCanonicalProjectionError,
+    MONEY_ROW_TYPES,
+    assert_canonical_money_gate,
+    build_fuel_source_batch,
+    finalize_batch,
+    project_bvd_rows_to_canonical,
+)
+from app.services.fuel_bvd_extraction import ROW_HEADER
+from app.services.fuel_bvd_source_reconciliation import parse_bvd_decimal
 from app.services.fuel_bvd_correction_validate import (
     BvdCorrectionValidationError,
     validate_reviewed_bvd_field,
@@ -342,6 +356,91 @@ async def _import_already_source_reviewed(
     return result.scalar_one_or_none() is not None
 
 
+async def _canonical_batch_for_bvd_import(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    import_id: uuid.UUID,
+) -> FuelSourceBatch | None:
+    result = await db.execute(
+        select(FuelSourceBatch).where(
+            FuelSourceBatch.tenant_id == tenant_id,
+            FuelSourceBatch.provider_code == BVD_VENDOR,
+            FuelSourceBatch.source_import_ref == str(import_id),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _verify_bvd_canonical_batch_complete(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    import_id: uuid.UUID,
+) -> FuelSourceBatch:
+    batch = await _canonical_batch_for_bvd_import(db, tenant_id=tenant_id, import_id=import_id)
+    if batch is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "BVD_CANONICAL_PARTIAL",
+                "message": "BVD import is SOURCE_REVIEWED but canonical FuelSourceBatch is missing",
+            },
+        )
+    money_row_count = await db.scalar(
+        select(func.count())
+        .select_from(FuelBvd)
+        .where(
+            FuelBvd.tenant_id == tenant_id,
+            FuelBvd.import_id == import_id,
+            FuelBvd.row_type.in_(tuple(MONEY_ROW_TYPES)),
+        )
+    )
+    txn_count = await db.scalar(
+        select(func.count())
+        .select_from(FuelTransaction)
+        .where(FuelTransaction.tenant_id == tenant_id, FuelTransaction.batch_id == batch.id)
+    )
+    if money_row_count != txn_count:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "BVD_CANONICAL_INCOMPLETE",
+                "message": f"canonical transaction count {txn_count} != source money rows {money_row_count}",
+            },
+        )
+    txn_sum = await db.scalar(
+        select(func.coalesce(func.sum(FuelTransaction.total_amount), 0)).where(
+            FuelTransaction.tenant_id == tenant_id,
+            FuelTransaction.batch_id == batch.id,
+        )
+    )
+    grand_row = await db.execute(
+        select(FuelBvd.final_amount, FuelBvd.final_amt)
+        .where(
+            FuelBvd.tenant_id == tenant_id,
+            FuelBvd.import_id == import_id,
+            FuelBvd.row_type == "GRAND_TOTAL",
+            FuelBvd.row_label == "Grand Total",
+        )
+        .limit(1)
+    )
+    grand_vals = grand_row.first()
+    expected_total, _ = parse_bvd_decimal(
+        (grand_vals[0] if grand_vals else None) or (grand_vals[1] if grand_vals else None)
+    )
+    if expected_total is not None and txn_sum is not None:
+        if Decimal(str(txn_sum)) != expected_total:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": "BVD_CANONICAL_SUM_MISMATCH",
+                    "message": f"canonical sum {txn_sum} != invoice grand {expected_total}",
+                },
+            )
+    return batch
+
+
 async def _finish_idempotent_process_cleanup(
     db: AsyncSession,
     *,
@@ -350,6 +449,7 @@ async def _finish_idempotent_process_cleanup(
     stage_id: uuid.UUID,
 ) -> dict[str, Any]:
     """Permanent commit already exists for stage_id — best-effort stage purge, return summary."""
+    await _verify_bvd_canonical_batch_complete(db, tenant_id=tenant_id, import_id=stage_id)
     try:
         await _delete_stage_records(db, tenant_id=tenant_id, stage_id=stage_id, tenant_slug=tenant_slug)
     except Exception:
@@ -748,7 +848,61 @@ async def process_stage_to_permanent(
                 )
             )
 
+        header = next((r for r in rows if r.get("row_type") == ROW_HEADER), {})
+        expected_money_count = sum(1 for r in effective_rows if r.get("row_type") in MONEY_ROW_TYPES)
+        expected_total, total_err = parse_bvd_decimal(reconciliation.provider_grand_total)
+        if total_err or expected_total is None:
+            raise FuelBvdCanonicalProjectionError(
+                "GRAND_TOTAL_MISSING",
+                "Cannot project canonical rows without provider grand total",
+            )
+
+        batch = build_fuel_source_batch(
+            tenant_id=tenant_id,
+            import_id=import_id,
+            header=header,
+            source_hash=stage.source_file_sha256,
+            source_storage_ref=permanent_key,
+            parser_version=stage.parser_version,
+            reviewed_by=reviewed_by,
+            imported_at=now,
+        )
+        db.add(batch)
+        await db.flush()
+
+        canonical_txns, canonical_controls = project_bvd_rows_to_canonical(
+            tenant_id=tenant_id,
+            batch=batch,
+            import_id=import_id,
+            raw_rows=rows,
+            effective_rows=effective_rows,
+            fuel_bvd_id_by_stage_row_id=id_map,
+        )
+        for txn in canonical_txns:
+            db.add(txn)
+        for ctrl in canonical_controls:
+            db.add(ctrl)
+
+        assert_canonical_money_gate(
+            canonical_txns,
+            canonical_controls,
+            expected_transaction_count=expected_money_count,
+            expected_total=expected_total,
+        )
+        finalize_batch(batch, reviewed_by=reviewed_by)
+
         await db.commit()
+    except FuelBvdCanonicalProjectionError as exc:
+        await db.rollback()
+        if permanent_key:
+            try:
+                purge_fuel_bvd_import_files(tenant_slug, str(import_id))
+            except Exception:
+                logger.exception("orphan permanent fuel_bvd file cleanup failed import_id=%s", import_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
     except Exception:
         await db.rollback()
         if permanent_key:

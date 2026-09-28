@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final, Literal
 
 from app.services.fuel_bvd_extraction import (
+    ROW_HEADER,
     ROW_EXPRESS_SUBTOTAL,
     ROW_EXPRESS_TRANSACTION,
     ROW_GRAND_TOTAL,
@@ -18,8 +20,6 @@ from app.services.fuel_bvd_extraction import (
     ROW_TRANSACTION,
     ROW_TRANSACTION_SUBTOTAL,
 )
-
-LINE_ARITHMETIC_TOLERANCE: Final[Decimal] = Decimal("0.05")
 
 CheckStatus = Literal["PASS", "FAIL", "NA", "INFO"]
 
@@ -133,6 +133,34 @@ def _is_nonzero_money(raw: Any) -> bool:
     if err or dec is None:
         return False
     return dec != Decimal("0")
+
+
+def _statement_boundary_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if " " in text:
+        text = text.split()[0]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _transaction_local_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if " " in text:
+        text = text.split()[0]
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 def _compare_decimal(expected: Decimal, actual: Decimal) -> tuple[bool, Decimal]:
@@ -299,13 +327,18 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
             else:
                 expected_final = pre + hst + gst + pst + qst - disc
                 txn_code = _row_get(row, "auth_code") or str(row.get("id") or "")
-                _add_check(
-                    checks,
-                    code=f"TXN_LINE_ARITHMETIC_{txn_code}",
-                    expected=expected_final,
-                    actual=final_dec,
-                    required=False,
-                    tolerance=LINE_ARITHMETIC_TOLERANCE,
+                ok, diff = _compare_decimal(expected_final, final_dec)
+                checks.append(
+                    ReconciliationCheck(
+                        code=f"TXN_LINE_ARITHMETIC_{txn_code}",
+                        status="PASS" if ok else "INFO",
+                        expected=decimal_to_display(expected_final),
+                        actual=decimal_to_display(final_dec),
+                        difference=decimal_to_display(abs(diff)),
+                        detail=None
+                        if ok
+                        else "Printed-field line arithmetic variance; provider Final AMT remains authoritative",
+                    )
                 )
 
     express_rows = [r for r in rows if r.get("row_type") == ROW_EXPRESS_TRANSACTION]
@@ -546,6 +579,35 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
                     actual="0.00",
                 )
             )
+
+    header_row = next((r for r in rows if r.get("row_type") == ROW_HEADER), None)
+    period_start = _statement_boundary_date(_row_get(header_row, "start_date") if header_row else None)
+    period_end = _statement_boundary_date(_row_get(header_row, "end_date") if header_row else None)
+    if period_start or period_end:
+        for row in transactions:
+            txn_date = _transaction_local_date(_row_get(row, "transaction_date"))
+            if txn_date is None:
+                continue
+            if period_start and txn_date < period_start:
+                checks.append(
+                    ReconciliationCheck(
+                        code=f"TXN_OUTSIDE_PERIOD_{_row_get(row, 'auth_code') or row.get('id')}",
+                        status="INFO",
+                        detail="Transaction date before printed statement start; provider money still counts",
+                        expected=str(period_start),
+                        actual=str(txn_date),
+                    )
+                )
+            if period_end and txn_date > period_end:
+                checks.append(
+                    ReconciliationCheck(
+                        code=f"TXN_OUTSIDE_PERIOD_{_row_get(row, 'auth_code') or row.get('id')}",
+                        status="INFO",
+                        detail="Transaction date after printed statement end; provider money still counts",
+                        expected=str(period_end),
+                        actual=str(txn_date),
+                    )
+                )
 
     card_txn_totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for row in transactions:
