@@ -311,6 +311,7 @@ class FuelTransaction(Base):
     classification: Mapped[str | None] = mapped_column(String(64), nullable=True)
     classification_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     classification_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    classification_mapping_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     financial_responsibility: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pricing_agreement_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     settlement_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -343,6 +344,117 @@ class FuelTransaction(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelChargeCategory(Base):
+    """Canonical fuel charge category reference (Segment B)."""
+
+    __tablename__ = "fuel_charge_category"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_fuel_charge_category_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelProviderCategoryMapping(Base):
+    """Tenant (or future system) provider text → canonical category (Segment B)."""
+
+    __tablename__ = "fuel_provider_category_mapping"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_fuel_provider_category_mapping_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["canonical_category_code"],
+            ["fuel_charge_category.code"],
+            name="fk_fuel_provider_category_mapping_category",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "mapping_source IN ('PROVIDER_RULE', 'SYSTEM_MAPPING', 'TENANT_MAPPING', 'MANUAL')",
+            name="ck_fuel_provider_category_mapping_source",
+        ),
+        Index(
+            "uq_fuel_provider_category_mapping_tenant_scope_key",
+            "tenant_id",
+            "provider_code",
+            "provider_section",
+            "normalized_reason_key",
+            unique=True,
+            postgresql_where=text("active IS TRUE AND tenant_id IS NOT NULL"),
+        ),
+        Index("ix_fuel_provider_category_mapping_tenant", "tenant_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_section: Mapped[str] = mapped_column(String(255), nullable=False)
+    normalized_reason_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    raw_example: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    canonical_category_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    mapping_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelTransactionClassificationEvent(Base):
+    """Append-only classification change history (Segment B)."""
+
+    __tablename__ = "fuel_transaction_classification_event"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "fuel_transaction_id"],
+            ["fuel_transactions.tenant_id", "fuel_transactions.id"],
+            name="fk_fuel_txn_classification_event_txn",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["mapping_id"],
+            ["fuel_provider_category_mapping.id"],
+            name="fk_fuel_txn_classification_event_mapping",
+            ondelete="SET NULL",
+        ),
+        CheckConstraint(
+            "source IS NULL OR source IN "
+            "('PROVIDER_RULE', 'SYSTEM_MAPPING', 'TENANT_MAPPING', 'MANUAL', 'AI')",
+            name="ck_fuel_txn_classification_event_source",
+        ),
+        Index("ix_fuel_txn_classification_event_tenant_txn", "tenant_id", "fuel_transaction_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    fuel_transaction_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    proposed_category: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    mapping_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    ai_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ai_prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_confidence: Mapped[Decimal | None] = mapped_column(Numeric(6, 5), nullable=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 

@@ -14,6 +14,7 @@ import BvdParsedStatementView from "./BvdParsedStatementView";
 import BvdPdfPopupModal from "./BvdPdfPopupModal";
 import { loadBvdPdfDocument } from "./loadBvdPdfDocument";
 import { reviewStatusLabel } from "../fuelBvdReviewLabels";
+import FuelBvdCanonicalClassificationPanel from "./FuelBvdCanonicalClassificationPanel";
 import "./bvd-parsed-statement.css";
 
 export type FuelBvdProcessedRecordViewProps = {
@@ -176,6 +177,11 @@ export default function FuelBvdProcessedRecordView({
           presentation="full-stored-detail"
           sourceReconciliation={sourceReconciliation}
         />
+        {reviewStatus === "SOURCE_REVIEWED" ? (
+          <div className="px-3 pb-4">
+            <FuelBvdCanonicalClassificationPanel importId={importId} canManage={true} />
+          </div>
+        ) : null}
       </div>
     </>
   );

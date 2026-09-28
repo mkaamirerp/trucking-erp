@@ -882,6 +882,7 @@ async def process_stage_to_permanent(
             db.add(txn)
         for ctrl in canonical_controls:
             db.add(ctrl)
+        await db.flush()
 
         assert_canonical_money_gate(
             canonical_txns,
@@ -916,5 +917,13 @@ async def process_stage_to_permanent(
         await _delete_stage_records(db, tenant_id=tenant_id, stage_id=stage_id, tenant_slug=tenant_slug)
     except Exception:
         logger.exception("stage cleanup after successful process failed stage_id=%s", stage_id)
+
+    from app.services.fuel_classification_persistence import (
+        best_effort_backfill_classifications_for_import,
+    )
+
+    await best_effort_backfill_classifications_for_import(
+        db, tenant_id=tenant_id, import_id=str(import_id)
+    )
 
     return await get_bvd_import_review_summary(db, tenant_id=tenant_id, import_id=import_id)

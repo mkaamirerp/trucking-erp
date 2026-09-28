@@ -775,3 +775,60 @@ class FuelBvdSourceReconciliationOut(BaseModel):
     difference: str
     checks: list[dict[str, Any]] = Field(default_factory=list)
     currencies_seen: list[str] = Field(default_factory=list)
+
+
+class FuelChargeCategoryOut(BaseModel):
+    code: str
+    display_name: str
+    description: str | None = None
+    active: bool = True
+
+
+class FuelCanonicalTransactionOut(BaseModel):
+    id: int
+    batch_id: int
+    provider_section_raw: str | None = None
+    provider_transaction_identity: str | None = None
+    provider_reason_raw: str | None = None
+    product_code_raw: str | None = None
+    principal_amount: Decimal | None = None
+    provider_fee_amount: Decimal | None = None
+    total_amount: Decimal | None = None
+    currency_raw: str | None = None
+    classification: str | None = None
+    classification_status: str | None = None
+    classification_source: str | None = None
+
+    @field_serializer(
+        "principal_amount",
+        "provider_fee_amount",
+        "total_amount",
+        when_used="json",
+    )
+    def _serialize_money(self, value: Decimal | None) -> str | None:
+        if value is None:
+            return None
+        return format(value, "f")
+
+
+class FuelTransactionClassificationIn(BaseModel):
+    canonical_category: str = Field(min_length=1, max_length=64)
+    remember_mapping: bool = False
+
+
+def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
+    return FuelCanonicalTransactionOut(
+        id=txn.id,
+        batch_id=txn.batch_id,
+        provider_section_raw=txn.provider_section_raw,
+        provider_transaction_identity=txn.provider_transaction_identity,
+        provider_reason_raw=txn.provider_reason_raw,
+        product_code_raw=txn.product_code_raw,
+        principal_amount=txn.principal_amount,
+        provider_fee_amount=txn.provider_fee_amount,
+        total_amount=txn.total_amount,
+        currency_raw=txn.currency_raw,
+        classification=txn.classification,
+        classification_status=txn.classification_status,
+        classification_source=txn.classification_source,
+    )

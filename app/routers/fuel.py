@@ -45,6 +45,10 @@ from app.schemas.fuel import (
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
     FuelBvdSourceReconciliationOut,
+    FuelCanonicalTransactionOut,
+    FuelChargeCategoryOut,
+    FuelTransactionClassificationIn,
+    fuel_transaction_to_canonical_out,
     FuelReconciliationOut,
     FuelReconciliationRunIn,
     FuelReviewConfirmIn,
@@ -590,6 +594,112 @@ async def discard_bvd_import_stage(
     if not discarded:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD stage not found")
     return {"discarded": True}
+
+
+@router.get("/charge-categories", response_model=list[FuelChargeCategoryOut])
+async def list_fuel_charge_categories(
+    _user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    _tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.models.fuel import FuelChargeCategory
+    from sqlalchemy import select
+
+    rows = (
+        await db.execute(
+            select(FuelChargeCategory)
+            .where(FuelChargeCategory.active.is_(True))
+            .order_by(FuelChargeCategory.code.asc())
+        )
+    ).scalars().all()
+    return [
+        FuelChargeCategoryOut(
+            code=r.code,
+            display_name=r.display_name,
+            description=r.description,
+            active=r.active,
+        )
+        for r in rows
+    ]
+
+
+@router.get(
+    "/bvd/imports/{import_id}/canonical-transactions",
+    response_model=list[FuelCanonicalTransactionOut],
+)
+async def list_bvd_import_canonical_transactions(
+    import_id: UUID,
+    _user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_persistence import list_canonical_transactions_for_import
+
+    txns = await list_canonical_transactions_for_import(
+        db, tenant_id=tenant_id, import_id=str(import_id)
+    )
+    if not txns:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Canonical transactions not found for import",
+        )
+    return [fuel_transaction_to_canonical_out(t) for t in txns]
+
+
+@router.post("/bvd/imports/{import_id}/classify-canonical")
+async def classify_bvd_import_canonical_transactions(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_persistence import (
+        FuelClassificationError,
+        backfill_classifications_for_import,
+        raise_http_from_classification_error,
+    )
+
+    try:
+        updated = await backfill_classifications_for_import(
+            db, tenant_id=tenant_id, import_id=str(import_id)
+        )
+        await db.commit()
+    except FuelClassificationError as exc:
+        raise_http_from_classification_error(exc)
+    return {"import_id": str(import_id), "transactions_reclassified": updated}
+
+
+@router.patch(
+    "/transactions/{transaction_id}/classification",
+    response_model=FuelCanonicalTransactionOut,
+)
+async def set_fuel_transaction_classification(
+    transaction_id: int,
+    payload: FuelTransactionClassificationIn,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_persistence import (
+        FuelClassificationError,
+        raise_http_from_classification_error,
+        set_transaction_classification_manual,
+    )
+
+    actor = str(user.user_id) if user.user_id is not None else user.email
+    try:
+        txn = await set_transaction_classification_manual(
+            db,
+            tenant_id=tenant_id,
+            transaction_id=transaction_id,
+            canonical_category=payload.canonical_category,
+            remember_mapping=payload.remember_mapping,
+            actor_user_id=actor,
+        )
+        await db.commit()
+    except FuelClassificationError as exc:
+        raise_http_from_classification_error(exc)
+    return fuel_transaction_to_canonical_out(txn)
 
 
 @router.get("/bvd/imports/{import_id}/document")

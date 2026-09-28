@@ -583,6 +583,8 @@ def reconcile_bvd_source_rows(rows: list[dict[str, Any]]) -> BvdSourceReconcilia
     header_row = next((r for r in rows if r.get("row_type") == ROW_HEADER), None)
     period_start = _statement_boundary_date(_row_get(header_row, "start_date") if header_row else None)
     period_end = _statement_boundary_date(_row_get(header_row, "end_date") if header_row else None)
+    # TODO(Segment B+): Surface non-blocking INFO diagnostics (e.g. out-of-period timestamps)
+    # in operator review/history UI; do not treat them as financial reconciliation failures.
     if period_start or period_end:
         for row in transactions:
             txn_date = _transaction_local_date(_row_get(row, "transaction_date"))

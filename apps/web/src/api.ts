@@ -4364,3 +4364,52 @@ export async function getFuelBvdImportRows(importId: string): Promise<FuelBvdRow
 export function fuelBvdDocumentUrl(importId: string): string {
   return `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/document`;
 }
+
+export type FuelChargeCategory = {
+  code: string;
+  display_name: string;
+  description?: string | null;
+  active: boolean;
+};
+
+export type FuelCanonicalTransaction = {
+  id: number;
+  batch_id: number;
+  provider_section_raw?: string | null;
+  provider_transaction_identity?: string | null;
+  provider_reason_raw?: string | null;
+  product_code_raw?: string | null;
+  principal_amount?: string | null;
+  provider_fee_amount?: string | null;
+  total_amount?: string | null;
+  currency_raw?: string | null;
+  classification?: string | null;
+  classification_status?: string | null;
+  classification_source?: string | null;
+};
+
+export async function getFuelChargeCategories(): Promise<FuelChargeCategory[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/charge-categories`);
+  return handle(res);
+}
+
+export async function getFuelBvdCanonicalTransactions(
+  importId: string,
+): Promise<FuelCanonicalTransaction[]> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/canonical-transactions`,
+  );
+  return handle(res);
+}
+
+export async function setFuelTransactionClassification(
+  transactionId: number,
+  body: { canonical_category: string; remember_mapping: boolean },
+): Promise<FuelCanonicalTransaction> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/transactions/${transactionId}/classification`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
