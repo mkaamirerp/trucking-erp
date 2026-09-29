@@ -47,7 +47,11 @@ from app.schemas.fuel import (
     FuelBvdSourceReconciliationOut,
     FuelCanonicalTransactionOut,
     FuelChargeCategoryOut,
+    FuelClassificationAuditEventOut,
+    FuelClassificationSummaryOut,
+    FuelReasonGroupClassificationIn,
     FuelTransactionClassificationIn,
+    FuelUnresolvedReasonGroupOut,
     fuel_transaction_to_canonical_out,
     FuelReconciliationOut,
     FuelReconciliationRunIn,
@@ -694,12 +698,116 @@ async def set_fuel_transaction_classification(
             transaction_id=transaction_id,
             canonical_category=payload.canonical_category,
             remember_mapping=payload.remember_mapping,
+            apply_matching_in_import=payload.apply_matching_in_import,
             actor_user_id=actor,
         )
         await db.commit()
     except FuelClassificationError as exc:
         raise_http_from_classification_error(exc)
     return fuel_transaction_to_canonical_out(txn)
+
+
+@router.get(
+    "/bvd/imports/{import_id}/classification-summary",
+    response_model=FuelClassificationSummaryOut,
+)
+async def get_bvd_import_classification_summary(
+    import_id: UUID,
+    _user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_workflow import get_classification_summary_for_import
+    from app.services.fuel_classification_persistence import (
+        FuelClassificationError,
+        raise_http_from_classification_error,
+    )
+
+    try:
+        summary = await get_classification_summary_for_import(
+            db, tenant_id=tenant_id, import_id=str(import_id)
+        )
+    except FuelClassificationError as exc:
+        raise_http_from_classification_error(exc)
+    return FuelClassificationSummaryOut(**summary)
+
+
+@router.get(
+    "/bvd/imports/{import_id}/classification-unresolved-groups",
+    response_model=list[FuelUnresolvedReasonGroupOut],
+)
+async def list_bvd_import_unresolved_classification_groups(
+    import_id: UUID,
+    _user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_workflow import get_unresolved_groups_for_import
+    from app.services.fuel_classification_persistence import (
+        FuelClassificationError,
+        raise_http_from_classification_error,
+    )
+
+    try:
+        groups = await get_unresolved_groups_for_import(
+            db, tenant_id=tenant_id, import_id=str(import_id)
+        )
+    except FuelClassificationError as exc:
+        raise_http_from_classification_error(exc)
+    return [FuelUnresolvedReasonGroupOut(**g) for g in groups]
+
+
+@router.post(
+    "/bvd/imports/{import_id}/classification-reason-group",
+    response_model=list[FuelCanonicalTransactionOut],
+)
+async def classify_bvd_import_reason_group(
+    import_id: UUID,
+    payload: FuelReasonGroupClassificationIn,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_workflow import classify_reason_group_in_import
+    from app.services.fuel_classification_persistence import (
+        FuelClassificationError,
+        raise_http_from_classification_error,
+    )
+
+    actor = str(user.user_id) if user.user_id is not None else user.email
+    try:
+        txns = await classify_reason_group_in_import(
+            db,
+            tenant_id=tenant_id,
+            import_id=str(import_id),
+            provider_section_raw=payload.provider_section_raw,
+            provider_reason_raw=payload.provider_reason_raw,
+            canonical_category=payload.canonical_category,
+            remember_mapping=payload.remember_mapping,
+            actor_user_id=actor,
+        )
+        await db.commit()
+    except FuelClassificationError as exc:
+        raise_http_from_classification_error(exc)
+    return [fuel_transaction_to_canonical_out(t) for t in txns]
+
+
+@router.get(
+    "/bvd/imports/{import_id}/classification-audit",
+    response_model=list[FuelClassificationAuditEventOut],
+)
+async def list_bvd_import_classification_audit(
+    import_id: UUID,
+    _user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    from app.services.fuel_classification_workflow import list_classification_audit_for_import
+
+    events = await list_classification_audit_for_import(
+        db, tenant_id=tenant_id, import_id=str(import_id)
+    )
+    return [FuelClassificationAuditEventOut(**e) for e in events]
 
 
 @router.get("/bvd/imports/{import_id}/document")

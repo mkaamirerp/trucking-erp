@@ -4372,9 +4372,42 @@ export type FuelChargeCategory = {
   active: boolean;
 };
 
+export type FuelClassificationSummary = {
+  import_id: string;
+  confirmed: number;
+  needs_review: number;
+  total: number;
+};
+
+export type FuelUnresolvedReasonGroup = {
+  provider_code: string;
+  provider_section_raw: string;
+  provider_reason_raw: string;
+  normalized_reason_key: string;
+  transaction_count: number;
+  total_amount: string;
+  transaction_ids: number[];
+  classification?: string | null;
+};
+
+export type FuelClassificationAuditEvent = {
+  id: number;
+  fuel_transaction_id: number;
+  provider_reason_raw?: string | null;
+  previous_category?: string | null;
+  proposed_category: string;
+  source?: string | null;
+  mapping_id?: number | null;
+  actor_user_id?: string | null;
+  created_at?: string | null;
+  remember_mapping?: boolean | null;
+  apply_matching_in_import?: boolean | null;
+};
+
 export type FuelCanonicalTransaction = {
   id: number;
   batch_id: number;
+  source_vendor?: string | null;
   provider_section_raw?: string | null;
   provider_transaction_identity?: string | null;
   provider_reason_raw?: string | null;
@@ -4402,9 +4435,56 @@ export async function getFuelBvdCanonicalTransactions(
   return handle(res);
 }
 
+export async function getFuelBvdClassificationSummary(importId: string): Promise<FuelClassificationSummary> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/classification-summary`,
+  );
+  return handle(res);
+}
+
+export async function getFuelBvdUnresolvedClassificationGroups(
+  importId: string,
+): Promise<FuelUnresolvedReasonGroup[]> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/classification-unresolved-groups`,
+  );
+  return handle(res);
+}
+
+export async function getFuelBvdClassificationAudit(importId: string): Promise<FuelClassificationAuditEvent[]> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/classification-audit`,
+  );
+  return handle(res);
+}
+
+export async function classifyFuelReasonGroup(
+  importId: string,
+  body: {
+    provider_section_raw: string;
+    provider_reason_raw: string;
+    canonical_category: string;
+    remember_mapping: boolean;
+  },
+): Promise<FuelCanonicalTransaction[]> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/classification-reason-group`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return handle(res);
+}
+
 export async function setFuelTransactionClassification(
   transactionId: number,
-  body: { canonical_category: string; remember_mapping: boolean },
+  body: {
+    canonical_category: string;
+    remember_mapping: boolean;
+    apply_matching_in_import?: boolean;
+  },
 ): Promise<FuelCanonicalTransaction> {
   const res = await fetchWithTenant(`${API_BASE}/fuel/transactions/${transactionId}/classification`, {
     method: "PATCH",

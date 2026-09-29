@@ -787,6 +787,7 @@ class FuelChargeCategoryOut(BaseModel):
 class FuelCanonicalTransactionOut(BaseModel):
     id: int
     batch_id: int
+    source_vendor: str | None = None
     provider_section_raw: str | None = None
     provider_transaction_identity: str | None = None
     provider_reason_raw: str | None = None
@@ -814,12 +815,53 @@ class FuelCanonicalTransactionOut(BaseModel):
 class FuelTransactionClassificationIn(BaseModel):
     canonical_category: str = Field(min_length=1, max_length=64)
     remember_mapping: bool = False
+    apply_matching_in_import: bool = False
+
+
+class FuelReasonGroupClassificationIn(BaseModel):
+    provider_section_raw: str = Field(min_length=1, max_length=255)
+    provider_reason_raw: str = Field(min_length=1, max_length=255)
+    canonical_category: str = Field(min_length=1, max_length=64)
+    remember_mapping: bool = False
+
+
+class FuelClassificationSummaryOut(BaseModel):
+    import_id: str
+    confirmed: int
+    needs_review: int
+    total: int
+
+
+class FuelUnresolvedReasonGroupOut(BaseModel):
+    provider_code: str
+    provider_section_raw: str
+    provider_reason_raw: str
+    normalized_reason_key: str
+    transaction_count: int
+    total_amount: str
+    transaction_ids: list[int]
+    classification: str | None = None
+
+
+class FuelClassificationAuditEventOut(BaseModel):
+    id: int
+    fuel_transaction_id: int
+    provider_reason_raw: str | None = None
+    previous_category: str | None = None
+    proposed_category: str
+    source: str | None = None
+    mapping_id: int | None = None
+    actor_user_id: str | None = None
+    created_at: str | None = None
+    remember_mapping: bool | None = None
+    apply_matching_in_import: bool | None = None
 
 
 def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
     return FuelCanonicalTransactionOut(
         id=txn.id,
         batch_id=txn.batch_id,
+        source_vendor=getattr(txn, "source_vendor", None),
         provider_section_raw=txn.provider_section_raw,
         provider_transaction_identity=txn.provider_transaction_identity,
         provider_reason_raw=txn.provider_reason_raw,

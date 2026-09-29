@@ -366,68 +366,30 @@ async def set_transaction_classification_manual(
     canonical_category: str,
     remember_mapping: bool,
     actor_user_id: str,
+    apply_matching_in_import: bool = False,
 ) -> FuelTransaction:
+    from app.services.fuel_classification_workflow import apply_manual_classification
+
     if canonical_category not in CANONICAL_CATEGORY_CODES:
         raise FuelClassificationError("INVALID_CATEGORY", f"Unknown category: {canonical_category}")
     if canonical_category == CATEGORY_UNMAPPED:
         raise FuelClassificationError("INVALID_CATEGORY", "Use classification resolver for UNMAPPED")
 
-    txn = await db.scalar(
-        select(FuelTransaction).where(
-            FuelTransaction.tenant_id == tenant_id,
-            FuelTransaction.id == transaction_id,
-        )
-    )
-    if txn is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fuel transaction not found")
-
-    money_snapshot = _money_snapshot(txn)
-
-    mapping_id: int | None = None
-    classification_source = CLASSIFICATION_SOURCE_MANUAL
-    if remember_mapping:
-        key = normalize_provider_reason_key(txn.provider_reason_raw)
-        section = (txn.provider_section_raw or "").strip()
-        if not key or not section:
-            raise FuelClassificationError(
-                "MAPPING_KEY_INSUFFICIENT",
-                "remember_mapping requires provider section and reason text",
-            )
-        mapping = await version_tenant_reason_mapping(
+    try:
+        updated = await apply_manual_classification(
             db,
             tenant_id=tenant_id,
-            provider_code=txn.source_vendor,
-            provider_section=section,
-            normalized_reason_key=key,
-            canonical_category_code=canonical_category,
-            raw_example=txn.provider_reason_raw,
-            approved_by=actor_user_id,
+            transaction_id=transaction_id,
+            canonical_category=canonical_category,
+            remember_mapping=remember_mapping,
+            apply_matching_in_import=apply_matching_in_import,
+            actor_user_id=actor_user_id,
         )
-        mapping_id = mapping.id
-        classification_source = CLASSIFICATION_SOURCE_TENANT_MAPPING
-
-    result = FuelTransactionClassificationResult(
-        classification=canonical_category,
-        classification_status=CLASSIFICATION_STATUS_CONFIRMED,
-        classification_source=classification_source,
-        mapping_id=mapping_id,
-    )
-    await apply_classification_result(
-        db,
-        txn=txn,
-        result=result,
-        actor_user_id=actor_user_id,
-        metadata_json={"remember_mapping": remember_mapping, "manual": True},
-    )
-
-    if _money_snapshot(txn) != money_snapshot:
-        raise FuelClassificationError(
-            "MONEY_MUTATION_FORBIDDEN",
-            "Classification must not alter transaction money fields",
-            http_status=500,
-        )
-
-    return txn
+    except FuelClassificationError as exc:
+        if exc.code == "TXN_NOT_FOUND":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from exc
+        raise
+    return updated[0]
 
 
 def _money_snapshot(txn: FuelTransaction) -> tuple[Any, ...]:

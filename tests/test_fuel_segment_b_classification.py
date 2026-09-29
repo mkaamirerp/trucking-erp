@@ -434,7 +434,7 @@ async def test_remember_mapping_calls_upsert() -> None:
         AsyncMock(return_value=True),
     ):
         with patch(
-            "app.services.fuel_classification_persistence.version_tenant_reason_mapping",
+            "app.services.fuel_classification_workflow.version_tenant_reason_mapping",
             AsyncMock(return_value=mapping),
         ) as upsert_mock:
             await set_transaction_classification_manual(
