@@ -29,6 +29,8 @@ const completed = (importId: string, invoice: string): FuelBvdCompletedBasic => 
   categories: [],
   taxes: [],
   card_number: "4237111",
+  purchase_card_count: 1,
+  purchase_card_numbers: ["4237111"],
   due_date: "2026-07-30 23:59:59",
   invoice_disc_amt: "0.00",
 });
@@ -89,6 +91,34 @@ describe("FuelRecentActivitySection", () => {
     expect(container.querySelector('[data-testid="fuel-activity-txn-panel-imp-a"]')).toBeNull();
     expect(container.querySelector('[data-testid^="bvd-txn-row-"]')).toBeNull();
     expect(container.textContent).toContain("972201");
+    expect(container.querySelector('[data-testid="fuel-activity-card-imp-a"]')?.textContent).toBe(
+      "4237111",
+    );
+  });
+
+  it("multi-card invoice shows card count not header card", async () => {
+    await renderSection([
+      {
+        ...completed("imp-mc", "838710"),
+        invoice_number: "838710",
+        card_number: "4237160",
+        purchase_card_count: 7,
+        purchase_card_numbers: [
+          "4236501",
+          "4236576",
+          "4236675",
+          "4236980",
+          "4237061",
+          "4237160",
+          "4237186",
+        ],
+        currency: "US",
+        total_amount: "9,047.72",
+      },
+    ]);
+    const cardCell = container.querySelector('[data-testid="fuel-activity-card-imp-mc"]');
+    expect(cardCell?.textContent).toBe("7 cards");
+    expect(cardCell?.textContent).not.toContain("4237160");
   });
 
   it("overlay Open handler fires without route navigation", async () => {

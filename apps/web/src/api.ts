@@ -4304,6 +4304,8 @@ export type FuelBvdCompletedBasic = {
   period_start?: string | null;
   period_end?: string | null;
   card_number?: string | null;
+  purchase_card_count?: number;
+  purchase_card_numbers?: string[];
   due_date?: string | null;
   invoice_disc_amt?: string;
   unit_count: number;

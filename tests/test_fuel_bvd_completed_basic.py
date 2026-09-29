@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.services.fuel_bvd_completed_basic import build_bvd_completed_basic_projection
+from app.services.fuel_bvd_completed_basic import (
+    build_bvd_completed_basic_projection,
+    distinct_purchase_card_numbers,
+)
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "fuel_bvd_972201_expected.json"
 
@@ -83,3 +86,64 @@ def test_completed_basic_includes_due_date_and_grand_total_discount() -> None:
     assert view["invoice_disc_amt"] == "0.00"
     assert view["total_amount"] == "3,421.01"
     assert view["currency"] == "CN"
+
+
+def test_972201_purchase_card_summary_single_card() -> None:
+    view = _project(_golden_rows())
+    assert view["purchase_card_count"] == 1
+    assert view["purchase_card_numbers"] == ["4237111"]
+    assert view["card_number"] == "4237111"
+
+
+def test_purchase_card_summary_838710_seven_distinct_cards() -> None:
+    cards_838710 = [
+        "4236501",
+        "4236576",
+        "4236675",
+        "4236980",
+        "4237061",
+        "4237160",
+        "4237186",
+    ]
+    rows: list[dict] = [
+        {"row_type": "HEADER", "invoice_number": "838710", "card_number": "4237160"},
+        {"row_type": "GRAND_TOTAL", "row_label": "Grand Total", "cur": "US", "final_amt": "9047.72"},
+    ]
+    for card in cards_838710:
+        rows.append({"row_type": "TRANSACTION", "card_number": card, "final_amt": "1.00"})
+    rows.append({"row_type": "EXPRESS_TRANSACTION", "card_number": "", "final_amt": "10.00"})
+    rows.append({"row_type": "TRANSACTION", "card_number": "4237160", "final_amt": "2.00"})
+    view = build_bvd_completed_basic_projection(rows, import_id="imp-838710", review_status="SOURCE_REVIEWED")
+    assert view["purchase_card_count"] == 7
+    assert view["purchase_card_numbers"] == sorted(cards_838710)
+    assert view["card_number"] == "4237160"
+    assert view["currency"] == "US"
+
+
+def test_express_blank_card_does_not_increase_purchase_card_count() -> None:
+    rows = [
+        {"row_type": "HEADER", "card_number": "4237160"},
+        {"row_type": "TRANSACTION", "card_number": "4236501"},
+        {"row_type": "EXPRESS_TRANSACTION", "card_number": None},
+        {"row_type": "EXPRESS_TRANSACTION", "card_number": ""},
+    ]
+    assert distinct_purchase_card_numbers(rows) == ["4236501"]
+
+
+def test_duplicate_transaction_same_card_counts_once() -> None:
+    rows = [
+        {"row_type": "TRANSACTION", "card_number": "4236501"},
+        {"row_type": "TRANSACTION", "card_number": "4236501"},
+    ]
+    assert distinct_purchase_card_numbers(rows) == ["4236501"]
+
+
+def test_accepted_transaction_card_on_row_not_header_only() -> None:
+    rows = [
+        {"row_type": "HEADER", "card_number": "4237160"},
+        {"row_type": "TRANSACTION", "card_number": "4236999"},
+    ]
+    view = build_bvd_completed_basic_projection(rows, import_id="x", review_status="SOURCE_REVIEWED")
+    assert view["purchase_card_count"] == 1
+    assert view["purchase_card_numbers"] == ["4236999"]
+    assert view["card_number"] == "4237160"

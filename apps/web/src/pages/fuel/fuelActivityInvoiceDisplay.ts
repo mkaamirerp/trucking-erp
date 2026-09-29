@@ -1,7 +1,7 @@
 import type { FuelBvdCompletedBasic } from "../../api";
 import { formatBvdSourceDate } from "../fuelBvdReview/bvdUploadDuplicate";
 
-/** Dashboard bucket for source currency (no FX). CN is stored as-is; display maps CN → CAD column. */
+/** Dashboard bucket for source currency (no FX). Provider codes US/CN preserved on invoice total. */
 export type FuelActivityMoneyBucket = "cad" | "usd";
 
 export function fuelActivitySourceMoneyBucket(
@@ -9,9 +9,21 @@ export function fuelActivitySourceMoneyBucket(
 ): FuelActivityMoneyBucket | null {
   const c = currency?.trim().toUpperCase();
   if (!c) return null;
-  if (c === "USD") return "usd";
+  if (c === "USD" || c === "US") return "usd";
   if (c === "CN" || c === "CAD") return "cad";
   return null;
+}
+
+/** Recent Activity Account/Card from completed-basic purchase card summary (not header alone). */
+export function formatFuelActivityAccountCard(row: FuelBvdCompletedBasic): string {
+  const count = row.purchase_card_count ?? 0;
+  const numbers = row.purchase_card_numbers ?? [];
+  if (count <= 0) return "—";
+  if (count === 1) {
+    const sole = numbers[0]?.trim() || row.card_number?.trim();
+    return sole || "—";
+  }
+  return `${count} cards`;
 }
 
 /** Provider invoice payment status — not Fuel process status. */

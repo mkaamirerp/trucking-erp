@@ -11,6 +11,7 @@ import {
   formatFuelActivityInvoiceTotal,
   formatFuelActivityPeriod,
   formatFuelActivityUsdTotal,
+  formatFuelActivityAccountCard,
   fuelActivityPaymentLabel,
 } from "./fuelActivityInvoiceDisplay";
 import "../fuelBvdReview/bvd-parsed-statement.css";
@@ -183,7 +184,7 @@ export default function FuelRecentActivitySection({
                         onClick={() => void toggleInvoice(row.import_id)}
                         data-testid={`fuel-activity-card-${row.import_id}`}
                       >
-                        {row.card_number?.trim() || "—"}
+                        {formatFuelActivityAccountCard(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"

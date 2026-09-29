@@ -666,6 +666,8 @@ class FuelBvdCompletedBasicOut(BaseModel):
     period_start: str | None = None
     period_end: str | None = None
     card_number: str | None = None
+    purchase_card_count: int = 0
+    purchase_card_numbers: list[str] = Field(default_factory=list)
     due_date: str | None = None
     invoice_disc_amt: str = ""
     unit_count: int

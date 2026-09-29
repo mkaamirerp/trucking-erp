@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { FuelBvdCompletedBasic } from "../../api";
 import {
+  formatFuelActivityAccountCard,
   formatFuelActivityCadTotal,
   formatFuelActivityDueDate,
   formatFuelActivityInvoiceDiscount,
@@ -83,5 +84,82 @@ describe("fuelActivityInvoiceDisplay (972201)", () => {
 
   it("missing bucket amount is em dash not zero", () => {
     expect(formatFuelActivityUsdTotal(row)).toBe("—");
+  });
+});
+
+describe("fuelActivitySourceMoneyBucket", () => {
+  it("maps provider codes to display buckets only", () => {
+    expect(fuelActivitySourceMoneyBucket("US")).toBe("usd");
+    expect(fuelActivitySourceMoneyBucket("USD")).toBe("usd");
+    expect(fuelActivitySourceMoneyBucket("CN")).toBe("cad");
+    expect(fuelActivitySourceMoneyBucket("CAD")).toBe("cad");
+    expect(fuelActivitySourceMoneyBucket("EUR")).toBeNull();
+    expect(fuelActivitySourceMoneyBucket(null)).toBeNull();
+  });
+});
+
+describe("838710 US currency display", () => {
+  const usRow: FuelBvdCompletedBasic = {
+    ...goldenCompletedBasic(),
+    import_id: "imp-838710",
+    invoice_number: "838710",
+    currency: "US",
+    total_amount: "9,047.72",
+    purchase_card_count: 7,
+    purchase_card_numbers: [
+      "4236501",
+      "4236576",
+      "4236675",
+      "4236980",
+      "4237061",
+      "4237160",
+      "4237186",
+    ],
+    card_number: "4237160",
+  };
+
+  it("fills USD column and preserves provider US on invoice total", () => {
+    expect(formatFuelActivityCadTotal(usRow)).toBe("—");
+    expect(formatFuelActivityUsdTotal(usRow)).toBe("9,047.72");
+    expect(formatFuelActivityInvoiceTotal(usRow)).toBe("9,047.72 US");
+  });
+
+  it("shows multi-card summary not header card alone", () => {
+    expect(formatFuelActivityAccountCard(usRow)).toBe("7 cards");
+    expect(formatFuelActivityAccountCard(usRow)).not.toBe("4237160");
+  });
+});
+
+describe("formatFuelActivityAccountCard", () => {
+  const base = goldenCompletedBasic();
+
+  it("one card shows exact number", () => {
+    expect(
+      formatFuelActivityAccountCard({
+        ...base,
+        purchase_card_count: 1,
+        purchase_card_numbers: ["4237111"],
+      }),
+    ).toBe("4237111");
+  });
+
+  it("seven cards shows count label", () => {
+    expect(
+      formatFuelActivityAccountCard({
+        ...base,
+        purchase_card_count: 7,
+        purchase_card_numbers: ["4236501", "4236576"],
+      }),
+    ).toBe("7 cards");
+  });
+
+  it("zero cards shows em dash", () => {
+    expect(
+      formatFuelActivityAccountCard({
+        ...base,
+        purchase_card_count: 0,
+        purchase_card_numbers: [],
+      }),
+    ).toBe("—");
   });
 });

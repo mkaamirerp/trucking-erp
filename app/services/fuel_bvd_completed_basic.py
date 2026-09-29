@@ -68,6 +68,21 @@ def _category_amount(row: dict[str, Any]) -> str:
     return format_money_display(_row_get(row, "final_amount") or _row_get(row, "final_amt"))
 
 
+def distinct_purchase_card_numbers(rows: list[dict[str, Any]]) -> list[str]:
+    """Distinct nonblank card numbers on permanent accepted TRANSACTION rows only."""
+    seen: set[str] = set()
+    cards: list[str] = []
+    for row in rows:
+        if row.get("row_type") != "TRANSACTION":
+            continue
+        card = str(row.get("card_number") or "").strip()
+        if not card or card in seen:
+            continue
+        seen.add(card)
+        cards.append(card)
+    return sorted(cards)
+
+
 def _distinct_billed_units(rows: list[dict[str, Any]]) -> list[str]:
     units: list[str] = []
     seen: set[str] = set()
@@ -151,6 +166,7 @@ def build_bvd_completed_basic_projection(
     status = review_status or (str(header.get("review_status")) if header else None) or "PENDING"
     grand = _grand_total_statement_row(rows)
     units = _distinct_billed_units(rows)
+    purchase_cards = distinct_purchase_card_numbers(rows)
 
     total_raw = None
     currency = None
@@ -172,6 +188,8 @@ def build_bvd_completed_basic_projection(
         "period_start": header.get("start_date") if header else None,
         "period_end": header.get("end_date") if header else None,
         "card_number": header.get("card_number") if header else None,
+        "purchase_card_count": len(purchase_cards),
+        "purchase_card_numbers": purchase_cards,
         "due_date": header.get("due_date") if header else None,
         "invoice_disc_amt": format_money_display(disc_raw) if disc_raw is not None else "",
         "unit_count": len(units),
