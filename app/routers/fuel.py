@@ -607,6 +607,7 @@ async def list_fuel_charge_categories(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     from app.models.fuel import FuelChargeCategory
+    from app.services.fuel_charge_categories import CANONICAL_CATEGORY_CODES, CATEGORY_UNMAPPED
     from sqlalchemy import select
 
     rows = (
@@ -624,6 +625,7 @@ async def list_fuel_charge_categories(
             active=r.active,
         )
         for r in rows
+        if r.code in CANONICAL_CATEGORY_CODES and r.code != CATEGORY_UNMAPPED
     ]
 
 

@@ -13,28 +13,26 @@ CATEGORY_CASH_ADVANCE = "CASH_ADVANCE"
 CATEGORY_PARKING = "PARKING"
 CATEGORY_REPAIR_OR_SERVICE = "REPAIR_OR_SERVICE"
 CATEGORY_PRODUCT_PURCHASE = "PRODUCT_PURCHASE"
-CATEGORY_ALLOWANCE = "ALLOWANCE"
-CATEGORY_LOAD_PAY = "LOAD_PAY"
 CATEGORY_OTHER = "OTHER"
 CATEGORY_UNMAPPED = "UNMAPPED"
 
-CANONICAL_CATEGORY_CODES: Final[frozenset[str]] = frozenset(
+# Locked business categories (charge types). UNMAPPED is operational workflow only.
+LOCKED_CHARGE_CATEGORY_CODES: Final[frozenset[str]] = frozenset(
     {
         CATEGORY_FUEL,
         CATEGORY_DEF,
         CATEGORY_SCALE,
         CATEGORY_LUMPER,
-        CATEGORY_TOLL,
         CATEGORY_CASH_ADVANCE,
-        CATEGORY_PARKING,
-        CATEGORY_REPAIR_OR_SERVICE,
         CATEGORY_PRODUCT_PURCHASE,
-        CATEGORY_ALLOWANCE,
-        CATEGORY_LOAD_PAY,
+        CATEGORY_REPAIR_OR_SERVICE,
+        CATEGORY_PARKING,
+        CATEGORY_TOLL,
         CATEGORY_OTHER,
-        CATEGORY_UNMAPPED,
     }
 )
+
+CANONICAL_CATEGORY_CODES: Final[frozenset[str]] = LOCKED_CHARGE_CATEGORY_CODES | {CATEGORY_UNMAPPED}
 
 CATEGORY_SEED_ROWS: Final[tuple[tuple[str, str, str], ...]] = (
     (CATEGORY_FUEL, "Fuel", "Fuel purchases (e.g. diesel/gas)"),
@@ -46,8 +44,6 @@ CATEGORY_SEED_ROWS: Final[tuple[tuple[str, str, str], ...]] = (
     (CATEGORY_PARKING, "Parking", "Parking"),
     (CATEGORY_REPAIR_OR_SERVICE, "Repair or service", "Repair or service"),
     (CATEGORY_PRODUCT_PURCHASE, "Product purchase", "Other product purchase"),
-    (CATEGORY_ALLOWANCE, "Allowance", "Allowance"),
-    (CATEGORY_LOAD_PAY, "Load pay", "Load pay"),
     (CATEGORY_OTHER, "Other", "Other charge"),
     (CATEGORY_UNMAPPED, "Unmapped", "Not yet classified"),
 )

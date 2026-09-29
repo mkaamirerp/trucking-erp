@@ -22,7 +22,8 @@ from app.services.fuel_charge_categories import (
     CANONICAL_CATEGORY_CODES,
     CATEGORY_DEF,
     CATEGORY_FUEL,
-    CATEGORY_LOAD_PAY,
+    CATEGORY_OTHER,
+    LOCKED_CHARGE_CATEGORY_CODES,
     CATEGORY_LUMPER,
     CATEGORY_SCALE,
     CATEGORY_UNMAPPED,
@@ -45,6 +46,59 @@ def test_category_seed_catalog_matches_locked_codes() -> None:
     codes = {row[0] for row in CATEGORY_SEED_ROWS}
     assert codes == CANONICAL_CATEGORY_CODES
     assert CATEGORY_UNMAPPED in codes
+    assert LOCKED_CHARGE_CATEGORY_CODES | {CATEGORY_UNMAPPED} == CANONICAL_CATEGORY_CODES
+    assert "LOAD_PAY" not in codes
+    assert "ALLOWANCE" not in codes
+
+
+# Original Segment B seed (d1e2f3a4b5c6) — must stay immutable in that revision.
+_SEGMENT_B_ORIGINAL_SEED_CODES = {
+    "FUEL",
+    "DEF",
+    "SCALE",
+    "LUMPER",
+    "TOLL",
+    "CASH_ADVANCE",
+    "PARKING",
+    "REPAIR_OR_SERVICE",
+    "PRODUCT_PURCHASE",
+    "ALLOWANCE",
+    "LOAD_PAY",
+    "OTHER",
+    "UNMAPPED",
+}
+
+_RETIRED_CATEGORY_CODES = frozenset({"LOAD_PAY", "ALLOWANCE"})
+
+
+def test_fresh_install_seed_minus_retired_matches_app_catalog() -> None:
+    """Full chain: d1e2f3 seed → e3f4 retire → same effective codes as CATEGORY_SEED_ROWS."""
+    after_retire = _SEGMENT_B_ORIGINAL_SEED_CODES - _RETIRED_CATEGORY_CODES
+    app_codes = {row[0] for row in CATEGORY_SEED_ROWS}
+    assert after_retire == app_codes
+    assert after_retire - {CATEGORY_UNMAPPED} == LOCKED_CHARGE_CATEGORY_CODES
+
+
+def test_picker_catalog_excludes_removed_categories() -> None:
+    """API/UI charge-categories list is driven by CATEGORY_SEED_ROWS / DB seed."""
+    picker_codes = {row[0] for row in CATEGORY_SEED_ROWS if row[0] != CATEGORY_UNMAPPED}
+    assert picker_codes == LOCKED_CHARGE_CATEGORY_CODES
+    assert "LOAD_PAY" not in picker_codes
+    assert "ALLOWANCE" not in picker_codes
+
+
+@pytest.mark.parametrize("reason", ["pay", "load pay", "allowance"])
+def test_express_reasons_unmapped_without_explicit_mapping(reason: str) -> None:
+    r = classify_fuel_transaction(
+        tenant_id=53,
+        provider_code="BVD",
+        provider_section_raw=SECTION_EXPRESS,
+        product_code_raw=None,
+        provider_reason_raw=reason,
+        tenant_reason_mappings={("BVD", SECTION_EXPRESS, "lumper fee"): (CATEGORY_LUMPER, 1)},
+    )
+    assert r.classification == CATEGORY_UNMAPPED
+    assert r.classification_status == CLASSIFICATION_STATUS_UNMAPPED
 
 
 def test_ta_tf_fuel_df_def_s_scale() -> None:
@@ -135,7 +189,18 @@ def test_express_phrases_stay_unmapped_without_mapping(reason: str) -> None:
 
 
 def test_mapping_scoped_by_tenant_provider_section() -> None:
-    mappings = {("BVD", SECTION_EXPRESS, "pay"): (CATEGORY_LOAD_PAY, 1)}
+    mappings = {("BVD", SECTION_EXPRESS, "pay"): (CATEGORY_OTHER, 1)}
+    hit = classify_fuel_transaction(
+        tenant_id=53,
+        provider_code="BVD",
+        provider_section_raw=SECTION_EXPRESS,
+        product_code_raw=None,
+        provider_reason_raw="pay",
+        tenant_reason_mappings=mappings,
+    )
+    assert hit.classification == CATEGORY_OTHER
+    assert hit.classification_source == CLASSIFICATION_SOURCE_TENANT_MAPPING
+
     wrong_provider = classify_fuel_transaction(
         tenant_id=53,
         provider_code="OTHER",
@@ -166,7 +231,7 @@ def test_tenant_mapping_loader_filters_tenant_id() -> None:
         provider_code="BVD",
         provider_section=SECTION_EXPRESS,
         normalized_reason_key="pay",
-        canonical_category_code=CATEGORY_LOAD_PAY,
+        canonical_category_code=CATEGORY_OTHER,
         mapping_source="TENANT_MAPPING",
         active=True,
     )
@@ -351,12 +416,13 @@ def test_classification_does_not_change_money_fields() -> None:
         provider_section_raw=SECTION_EXPRESS,
         product_code_raw=None,
         provider_reason_raw="pay",
-        tenant_reason_mappings={("BVD", SECTION_EXPRESS, "pay"): (CATEGORY_LOAD_PAY, 1)},
+        tenant_reason_mappings={("BVD", SECTION_EXPRESS, "pay"): (CATEGORY_OTHER, 1)},
     )
     txn.classification = r.classification
     after = (txn.principal_amount, txn.provider_fee_amount, txn.total_amount)
     assert before == after
-    assert r.classification == CATEGORY_LOAD_PAY
+    assert r.classification == CATEGORY_OTHER
+    assert txn.provider_reason_raw == "pay"
 
 
 @pytest.mark.asyncio
@@ -396,11 +462,12 @@ async def test_manual_classification_without_remember_mapping() -> None:
                 db,
                 tenant_id=53,
                 transaction_id=7,
-                canonical_category=CATEGORY_LOAD_PAY,
+                canonical_category=CATEGORY_OTHER,
                 remember_mapping=False,
                 actor_user_id="u1",
             )
     assert out.id == 7
+    assert txn.provider_reason_raw == "pay"
     upsert_mock.assert_not_awaited()
     apply_mock.assert_awaited_once()
 
@@ -441,7 +508,7 @@ async def test_remember_mapping_calls_upsert() -> None:
                 db,
                 tenant_id=53,
                 transaction_id=8,
-                canonical_category=CATEGORY_LOAD_PAY,
+                canonical_category=CATEGORY_OTHER,
                 remember_mapping=True,
                 actor_user_id="u1",
             )
@@ -570,7 +637,7 @@ async def test_human_confirmed_not_overwritten_by_automatic() -> None:
         provider_section_raw=SECTION_EXPRESS,
         provider_reason_raw="pay",
         provider_raw={},
-        classification=CATEGORY_LOAD_PAY,
+        classification=CATEGORY_OTHER,
         classification_status=CLASSIFICATION_STATUS_CONFIRMED,
         classification_source=CLASSIFICATION_SOURCE_MANUAL,
     )
@@ -582,7 +649,8 @@ async def test_human_confirmed_not_overwritten_by_automatic() -> None:
         respect_human_lock=True,
     )
     assert out is None
-    assert txn.classification == CATEGORY_LOAD_PAY
+    assert txn.classification == CATEGORY_OTHER
+    assert txn.provider_reason_raw == "pay"
     db.add.assert_not_called()
 
 

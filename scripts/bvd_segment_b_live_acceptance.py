@@ -24,7 +24,7 @@ from app.models.fuel import (
 )
 from app.services.fuel_bvd_canonical_projection import SECTION_EXPRESS, SECTION_FUEL_CARD
 from app.services.fuel_charge_categories import (
-    CATEGORY_LOAD_PAY,
+    CATEGORY_OTHER,
     CATEGORY_LUMPER,
     CATEGORY_UNMAPPED,
     CLASSIFICATION_SOURCE_MANUAL,
@@ -244,7 +244,7 @@ async def main() -> int:
             session,
             tenant_id=TENANT_ID,
             transaction_id=pay_txn.id,
-            canonical_category=CATEGORY_LOAD_PAY,
+            canonical_category=CATEGORY_OTHER,
             remember_mapping=False,
             actor_user_id="segment_b_acceptance",
         )
