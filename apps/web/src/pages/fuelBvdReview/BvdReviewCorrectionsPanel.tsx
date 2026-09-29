@@ -36,8 +36,8 @@ export default function BvdReviewCorrectionsPanel({ rows, drafts, readOnly, onDr
         <div>
           <h2 className="text-sm font-semibold text-[var(--trk-text)]">Review corrections</h2>
           <p className="text-xs text-[var(--trk-text-muted)]">
-            Edit reviewed values before Process. Original extracted source stays immutable; Save review persists
-            corrections.
+            Optional detail view — edit values inline in the tables above. Save persists stage review and reruns
+            validations.
           </p>
         </div>
         {pages.length > 1 ? (

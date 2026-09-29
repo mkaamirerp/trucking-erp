@@ -145,6 +145,19 @@ export default function FuelBvdProcessedRecordView({
         }
         data-testid="fuel-processed-record"
       >
+        {sourceReconciliation?.passed ? (
+          <div className="border-b border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-3 py-1.5 text-xs text-[var(--trk-text-muted)]">
+            Source reconciliation:{" "}
+            <span className="font-medium text-[var(--trk-text)]">PASS</span>
+            {sourceReconciliation.provider_grand_total
+              ? ` · Invoice ${sourceReconciliation.provider_grand_total}`
+              : ""}
+            {sourceReconciliation.difference ? ` · Difference ${sourceReconciliation.difference}` : ""}
+            <span className="ml-2 text-[10px]">
+              (Financial source is complete; classification below is separate operational review.)
+            </span>
+          </div>
+        ) : null}
         {variant === "route" ? (
           <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
             <div>

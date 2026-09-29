@@ -186,7 +186,7 @@ def test_effective_correction_changes_canonical_not_raw_provider() -> None:
     )
     txn = next(t for t in txns if t.provider_transaction_identity == "A350330291-DF")
     assert txn.product_code_raw == "S"
-    assert txn.provider_raw["fields"]["prod"] == "DF"
+    assert txn.provider_raw["fields"]["prod"] == "S"
 
 
 @pytest.mark.skipif(not BVD_972201.is_file(), reason="972201 fixture missing")

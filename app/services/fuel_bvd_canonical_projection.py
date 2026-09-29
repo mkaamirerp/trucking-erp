@@ -245,7 +245,7 @@ def _build_purchase_transaction(
         classification=None,
         classification_status=CLASSIFICATION_STATUS_UNMAPPED,
         classification_source=None,
-        provider_raw=_raw_provider_payload(raw, fuel_bvd_id=fuel_bvd_id, import_id=import_id),
+        provider_raw=_raw_provider_payload(effective, fuel_bvd_id=fuel_bvd_id, import_id=import_id),
         review_status="CONFIRMED",
         parsed_row_role="TRANSACTION",
         **ts,
@@ -297,7 +297,7 @@ def _build_express_transaction(
         classification=None,
         classification_status=CLASSIFICATION_STATUS_UNMAPPED,
         classification_source=None,
-        provider_raw=_raw_provider_payload(raw, fuel_bvd_id=fuel_bvd_id, import_id=import_id),
+        provider_raw=_raw_provider_payload(effective, fuel_bvd_id=fuel_bvd_id, import_id=import_id),
         review_status="CONFIRMED",
         parsed_row_role="TRANSACTION",
         **ts,
@@ -541,7 +541,7 @@ def project_bvd_rows_to_canonical(
             )
         elif row_type not in {ROW_HEADER, "LEGEND"}:
             ctrl = _control_from_bvd_row(
-                raw,
+                eff,
                 tenant_id=tenant_id,
                 batch_id=batch.id,
                 fuel_bvd_id=fuel_bvd_id,

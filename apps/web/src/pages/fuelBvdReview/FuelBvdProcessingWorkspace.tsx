@@ -190,6 +190,29 @@ export default function FuelBvdProcessingWorkspace({
     setDrafts((prev) => ({ ...prev, [draftKey(rowId, field)]: value }));
   }, []);
 
+  const handleInlineCommit = async (rowId: number, field: string, value: string) => {
+    if (readOnly) return;
+    setSaving(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      await saveFuelBvdReview(importId, [
+        { fuel_bvd_id: rowId, field_name: field, reviewed_value: value },
+      ]);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[draftKey(rowId, field)];
+        return next;
+      });
+      await load();
+      setActionSuccess("Review saved — validations refreshed");
+    } catch (e: unknown) {
+      setActionError(formatFuelBvdReviewActionError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveReview = async () => {
     if (readOnly) return;
     setSaving(true);
@@ -351,6 +374,8 @@ export default function FuelBvdProcessingWorkspace({
           onOpenPdf={openPdf}
           drafts={drafts}
           sourceReconciliation={sourceReconciliation}
+          readOnly={readOnly}
+          onInlineCommit={handleInlineCommit}
         />
         <BvdReviewCorrectionsPanel rows={rows} drafts={drafts} readOnly={readOnly} onDraft={onDraft} />
         <footer className="bvd-statement__footer-bar sticky bottom-0 z-20">

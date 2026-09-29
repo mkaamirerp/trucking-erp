@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fuel import FuelBvd, FuelBvdFieldCorrection
@@ -15,7 +15,7 @@ from app.services.fuel_bvd_correction_validate import (
     BvdCorrectionValidationError,
     validate_reviewed_bvd_field,
 )
-from app.services.fuel_bvd_effective import build_effective_bvd_rows
+from app.services.fuel_bvd_effective import build_effective_bvd_row, build_effective_bvd_rows
 from app.services.fuel_bvd_import import BVD_SOURCE_FIELD_NAMES, fuel_bvd_row_to_dict
 from app.services.fuel_bvd_source_reconciliation import (
     BvdSourceReconciliationResult,
@@ -298,6 +298,51 @@ async def save_bvd_import_review(
     return written
 
 
+async def commit_accepted_values_onto_permanent_fuel_bvd(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    import_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> None:
+    """
+    Write human-accepted structured values onto permanent fuel_bvd columns.
+
+    Pre-Process review overlays live in fuel_bvd_field_correction (legacy) or stage
+    corrections (staging). After Process, accepted values are the business record;
+    parser-review correction rows for this import are removed. Post-Process amendments
+    may create new fuel_bvd_field_correction rows later.
+    """
+    row_ids = [int(r["id"]) for r in rows if r.get("id") is not None]
+    if not row_ids:
+        return
+    result = await db.execute(
+        select(FuelBvd).where(
+            FuelBvd.tenant_id == tenant_id,
+            FuelBvd.import_id == import_id,
+            FuelBvd.id.in_(row_ids),
+        )
+    )
+    by_id = {r.id: r for r in result.scalars().all()}
+    for row_dict in rows:
+        rid = row_dict.get("id")
+        if rid is None:
+            continue
+        orm = by_id.get(int(rid))
+        if orm is None:
+            continue
+        accepted = build_effective_bvd_row(row_dict)
+        for name in BVD_SOURCE_FIELD_NAMES:
+            if name in accepted:
+                setattr(orm, name, accepted.get(name))
+    await db.execute(
+        delete(FuelBvdFieldCorrection).where(
+            FuelBvdFieldCorrection.tenant_id == tenant_id,
+            FuelBvdFieldCorrection.import_id == import_id,
+        )
+    )
+
+
 async def process_bvd_import_review(
     db: AsyncSession,
     *,
@@ -340,6 +385,10 @@ async def process_bvd_import_review(
                 "reconciliation": reconciliation.to_dict(),
             },
         )
+
+    await commit_accepted_values_onto_permanent_fuel_bvd(
+        db, tenant_id=tenant_id, import_id=import_id, rows=rows
+    )
 
     now = datetime.now(timezone.utc)
     await db.execute(

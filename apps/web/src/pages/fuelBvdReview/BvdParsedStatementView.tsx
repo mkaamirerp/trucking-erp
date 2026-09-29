@@ -111,6 +111,8 @@ type Props = {
   drafts?: DraftMap;
   /** Authoritative backend source-reconciliation (effective reviewed values). */
   sourceReconciliation?: FuelBvdSourceReconciliation | null;
+  readOnly?: boolean;
+  onInlineCommit?: (rowId: number, field: string, value: string) => void | Promise<void>;
 };
 
 export default function BvdParsedStatementView({
@@ -120,6 +122,8 @@ export default function BvdParsedStatementView({
   presentation = "processing-review",
   drafts = {},
   sourceReconciliation = null,
+  readOnly = false,
+  onInlineCommit,
 }: Props) {
   const sorted = sortBvdRows(rows);
   const header = sorted.find((r) => r.row_type === "HEADER");
@@ -275,6 +279,8 @@ export default function BvdParsedStatementView({
                             field={c.field}
                             drafts={presentation === "processing-review" ? drafts : {}}
                             presentation={presentation}
+                            readOnly={readOnly}
+                            onInlineCommit={onInlineCommit}
                           />
                         </td>
                       ))}
@@ -316,6 +322,8 @@ export default function BvdParsedStatementView({
                               field={c.field}
                               drafts={presentation === "processing-review" ? drafts : {}}
                               presentation={presentation}
+                              readOnly={readOnly}
+                              onInlineCommit={onInlineCommit}
                             />
                           )}
                         </td>

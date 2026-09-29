@@ -374,7 +374,7 @@ async def test_process_promotion_failure_keeps_stage() -> None:
         with patch("app.services.fuel_bvd_stage.get_active_stage", AsyncMock(return_value=stage)):
             with patch("app.services.fuel_bvd_stage.list_stage_rows_for_review", AsyncMock(return_value=rows)):
                 with patch(
-                    "app.services.fuel_bvd_stage.reconcile_bvd_import_review_rows",
+                    "app.services.fuel_bvd_stage.reconcile_bvd_source_rows",
                     return_value=MagicMock(passed=True),
                 ):
                     with patch(
@@ -474,7 +474,7 @@ async def test_cleanup_after_commit_failure_best_effort_orphan_purge() -> None:
         with patch("app.services.fuel_bvd_stage.get_active_stage", AsyncMock(return_value=stage)):
             with patch("app.services.fuel_bvd_stage.list_stage_rows_for_review", AsyncMock(return_value=rows)):
                 with patch(
-                    "app.services.fuel_bvd_stage.reconcile_bvd_import_review_rows",
+                    "app.services.fuel_bvd_stage.reconcile_bvd_source_rows",
                     return_value=MagicMock(passed=True, provider_grand_total="100.00"),
                 ):
                     with patch(

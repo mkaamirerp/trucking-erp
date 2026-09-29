@@ -21,7 +21,6 @@ from app.core.storage import (
 )
 from app.models.fuel import (
     FuelBvd,
-    FuelBvdFieldCorrection,
     FuelBvdImportStage,
     FuelBvdStageFieldCorrection,
     FuelBvdStageRow,
@@ -57,6 +56,7 @@ from app.services.fuel_bvd_review import (
     get_bvd_import_review_summary,
     reconcile_bvd_import_review_rows,
 )
+from app.services.fuel_bvd_source_reconciliation import reconcile_bvd_source_rows
 from app.services.fuel_source_duplicate_gate import (
     ExistingBvdImportMatch,
     FuelDuplicateIngestionConflict,
@@ -714,7 +714,8 @@ async def process_stage_to_permanent(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BVD stage not found")
 
     rows = await list_stage_rows_for_review(db, tenant_id=tenant_id, stage_id=stage_id)
-    reconciliation = reconcile_bvd_import_review_rows(rows)
+    accepted_rows = build_effective_bvd_rows(rows)
+    reconciliation = reconcile_bvd_source_rows(accepted_rows)
     if not reconciliation.passed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -731,14 +732,13 @@ async def process_stage_to_permanent(
     storage = get_storage()
     pdf_bytes = storage.read_bytes(stage.source_storage_ref, module="fuel_bvd_stage", tenant_slug=tenant_slug)
 
-    effective_rows = build_effective_bvd_rows(rows)
     identity = document_identity_from_extracted_rows(
         [
             FuelBvdExtractedRow(
                 row_type=r["row_type"],
                 fields={k: r.get(k) for k in BVD_SOURCE_FIELD_NAMES},
             )
-            for r in effective_rows
+            for r in accepted_rows
         ]
     )
     await acquire_bvd_import_advisory_lock(db, tenant_id=tenant_id, identity=identity)
@@ -748,7 +748,7 @@ async def process_stage_to_permanent(
             row_type=r["row_type"],
             fields={k: (r.get(k) if r.get(k) is not None else None) for k in BVD_SOURCE_FIELD_NAMES},
         )
-        for r in effective_rows
+        for r in accepted_rows
     ]
     duplicate = await check_bvd_pdf_duplicate_before_import(
         db,
@@ -787,7 +787,7 @@ async def process_stage_to_permanent(
     try:
         orm_rows: list[FuelBvd] = []
         stage_row_ids: list[int] = []
-        for r in rows:
+        for r in accepted_rows:
             fuel_row = FuelBvd(
                 tenant_id=tenant_id,
                 import_id=import_id,
@@ -822,34 +822,8 @@ async def process_stage_to_permanent(
 
         id_map = {sid: orm.id for sid, orm in zip(stage_row_ids, orm_rows, strict=True)}
 
-        corr_result = await db.execute(
-            select(FuelBvdStageFieldCorrection)
-            .where(
-                FuelBvdStageFieldCorrection.tenant_id == tenant_id,
-                FuelBvdStageFieldCorrection.stage_id == stage_id,
-            )
-            .order_by(FuelBvdStageFieldCorrection.id.asc())
-        )
-        for corr in corr_result.scalars().all():
-            fuel_bvd_id = id_map.get(corr.stage_row_id)
-            if fuel_bvd_id is None:
-                continue
-            db.add(
-                FuelBvdFieldCorrection(
-                    tenant_id=tenant_id,
-                    import_id=import_id,
-                    fuel_bvd_id=fuel_bvd_id,
-                    field_name=corr.field_name,
-                    extracted_value=corr.extracted_value,
-                    reviewed_value=corr.reviewed_value,
-                    reviewed_by=corr.reviewed_by,
-                    reviewed_at=corr.reviewed_at,
-                    correction_reason=corr.correction_reason,
-                )
-            )
-
-        header = next((r for r in rows if r.get("row_type") == ROW_HEADER), {})
-        expected_money_count = sum(1 for r in effective_rows if r.get("row_type") in MONEY_ROW_TYPES)
+        header = next((r for r in accepted_rows if r.get("row_type") == ROW_HEADER), {})
+        expected_money_count = sum(1 for r in accepted_rows if r.get("row_type") in MONEY_ROW_TYPES)
         expected_total, total_err = parse_bvd_decimal(reconciliation.provider_grand_total)
         if total_err or expected_total is None:
             raise FuelBvdCanonicalProjectionError(
@@ -874,8 +848,8 @@ async def process_stage_to_permanent(
             tenant_id=tenant_id,
             batch=batch,
             import_id=import_id,
-            raw_rows=rows,
-            effective_rows=effective_rows,
+            raw_rows=accepted_rows,
+            effective_rows=accepted_rows,
             fuel_bvd_id_by_stage_row_id=id_map,
         )
         for txn in canonical_txns:

@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from "react";
 import type { FuelBvdRow } from "../../api";
+import { fieldsForRowType } from "./bvdFieldSlots";
 import {
   extractedValue,
   isFieldCorrected,
@@ -11,6 +13,8 @@ type Props = {
   field: string;
   drafts?: DraftMap;
   presentation: "processing-review" | "full-stored-detail";
+  readOnly?: boolean;
+  onInlineCommit?: (rowId: number, field: string, value: string) => void | Promise<void>;
 };
 
 export default function BvdCorrectedFieldCell({
@@ -18,13 +22,85 @@ export default function BvdCorrectedFieldCell({
   field,
   drafts = {},
   presentation,
+  readOnly = false,
+  onInlineCommit,
 }: Props) {
   const extracted = extractedValue(row, field);
   const effective = reviewedValue(row, field, drafts);
   const corrected = isFieldCorrected(row, field, drafts);
   const display = effective || extracted || "—";
+  const editable =
+    presentation === "processing-review" &&
+    !readOnly &&
+    Boolean(onInlineCommit) &&
+    fieldsForRowType(row.row_type).includes(field);
+
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(display === "—" ? "" : display);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) {
+      setLocal(display === "—" ? "" : display);
+    }
+  }, [display, editing]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = async () => {
+    setEditing(false);
+    const next = local.trim();
+    const baseline = extracted || "";
+    if (next === baseline && !corrected) {
+      return;
+    }
+    if (next === effective) {
+      return;
+    }
+    await onInlineCommit?.(row.id, field, next);
+  };
+
+  if (editable && editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="bvd-inline-edit-input w-full min-w-[3rem] rounded border border-[var(--trk-accent)] bg-[var(--trk-surface)] px-1 py-0.5 text-xs"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commit();
+          }
+          if (e.key === "Escape") {
+            setEditing(false);
+            setLocal(display === "—" ? "" : display);
+          }
+        }}
+        aria-label={`Edit ${field}`}
+      />
+    );
+  }
 
   if (!corrected) {
+    if (editable) {
+      return (
+        <button
+          type="button"
+          className="bvd-inline-edit-trigger w-full text-left hover:underline"
+          onClick={() => setEditing(true)}
+          title="Click to edit"
+        >
+          {display}
+        </button>
+      );
+    }
     return <>{display}</>;
   }
 
@@ -32,9 +108,33 @@ export default function BvdCorrectedFieldCell({
     return (
       <div className="bvd-corrected-cell bvd-corrected-cell--detail">
         <span className="bvd-corrected-cell__effective">{display}</span>
-        <span className="bvd-corrected-cell__badge">Corrected during review</span>
-        <span className="bvd-corrected-cell__extracted">Extracted: {extracted || "—"}</span>
+        {row.field_corrections?.[field] ? (
+          <>
+            <span className="bvd-corrected-cell__badge">Corrected during review</span>
+            <span className="bvd-corrected-cell__extracted">Extracted: {extracted || "—"}</span>
+          </>
+        ) : null}
       </div>
+    );
+  }
+
+  const cellBody = (
+    <>
+      {display}
+      <span className="bvd-corrected-cell__mark" aria-label="Corrected"> *</span>
+    </>
+  );
+
+  if (editable) {
+    return (
+      <button
+        type="button"
+        className="bvd-corrected-cell bvd-corrected-cell--inline bvd-inline-edit-trigger w-full text-left"
+        title={`Extracted: ${extracted || "—"}\nReviewed: ${effective}`}
+        onClick={() => setEditing(true)}
+      >
+        {cellBody}
+      </button>
     );
   }
 
@@ -43,8 +143,7 @@ export default function BvdCorrectedFieldCell({
       className="bvd-corrected-cell bvd-corrected-cell--inline"
       title={`Extracted: ${extracted || "—"}\nReviewed: ${effective}`}
     >
-      {display}
-      <span className="bvd-corrected-cell__mark" aria-label="Corrected"> *</span>
+      {cellBody}
     </span>
   );
 }

@@ -118,7 +118,7 @@ async def _seed_df_to_s_synthetic_import(
 @pytest.mark.asyncio
 @pytest.mark.skipif(REQUIRES_TENANT_DB, reason="TENANT_DATABASE_URL tenant_pytest required")
 async def test_df_to_s_synthetic_import_full_process_lifecycle() -> None:
-    """Parser DF → reviewed S → reconcile PASS → Process → lock; raw DF preserved."""
+    """Parser DF → reviewed S → reconcile PASS → Process → accepted S on fuel_bvd."""
     url = _tenant_url()
     assert url is not None
     engine = create_async_engine(url, pool_pre_ping=True)
@@ -185,8 +185,8 @@ async def test_df_to_s_synthetic_import_full_process_lifecycle() -> None:
             session, tenant_id=tenant_id, import_id=import_id
         )
         txn_final = next(r for r in rows_final if r.get("auth_code") == "SCALE-1")
-        assert txn_final["prod"] == "DF"
-        assert txn_final["field_corrections"]["prod"]["reviewed_value"] == "S"
+        assert txn_final["prod"] == "S"
+        assert not txn_final.get("field_corrections")
         assert build_effective_bvd_row(txn_final)["prod"] == "S"
         assert txn_final.get("review_status") == BVD_REVIEW_SOURCE_COMPLETE
 
@@ -198,7 +198,7 @@ async def test_df_to_s_synthetic_import_full_process_lifecycle() -> None:
                 FuelBvdFieldCorrection.import_id == import_id,
             )
         )
-        assert int(corr_count_before or 0) == 1
+        assert int(corr_count_before or 0) == 0
 
         with pytest.raises(HTTPException) as locked_exc:
             await save_bvd_import_review(
@@ -232,7 +232,7 @@ async def test_df_to_s_synthetic_import_full_process_lifecycle() -> None:
                 FuelBvd.id == txn_row_id,
             )
         )
-        assert raw_prod == "DF"
+        assert raw_prod == "S"
 
         await session.execute(
             FuelBvdFieldCorrection.__table__.delete().where(

@@ -2,6 +2,7 @@
 
 import type { FuelBvdRow } from "../../api";
 import {
+  BVD_EXPRESS_COLUMNS,
   BVD_GRAND_TOTAL_FIELDS,
   BVD_HEADER_FIELDS,
   BVD_SUBTOTAL_FIELDS,
@@ -58,6 +59,8 @@ export function fieldsForRowType(rowType: string): string[] {
       return BVD_HEADER_FIELDS;
     case "TRANSACTION":
       return BVD_TRANSACTION_COLUMNS.map((c) => c.field);
+    case "EXPRESS_TRANSACTION":
+      return BVD_EXPRESS_COLUMNS.filter((c) => c.field !== "_category").map((c) => c.field);
     case "TRANSACTION_SUBTOTAL":
     case "PAGE1_SUMMARY":
       return BVD_SUBTOTAL_FIELDS;

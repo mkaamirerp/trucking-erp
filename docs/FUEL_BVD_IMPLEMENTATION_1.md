@@ -46,43 +46,40 @@ Before Process, TruckERP must answer three questions:
 
 ---
 
-# 2. Immutable BVD source evidence
+# 2. Provider evidence vs accepted structured source (Fuel module)
 
-The provider source evidence remains in:
+BVD is one **provider adapter** into the shared Fuel module. The business contract matches
+`docs/FUEL_CARD_MODULE_DESIGN.md` (immutable file/payload evidence; structured operational rows):
 
-```text
-fuel_bvd
-```
+| Layer | Role |
+|--------|------|
+| **Original PDF / payload** | Immutable provider evidence (storage ref + hash). Never rewritten by review. |
+| **Stage parser output** | Temporary machine interpretation (`fuel_bvd_stage_row` + optional `fuel_bvd_stage_field_correction`). |
+| **Human-reviewed effective stage** | Accepted structured representation while in review (`build_effective_bvd_rows`). |
+| **Process** | Commits that accepted representation to permanent `fuel_bvd`, `fuel_source_batch`, `fuel_transactions`, and controls. |
 
-One `fuel_bvd` row represents one extracted BVD source row/record.
+After **Process**, each `fuel_bvd` row holds the **accepted** field values (what reconciled and was approved), not a
+parallel “parser column + permanent overlay” split. Parser mistakes are not promoted as provider facts.
+
+`fuel_bvd_field_correction` remains for **post-Process** authorized amendments only (not for replaying stage parser
+review onto permanent rows).
 
 Rows from the same source file share the same `import_id`.
 
-Known structural values:
+Known structural row types:
 
 ```text
 HEADER
 TRANSACTION
+EXPRESS_TRANSACTION
 TRANSACTION_SUBTOTAL
 PAGE1_SUMMARY
 GRAND_TOTAL
 LEGEND
 ```
 
-The source table is provider-faithful and immutable after capture/review correction overlay rules.
-
-TruckERP operational decisions must never replace the BVD source value.
-
-Example:
-
-```text
-BVD source Unit # = 7788
-fuel_bvd.unit_number = "7788"
-```
-
-If TruckERP later decides that `7788` maps to Asset 1105, or that it belongs to an external card-loan record, the original BVD value remains `7788`.
-
-Operational resolution is stored separately.
+Operational asset/unit resolution and charge classification are separate Fuel concerns and do not rewrite accepted
+source money or the stored PDF evidence.
 
 ---
 
