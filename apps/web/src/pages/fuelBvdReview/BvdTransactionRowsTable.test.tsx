@@ -1,8 +1,19 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FuelBvdRow } from "../../api";
 import BvdTransactionRowsTable from "./BvdTransactionRowsTable";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
+const fixture972201 = JSON.parse(
+  readFileSync(join(repoRoot, "tests/fixtures/fuel_bvd_972201_expected.json"), "utf-8"),
+) as { rows: FuelBvdRow[] };
+const rows972201 = fixture972201.rows
+  .filter((r) => r.row_type === "TRANSACTION")
+  .map((r, i) => ({ ...r, id: i + 1, import_id: "972201" })) as FuelBvdRow[];
 
 function txn(id: number, partial: Partial<FuelBvdRow> = {}): FuelBvdRow {
   return {
@@ -77,14 +88,62 @@ describe("BvdTransactionRowsTable", () => {
     expect(productCell?.textContent).not.toContain("DEF");
   });
 
-  it("B: main table does not expose auth, tax, or retail columns", () => {
+  it("B: main table does not expose auth or retail columns", () => {
     renderTable([txn(1)]);
     const h = headerText();
     expect(h).not.toMatch(/Auth Code/i);
-    expect(h).not.toMatch(/HST/i);
     expect(h).not.toMatch(/Retail/i);
     expect(h).not.toMatch(/Site #/i);
     expect(container.textContent).not.toContain("A204040667-TA");
+  });
+
+  it("discount column always exists with 0.00 for zero source discount", () => {
+    renderTable([txn(1, { disc_amt: "0.00" })]);
+    expect(headerText()).toMatch(/Discount/);
+    expect(container.querySelector('[data-testid="bvd-txn-col-discount"]')?.textContent).toBe("0.00");
+  });
+
+  it("shows HST only when invoice has non-zero HST and hides zero tax types", () => {
+    renderTable([txn(1, { hst: "185.33", gst: "0.00", pst: "0.00", qst: "0.00" })]);
+    const h = headerText();
+    expect(h).toMatch(/HST/);
+    expect(h).not.toMatch(/GST/);
+    expect(h).not.toMatch(/PST/);
+    expect(h).not.toMatch(/QST/);
+    expect(container.querySelector('[data-testid="bvd-txn-col-hst"]')?.textContent).toBe("185.33");
+    expect(container.querySelector('[data-testid="bvd-txn-col-gst"]')).toBeNull();
+  });
+
+  it("972201 fixture shows Discount and HST only in compact headers", () => {
+    renderTable(rows972201);
+    const wrap = container.querySelector('[data-testid="bvd-txn-rows-table"]');
+    expect(wrap?.getAttribute("data-active-tax-columns")).toBe("hst");
+    const h = headerText();
+    expect(h).toMatch(/Discount/);
+    expect(h).toMatch(/HST/);
+    expect(h).not.toMatch(/GST/);
+    expect(h).not.toMatch(/PST/);
+    expect(h).not.toMatch(/QST/);
+    expect(container.querySelectorAll('[data-testid="bvd-txn-col-discount"]')[0]?.textContent).toBe(
+      "0.00",
+    );
+  });
+
+  it("838710-like rows show Discount without any tax columns", () => {
+    renderTable([
+      txn(1, { disc_amt: "44.24", hst: "0.00", gst: "0.00", pst: "0.00", qst: "0.00" }),
+      txn(2, { disc_amt: "0.00", hst: "0.00", gst: "0.00", pst: "0.00", qst: "0.00" }),
+    ]);
+    expect(container.querySelector('[data-testid="bvd-txn-rows-table"]')?.getAttribute("data-active-tax-columns")).toBe(
+      "",
+    );
+    expect(headerText()).not.toMatch(/HST/);
+    expect(container.querySelectorAll('[data-testid="bvd-txn-col-discount"]')[1]?.textContent).toBe(
+      "0.00",
+    );
+    expect(container.querySelectorAll('[data-testid="bvd-txn-col-discount"]')[0]?.textContent).toBe(
+      "44.24",
+    );
   });
 
   it("C–K: expand, taxes, collapse", () => {

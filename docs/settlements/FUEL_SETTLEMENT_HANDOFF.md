@@ -197,25 +197,44 @@ Enforcement belongs in the future settlement engine — not in Fuel Process.
 
 ---
 
-## C9. Future Fuel history UI (not implemented in Fuel dashboard phase)
+## C9. Future Fuel history / compact transaction settlement status (NOT implemented)
 
-| State | UI |
-|-------|-----|
-| Settlement-irrelevant | No settlement indicator |
-| Eligible, not yet consumed | No completed tick (optional “pending” later) |
-| Included in settlement | ✓ + settlement number (link to settlement) |
+**Do not build** this column in Fuel until the Settlement module exists and can emit real settlement lines.
 
-**Examples (future only):**
+### Meaning of the indicator
+
+| UI | Meaning |
+|----|---------|
+| *(empty)* | Not settlement-relevant (e.g. company **FUEL** / **DEF** on company expense — no fake status) |
+| **Pending** | Settlement-relevant **candidate** (`settlement_deduction_candidate = TRUE`) but **no** settlement line yet references this `fuel_transaction.id` |
+| **✓ SET-10452** (clickable) | An actual settlement line references this exact `fuel_transaction.id`; link opens **read-only** settlement / invoice detail |
+
+The **✓** means **included/consumed by Payroll/O/O Settlement** — not provider paid, not Fuel invoice paid, not settlement payment cleared.
+
+### Eligibility (Fuel-owned, already persisted)
+
+- Use `fuel_transactions.settlement_deduction_candidate` and financial responsibility — do not infer from person type alone.
+- Non-candidates must **not** show **Pending**.
+
+### Examples (future only)
 
 ```text
-Unit 1104 — O/O
-Sep 08  FUEL          425.70    ✓ SET-10452
-Sep 10  FUEL          386.20    ✓ SET-10452
-Sep 12  FUEL          441.80    —
+O/O settlement-relevant FUEL (not yet on a settlement):
+  Sep 12  FUEL  441.80  Pending
 
-Company driver
-Sep 08  FUEL          425.70    (no indicator)
-Sep 09  CASH_ADVANCE  100.00    ✓ SET-20113
+After consumption:
+  Sep 08  FUEL  425.70  ✓ SET-10452
+
+Company driver company FUEL:
+  Sep 08  FUEL  425.70  (no column / no status)
+
+Cash advance (settlement-relevant):
+  Sep 09  CASH_ADVANCE  100.00  Pending
+  → later: ✓ SET-20113
 ```
 
-Do **not** implement checkmarks/links until Settlement exists.
+### Relation to compact Recent Activity table
+
+The **Recent Activity expanded transaction table** (`BvdTransactionRowsTable`) shows **source money only** today (discount + applicable taxes). A future **Settlement** column may be added beside operational columns under this rule — **not** in the current Fuel milestone.
+
+Do **not** implement checkmarks, **Pending**, or links until Settlement generation and `settlement_line → fuel_transaction.id` evidence exist.

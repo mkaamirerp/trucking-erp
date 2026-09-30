@@ -131,6 +131,11 @@ describe("fuelBvdTxnTableSort", () => {
       "location",
       "product",
       "qty",
+      "discount",
+      "hst",
+      "gst",
+      "pst",
+      "qst",
       "final",
       "currency",
     ];

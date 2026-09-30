@@ -3,6 +3,12 @@ import type { FuelBvdRow } from "../../api";
 import { displayCell, operationalCell } from "./bvdParsedDisplay";
 import { bvdProductDisplayLabel } from "./bvdProductDisplay";
 import {
+  activeBvdTxnTaxColumns,
+  bvdTxnDiscountDisplay,
+  bvdTxnTaxDisplay,
+  type BvdTxnActiveTaxColumn,
+} from "./fuelBvdTxnMoneyColumns";
+import {
   type FuelBvdTxnSortColumn,
   type FuelBvdTxnSortState,
   sortFuelBvdTransactions,
@@ -22,16 +28,48 @@ type Props = {
   cardNumber: string;
 };
 
-const SORTABLE_COLUMNS: { key: FuelBvdTxnSortColumn; label: string; className?: string }[] = [
+type ColumnDef = {
+  key: FuelBvdTxnSortColumn;
+  label: string;
+  className?: string;
+};
+
+const BASE_SORTABLE_COLUMNS: ColumnDef[] = [
   { key: "date", label: "Date / Time", className: "bvd-txn-rows__col-compact" },
   { key: "unit", label: "Unit", className: "bvd-txn-rows__col-compact" },
   { key: "driver", label: "Source driver", className: "bvd-txn-rows__col-flex bvd-txn-rows__col-driver" },
   { key: "location", label: "Location", className: "bvd-txn-rows__col-flex" },
   { key: "product", label: "Product", className: "bvd-txn-rows__col-compact" },
   { key: "qty", label: "Qty", className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric" },
+];
+
+const DISCOUNT_COLUMN: ColumnDef = {
+  key: "discount",
+  label: "Discount",
+  className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric",
+};
+
+const TAIL_SORTABLE_COLUMNS: ColumnDef[] = [
   { key: "final", label: "Final amount", className: "bvd-txn-rows__col-compact bvd-txn-rows__col-amount" },
   { key: "currency", label: "Currency", className: "bvd-txn-rows__col-compact" },
 ];
+
+function taxColumnDef(tax: BvdTxnActiveTaxColumn): ColumnDef {
+  return {
+    key: tax.field,
+    label: tax.label,
+    className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric",
+  };
+}
+
+function buildSortableColumns(activeTaxes: BvdTxnActiveTaxColumn[]): ColumnDef[] {
+  return [
+    ...BASE_SORTABLE_COLUMNS,
+    DISCOUNT_COLUMN,
+    ...activeTaxes.map(taxColumnDef),
+    ...TAIL_SORTABLE_COLUMNS,
+  ];
+}
 
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
@@ -94,6 +132,10 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [sort, setSort] = useState<FuelBvdTxnSortState | null>(null);
 
+  const activeTaxes = useMemo(() => activeBvdTxnTaxColumns(transactions), [transactions]);
+  const sortableColumns = useMemo(() => buildSortableColumns(activeTaxes), [activeTaxes]);
+  const columnCount = 1 + sortableColumns.length;
+
   const displayTransactions = useMemo(() => {
     if (!sort) return transactions;
     return sortFuelBvdTransactions(transactions, sort);
@@ -113,12 +155,16 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
   };
 
   return (
-    <div className="bvd-statement__table-wrap bvd-txn-rows">
+    <div
+      className="bvd-statement__table-wrap bvd-txn-rows"
+      data-testid="bvd-txn-rows-table"
+      data-active-tax-columns={activeTaxes.map((t) => t.field).join(",")}
+    >
       <table className="bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases bvd-txn-rows__table">
         <thead>
           <tr>
             <th className="bvd-txn-rows__col-chevron" aria-hidden="true" scope="col" />
-            {SORTABLE_COLUMNS.map((col) => (
+            {sortableColumns.map((col) => (
               <SortableHeader
                 key={col.key}
                 column={col.key}
@@ -185,6 +231,21 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
                     {operationalCell(row, "qty") || "—"}
                   </td>
                   <td
+                    className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
+                    data-testid="bvd-txn-col-discount"
+                  >
+                    {bvdTxnDiscountDisplay(row)}
+                  </td>
+                  {activeTaxes.map((tax) => (
+                    <td
+                      key={tax.field}
+                      className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
+                      data-testid={`bvd-txn-col-${tax.field}`}
+                    >
+                      {bvdTxnTaxDisplay(row, tax.field)}
+                    </td>
+                  ))}
+                  <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-amount"
                     data-testid="bvd-txn-col-final"
                   >
@@ -196,7 +257,7 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
                 </tr>
                 {expanded ? (
                   <tr key={`${row.id}-detail`} className="bvd-txn-rows__detail-row">
-                    <td colSpan={9}>
+                    <td colSpan={columnCount}>
                       <div
                         className="bvd-txn-rows__detail-panel"
                         data-testid={`bvd-txn-detail-${row.id}`}

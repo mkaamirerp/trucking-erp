@@ -1289,6 +1289,61 @@ When multiple legacy rows share the same identity, the canonical representative 
 
 Other imports are **not** deleted.
 
+## RECENT ACTIVITY — EXPANDED TRANSACTION DISPLAY CONTRACT (LOCKED)
+
+**Surface:** Fuel dashboard → Recent activity → expand a completed BVD invoice → compact transaction table (`BvdTransactionRowsTable`).
+
+**Authority:** Accepted / effective BVD transaction fields only (`operationalCell` on permanent `fuel_bvd` rows returned by `GET /fuel/bvd/imports/{import_id}/rows`). No recalculation, allocation, FX, or inference.
+
+### Discount column (always on)
+
+| Source field | Display |
+|--------------|---------|
+| `disc_amt` | Always show a **Discount** column |
+
+- Non-zero provider discount → display the accepted amount (formatted; commas allowed).
+- Known zero (`0`, `0.00`, etc.) → **`0.00`** (not `—`).
+- `—` only when the source value is genuinely missing/unknown under the BVD row contract.
+
+### Tax columns (dynamic per expanded invoice)
+
+Supported source fields: `hst`, `gst`, `pst`, `qst`.
+
+For the **currently displayed transaction set** (all `TRANSACTION` rows for that import in the table):
+
+- Show a tax column **only if** at least one row has a **non-zero** accepted amount for that tax type.
+- Do **not** show tax columns that are zero across the entire invoice.
+
+When a tax column is active, **every row** shows that field:
+
+- Non-zero → formatted accepted amount.
+- Zero → **`0.00`** (not `—`).
+
+### Column order (compact table)
+
+```text
+expand | Date/Time | Unit | Source driver | Location | Product | Qty | Discount | [HST] | [GST] | [PST] | [QST] | Final amount | Currency
+```
+
+Bracketed tax columns appear only when applicable.
+
+### Sorting (view-only)
+
+- Default row order = provider/source order (unchanged until the user sorts).
+- **Discount** and each **visible** tax column are sortable as numeric money (`parseBvdMoneyString`), not formatted strings.
+
+### Full evidence view
+
+The **full processed / stored BVD detail** view (`BvdParsedStatementView`, `/fuel/bvd/{import_id}/detail`) remains the complete provider projection. This contract applies only to the **compact** Recent Activity transaction table.
+
+### Implementation hooks (compact table)
+
+- `apps/web/src/pages/fuelBvdReview/fuelBvdTxnMoneyColumns.ts`
+- `apps/web/src/pages/fuelBvdReview/BvdTransactionRowsTable.tsx`
+- `apps/web/src/pages/fuelBvdReview/fuelBvdTxnTableSort.ts`
+
+---
+
 ## Implementation hooks
 
 - BASIC projection: `app/services/fuel_bvd_completed_basic.py`, `apps/web/src/pages/fuelBvdReview/bvdCompletedBasicProjection.ts`
