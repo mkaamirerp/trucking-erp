@@ -23,6 +23,12 @@
   --trk-success:       #2ECC71;
   --trk-warning:       #FBBF24;
   --trk-danger:        #F87171;
+
+  /* Fluid app shell — full viewport width; wide tables scroll inside .trk-scroll-x */
+  --trk-layout-max-width: none;
+  --trk-page-padding-x: 1.5rem;
+  --trk-page-padding-y: 1.5rem;
+  --trk-page-constrained-max: 72rem;
 }
 
 /* ---------------------------------------------------------------------------
@@ -136,4 +142,51 @@
   --trk-success:         #059669;
   --trk-warning:         #D97706;
   --trk-danger:          #DC2626;
+}
+
+/* =============================================================================
+   App shell layout (all themes — use classes, not per-page max-width)
+   ============================================================================= */
+
+.trk-app-shell {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--trk-layout-max-width);
+  background-color: var(--trk-bg);
+  color: var(--trk-text);
+}
+
+.trk-app-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: var(--trk-layout-max-width);
+  overflow: auto;
+  background: transparent;
+  padding: var(--trk-page-padding-y) var(--trk-page-padding-x);
+  scrollbar-gutter: stable;
+}
+
+.trk-page {
+  width: 100%;
+  max-width: var(--trk-layout-max-width);
+  min-width: 0;
+}
+
+.trk-page--constrained {
+  max-width: var(--trk-page-constrained-max);
+  margin-inline: auto;
+}
+
+.trk-scroll-x {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }

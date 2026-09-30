@@ -1,7 +1,7 @@
-/* Full-bleed BVD page: counteract app Layout p-6 so statement uses monitor width. */
+/* Full-bleed BVD page: counteract themed shell padding so statement uses monitor width. */
 .bvd-review-page {
-  margin: -1.5rem -1.5rem 0;
-  width: calc(100% + 3rem);
+  margin: calc(-1 * var(--trk-page-padding-y)) calc(-1 * var(--trk-page-padding-x)) 0;
+  width: calc(100% + 2 * var(--trk-page-padding-x));
   min-height: 0;
   flex: 1;
   display: flex;

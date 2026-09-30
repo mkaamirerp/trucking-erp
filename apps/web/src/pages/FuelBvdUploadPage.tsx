@@ -131,7 +131,7 @@ export default function FuelBvdUploadPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="trk-page">
       <h1 className="text-lg font-semibold text-[var(--trk-text)]">BVD PDF upload (Implementation 1)</h1>
       <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
         Digital BVD PDF only. Extracts exact source fields into{" "}

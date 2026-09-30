@@ -4,6 +4,7 @@
   z-index: 60;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   background: var(--trk-bg);
   overflow: hidden;
 }

@@ -108,7 +108,7 @@ export default function FuelRecentActivitySection({
       ) : activity.length === 0 ? (
         <p className="text-xs text-[var(--trk-text-muted)]">{emptyMessage}</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="trk-scroll-x">
           <table className="min-w-full text-left text-xs">
             <thead className="text-[10px] uppercase text-[var(--trk-text-muted)]">
               <tr>
