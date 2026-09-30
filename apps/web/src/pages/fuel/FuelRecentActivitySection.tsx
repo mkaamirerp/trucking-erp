@@ -2,7 +2,7 @@ import { Fragment, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { getFuelBvdImportRows, type FuelBvdCompletedBasic, type FuelBvdRow } from "../../api";
 import { OPS } from "../../routes";
-import BvdTransactionRowsTable from "../fuelBvdReview/BvdTransactionRowsTable";
+import RecentActivityStatementTxnPanel from "./RecentActivityStatementTxnPanel";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
 import {
   formatFuelActivityCadTotal,
@@ -270,12 +270,12 @@ export default function FuelRecentActivitySection({
                           {loadingImportId === row.import_id ? (
                             <p className="text-xs text-[var(--trk-text-muted)]">Loading transactions…</p>
                           ) : expandedData && expandedData.transactions.length > 0 ? (
-                            <div data-testid={`fuel-activity-txn-panel-${row.import_id}`}>
-                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                <span className="text-[10px] uppercase tracking-wide text-[var(--trk-text-muted)]">
-                                  Transactions ({expandedData.transactions.length})
-                                </span>
-                                {onOpenProcessed ? (
+                            <RecentActivityStatementTxnPanel
+                              importId={row.import_id}
+                              transactions={expandedData.transactions}
+                              cardNumber={expandedData.cardNumber || row.card_number || ""}
+                              fullInvoiceLink={
+                                onOpenProcessed ? (
                                   <button
                                     type="button"
                                     className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
@@ -292,15 +292,9 @@ export default function FuelRecentActivitySection({
                                   >
                                     Open full invoice
                                   </Link>
-                                )}
-                              </div>
-                              <BvdTransactionRowsTable
-                                transactions={expandedData.transactions}
-                                cardNumber={
-                                  expandedData.cardNumber || row.card_number || ""
-                                }
-                              />
-                            </div>
+                                )
+                              }
+                            />
                           ) : expandedData && expandedData.transactions.length === 0 ? (
                             <p className="text-xs text-[var(--trk-text-muted)]">No purchase transactions.</p>
                           ) : null}

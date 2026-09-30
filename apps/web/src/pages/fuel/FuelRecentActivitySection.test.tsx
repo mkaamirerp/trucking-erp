@@ -163,6 +163,8 @@ describe("FuelRecentActivitySection", () => {
     expect(apiMocks.getFuelBvdImportRows).toHaveBeenCalledTimes(1);
     expect(apiMocks.getFuelBvdImportRows).toHaveBeenCalledWith("imp-a");
     expect(container.querySelector('[data-testid="fuel-activity-txn-panel-imp-a"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="bvd-statement-filters"]')).toBeTruthy();
+    expect(container.textContent).toContain("Search this statement");
     expect(container.querySelector('[data-testid="bvd-txn-row-2"]')).toBeTruthy();
 
     const fullLink = container.querySelector('[data-testid="fuel-activity-full-invoice-imp-a"]') as HTMLAnchorElement;
