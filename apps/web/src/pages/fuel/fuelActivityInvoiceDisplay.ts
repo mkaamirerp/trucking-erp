@@ -85,15 +85,15 @@ export function formatFuelActivityInvoiceDiscount(row: FuelBvdCompletedBasic): s
 export function formatFuelActivityCadTotal(row: FuelBvdCompletedBasic): string {
   const bucket = fuelActivitySourceMoneyBucket(row.currency);
   const amt = row.total_amount?.trim();
-  if (bucket !== "cad" || !amt) return "—";
-  return amt;
+  if (!bucket || !amt) return "—";
+  return bucket === "cad" ? amt : "0.00";
 }
 
 export function formatFuelActivityUsdTotal(row: FuelBvdCompletedBasic): string {
   const bucket = fuelActivitySourceMoneyBucket(row.currency);
   const amt = row.total_amount?.trim();
-  if (bucket !== "usd" || !amt) return "—";
-  return amt;
+  if (!bucket || !amt) return "—";
+  return bucket === "usd" ? amt : "0.00";
 }
 
 export function formatFuelActivityInvoiceTotal(row: FuelBvdCompletedBasic): string {

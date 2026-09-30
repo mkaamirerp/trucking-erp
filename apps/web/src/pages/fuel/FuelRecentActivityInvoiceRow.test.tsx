@@ -81,7 +81,7 @@ describe("FuelRecentActivitySection invoice row columns", () => {
       "3,421.01",
     );
     expect(container.querySelector('[data-testid="fuel-activity-usd-total-import-972201"]')?.textContent).toBe(
-      "—",
+      "0.00",
     );
     expect(container.querySelector('[data-testid="fuel-activity-invoice-total-import-972201"]')?.textContent).toBe(
       "3,421.01 CN",

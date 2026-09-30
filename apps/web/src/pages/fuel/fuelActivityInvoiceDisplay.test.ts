@@ -48,11 +48,11 @@ function goldenCompletedBasic(): FuelBvdCompletedBasic {
 describe("fuelActivityInvoiceDisplay (972201)", () => {
   const row = goldenCompletedBasic();
 
-  it("preserves CN in source currency (dashboard maps to CAD column only)", () => {
+  it("shows CN amount in CAD and known-zero USD while preserving source currency", () => {
     expect(row.currency).toBe("CN");
     expect(fuelActivitySourceMoneyBucket(row.currency)).toBe("cad");
     expect(formatFuelActivityCadTotal(row)).toBe("3,421.01");
-    expect(formatFuelActivityUsdTotal(row)).toBe("—");
+    expect(formatFuelActivityUsdTotal(row)).toBe("0.00");
     expect(formatFuelActivityInvoiceTotal(row)).toBe("3,421.01 CN");
   });
 
@@ -72,18 +72,29 @@ describe("fuelActivityInvoiceDisplay (972201)", () => {
     expect(formatFuelActivityInvoiceDiscount(row)).toBe("0.00");
   });
 
-  it("USD bucket separate — no FX", () => {
+  it("shows USD amount and known-zero CAD — no FX", () => {
     const usdRow: FuelBvdCompletedBasic = {
       ...row,
       currency: "USD",
       total_amount: "2,430.70",
     };
     expect(formatFuelActivityUsdTotal(usdRow)).toBe("2,430.70");
-    expect(formatFuelActivityCadTotal(usdRow)).toBe("—");
+    expect(formatFuelActivityCadTotal(usdRow)).toBe("0.00");
   });
 
-  it("missing bucket amount is em dash not zero", () => {
-    expect(formatFuelActivityUsdTotal(row)).toBe("—");
+  it("uses dash only when source currency or required amount is unknown", () => {
+    expect(formatFuelActivityCadTotal({ ...row, currency: "EUR" })).toBe("—");
+    expect(formatFuelActivityUsdTotal({ ...row, currency: "EUR" })).toBe("—");
+    expect(formatFuelActivityCadTotal({ ...row, currency: null })).toBe("—");
+    expect(formatFuelActivityUsdTotal({ ...row, currency: null })).toBe("—");
+    expect(formatFuelActivityCadTotal({ ...row, total_amount: "" })).toBe("—");
+    expect(formatFuelActivityUsdTotal({ ...row, total_amount: "" })).toBe("—");
+  });
+
+  it("preserves an actual CAD zero and its known-zero USD bucket", () => {
+    const zeroCad: FuelBvdCompletedBasic = { ...row, currency: "CAD", total_amount: "0.00" };
+    expect(formatFuelActivityCadTotal(zeroCad)).toBe("0.00");
+    expect(formatFuelActivityUsdTotal(zeroCad)).toBe("0.00");
   });
 });
 
@@ -119,9 +130,15 @@ describe("838710 US currency display", () => {
   };
 
   it("fills USD column and preserves provider US on invoice total", () => {
-    expect(formatFuelActivityCadTotal(usRow)).toBe("—");
+    expect(formatFuelActivityCadTotal(usRow)).toBe("0.00");
     expect(formatFuelActivityUsdTotal(usRow)).toBe("9,047.72");
     expect(formatFuelActivityInvoiceTotal(usRow)).toBe("9,047.72 US");
+  });
+
+  it("maps the USD alias to USD with a known-zero CAD bucket", () => {
+    const usdAlias: FuelBvdCompletedBasic = { ...usRow, currency: "USD", total_amount: "4.50" };
+    expect(formatFuelActivityCadTotal(usdAlias)).toBe("0.00");
+    expect(formatFuelActivityUsdTotal(usdAlias)).toBe("4.50");
   });
 
   it("shows multi-card summary not header card alone", () => {
