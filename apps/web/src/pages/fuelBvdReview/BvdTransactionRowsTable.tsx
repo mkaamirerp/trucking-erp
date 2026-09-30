@@ -1,7 +1,12 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import type { FuelBvdRow } from "../../api";
 import { displayCell, operationalCell } from "./bvdParsedDisplay";
 import { bvdProductDisplayLabel } from "./bvdProductDisplay";
+import {
+  type FuelBvdTxnSortColumn,
+  type FuelBvdTxnSortState,
+  sortFuelBvdTransactions,
+} from "./fuelBvdTxnTableSort";
 import {
   bvdTxnDiscountAmount,
   bvdTxnNonZeroTaxLines,
@@ -16,6 +21,17 @@ type Props = {
   /** From statement header — shown in expanded panel only. */
   cardNumber: string;
 };
+
+const SORTABLE_COLUMNS: { key: FuelBvdTxnSortColumn; label: string; className?: string }[] = [
+  { key: "date", label: "Date / Time", className: "bvd-txn-rows__col-compact" },
+  { key: "unit", label: "Unit", className: "bvd-txn-rows__col-compact" },
+  { key: "driver", label: "Source driver", className: "bvd-txn-rows__col-flex bvd-txn-rows__col-driver" },
+  { key: "location", label: "Location", className: "bvd-txn-rows__col-flex" },
+  { key: "product", label: "Product", className: "bvd-txn-rows__col-compact" },
+  { key: "qty", label: "Qty", className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric" },
+  { key: "final", label: "Final amount", className: "bvd-txn-rows__col-compact bvd-txn-rows__col-amount" },
+  { key: "currency", label: "Currency", className: "bvd-txn-rows__col-compact" },
+];
 
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
@@ -34,11 +50,66 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   );
 }
 
+function SortableHeader({
+  column,
+  label,
+  className,
+  sort,
+  onSort,
+}: {
+  column: FuelBvdTxnSortColumn;
+  label: string;
+  className?: string;
+  sort: FuelBvdTxnSortState | null;
+  onSort: (column: FuelBvdTxnSortColumn) => void;
+}) {
+  const active = sort?.column === column;
+  const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
+  const indicator = active ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
+
+  return (
+    <th className={className} scope="col">
+      <button
+        type="button"
+        className="bvd-txn-rows__sort-btn"
+        data-testid={`bvd-txn-sort-${column}`}
+        aria-sort={ariaSort}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSort(column);
+        }}
+      >
+        <span className="bvd-txn-rows__sort-label">{label}</span>
+        {active ? (
+          <span className="bvd-txn-rows__sort-indicator" aria-hidden="true">{indicator}</span>
+        ) : (
+          <span className="bvd-txn-rows__sort-hint" aria-hidden="true">↕</span>
+        )}
+      </button>
+    </th>
+  );
+}
+
 export default function BvdTransactionRowsTable({ transactions, cardNumber }: Props) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [sort, setSort] = useState<FuelBvdTxnSortState | null>(null);
+
+  const displayTransactions = useMemo(() => {
+    if (!sort) return transactions;
+    return sortFuelBvdTransactions(transactions, sort);
+  }, [transactions, sort]);
 
   const toggle = (id: number) => {
     setExpandedId((cur) => (cur === id ? null : id));
+  };
+
+  const handleSort = (column: FuelBvdTxnSortColumn) => {
+    setSort((prev) => {
+      if (prev?.column === column) {
+        return { column, direction: prev.direction === "asc" ? "desc" : "asc" };
+      }
+      return { column, direction: "asc" };
+    });
   };
 
   return (
@@ -46,19 +117,21 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
       <table className="bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases bvd-txn-rows__table">
         <thead>
           <tr>
-            <th className="bvd-txn-rows__col-chevron" aria-hidden="true" />
-            <th>Date / Time</th>
-            <th>Unit</th>
-            <th className="bvd-txn-rows__col-driver">Source driver</th>
-            <th>Location</th>
-            <th>Product</th>
-            <th>Qty</th>
-            <th className="bvd-txn-rows__col-amount">Final amount</th>
-            <th>Currency</th>
+            <th className="bvd-txn-rows__col-chevron" aria-hidden="true" scope="col" />
+            {SORTABLE_COLUMNS.map((col) => (
+              <SortableHeader
+                key={col.key}
+                column={col.key}
+                label={col.label}
+                className={col.className}
+                sort={sort}
+                onSort={handleSort}
+              />
+            ))}
           </tr>
         </thead>
         <tbody>
-          {transactions.map((row) => {
+          {displayTransactions.map((row) => {
             const expanded = expandedId === row.id;
             const taxes = bvdTxnNonZeroTaxLines(row);
             const discount = bvdTxnDiscountAmount(row);
@@ -87,18 +160,39 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
                   <td className="bvd-txn-rows__chevron-cell">
                     <Chevron expanded={expanded} />
                   </td>
-                  <td data-testid="bvd-txn-col-date">
+                  <td className="bvd-txn-rows__col-compact" data-testid="bvd-txn-col-date">
                     {formatBvdTransactionDateTime(operationalCell(row, "transaction_date"))}
                   </td>
-                  <td data-testid="bvd-txn-col-unit">{operationalCell(row, "unit_number") || "—"}</td>
-                  <td data-testid="bvd-txn-col-driver">{operationalCell(row, "driver_name") || "—"}</td>
-                  <td data-testid="bvd-txn-col-location">{formatBvdTxnLocationShort(row)}</td>
-                  <td data-testid="bvd-txn-col-product">
+                  <td className="bvd-txn-rows__col-compact" data-testid="bvd-txn-col-unit">
+                    {operationalCell(row, "unit_number") || "—"}
+                  </td>
+                  <td
+                    className="bvd-txn-rows__col-flex bvd-txn-rows__col-driver"
+                    data-testid="bvd-txn-col-driver"
+                  >
+                    {operationalCell(row, "driver_name") || "—"}
+                  </td>
+                  <td className="bvd-txn-rows__col-flex" data-testid="bvd-txn-col-location">
+                    {formatBvdTxnLocationShort(row)}
+                  </td>
+                  <td className="bvd-txn-rows__col-compact" data-testid="bvd-txn-col-product">
                     {bvdProductDisplayLabel(operationalCell(row, "prod"))}
                   </td>
-                  <td data-testid="bvd-txn-col-qty">{operationalCell(row, "qty") || "—"}</td>
-                  <td data-testid="bvd-txn-col-final">{finalAmt || "—"}</td>
-                  <td data-testid="bvd-txn-col-cur">{cur || "—"}</td>
+                  <td
+                    className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
+                    data-testid="bvd-txn-col-qty"
+                  >
+                    {operationalCell(row, "qty") || "—"}
+                  </td>
+                  <td
+                    className="bvd-txn-rows__col-compact bvd-txn-rows__col-amount"
+                    data-testid="bvd-txn-col-final"
+                  >
+                    {finalAmt || "—"}
+                  </td>
+                  <td className="bvd-txn-rows__col-compact" data-testid="bvd-txn-col-cur">
+                    {cur || "—"}
+                  </td>
                 </tr>
                 {expanded ? (
                   <tr key={`${row.id}-detail`} className="bvd-txn-rows__detail-row">

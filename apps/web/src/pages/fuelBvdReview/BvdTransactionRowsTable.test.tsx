@@ -132,4 +132,86 @@ describe("BvdTransactionRowsTable", () => {
     renderTable([txn(1)]);
     expect(container.querySelector('[data-testid="bvd-txn-col-product"]')?.textContent).toBe("Fuel");
   });
+
+  function rowIdsInDom(): number[] {
+    return Array.from(container.querySelectorAll('[data-testid^="bvd-txn-row-"]')).map((el) => {
+      const m = el.getAttribute("data-testid")?.match(/bvd-txn-row-(\d+)/);
+      return m ? Number(m[1]) : 0;
+    });
+  }
+
+  it("default row order matches source transaction order", () => {
+    renderTable([txn(3), txn(1), txn(2)]);
+    expect(rowIdsInDom()).toEqual([3, 1, 2]);
+  });
+
+  it("date sort ascending reorders rows and shows indicator", () => {
+    renderTable([
+      txn(1, { transaction_date: "2026-07-24 10:00:00" }),
+      txn(2, { transaction_date: "2026-07-23 02:17:56" }),
+    ]);
+    const btn = container.querySelector('[data-testid="bvd-txn-sort-date"]') as HTMLButtonElement;
+    act(() => btn.click());
+    expect(rowIdsInDom()).toEqual([2, 1]);
+    expect(btn.getAttribute("aria-sort")).toBe("ascending");
+    expect(btn.textContent).toMatch(/↑/);
+  });
+
+  it("clicking same header toggles to descending", () => {
+    renderTable([
+      txn(1, { transaction_date: "2026-07-24 10:00:00" }),
+      txn(2, { transaction_date: "2026-07-23 02:17:56" }),
+    ]);
+    const btn = container.querySelector('[data-testid="bvd-txn-sort-date"]') as HTMLButtonElement;
+    act(() => btn.click());
+    act(() => btn.click());
+    expect(rowIdsInDom()).toEqual([1, 2]);
+    expect(btn.getAttribute("aria-sort")).toBe("descending");
+    expect(btn.textContent).toMatch(/↓/);
+  });
+
+  it("clicking another header starts ascending on that column", () => {
+    renderTable([
+      txn(1, { unit_number: "Z9" }),
+      txn(2, { unit_number: "001107" }),
+    ]);
+    const dateBtn = container.querySelector('[data-testid="bvd-txn-sort-date"]') as HTMLButtonElement;
+    const unitBtn = container.querySelector('[data-testid="bvd-txn-sort-unit"]') as HTMLButtonElement;
+    act(() => dateBtn.click());
+    act(() => unitBtn.click());
+    expect(rowIdsInDom()).toEqual([2, 1]);
+    expect(unitBtn.getAttribute("aria-sort")).toBe("ascending");
+    expect(dateBtn.getAttribute("aria-sort")).toBe("none");
+  });
+
+  it("unit sort preserves leading-zero identifier display", () => {
+    renderTable([
+      txn(1, { unit_number: "S1107" }),
+      txn(2, { unit_number: "001107" }),
+    ]);
+    const unitBtn = container.querySelector('[data-testid="bvd-txn-sort-unit"]') as HTMLButtonElement;
+    act(() => unitBtn.click());
+    expect(rowIdsInDom()).toEqual([2, 1]);
+    const units = Array.from(container.querySelectorAll('[data-testid="bvd-txn-col-unit"]')).map(
+      (el) => el.textContent,
+    );
+    expect(units).toEqual(["001107", "S1107"]);
+  });
+
+  it("expanded row stays attached after sort", () => {
+    renderTable([
+      txn(1, { transaction_date: "2026-07-24 10:00:00", auth_code: "AUTH-ONE" }),
+      txn(2, { transaction_date: "2026-07-23 02:17:56", auth_code: "AUTH-TWO" }),
+    ]);
+    const row1 = container.querySelector('[data-testid="bvd-txn-row-1"]') as HTMLElement;
+    act(() => row1.click());
+    expect(container.querySelector('[data-testid="bvd-txn-detail-1"]')).not.toBeNull();
+
+    const dateBtn = container.querySelector('[data-testid="bvd-txn-sort-date"]') as HTMLButtonElement;
+    act(() => dateBtn.click());
+    expect(rowIdsInDom()).toEqual([2, 1]);
+    const detail = container.querySelector('[data-testid="bvd-txn-detail-1"]');
+    expect(detail).not.toBeNull();
+    expect(detail?.textContent).toContain("AUTH-ONE");
+  });
 });
