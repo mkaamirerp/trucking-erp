@@ -479,8 +479,9 @@
 }
 
 .bvd-statement__table-wrap {
-  overflow-x: hidden;
+  overflow-x: auto;
   width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
 .bvd-statement__table {
@@ -555,6 +556,14 @@
 .bvd-statement__table--txn col.col-qty { width: 4%; }
 .bvd-statement__table--txn col.col-money { width: 4.5%; }
 .bvd-statement__table--txn col.col-cur { width: 2.5%; }
+
+/* Keep the 21-column evidence grid readable on narrow screens; scroll its own
+   wrapper instead of squeezing source data into unusable columns. */
+@media (max-width: 1199px) {
+  .bvd-statement__table--txn {
+    min-width: 75rem;
+  }
+}
 
 .bvd-statement__footer-bar {
   width: 100%;
