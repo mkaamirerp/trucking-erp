@@ -170,7 +170,7 @@ export default function FuelProviderConnectionsPage({ entryPoint }: Props) {
   };
 
   return (
-    <div className="trk-page space-y-6">
+    <div className="trk-page trk-page--constrained space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Fuel / card providers</h1>
         <p className="text-sm text-gray-600 mt-1">

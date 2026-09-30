@@ -31,7 +31,7 @@ export default function FuelReviewQueuePage() {
   }, [refresh]);
 
   return (
-    <div className="trk-page">
+    <div className="trk-page trk-page--dense">
       <div className="mb-4 flex items-end justify-between gap-4">
         <div>
           <Link to={OPS.FUEL} className="text-sm text-blue-700 hover:underline">← Fuel home</Link>

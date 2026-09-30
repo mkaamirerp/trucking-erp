@@ -147,7 +147,7 @@ export default function FuelMainPage() {
   }, [overlayOpen]);
 
   return (
-    <div className="trk-page" data-testid="fuel-home">
+    <div className="trk-page trk-page--dense" data-testid="fuel-home">
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div>
           <h1 className="text-xl font-semibold text-[var(--trk-text)]">Fuel</h1>

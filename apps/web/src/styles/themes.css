@@ -29,6 +29,8 @@
   --trk-page-padding-x: 1.5rem;
   --trk-page-padding-y: 1.5rem;
   --trk-page-constrained-max: 72rem;
+  /* Dense data workspace (Fuel, etc.): ~8px min, ~12px max desktop gutter; opt-in via .trk-page--dense */
+  --trk-dense-gutter: clamp(0.5rem, 0.6vw, 0.75rem);
 }
 
 /* ---------------------------------------------------------------------------
@@ -170,13 +172,20 @@
   overflow: auto;
   background: transparent;
   padding: var(--trk-page-padding-y) var(--trk-page-padding-x);
-  scrollbar-gutter: stable;
+  /* html already reserves the viewport scrollbar gutter; do not reserve a second one here */
 }
 
 .trk-page {
   width: 100%;
   max-width: var(--trk-layout-max-width);
   min-width: 0;
+}
+
+/* Dense data pages: cancel shell padding down to a small workspace gutter (cards keep own padding). */
+.trk-page--dense {
+  width: auto;
+  align-self: stretch;
+  margin-inline: calc(var(--trk-dense-gutter) - var(--trk-page-padding-x));
 }
 
 .trk-page--constrained {
