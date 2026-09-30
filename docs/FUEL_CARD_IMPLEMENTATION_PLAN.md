@@ -98,20 +98,22 @@ Those are later backend decisions after source evidence and review.
 
 # 1. Current execution sequence (locked precedence)
 
-**BVD contract for the current milestone:** `docs/FUEL_BVD_IMPLEMENTATION_1.md` — not superseded by the segment letters below.
+**BVD contract for the current milestone:** `docs/FUEL_BVD_IMPLEMENTATION_1.md` — **authoritative** for current BVD behavior. Not superseded by the segment letters below.
+
+**Drift guard (2026-09-29):** Current BVD uses **staging** (`fuel_bvd_import_stage` + stage rows/corrections) before Process; permanent `fuel_bvd` and canonical `fuel_source_batches` / `fuel_transactions` are created at **Process**. Future **BVD CSV** must use the **same** staging / review / Process architecture as PDF. There is **no** universal Fuel closing day; provider cadence, Fuel Process (`finalized_at`), and settlement periods are **independent** (see `docs/FUEL_CARD_MODULE_DESIGN.md`).
 
 The **active** execution order is:
 
 ## PHASE 1 — BVD IMPLEMENTATION 1
 
 - exact BVD digital-PDF extraction
-- one `fuel_bvd` table
-- exact TEXT source values
+- staged review (`fuel_bvd_import_stage` → Process → permanent `fuel_bvd` + canonical batch)
+- exact TEXT source values on permanent rows
 - PostgreSQL round-trip
-- side-by-side review (PDF left / PostgreSQL values right)
-- no truck matching, driver matching, O/O logic, reconciliation, settlement, or posting
+- results-first review + source reconciliation before Process
+- no settlement engine, payroll posting, or O/O settlement math in Fuel Process
 
-**Status:** CODE/TEST ACCEPTANCE PASSED. Live application migration/browser acceptance still pending.
+**Status:** Staging + Process + canonical projection in progress on `feat/fuel-card`; see Implementation 1 doc for legacy compatibility rules.
 
 ## PHASE 2 — BVD LIVE ACCEPTANCE
 

@@ -1,6 +1,6 @@
 # Fuel / BVD — Implementation 1
 
-**Status:** LOCKED — amended 2026-09-27  
+**Status:** LOCKED — amended 2026-09-29 (staged lifecycle + legacy compatibility)
 **Scope:** BVD source extraction, source reconciliation, unit resolution, human review, and Process gate.  
 **Goal:** upload an approved BVD PDF/CSV, preserve every BVD source value exactly, prove all parsed money reconciles to the provider totals, flag unresolved unit numbers immediately, resolve those units without corrupting source evidence, then allow the user to Process.  
 
@@ -17,9 +17,11 @@ UPLOAD PDF / CSV
       ↓
 PARSE
       ↓
-SAVE EXACT BVD SOURCE DATA
+fuel_bvd_import_stage  (temporary staging — not permanent fuel_bvd)
       ↓
-RUN SOURCE MONEY VALIDATIONS
+review / corrections / effective accepted values
+      ↓
+RUN SOURCE MONEY VALIDATIONS (reconciliation)
       ↓
 FLAG UNRESOLVED UNIT NUMBERS
       ↓
@@ -32,7 +34,15 @@ OPEN ORIGINAL PDF ONLY IF NEEDED
 RESOLVE UNIT EXCEPTIONS
       ↓
 PROCESS
+      ↓
+permanent fuel_bvd  (accepted values)
+      ↓
+fuel_source_batch  →  fuel_transactions / fuel_source_controls
+      ↓
+classification (may continue after Process commit)
 ```
+
+**Current PDF path (locked):** upload does **not** write permanent `fuel_bvd` or `fuel_source_batches` until the user successfully **Process**es from staging.
 
 The review page is **results-first**. It is not required to show the PDF side-by-side.
 
@@ -43,6 +53,86 @@ Before Process, TruckERP must answer three questions:
 1. Did TruckERP parse the source correctly?
 2. Does every penny reconcile through transaction, unit, product, and BVD provider totals?
 3. Is every non-zero source unit resolved either to a real TruckERP asset or to a Fuel-only external-use record?
+
+---
+
+# 1A. Current staged BVD source lifecycle (authoritative)
+
+This section describes the **current** BVD implementation on `feat/fuel-card`, not pre-staging behavior.
+
+## Upload and pre-Process authority
+
+1. **Current BVD upload does NOT immediately create permanent `fuel_bvd`.**
+
+2. **Current BVD upload does NOT create `fuel_source_batches`.**
+
+3. **Before Process**, authority for in-flight BVD imports is:
+
+   - `fuel_bvd_import_stage` (`status = ACTIVE`, not expired)
+   - `fuel_bvd_stage_row` (parsed source rows)
+   - `fuel_bvd_stage_field_correction` (append-only review corrections)
+   - **effective / accepted review values** (`build_effective_bvd_rows` + reconciliation)
+
+4. **Discard** and **expired-stage purge** remove staging rows (hard delete). They are not a separate long-lived “cancelled import” status.
+
+## Successful Process (staged path)
+
+At successful **Process** (`process_stage_to_permanent`), in one transaction:
+
+1. Reconcile **effective** stage rows (money gate).
+2. Run duplicate gate (`permanent_only`).
+3. Persist immutable source evidence (permanent PDF storage).
+4. Create permanent **`fuel_bvd`** rows using **accepted** field values (`review_status = SOURCE_REVIEWED`).
+5. Create **`fuel_source_batch`** and project **`fuel_transactions`** / **`fuel_source_controls`**.
+6. Run canonical money gate.
+7. **Finalize** the canonical batch (`status = FINALIZED`, `finalized_at` set).
+8. **Commit**.
+9. Remove staging rows/files.
+10. **Classification** may run afterward (post-commit backfill); it is not required to complete Process.
+
+## Process timestamps (staged path)
+
+5. Current staged Process creates:
+
+   - `fuel_source_batches.status = FINALIZED`
+   - `fuel_source_batches.finalized_at` (UTC)
+
+6. **`fuel_source_batches.finalized_at`** is the strongest current timestamp meaning:
+
+   > this staged Fuel import successfully completed Process (canonical batch committed).
+
+7. **`fuel_bvd.reviewed_at`** remains **source-review metadata** on permanent rows. It must **not** be treated silently as the authoritative **Process** timestamp for new staged imports (dashboard metrics, operational “processed” counts, or settlement handoff).
+
+**Implementation reference:** `app/services/fuel_bvd_stage.py` (`process_stage_to_permanent`), `app/services/fuel_bvd_canonical_projection.py` (`finalize_batch`).
+
+---
+
+# 1B. Legacy BVD compatibility
+
+Older tenant data may exist where permanent **`fuel_bvd`** rows were created **without** the staging path, or where Process completed **without** a canonical batch.
+
+## Legacy signals
+
+- Open imports: `fuel_bvd` **HEADER** with `review_status` **`PENDING`** or **`IN_REVIEW`** (no active stage).
+- Processed history: `fuel_bvd.review_status = SOURCE_REVIEWED` with **no** matching `fuel_source_batches` row (`source_import_ref` = import id).
+
+## Locked rules
+
+- Legacy rows remain **readable**; do not rewrite historical source evidence.
+- Do **not** manufacture `fuel_source_batches` retroactively for legacy imports.
+- Do **not** invent `finalized_at` values for legacy imports.
+- Legacy open **`PENDING` / `IN_REVIEW`** imports may remain **actionable** (review + Process via legacy path where applicable).
+- Legacy **`SOURCE_REVIEWED`** imports remain **history**.
+- Legacy processed imports **without** authoritative batch `finalized_at` must **not** be silently counted as newly Processed using `MAX(fuel_bvd.reviewed_at)` (operational dashboard uses `finalized_at` for staged canonical Process only).
+
+## Current vs legacy Process
+
+| Path | When | Permanent `fuel_bvd` | Canonical batch |
+|------|------|----------------------|-----------------|
+| **Current staged** | Active `fuel_bvd_import_stage` | Created at Process with accepted values | Created and **FINALIZED** in same transaction |
+| **Legacy** | No active stage; rows already in `fuel_bvd` | Updated to `SOURCE_REVIEWED` at Process | **Not** created by legacy `process_bvd_import_review` |
+
+New development should assume the **staged** path. CSV intake (when resumed) must use the **same** staging / review / Process architecture as PDF.
 
 ---
 

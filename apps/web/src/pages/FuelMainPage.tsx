@@ -3,9 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import {
   getFuelBvdUploadErrorDisplay,
   listFuelBvdCompletedHistory,
-  listFuelBvdImports,
   listFuelProviders,
-  listFuelReviewQueue,
+  getFuelDashboardStats,
   discardFuelBvdStage,
   uploadFuelBvdPdf,
   type FuelBvdCompletedBasic,
@@ -13,10 +12,7 @@ import {
 } from "../api";
 import FuelConfigureApiModal from "./fuel/FuelConfigureApiModal";
 import FuelProviderCombobox from "./fuel/FuelProviderCombobox";
-import {
-  computeFuelDashboardStats,
-  recentFuelActivity,
-} from "./fuel/fuelDashboardData";
+import { mapFuelDashboardStatsFromApi, recentFuelActivity, type FuelDashboardStats } from "./fuel/fuelDashboardData";
 import { readLastFuelProviderCode, writeLastFuelProviderCode } from "./fuel/fuelLastProvider";
 import { parseFuelBvdDuplicateDetail } from "./fuelBvdReview/bvdUploadDuplicate";
 import { readFuelProcessedReturn } from "./fuelBvdReview/bvdUploadCompletion";
@@ -29,7 +25,10 @@ export default function FuelMainPage() {
   const [catalog, setCatalog] = useState<FuelProviderCatalog[]>([]);
   const [providerCode, setProviderCode] = useState("BVD");
   const [completed, setCompleted] = useState<FuelBvdCompletedBasic[]>([]);
-  const [stats, setStats] = useState(() => computeFuelDashboardStats([], [], []));
+  const [stats, setStats] = useState<FuelDashboardStats>({
+    needsReviewCount: 0,
+    processedLast7DaysCount: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -42,15 +41,14 @@ export default function FuelMainPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const refresh = useCallback(async () => {
-    const [providers, queue, openBvd, history] = await Promise.all([
+    const [providers, history, dashboardStats] = await Promise.all([
       listFuelProviders(),
-      listFuelReviewQueue(),
-      listFuelBvdImports({ excludeReviewStatus: "SOURCE_REVIEWED" }),
       listFuelBvdCompletedHistory(),
+      getFuelDashboardStats(),
     ]);
     setCatalog(providers);
     setCompleted(history);
-    setStats(computeFuelDashboardStats(queue, openBvd, history));
+    setStats(mapFuelDashboardStatsFromApi(dashboardStats));
 
     const last = readLastFuelProviderCode();
     const codes = providers.map((p) => p.provider_code);
@@ -210,19 +208,13 @@ export default function FuelMainPage() {
           ) : null}
         </section>
 
-        <div className="grid grid-cols-3 gap-2 lg:w-[min(100%,28rem)]">
+        <div className="grid grid-cols-2 gap-2 lg:w-[min(100%,20rem)]">
           {[
             { label: "Needs review", value: stats.needsReviewCount },
-            { label: "Processed this week", value: stats.processedThisWeekCount },
-            {
-              label: "Closing day",
-              value: stats.closingDayLabel,
-              title: stats.closingDayIsPlaceholder ? "Tenant setting TBD" : undefined,
-            },
+            { label: "Processed last 7 days", value: stats.processedLast7DaysCount },
           ].map((card) => (
             <div
               key={card.label}
-              title={card.title}
               className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-1.5"
             >
               <div className="text-[10px] leading-tight text-[var(--trk-text-muted)]">{card.label}</div>

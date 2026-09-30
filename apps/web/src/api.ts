@@ -3957,6 +3957,16 @@ export type FuelReviewCorrectionWrite = {
   reason: string;
 };
 
+export type FuelDashboardStats = {
+  needs_review_count: number;
+  processed_last_7_days_count: number;
+};
+
+export async function getFuelDashboardStats(): Promise<FuelDashboardStats> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/dashboard/stats`);
+  return handle<FuelDashboardStats>(res);
+}
+
 export async function listFuelReviewQueue(statuses?: string[]): Promise<FuelReviewQueueItem[]> {
   const qs =
     statuses && statuses.length

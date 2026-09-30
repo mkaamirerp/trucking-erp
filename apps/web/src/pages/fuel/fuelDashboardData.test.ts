@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeFuelDashboardStats, recentFuelActivity } from "./fuelDashboardData";
+import { mapFuelDashboardStatsFromApi, recentFuelActivity } from "./fuelDashboardData";
 import type { FuelBvdCompletedBasic } from "../../api";
 
 describe("fuelDashboardData", () => {
@@ -20,13 +20,15 @@ describe("fuelDashboardData", () => {
     expect(recentFuelActivity(rows, 5)).toHaveLength(5);
   });
 
-  it("computes stats from queue and imports", () => {
-    const stats = computeFuelDashboardStats(
-      [{ batch_id: 1 } as never],
-      [{ import_id: "a", invoice_number: "1", review_status: "IN_REVIEW" }],
-      [],
-    );
-    expect(stats.needsReviewCount).toBeGreaterThan(0);
-    expect(stats.closingDayIsPlaceholder).toBe(true);
+  it("maps dashboard stats from API shape", () => {
+    expect(
+      mapFuelDashboardStatsFromApi({
+        needs_review_count: 2,
+        processed_last_7_days_count: 5,
+      }),
+    ).toEqual({
+      needsReviewCount: 2,
+      processedLast7DaysCount: 5,
+    });
   });
 });

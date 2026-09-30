@@ -17,6 +17,8 @@ const row972201: FuelBvdCompletedBasic = {
   review_status: "SOURCE_REVIEWED",
   read_only: true,
   card_number: "4237111",
+  purchase_card_count: 1,
+  purchase_card_numbers: ["4237111"],
   period_start: "2026-07-22 00:00:00",
   period_end: "2026-07-28 23:59:59",
   due_date: "2026-07-30 23:59:59",

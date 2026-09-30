@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMocks = vi.hoisted(() => ({
   listFuelProviders: vi.fn(),
-  listFuelReviewQueue: vi.fn(),
-  listFuelBvdImports: vi.fn(),
+  getFuelDashboardStats: vi.fn(),
   listFuelBvdCompletedHistory: vi.fn(),
   uploadFuelBvdPdf: vi.fn(),
   discardFuelBvdStage: vi.fn(),
@@ -14,8 +13,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("../api", () => ({
   listFuelProviders: apiMocks.listFuelProviders,
-  listFuelReviewQueue: apiMocks.listFuelReviewQueue,
-  listFuelBvdImports: apiMocks.listFuelBvdImports,
+  getFuelDashboardStats: apiMocks.getFuelDashboardStats,
   listFuelBvdCompletedHistory: apiMocks.listFuelBvdCompletedHistory,
   uploadFuelBvdPdf: apiMocks.uploadFuelBvdPdf,
   discardFuelBvdStage: apiMocks.discardFuelBvdStage,
@@ -60,8 +58,10 @@ describe("FuelMainPage", () => {
       { provider_code: "BVD", display_name: "BVD", connection_methods: [], supported_connection_methods: [] },
       { provider_code: "WEX", display_name: "WEX", connection_methods: [], supported_connection_methods: [] },
     ]);
-    apiMocks.listFuelReviewQueue.mockResolvedValue([]);
-    apiMocks.listFuelBvdImports.mockResolvedValue([]);
+    apiMocks.getFuelDashboardStats.mockResolvedValue({
+      needs_review_count: 3,
+      processed_last_7_days_count: 7,
+    });
     apiMocks.listFuelBvdCompletedHistory.mockResolvedValue([]);
     apiMocks.uploadFuelBvdPdf.mockReset();
     apiMocks.discardFuelBvdStage.mockResolvedValue({ discarded: true });
@@ -96,7 +96,13 @@ describe("FuelMainPage", () => {
     expect(container.textContent).not.toContain("1.Upload");
     expect(container.querySelector('[data-design-notes="true"]')).toBeNull();
     expect(container.textContent).toContain("Needs review");
+    expect(container.textContent).toContain("Processed last 7 days");
+    expect(container.textContent).toContain("3");
+    expect(container.textContent).toContain("7");
+    expect(container.textContent).not.toContain("Closing day");
+    expect(container.textContent).not.toContain("Sunday");
     expect(container.textContent).not.toContain("In queue");
+    expect(apiMocks.getFuelDashboardStats).toHaveBeenCalled();
   });
 
   it("upload opens processing overlay on fuel home", async () => {

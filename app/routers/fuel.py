@@ -41,6 +41,7 @@ from app.schemas.fuel import (
     FuelBvdImportOut,
     FuelBvdImportListItemOut,
     FuelBvdCompletedBasicOut,
+    FuelDashboardStatsOut,
     FuelBvdReviewSaveIn,
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
@@ -69,6 +70,7 @@ from app.services import fuel_bvd_import as bvd_import_service
 from app.services import fuel_bvd_review as bvd_review_service
 from app.services import fuel_reconciliation as reconciliation_service
 from app.services import fuel_review as review_service
+from app.services import fuel_dashboard_stats as dashboard_stats_service
 from app.services.fuel_bvd_import import FuelBvdImportError
 
 router = APIRouter(
@@ -189,6 +191,20 @@ async def sync_fuel_provider_connection(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fuel provider connection not found")
     return await connections_service.run_sync(db, tenant_id=tenant_id, row=row, actor=user)
+
+
+# --- Fuel home dashboard (authoritative counts) ---
+
+
+@router.get("/dashboard/stats", response_model=FuelDashboardStatsOut)
+async def get_fuel_dashboard_stats(
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    stats = await dashboard_stats_service.get_fuel_dashboard_stats(db, tenant_id=tenant_id)
+    return FuelDashboardStatsOut(**stats)
 
 
 # --- Segment 8: source review ---

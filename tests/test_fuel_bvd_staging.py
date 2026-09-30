@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -100,6 +100,23 @@ async def _count_fuel_bvd(session: AsyncSession, tenant_id: int) -> int:
     )
 
 
+async def _purge_bvd_pdf_artifacts(session: AsyncSession, *, tenant_id: int, pdf_bytes: bytes) -> None:
+    file_sha = sha256_hex(pdf_bytes)
+    await session.execute(
+        delete(FuelBvdImportStage).where(
+            FuelBvdImportStage.tenant_id == tenant_id,
+            FuelBvdImportStage.source_file_sha256 == file_sha,
+        )
+    )
+    await session.execute(
+        delete(FuelBvd).where(
+            FuelBvd.tenant_id == tenant_id,
+            FuelBvd.source_file_sha256 == file_sha,
+        )
+    )
+    await session.commit()
+
+
 async def _count_stage_rows(session: AsyncSession, tenant_id: int) -> int:
     reg = await session.scalar(text("SELECT to_regclass('fuel_bvd_import_stage')"))
     if reg is None:
@@ -133,14 +150,16 @@ async def test_upload_creates_stage_zero_fuel_bvd(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
     monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", AsyncMock(return_value=0))
 
+    pdf_bytes = BVD_PDF.read_bytes()
     async with session_factory() as session:
+        await _purge_bvd_pdf_artifacts(session, tenant_id=INTEGRATION_TENANT_ID, pdf_bytes=pdf_bytes)
         before = await _count_fuel_bvd(session, INTEGRATION_TENANT_ID)
         corr_before = await session.scalar(select(func.count()).select_from(FuelBvdFieldCorrection)) or 0
         stage_id, count, status, reused = await create_bvd_import_stage_from_pdf(
             session,
             tenant_id=INTEGRATION_TENANT_ID,
             tenant_slug="pytest",
-            pdf_bytes=BVD_PDF.read_bytes(),
+            pdf_bytes=pdf_bytes,
             filename="BVD_invoice_972201.pdf",
             uploaded_by="staging_test",
         )
@@ -183,6 +202,7 @@ async def test_discard_then_reupload_same_pdf(monkeypatch: pytest.MonkeyPatch) -
 
     pdf = BVD_PDF.read_bytes()
     async with session_factory() as session:
+        await _purge_bvd_pdf_artifacts(session, tenant_id=INTEGRATION_TENANT_ID, pdf_bytes=pdf)
         s1, *_ = await create_bvd_import_stage_from_pdf(
             session,
             tenant_id=INTEGRATION_TENANT_ID,
@@ -233,6 +253,7 @@ async def test_active_stage_duplicate_reuses_stage_id(monkeypatch: pytest.Monkey
 
     pdf = BVD_PDF.read_bytes()
     async with session_factory() as session:
+        await _purge_bvd_pdf_artifacts(session, tenant_id=INTEGRATION_TENANT_ID, pdf_bytes=pdf)
         s1, c1, st1, _ = await create_bvd_import_stage_from_pdf(
             session,
             tenant_id=INTEGRATION_TENANT_ID,
@@ -278,12 +299,14 @@ async def test_save_review_writes_stage_corrections_only(monkeypatch: pytest.Mon
     monkeypatch.setattr("app.services.fuel_bvd_stage.save_fuel_bvd_stage_bytes", _fake_stage_save)
     monkeypatch.setattr("app.services.fuel_bvd_stage.purge_expired_stages", AsyncMock(return_value=0))
 
+    pdf_bytes = BVD_PDF.read_bytes()
     async with session_factory() as session:
+        await _purge_bvd_pdf_artifacts(session, tenant_id=INTEGRATION_TENANT_ID, pdf_bytes=pdf_bytes)
         stage_id, *_ = await create_bvd_import_stage_from_pdf(
             session,
             tenant_id=INTEGRATION_TENANT_ID,
             tenant_slug="pytest",
-            pdf_bytes=BVD_PDF.read_bytes(),
+            pdf_bytes=pdf_bytes,
             filename="BVD_invoice_972201.pdf",
             uploaded_by="staging_test",
         )

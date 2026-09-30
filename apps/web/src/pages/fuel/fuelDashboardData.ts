@@ -1,38 +1,19 @@
-import type { FuelBvdCompletedBasic, FuelBvdImportListItem, FuelReviewQueueItem } from "../../api";
+import type { FuelBvdCompletedBasic } from "../../api";
 
 export const FUEL_QUICK_PROVIDER_CODES = ["BVD", "LOVES", "PILOT", "WEX"] as const;
 
 export type FuelDashboardStats = {
-  /** Open BVD imports + legacy segment-8 queue items awaiting operator review. */
   needsReviewCount: number;
-  processedThisWeekCount: number;
-  closingDayLabel: string;
-  closingDayIsPlaceholder: boolean;
+  processedLast7DaysCount: number;
 };
 
-export function computeFuelDashboardStats(
-  queue: FuelReviewQueueItem[],
-  openBvd: FuelBvdImportListItem[],
-  completed: FuelBvdCompletedBasic[],
-): FuelDashboardStats {
-  const now = Date.now();
-  const weekMs = 7 * 24 * 60 * 60 * 1000;
-  const processedThisWeek = completed.filter((row) => {
-    if (!row.processed_at) return false;
-    const t = Date.parse(row.processed_at);
-    return Number.isFinite(t) && now - t <= weekMs;
-  });
-
-  const pendingBvd = openBvd.filter(
-    (r) => r.review_status !== "SOURCE_REVIEWED" && r.review_status !== "IN_REVIEW",
-  ).length;
-  const inReviewBvd = openBvd.filter((r) => r.review_status === "IN_REVIEW").length;
-
+export function mapFuelDashboardStatsFromApi(stats: {
+  needs_review_count: number;
+  processed_last_7_days_count: number;
+}): FuelDashboardStats {
   return {
-    needsReviewCount: queue.length + pendingBvd + inReviewBvd,
-    processedThisWeekCount: processedThisWeek.length,
-    closingDayLabel: "Sunday",
-    closingDayIsPlaceholder: true,
+    needsReviewCount: stats.needs_review_count,
+    processedLast7DaysCount: stats.processed_last_7_days_count,
   };
 }
 

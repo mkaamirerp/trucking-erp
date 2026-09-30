@@ -636,6 +636,11 @@ class FuelReconciliationOut(BaseModel):
 # --- BVD Implementation 1 (source fidelity) ---
 
 
+class FuelDashboardStatsOut(BaseModel):
+    needs_review_count: int
+    processed_last_7_days_count: int
+
+
 class FuelBvdImportOut(BaseModel):
     import_id: str
     row_count: int

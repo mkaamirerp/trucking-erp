@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -22,9 +22,11 @@ from app.models.fuel import (
     FuelBvdImportStage,
     FuelBvdStageFieldCorrection,
     FuelBvdStageRow,
+    FuelSourceBatch,
     FuelSourceControl,
     FuelTransaction,
 )
+from app.services.fuel_source_duplicate_gate import sha256_hex
 from app.services.fuel_bvd_import import BVD_SOURCE_FIELD_NAMES, import_bvd_digital_pdf
 from app.services.fuel_bvd_review import list_bvd_import_rows_for_review, process_bvd_import_review
 from tests.support.integration_isolation import require_integration_tenant_database_url
@@ -117,6 +119,52 @@ async def test_bvd_import_postgres_roundtrip_matches_golden(monkeypatch: pytest.
     )
 
     import_id: uuid.UUID
+    pdf_bytes = BVD_PDF.read_bytes()
+    file_sha = sha256_hex(pdf_bytes)
+    async with session_factory() as session:
+        batch_ids = list(
+            (
+                await session.scalars(
+                    select(FuelSourceBatch.id).where(
+                        FuelSourceBatch.tenant_id == INTEGRATION_TENANT_ID,
+                        FuelSourceBatch.source_hash == file_sha,
+                    )
+                )
+            ).all()
+        )
+        if batch_ids:
+            await session.execute(
+                delete(FuelTransaction).where(
+                    FuelTransaction.tenant_id == INTEGRATION_TENANT_ID,
+                    FuelTransaction.batch_id.in_(batch_ids),
+                )
+            )
+            await session.execute(
+                delete(FuelSourceControl).where(
+                    FuelSourceControl.tenant_id == INTEGRATION_TENANT_ID,
+                    FuelSourceControl.batch_id.in_(batch_ids),
+                )
+            )
+            await session.execute(
+                delete(FuelSourceBatch).where(
+                    FuelSourceBatch.tenant_id == INTEGRATION_TENANT_ID,
+                    FuelSourceBatch.id.in_(batch_ids),
+                )
+            )
+        await session.execute(
+            delete(FuelBvd).where(
+                FuelBvd.tenant_id == INTEGRATION_TENANT_ID,
+                FuelBvd.source_file_sha256 == file_sha,
+            )
+        )
+        await session.execute(
+            delete(FuelBvdImportStage).where(
+                FuelBvdImportStage.tenant_id == INTEGRATION_TENANT_ID,
+                FuelBvdImportStage.source_file_sha256 == file_sha,
+            )
+        )
+        await session.commit()
+
     async with session_factory() as session:
         txn_before = await _safe_table_row_count(session, FuelTransaction.__tablename__)
         ctrl_before = await _safe_table_row_count(session, FuelSourceControl.__tablename__)
@@ -125,7 +173,7 @@ async def test_bvd_import_postgres_roundtrip_matches_golden(monkeypatch: pytest.
             session,
             tenant_id=INTEGRATION_TENANT_ID,
             tenant_slug="pytest",
-            pdf_bytes=BVD_PDF.read_bytes(),
+            pdf_bytes=pdf_bytes,
             filename="BVD_invoice_972201.pdf",
             uploaded_by="pytest",
         )
