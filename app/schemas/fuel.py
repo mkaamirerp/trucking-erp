@@ -219,6 +219,8 @@ class FuelTransactionOut(BaseModel):
     owner_operator_payee_id: int | None = None
     classification: str | None = None
     financial_responsibility: str | None = None
+    settlement_deduction_candidate: bool | None = None
+    settlement_deduction_basis_amount: Decimal | None = None
     pricing_agreement_ref: str | None = None
     settlement_ref: str | None = None
     downstream_module: str | None = None

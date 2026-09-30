@@ -14,16 +14,80 @@
 
 **Authoritative contract for the current BVD fidelity milestone:** `docs/FUEL_BVD_IMPLEMENTATION_1.md`.
 
-For **BVD Implementation 1** specifically:
+For **BVD Implementation 1** specifically (see `docs/FUEL_BVD_IMPLEMENTATION_1.md`):
 
-- **one table:** `fuel_bvd`
-- **fixed BVD columns** mapped from the approved digital-PDF contract
-- **BVD source values stored as TEXT** (exact source strings)
-- **source / process / review metadata only** on that table
-- **no** requirement for generic `fuel_source_document`, `fuel_parse_run`, provider-native record tables, or ordered JSONB native arrays
-- **no** canonical financial writes, reconciliation, truck/driver matching, O/O logic, settlement, or posting
+- **Pre-Process staging:** `fuel_bvd_import_stage`, `fuel_bvd_stage_row`, `fuel_bvd_stage_field_correction` (temporary authority before Process)
+- **Post-Process permanent source:** `fuel_bvd` with fixed BVD columns and **TEXT** source values (accepted values at Process)
+- **Post-Process canonical layer:** `fuel_source_batches`, `fuel_transactions`, `fuel_source_controls` (created at successful staged Process)
+- **no** payroll, settlement generation, or payment processing inside Fuel Process
+- broader provider-native document → parse-run models remain **future generalization**, not a blocker for the current staged BVD path
 
-The broader provider-native document → parse-run → block → record → append-only review overlay model in this design is a **future architecture direction** after Implementation 1 is accepted, unless explicitly reopened. Sections below that describe that stack describe the **target generalization**, not a gate that invalidates the current one-table BVD path.
+The broader provider-native document → parse-run → block → record → append-only review overlay model in this design is a **future architecture direction** after Implementation 1 is accepted, unless explicitly reopened. Sections below that describe that stack describe the **target generalization**, not a gate that invalidates the current staged BVD path.
+
+
+# Provider period vs Fuel Process period vs Settlement period (LOCKED)
+
+There are **three independent clocks**. Do not collapse them into one “Fuel week” or a universal closing weekday.
+
+## 1. Provider / ingestion clock
+
+Data may arrive through:
+
+- near-real-time API
+- CSV for an arbitrary date range
+- weekly or monthly CSV
+- weekly or monthly PDF
+- provider statement / invoice on the provider’s schedule
+
+Provider statement dates and file cadence are **evidence only**. They do **not** control company payroll or owner-operator settlement timing.
+
+Examples:
+
+- WEX data may arrive nearly in real time.
+- A portal user may export a CSV for arbitrary dates.
+- BVD may issue weekly statements for one customer and monthly for another.
+- Another provider may have no meaningful weekly “closing” cycle.
+
+**Therefore: do NOT create one global Fuel closing day.** Sunday (or any weekday) may be common operationally for some fleets, but TruckERP must **not** treat it as a universal Fuel rule. Do not add `fuel_closing_day` to `platform_tenants` as part of the Fuel module contract without an explicit future settings design.
+
+## 2. Fuel Process clock
+
+**Fuel Process** means:
+
+- source was accepted
+- reconciliation / money gate passed
+- canonical Fuel transactions exist (`fuel_transactions` under a finalized batch for the current staged BVD path)
+
+Fuel Process does **not** mean:
+
+- provider invoice was paid
+- driver was paid
+- owner-operator was settled
+- a deduction was applied
+- payroll consumed the transaction
+
+A canonical Fuel transaction may remain **Processed** for days or weeks before any settlement uses it.
+
+**Operational dashboard note:** “Processed last 7 days” is a TruckERP Fuel metric based on canonical batch `finalized_at`, not provider statement period or settlement week.
+
+## 3. Company settlement / payroll clock
+
+Company policy determines when eligible expenses are applied to:
+
+- owner-operator settlements
+- company-driver payroll deductions (where applicable)
+
+This period is independent from:
+
+- provider statement dates
+- source file dates
+- Fuel Process date (`finalized_at`)
+
+Example: a unit may have two weeks of **Processed** Fuel transactions in TruckERP while payroll is settling only one week. Transactions outside the active settlement period remain **Processed** but **not yet included in settlement** — do not re-import, alter, or delete them; they remain available for a later settlement.
+
+**Future handoff contract (documentation only):** `docs/settlements/FUEL_SETTLEMENT_HANDOFF.md`
+
+**Fuel-owned CASH_ADVANCE recoverable basis (locked):** `settlement_deduction_basis_amount = principal_amount + directly attributable provider_fee_amount` on the same transaction (e.g. 100 + 3 = 103). O/O fuel final settlement tax treatment remains documented as NOT_LOCKED in the handoff.
 
 
 # 1. Non-negotiable principles

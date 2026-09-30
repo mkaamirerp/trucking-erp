@@ -313,6 +313,11 @@ class FuelTransaction(Base):
     classification_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     classification_mapping_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     financial_responsibility: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Evaluated Fuel flag: eligible for future Payroll/O-O Settlement consumption (not settled/paid).
+    #: NULL = not yet financially evaluated (legacy rows); FALSE/TRUE set by responsibility refresh.
+    settlement_deduction_candidate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    #: Fuel-determined recoverable basis for future Settlement (e.g. CASH_ADVANCE principal + fee).
+    settlement_deduction_basis_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     pricing_agreement_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     settlement_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     owner_operator_charge_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
@@ -412,6 +417,48 @@ class FuelProviderCategoryMapping(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelTransactionFinancialEvent(Base):
+    """Append-only Fuel financial responsibility / settlement-candidate history."""
+
+    __tablename__ = "fuel_transaction_financial_event"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "fuel_transaction_id"],
+            ["fuel_transactions.tenant_id", "fuel_transactions.id"],
+            name="fk_fuel_txn_financial_event_txn",
+            ondelete="CASCADE",
+        ),
+        Index("ix_fuel_txn_financial_event_tenant_txn", "tenant_id", "fuel_transaction_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    fuel_transaction_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_financial_responsibility: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_financial_responsibility: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    previous_settlement_deduction_candidate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    new_settlement_deduction_candidate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    previous_owner_operator_payee_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_owner_operator_payee_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_driver_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_driver_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_owner_operator_charge_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    new_owner_operator_charge_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    previous_oo_charge_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 6), nullable=True)
+    new_oo_charge_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 6), nullable=True)
+    previous_settlement_deduction_basis_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 4), nullable=True
+    )
+    new_settlement_deduction_basis_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 

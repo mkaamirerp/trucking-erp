@@ -117,6 +117,12 @@ This is future work; do not mix it into the current onboarding validation/date-f
 
 ## Fuel / Card transactions
 
+### Fuel → Settlement handoff (documentation)
+
+Status: contract documented; implementation pending (Settlement module).
+
+See [`docs/settlements/FUEL_SETTLEMENT_HANDOFF.md`](../settlements/FUEL_SETTLEMENT_HANDOFF.md) for the future link between `fuel_transactions` and settlement lines. Fuel Process and settlement periods remain independent.
+
 ### Non-fuel fuel-card transactions and lumper handoff
 
 Status: discussion / future cross-module work.

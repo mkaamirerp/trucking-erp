@@ -72,6 +72,8 @@ SOURCE_HYDRATION_FORBIDDEN_FIELDS: Final[frozenset[str]] = frozenset(
         "owner_operator_payee_id",
         "classification",
         "financial_responsibility",
+        "settlement_deduction_candidate",
+        "settlement_deduction_basis_amount",
         "pricing_agreement_ref",
         "settlement_ref",
         "downstream_module",

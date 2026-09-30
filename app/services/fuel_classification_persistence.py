@@ -157,6 +157,14 @@ async def apply_classification_result(
     txn.classification_status = result.classification_status
     txn.classification_source = result.classification_source
     txn.classification_mapping_id = result.mapping_id
+
+    from app.services.fuel_financial_responsibility_refresh import (
+        refresh_fuel_financial_responsibility_for_transaction_row,
+    )
+
+    await refresh_fuel_financial_responsibility_for_transaction_row(
+        db, txn, actor_user_id=actor_user_id
+    )
     return True
 
 

@@ -544,7 +544,7 @@ async def test_apply_classification_appends_event_on_change() -> None:
     )
     changed = await apply_classification_result(db, txn=txn, result=result, actor_user_id="u1")
     assert changed is True
-    db.add.assert_called_once()
+    assert db.add.call_count == 2
     assert txn.classification == CATEGORY_FUEL
 
 
@@ -615,7 +615,7 @@ async def test_provenance_change_appends_event_same_category() -> None:
     )
     changed = await apply_classification_result(db, txn=txn, result=result)
     assert changed is True
-    db.add.assert_called_once()
+    assert db.add.call_count == 2
 
 
 @pytest.mark.asyncio
