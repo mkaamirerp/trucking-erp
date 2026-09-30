@@ -1,5 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { FuelBvdRow } from "../../api";
+import {
+  buildStatementMonthGroups,
+  parseBvdStatementTransactionDate,
+  type DatePeriodSelection,
+} from "./fuelProcessedStatementDateFilter";
+import {
+  filterProcessedStatementRows,
+  type ProcessedStatementSearchContext,
+} from "./fuelProcessedStatementSearch";
+import ProcessedStatementFilterBar from "./ProcessedStatementFilterBar";
 import {
   BVD_FIELD_LABELS,
   BVD_HEADER_CLIENT_FIELDS,
@@ -9,7 +19,7 @@ import {
   BVD_TRANSACTION_COLUMNS,
 } from "../fuelBvdReviewLabels";
 import BvdCorrectedFieldCell from "./BvdCorrectedFieldCell";
-import { displayCell, sortBvdRows } from "./bvdParsedDisplay";
+import { displayCell, operationalCell, sortBvdRows } from "./bvdParsedDisplay";
 import { type BvdValidationMetric, type BvdValidationStatus } from "./bvdParsedValidation";
 import {
   reconciliationStripFromBackend,
@@ -113,6 +123,8 @@ type Props = {
   sourceReconciliation?: FuelBvdSourceReconciliation | null;
   readOnly?: boolean;
   onInlineCommit?: (rowId: number, field: string, value: string) => void | Promise<void>;
+  /** Processed read-only record: local search + date filter (one statement only). */
+  statementSearchContext?: ProcessedStatementSearchContext;
 };
 
 export default function BvdParsedStatementView({
@@ -124,11 +136,45 @@ export default function BvdParsedStatementView({
   sourceReconciliation = null,
   readOnly = false,
   onInlineCommit,
+  statementSearchContext,
 }: Props) {
   const sorted = sortBvdRows(rows);
   const header = sorted.find((r) => r.row_type === "HEADER");
   const transactions = sorted.filter((r) => r.row_type === "TRANSACTION");
   const expressCharges = sorted.filter((r) => r.row_type === "EXPRESS_TRANSACTION");
+  const enableStatementFilters = presentation === "full-stored-detail";
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [datePeriod, setDatePeriod] = useState<DatePeriodSelection>({ kind: "all" });
+
+  const searchCtx: ProcessedStatementSearchContext = useMemo(
+    () => ({
+      headerCardNumber: header ? displayCell(header, "card_number") : statementSearchContext?.headerCardNumber,
+      canonicalByRowId: statementSearchContext?.canonicalByRowId,
+    }),
+    [header, statementSearchContext],
+  );
+
+  const monthGroups = useMemo(() => {
+    if (!enableStatementFilters) return [];
+    const dates = [...transactions, ...expressCharges]
+      .map((r) => parseBvdStatementTransactionDate(operationalCell(r, "transaction_date")))
+      .filter((d): d is Date => d !== null);
+    return buildStatementMonthGroups(dates);
+  }, [enableStatementFilters, transactions, expressCharges]);
+
+  const filteredTransactions = useMemo(() => {
+    if (!enableStatementFilters) return transactions;
+    return filterProcessedStatementRows(transactions, searchQuery, datePeriod, searchCtx);
+  }, [enableStatementFilters, transactions, searchQuery, datePeriod, searchCtx]);
+
+  const filteredExpress = useMemo(() => {
+    if (!enableStatementFilters) return expressCharges;
+    return filterProcessedStatementRows(expressCharges, searchQuery, datePeriod, searchCtx);
+  }, [enableStatementFilters, expressCharges, searchQuery, datePeriod, searchCtx]);
+
+  const searchableTotal = transactions.length + expressCharges.length;
+  const searchableFiltered = filteredTransactions.length + filteredExpress.length;
   const controlRows = sorted.filter(
     (r) => r.row_type === "TRANSACTION_SUBTOTAL" || r.row_type === "PAGE1_SUMMARY",
   );
@@ -247,10 +293,30 @@ export default function BvdParsedStatementView({
           ) : null}
         </section>
 
+        {enableStatementFilters && searchableTotal > 0 ? (
+          <ProcessedStatementFilterBar
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            period={datePeriod}
+            onPeriodChange={setDatePeriod}
+            monthGroups={monthGroups}
+            filteredCount={searchableFiltered}
+            totalCount={searchableTotal}
+            onClear={() => {
+              setSearchQuery("");
+              setDatePeriod({ kind: "all" });
+            }}
+          />
+        ) : null}
+
         {transactions.length > 0 ? (
           <section className="bvd-txn-section" aria-label="Fuel card purchases">
             <h2 className="bvd-statement__section-title bvd-statement__section-title--purchases">
-              Purchases ({transactions.length})
+              Purchases ({enableStatementFilters ? filteredTransactions.length : transactions.length}
+              {enableStatementFilters && filteredTransactions.length !== transactions.length
+                ? ` of ${transactions.length}`
+                : ""}
+              )
             </h2>
             <p className="bvd-section-hint">
               Only provider purchase rows — not subtotals or reconciliation controls.
@@ -270,7 +336,7 @@ export default function BvdParsedStatementView({
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((row) => (
+                  {(enableStatementFilters ? filteredTransactions : transactions).map((row) => (
                     <tr key={row.id} className="bvd-purchase-row">
                       {txnColumns.map((c) => (
                         <td key={c.field}>
@@ -295,7 +361,11 @@ export default function BvdParsedStatementView({
         {expressCharges.length > 0 ? (
           <section className="bvd-txn-section" aria-label="Express charges">
             <h2 className="bvd-statement__section-title bvd-statement__section-title--purchases">
-              Express charges ({expressCharges.length})
+              Express charges ({enableStatementFilters ? filteredExpress.length : expressCharges.length}
+              {enableStatementFilters && filteredExpress.length !== expressCharges.length
+                ? ` of ${expressCharges.length}`
+                : ""}
+              )
             </h2>
             <p className="bvd-section-hint">
               BVD Express Codes — provider money only; category is not assigned during extraction.
@@ -310,7 +380,7 @@ export default function BvdParsedStatementView({
                   </tr>
                 </thead>
                 <tbody>
-                  {expressCharges.map((row) => (
+                  {(enableStatementFilters ? filteredExpress : expressCharges).map((row) => (
                     <tr key={row.id} className="bvd-purchase-row">
                       {BVD_EXPRESS_COLUMNS.map((c) => (
                         <td key={c.field}>

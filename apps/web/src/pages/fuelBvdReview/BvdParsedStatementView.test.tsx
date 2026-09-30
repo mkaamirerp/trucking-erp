@@ -99,4 +99,58 @@ describe("BvdParsedStatementView purchases table", () => {
     expect(container.textContent).toContain("Disc Rate");
     expect(container.textContent).toContain("GST");
   });
+
+  it("full-stored-detail shows statement search and filters purchase rows", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(
+        <BvdParsedStatementView
+          rows={[
+            row({ id: 1, row_type: "HEADER", invoice_number: "838710", card_number: "4237160" }),
+            row({
+              id: 2,
+              row_type: "TRANSACTION",
+              unit_number: "1103",
+              transaction_date: "2025-12-12 00:00:00",
+              final_amt: "10.00",
+            }),
+            row({
+              id: 3,
+              row_type: "TRANSACTION",
+              unit_number: "2200",
+              transaction_date: "2025-12-15 00:00:00",
+              final_amt: "20.00",
+            }),
+          ]}
+          statusLabel="Completed"
+          onOpenPdf={vi.fn()}
+          presentation="full-stored-detail"
+          sourceReconciliation={{
+            passed: true,
+            transaction_total: "30",
+            all_unit_total: "30",
+            provider_grand_total: "30",
+            difference: "0.00",
+            checks: [],
+          }}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-testid="bvd-statement-filters"]')).not.toBeNull();
+    expect(container.textContent).toContain("Search this statement");
+    expect(container.querySelector('[data-testid="bvd-statement-result-count"]')?.textContent).toBe(
+      "2 transactions",
+    );
+    expect(container.querySelectorAll('[data-testid="bvd-purchases-full-table"] tbody tr').length).toBe(2);
+  });
+
+  it("processing review does not show processed-record filters", () => {
+    renderPurchases([
+      row({ id: 1, row_type: "HEADER", invoice_number: "972201" }),
+      row({ id: 2, row_type: "TRANSACTION", final_amt: "1.00" }),
+    ]);
+    expect(container.querySelector('[data-testid="bvd-statement-filters"]')).toBeNull();
+  });
 });

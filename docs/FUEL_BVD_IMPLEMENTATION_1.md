@@ -1336,6 +1336,10 @@ Bracketed tax columns appear only when applicable.
 
 The **full processed / stored BVD detail** view (`BvdParsedStatementView`, `/fuel/bvd/{import_id}/detail`) remains the complete provider projection. This contract applies only to the **compact** Recent Activity transaction table.
 
+### Processed record local search (separate from Global Fuel History)
+
+Full processed/read-only statement (`FuelBvdProcessedRecordView`, `presentation=full-stored-detail`): **Search this statement** + **Date period** filters are view-only, client-side, one import at a time. Locked in `docs/FUEL_REVIEW_HISTORY_SEARCH_ARCHITECTURE_LOCK.md`.
+
 ### Implementation hooks (compact table)
 
 - `apps/web/src/pages/fuelBvdReview/fuelBvdTxnMoneyColumns.ts`

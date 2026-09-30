@@ -3,11 +3,14 @@ import { Link } from "react-router-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   fuelBvdDocumentUrl,
+  getFuelBvdCanonicalTransactions,
   getFuelBvdImportRows,
   getFuelBvdSourceReconciliation,
   type FuelBvdRow,
+  type FuelCanonicalTransaction,
   type FuelBvdSourceReconciliation,
 } from "../../api";
+import { buildCanonicalByBvdRowId } from "./fuelProcessedStatementSearch";
 import { OPS } from "../../routes";
 import FuelFullScreenOverlay from "../fuel/FuelFullScreenOverlay";
 import BvdParsedStatementView from "./BvdParsedStatementView";
@@ -36,6 +39,7 @@ export default function FuelBvdProcessedRecordView({
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [canonicalTransactions, setCanonicalTransactions] = useState<FuelCanonicalTransaction[]>([]);
 
   const load = useCallback(async () => {
     const [nextRows, recon] = await Promise.all([
@@ -44,6 +48,12 @@ export default function FuelBvdProcessedRecordView({
     ]);
     setRows(nextRows);
     setSourceReconciliation(recon);
+    try {
+      const canonical = await getFuelBvdCanonicalTransactions(importId);
+      setCanonicalTransactions(canonical);
+    } catch {
+      setCanonicalTransactions([]);
+    }
   }, [importId]);
 
   useEffect(() => {
@@ -66,6 +76,13 @@ export default function FuelBvdProcessedRecordView({
   }, [rows]);
 
   const header = useMemo(() => rows.find((r) => r.row_type === "HEADER"), [rows]);
+  const statementSearchContext = useMemo(
+    () => ({
+      headerCardNumber: header?.card_number ? String(header.card_number) : undefined,
+      canonicalByRowId: buildCanonicalByBvdRowId(rows, canonicalTransactions),
+    }),
+    [header, rows, canonicalTransactions],
+  );
   const correctionCount = useMemo(
     () => rows.reduce((n, r) => n + Object.keys(r.field_corrections ?? {}).length, 0),
     [rows],
@@ -189,6 +206,7 @@ export default function FuelBvdProcessedRecordView({
           }}
           presentation="full-stored-detail"
           sourceReconciliation={sourceReconciliation}
+          statementSearchContext={statementSearchContext}
         />
         {reviewStatus === "SOURCE_REVIEWED" ? (
           <div className="px-3 pb-4">
