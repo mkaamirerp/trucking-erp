@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
-import { getFuelNationwideImportRows, getFuelNationwideSourceReconciliation } from "../../api";
+import { useCallback, useEffect, useState } from "react";
+import type { PDFDocumentProxy } from "pdfjs-dist";
+import {
+  fuelNationwideDocumentUrl,
+  getFuelNationwideImportRows,
+  getFuelNationwideSourceReconciliation,
+} from "../../api";
+import BvdPdfPopupModal from "../fuelBvdReview/BvdPdfPopupModal";
+import { loadBvdPdfDocument } from "../fuelBvdReview/loadBvdPdfDocument";
 import NationwideParsedStatementView from "../fuelNationwideReview/NationwideParsedStatementView";
 
 type Props = {
@@ -16,6 +23,10 @@ export default function NationwideProcessedEvidencePanel({ sourceImportRef, onOp
   const [reconciliation, setReconciliation] = useState<
     Awaited<ReturnType<typeof getFuelNationwideSourceReconciliation>> | null
   >(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sourceImportRef) {
@@ -37,6 +48,21 @@ export default function NationwideProcessedEvidencePanel({ sourceImportRef, onOp
       .finally(() => setLoading(false));
   }, [sourceImportRef]);
 
+  const openPdf = useCallback(async () => {
+    if (!sourceImportRef) return;
+    setPdfOpen(true);
+    if (pdfDoc) return;
+    setPdfLoading(true);
+    setPdfError(null);
+    try {
+      setPdfDoc(await loadBvdPdfDocument(fuelNationwideDocumentUrl(sourceImportRef)));
+    } catch (e: unknown) {
+      setPdfError(e instanceof Error ? e.message : "PDF load failed");
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [pdfDoc, sourceImportRef]);
+
   if (loading) {
     return <p className="text-xs text-[var(--trk-text-muted)]">Loading source evidence…</p>;
   }
@@ -47,12 +73,34 @@ export default function NationwideProcessedEvidencePanel({ sourceImportRef, onOp
     return <p className="text-xs text-[var(--trk-text-muted)]">No source rows for this invoice.</p>;
   }
 
+  const header = rows.find((r) => r.row_type === "HEADER");
+  const invoiceLabel = header?.invoice_number ? `Invoice ${header.invoice_number}` : "Nationwide import";
+
   return (
-    <NationwideParsedStatementView
-      rows={rows}
-      statusLabel="Processed"
-      onOpenPdf={onOpenFull}
-      sourceReconciliation={reconciliation}
-    />
+    <>
+      <BvdPdfPopupModal
+        open={pdfOpen}
+        onClose={() => setPdfOpen(false)}
+        title={invoiceLabel}
+        pdfDocument={pdfDoc}
+        loading={pdfLoading}
+        error={pdfError}
+      />
+      <NationwideParsedStatementView
+        rows={rows}
+        statusLabel="Processed"
+        onOpenPdf={() => void openPdf()}
+        sourceReconciliation={reconciliation}
+      />
+      {onOpenFull ? (
+        <button
+          type="button"
+          className="mt-2 text-xs font-medium text-[var(--trk-accent)] hover:underline"
+          onClick={onOpenFull}
+        >
+          Open full invoice
+        </button>
+      ) : null}
+    </>
   );
 }

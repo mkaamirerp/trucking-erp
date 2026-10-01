@@ -22,9 +22,31 @@ const evidenceRenderers: Record<string, ComponentType<ProcessedFuelEvidencePanel
   NATIONWIDE: NationwideProcessedEvidencePanel,
 };
 
+function FuelBvdProcessedRecordOverlay({
+  sourceImportRef,
+  onClose,
+}: ProcessedFuelRecordOverlayProps) {
+  return (
+    <FuelBvdProcessedRecordView importId={sourceImportRef} variant="overlay" onClose={onClose} />
+  );
+}
+
+function FuelNationwideProcessedRecordOverlay({
+  sourceImportRef,
+  onClose,
+}: ProcessedFuelRecordOverlayProps) {
+  return (
+    <FuelNationwideProcessedRecordView
+      importId={sourceImportRef}
+      variant="overlay"
+      onClose={onClose}
+    />
+  );
+}
+
 const recordOverlays: Record<string, ComponentType<ProcessedFuelRecordOverlayProps>> = {
-  BVD: FuelBvdProcessedRecordView,
-  NATIONWIDE: FuelNationwideProcessedRecordView,
+  BVD: FuelBvdProcessedRecordOverlay,
+  NATIONWIDE: FuelNationwideProcessedRecordOverlay,
 };
 
 export function getProcessedFuelEvidenceRenderer(

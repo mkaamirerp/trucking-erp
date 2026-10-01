@@ -194,6 +194,8 @@ async def test_nationwide_demo_batch_8_canonical_totals() -> None:
         assert nw is not None
         assert nw["invoice_number"] == DEMO_INVOICE
         assert nw["provider_code"] == "NATIONWIDE"
+        assert nw["source_import_ref"] == str(import_id)
+        assert nw["batch_id"] == batch_id
         assert nw["transaction_count"] == 12
         assert nw["control_count"] == 14
         assert Decimal(nw["cad_transaction_total"]) == Decimal("1263.85")
@@ -204,6 +206,8 @@ async def test_nationwide_demo_batch_8_canonical_totals() -> None:
             assert nw["total_amount"] in ("", None)
 
         detail = await get_processed_fuel_batch(session, tenant_id=TENANT_A, batch_id=batch_id)
+        assert detail["source_import_ref"] == str(import_id)
+        assert detail["batch_id"] == batch_id
         assert len(detail["canonical_transactions"]) == 12
 
     async with session_maker() as cleanup:

@@ -36,14 +36,24 @@ export default function ProcessedFuelStatementShell({
   const [canonical, setCanonical] = useState<FuelCanonicalTransaction[]>([]);
   const [canonicalError, setCanonicalError] = useState<string | null>(null);
   const [canonicalLoading, setCanonicalLoading] = useState(true);
+  const [lineageSourceImportRef, setLineageSourceImportRef] = useState<string | null>(sourceImportRef);
 
   const EvidencePanel = getProcessedFuelEvidenceRenderer(providerCode);
+
+  useEffect(() => {
+    setLineageSourceImportRef(sourceImportRef);
+  }, [sourceImportRef, batchId]);
 
   useEffect(() => {
     setCanonicalLoading(true);
     setCanonicalError(null);
     void getFuelProcessedBatch(batchId)
-      .then((detail) => setCanonical(detail.canonical_transactions))
+      .then((detail) => {
+        setCanonical(detail.canonical_transactions);
+        if (detail.source_import_ref) {
+          setLineageSourceImportRef(detail.source_import_ref);
+        }
+      })
       .catch((e: unknown) =>
         setCanonicalError(e instanceof Error ? e.message : "Could not load canonical transactions"),
       )
@@ -102,7 +112,7 @@ export default function ProcessedFuelStatementShell({
         {EvidencePanel ? (
           <EvidencePanel
             batchId={batchId}
-            sourceImportRef={sourceImportRef}
+            sourceImportRef={lineageSourceImportRef}
             invoiceNumber={invoiceNumber}
             onOpenFull={onOpenFull}
           />
