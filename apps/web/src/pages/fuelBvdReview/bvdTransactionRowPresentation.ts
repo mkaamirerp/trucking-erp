@@ -86,10 +86,30 @@ export function formatBvdTxnSiteDetail(row: FuelBvdRow): BvdTxnSiteDetail {
   };
 }
 
-/** Jul 23 02:17 from BVD datetime strings. */
+const ISO_CALENDAR_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Canonical fuel ``transaction_date`` (YYYY-MM-DD) — calendar date, no timezone shift or invented time. */
+export function formatCanonicalCalendarDate(raw: string): string {
+  const t = raw.trim();
+  const m = t.match(ISO_CALENDAR_DATE_ONLY);
+  if (!m) return t;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+    return t;
+  }
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Jul 23 02:17 from BVD datetime strings; YYYY-MM-DD → Jun 9, 2026 (date-only, no TZ shift). */
 export function formatBvdTransactionDateTime(raw: string): string {
   const t = raw.trim();
   if (!t) return "—";
+  if (ISO_CALENDAR_DATE_ONLY.test(t)) {
+    return formatCanonicalCalendarDate(t);
+  }
   const isoLike = t.includes("T") ? t : t.replace(" ", "T");
   const d = new Date(isoLike);
   if (Number.isNaN(d.getTime())) {

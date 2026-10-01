@@ -5,7 +5,9 @@ import {
   bvdTxnDiscountAmount,
   bvdTxnNonZeroTaxLines,
   bvdTxnPriceDisplay,
+  formatBvdTransactionDateTime,
   formatBvdTxnLocationShort,
+  formatCanonicalCalendarDate,
 } from "./bvdTransactionRowPresentation";
 
 function txn(partial: Partial<FuelBvdRow>): FuelBvdRow {
@@ -56,6 +58,29 @@ describe("bvdTxnPriceDisplay", () => {
   it("I: retail differs from billed — both flagged", () => {
     const d = bvdTxnPriceDisplay(txn({ retail: "2.50", billed: "2.39" }));
     expect(d.showRetail).toBe(true);
+  });
+});
+
+describe("formatCanonicalCalendarDate / formatBvdTransactionDateTime date-only", () => {
+  it("renders YYYY-MM-DD as calendar date without timezone shift or clock time", () => {
+    const input = "2026-06-09";
+    expect(formatCanonicalCalendarDate(input)).toBe("Jun 9, 2026");
+    expect(formatBvdTransactionDateTime(input)).toBe("Jun 9, 2026");
+    expect(formatBvdTransactionDateTime(input)).not.toMatch(/Jun 8/);
+    expect(formatBvdTransactionDateTime(input)).not.toMatch(/20:00/);
+  });
+
+  it("keeps calendar day on DST-adjacent date-only values (no previous-day shift)", () => {
+    const input = "2026-03-08";
+    expect(formatBvdTransactionDateTime(input)).toBe("Mar 8, 2026");
+    expect(formatBvdTransactionDateTime(input)).not.toMatch(/Mar 7/);
+    expect(formatBvdTransactionDateTime(input)).not.toMatch(/:\d{2}/);
+  });
+
+  it("still formats BVD datetime strings with local time", () => {
+    const formatted = formatBvdTransactionDateTime("2026-07-23 02:17:56");
+    expect(formatted).toMatch(/Jul 23/);
+    expect(formatted).toMatch(/02:17/);
   });
 });
 
