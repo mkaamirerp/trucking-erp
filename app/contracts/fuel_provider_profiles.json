@@ -195,7 +195,13 @@
         "Page 2 footnote: US uses that column as final gallon price.",
         "Page 2 footnote: Ex-HST/Ex-GST for applicable Canadian provinces → EX_TAX.",
         "Mappings CAD→EX_TAX and USD→FINAL_GALLON_PRICE live only in this Nationwide profile."
-      ]
+      ],
+      "usd_row_total_vs_billing_control": {
+        "transaction_row_total_sum_usd": "5197.67",
+        "provider_billing_control_usd": "5197.69",
+        "difference_usd": "0.02",
+        "note": "Printed row Total values sum to 5197.67; USD billing block declares 5197.69. Provider subtotal rounding from higher-precision qty×unit — source evidence, not a parser defect. Never alter row totals or controls to force equality."
+      }
     },
     "layout_recognition": {
       "required_anchors": [
@@ -289,6 +295,29 @@
           ]
         },
         {
+          "kind": "line_prefix",
+          "prefixes": [
+            "pst $"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "total volume"
+          ]
+        },
+        {
+          "kind": "line_prefix",
+          "prefixes": [
+            "subtotal"
+          ]
+        },
+        {
+          "kind": "field_equals",
+          "field": "row_label",
+          "value": "USD_BILLING_TOTAL"
+        },
+        {
           "kind": "line_equals",
           "value": "TRANSACTION BREAKDOWN BY CARD"
         }
@@ -335,6 +364,33 @@
           "gst $"
         ],
         "control_type": "TAX_CONTROL"
+      },
+      {
+        "kind": "line_prefix",
+        "prefixes": [
+          "pst $"
+        ],
+        "control_type": "TAX_CONTROL"
+      },
+      {
+        "kind": "line_prefix",
+        "prefixes": [
+          "total volume"
+        ],
+        "control_type": "UNIT_SUBTOTAL"
+      },
+      {
+        "kind": "line_prefix",
+        "prefixes": [
+          "subtotal"
+        ],
+        "control_type": "PROVIDER_DECLARED_TOTAL"
+      },
+      {
+        "kind": "field_equals",
+        "field": "row_label",
+        "value": "USD_BILLING_TOTAL",
+        "control_type": "CURRENCY_TOTAL"
       },
       {
         "kind": "field_equals",

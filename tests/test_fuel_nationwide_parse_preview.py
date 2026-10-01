@@ -91,6 +91,31 @@ def test_nationwide_cad_and_usd_examples(preview: dict) -> None:
     assert usd["preview_normalized"]["provider_discount_amount"] == "34.56"
 
 
+def test_usd_row_sum_vs_provider_billing_control_preserved(preview: dict) -> None:
+    """Row Total sum vs provider USD billing control — 0.02 is source rounding, not reconciled."""
+    row_sum = _sum_currency(preview["transactions"], "USD")
+    assert row_sum == Decimal("5197.67")
+    usd_controls = [
+        c
+        for c in preview["controls"]
+        if c.get("control_type") == "CURRENCY_TOTAL"
+        or c.get("declared_amount") == "5197.69"
+        or "5197.69" in (c.get("control_type_raw") or "")
+    ]
+    assert usd_controls, "expected USD billing control 5197.69"
+    declared = Decimal(str(usd_controls[0].get("declared_amount", "5197.69")).replace(",", ""))
+    assert declared == Decimal("5197.69")
+    assert declared - row_sum == Decimal("0.02")
+
+
+def test_nationwide_billing_controls_not_unknown(preview: dict) -> None:
+    by_raw = {(c.get("control_type_raw") or "")[:40]: c.get("control_type") for c in preview["controls"]}
+    assert by_raw.get("Total Volume 674.17") == "UNIT_SUBTOTAL"
+    assert by_raw.get("PST $0.00") == "TAX_CONTROL"
+    assert by_raw.get("Subtotal $1,263.85") == "PROVIDER_DECLARED_TOTAL"
+    assert all(c.get("control_type") != "UNKNOWN" for c in preview["controls"])
+
+
 def test_nationwide_products_and_controls(preview: dict) -> None:
     products = {t["provider_raw"]["Product"] for t in preview["transactions"]}
     assert "DIESEL" in products

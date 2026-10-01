@@ -28,6 +28,8 @@ _CARD_TOTAL_RE = re.compile(r"^X+\d+\s+Total\b", re.IGNORECASE)
 _INVOICE_NUMBER_RE = re.compile(r"\d{8}B-\d{8}")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _GST_LINE_RE = re.compile(r"^GST\s+\$?([\d,]+\.?\d*)", re.IGNORECASE)
+_PST_LINE_RE = re.compile(r"^PST\s+\$?([\d,]+\.?\d*)", re.IGNORECASE)
+_MONEY_ONLY_LINE_RE = re.compile(r"^\$([\d,]+\.\d{2})$")
 
 
 def _money_display(value: str) -> str:
@@ -137,11 +139,44 @@ def _control_fields_from_line(line: str) -> dict[str, str | None]:
     gst = _GST_LINE_RE.match(line.strip())
     if gst:
         out["GST"] = _money_display(gst.group(1))
+    pst = _PST_LINE_RE.match(line.strip())
+    if pst:
+        out["PST"] = _money_display(pst.group(1))
     if _CARD_TOTAL_RE.match(line.strip()):
         out["row_label"] = "CARD_TOTAL"
         card = line.strip().split()[0]
         out["Card Number"] = card
     return out
+
+
+def _page1_billing_control_rows(page_text: str) -> list[DigitalPdfSourceRow]:
+    """Billing-summary controls on page 1 (USD declared total after Gallons label)."""
+    rows: list[DigitalPdfSourceRow] = []
+    lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
+    for index, line in enumerate(lines):
+        if line.casefold() != "gallons":
+            continue
+        if index + 1 >= len(lines):
+            continue
+        money_line = lines[index + 1]
+        money_match = _MONEY_ONLY_LINE_RE.match(money_line)
+        if not money_match:
+            continue
+        amount = _money_display(money_match.group(1))
+        rows.append(
+            DigitalPdfSourceRow(
+                ROW_KIND_CONTROL,
+                {
+                    "control_line_raw": f"USD billing total {money_line}",
+                    "row_label": "USD_BILLING_TOTAL",
+                    "declared_amount": amount,
+                    "Currency": "USD",
+                },
+                source_page=1,
+            )
+        )
+        break
+    return rows
 
 
 def extract_nationwide_digital_pdf_rows(
@@ -154,6 +189,8 @@ def extract_nationwide_digital_pdf_rows(
     rows: list[DigitalPdfSourceRow] = []
     header_fields = _parse_nationwide_header(page_texts)
     rows.append(DigitalPdfSourceRow(ROW_KIND_HEADER, header_fields, source_page=1))
+    if page_texts:
+        rows.extend(_page1_billing_control_rows(page_texts[0]))
 
     for page_index, page_text in enumerate(page_texts):
         page_num = page_index + 1

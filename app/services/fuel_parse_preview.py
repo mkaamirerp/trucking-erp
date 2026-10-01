@@ -164,6 +164,9 @@ def parse_fuel_pdf_preview(
             ):
                 if aliased.get(key) is not None:
                     txn[key] = aliased[key]
+            dt_src = aliased.get("transaction_datetime_source")
+            if dt_src and not txn.get("transaction_date"):
+                txn["transaction_date"] = str(dt_src).split()[0]
             transactions.append(txn)
             continue
 
@@ -184,6 +187,12 @@ def parse_fuel_pdf_preview(
             if provider_raw.get("GST"):
                 ctl["gst_amount"] = provider_raw["GST"]
                 ctl["currency_raw"] = "CAD"
+            if provider_raw.get("PST") is not None:
+                ctl["pst_amount"] = provider_raw["PST"]
+            if provider_raw.get("declared_amount"):
+                ctl["declared_amount"] = provider_raw["declared_amount"]
+            if provider_raw.get("Currency"):
+                ctl["currency_raw"] = provider_raw["Currency"]
             controls.append(ctl)
             if role.role == "UNKNOWN":
                 warnings.append(f"control row {order}: role UNKNOWN ({role.reason})")
