@@ -3,24 +3,85 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   fuelNationwideDocumentUrl,
   getFuelNationwideImportRows,
+  getFuelNationwideImportSummary,
   getFuelNationwideSourceReconciliation,
+  processFuelNationwideImport,
+  type FuelNationwideReviewSummary,
   type FuelNationwideRow,
   type FuelNationwideSourceReconciliation,
 } from "../../api";
 import FuelFullScreenOverlay from "../fuel/FuelFullScreenOverlay";
 import BvdPdfPopupModal from "../fuelBvdReview/BvdPdfPopupModal";
+import { formatFuelBvdReviewActionError } from "../fuelBvdReview/bvdReviewActionErrors";
 import { loadBvdPdfDocument } from "../fuelBvdReview/loadBvdPdfDocument";
 import NationwideParsedStatementView from "./NationwideParsedStatementView";
+import "../fuelBvdReview/bvd-parsed-statement.css";
+
+function NationwideProcessConfirmModal({
+  summary,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  summary: FuelNationwideReviewSummary;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-xl border border-[var(--trk-border)] bg-[var(--trk-surface)] p-5 shadow-xl">
+        <h2 className="text-base font-semibold text-[var(--trk-text)]">Confirm process</h2>
+        <p className="mt-2 text-sm text-[var(--trk-text-muted)]">
+          Creates canonical fuel transactions from this Nationwide source review.
+        </p>
+        <dl className="mt-4 space-y-2 text-sm">
+          <div className="flex justify-between gap-4">
+            <dt className="text-[var(--trk-text-muted)]">Invoice</dt>
+            <dd className="font-medium text-[var(--trk-text)]">{summary.invoice_number ?? "—"}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-[var(--trk-text-muted)]">Transactions</dt>
+            <dd>{summary.transaction_count}</dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-[var(--trk-text-muted)]">Corrections</dt>
+            <dd>{summary.correction_count}</dd>
+          </div>
+        </dl>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-[var(--trk-border)] px-3 py-1.5 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="rounded-md bg-[var(--trk-btn-primary)] px-3 py-1.5 text-sm font-semibold text-[var(--trk-btn-text)] disabled:opacity-50"
+          >
+            {busy ? "Processing…" : "Confirm process"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export type FuelNationwideProcessingWorkspaceProps = {
   importId: string;
   variant: "overlay" | "route";
+  onProcessed?: (payload: { importId: string; invoiceNumber?: string }) => void;
   onClose?: () => void;
 };
 
 export default function FuelNationwideProcessingWorkspace({
   importId,
   variant,
+  onProcessed,
   onClose,
 }: FuelNationwideProcessingWorkspaceProps) {
   const [rows, setRows] = useState<FuelNationwideRow[]>([]);
@@ -31,6 +92,10 @@ export default function FuelNationwideProcessingWorkspace({
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [processOpening, setProcessOpening] = useState(false);
+  const [confirmSummary, setConfirmSummary] = useState<FuelNationwideReviewSummary | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [nextRows, recon] = await Promise.all([
@@ -70,6 +135,36 @@ export default function FuelNationwideProcessingWorkspace({
     }
   }, [importId, pdfDoc]);
 
+  const openProcessConfirm = async () => {
+    setProcessOpening(true);
+    setActionError(null);
+    try {
+      setConfirmSummary(await getFuelNationwideImportSummary(importId));
+    } catch (e: unknown) {
+      setActionError(formatFuelBvdReviewActionError(e));
+    } finally {
+      setProcessOpening(false);
+    }
+  };
+
+  const handleConfirmProcess = async () => {
+    setProcessing(true);
+    setActionError(null);
+    try {
+      const result = await processFuelNationwideImport(importId);
+      setConfirmSummary(null);
+      if (variant === "overlay" && onProcessed) {
+        onProcessed({ importId, invoiceNumber: result.invoice_number ?? undefined });
+        return;
+      }
+    } catch (e: unknown) {
+      setConfirmSummary(null);
+      setActionError(formatFuelBvdReviewActionError(e));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const body = loading ? (
     <p className="p-6 text-sm text-[var(--trk-text-muted)]">Loading Nationwide review…</p>
   ) : error ? (
@@ -84,6 +179,14 @@ export default function FuelNationwideProcessingWorkspace({
         loading={pdfLoading}
         error={pdfError}
       />
+      {confirmSummary ? (
+        <NationwideProcessConfirmModal
+          summary={confirmSummary}
+          busy={processing}
+          onCancel={() => setConfirmSummary(null)}
+          onConfirm={() => void handleConfirmProcess()}
+        />
+      ) : null}
       <NationwideParsedStatementView
         rows={rows}
         statusLabel="In review"
@@ -93,10 +196,28 @@ export default function FuelNationwideProcessingWorkspace({
         }}
         sourceReconciliation={sourceReconciliation}
       />
-      <footer className="bvd-statement__footer-bar sticky bottom-0 z-20 px-3 py-2">
-        <p className="text-xs text-[var(--trk-text-muted)]">
-          Nationwide staging review — Process is disabled until you approve this screen (operator step).
-        </p>
+      <footer className="bvd-statement__footer-bar sticky bottom-0 z-20">
+        <div className="flex w-full flex-wrap items-center justify-between gap-3 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            {actionError ? (
+              <p className="text-xs font-medium text-[var(--trk-danger)]" role="alert">{actionError}</p>
+            ) : (
+              <p className="text-xs text-[var(--trk-text-muted)]">
+                Review purchases and provider controls above, then Process when ready.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={processing || processOpening}
+              onClick={() => void openProcessConfirm()}
+              className="rounded-md bg-[var(--trk-btn-primary)] px-4 py-2 text-sm font-semibold text-[var(--trk-btn-text)] disabled:opacity-50"
+            >
+              {processOpening ? "Loading…" : processing ? "Processing…" : "Process"}
+            </button>
+          </div>
+        </div>
       </footer>
     </>
   );

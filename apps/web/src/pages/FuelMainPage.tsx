@@ -281,6 +281,7 @@ export default function FuelMainPage() {
               void discardFuelNationwideStage(id).catch(() => {});
             }
           }}
+          onProcessed={(p) => void handleProcessed(p)}
         />
       ) : null}
 

@@ -1,0 +1,122 @@
+/* Nationwide staging review — scoped readability tweaks (no BVD impact). */
+
+.bvd-statement--nationwide {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.nw-review-top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.65rem;
+  border: 1px solid var(--trk-border);
+  border-radius: 8px;
+  background: var(--trk-surface);
+}
+
+.nw-review-top-actions__status {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--trk-text);
+}
+
+.nw-review-top-actions__recon {
+  font-size: 13px;
+  color: var(--trk-text-muted);
+}
+
+.nw-review-top-actions__pass {
+  color: var(--trk-success);
+  font-weight: 700;
+}
+
+.nw-review-top-actions__fail {
+  color: var(--trk-warning);
+  font-weight: 700;
+}
+
+.bvd-statement--nationwide .bvd-statement__table-wrap--nationwide {
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bvd-statement--nationwide .bvd-statement__table--nationwide {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+
+.bvd-statement--nationwide .bvd-statement__table--nationwide th,
+.bvd-statement--nationwide .bvd-statement__table--nationwide td {
+  padding: 0.35rem 0.55rem;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.bvd-statement--nationwide .bvd-statement__table--nationwide th {
+  font-size: 9px;
+  min-width: 3.5rem;
+  line-height: 1.25;
+}
+
+.bvd-statement--nationwide .bvd-statement__table--nationwide td {
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.bvd-statement--nationwide .bvd-statement__table--nationwide th:nth-child(1),
+.bvd-statement--nationwide .bvd-statement__table--nationwide td:nth-child(1) {
+  min-width: 6.5rem;
+}
+
+.bvd-statement--nationwide .nw-provider-controls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.bvd-statement--nationwide .nw-provider-controls__row {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 1fr) minmax(9rem, 2fr) minmax(5.5rem, 1fr);
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--trk-border);
+  border-radius: 6px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--trk-surface-2) 40%, var(--trk-surface));
+}
+
+.bvd-statement--nationwide .nw-provider-controls__type {
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--trk-text);
+  word-break: break-word;
+}
+
+.bvd-statement--nationwide .nw-provider-controls__label {
+  color: var(--trk-text-muted);
+}
+
+.bvd-statement--nationwide .nw-provider-controls__amount {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--trk-text);
+}
+
+.bvd-statement--nationwide .bvd-audit-details__header-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.75rem;
+}
