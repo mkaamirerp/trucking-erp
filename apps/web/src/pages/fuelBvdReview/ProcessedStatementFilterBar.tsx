@@ -74,7 +74,7 @@ export default function ProcessedStatementFilterBar({
             }
           }}
         >
-          <option value="all">All transactions</option>
+          <option value="all">All charges</option>
           {monthGroups.map((g) => (
             <optgroup key={`${g.year}-${g.month}`} label={g.label}>
               {g.weeks.map((w) => (
@@ -112,8 +112,8 @@ export default function ProcessedStatementFilterBar({
       <div className="bvd-statement-filters__meta">
         <span data-testid="bvd-statement-result-count">
           {filteredCount === totalCount
-            ? `${totalCount} transaction${totalCount === 1 ? "" : "s"}`
-            : `${filteredCount} of ${totalCount} transactions`}
+            ? `${totalCount} charge${totalCount === 1 ? "" : "s"}`
+            : `${filteredCount} of ${totalCount} charges`}
         </span>
         {searchQuery.trim() || period.kind !== "all" ? (
           <button

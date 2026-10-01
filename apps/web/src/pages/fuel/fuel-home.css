@@ -1,5 +1,18 @@
 /* Fuel home — viewport containment + dense workspace (no page-level horizontal scroll). */
 
+/*
+ * Fuel-only: shell default padding is 1.5rem; dense page also added gutter → ~35px inset.
+ * Use a single clamp(8–12px) gutter on the main column when Fuel is mounted.
+ */
+.trk-app-main:has([data-testid="fuel-home"]) {
+  padding-inline: var(--trk-dense-gutter);
+}
+
+.trk-page--dense[data-testid="fuel-home"] {
+  padding-inline: 0;
+  margin-inline: 0;
+}
+
 .fuel-recent-activity {
   min-width: 0;
   max-width: 100%;

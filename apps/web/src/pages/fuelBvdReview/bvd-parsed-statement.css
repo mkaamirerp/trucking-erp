@@ -672,27 +672,30 @@
   font-size: 13px;
 }
 
-.bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table th {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 0.4rem 0.5rem;
-  line-height: 1.25;
-  vertical-align: bottom;
+.bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead tr.bvd-txn-rows__header-row {
+  height: 44px;
 }
 
 .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead th.bvd-txn-rows__header-cell {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: var(--trk-text-muted);
-  padding: 0.55rem 0.5rem;
-  line-height: 1.25;
-  min-height: 40px;
+  letter-spacing: 0.03em;
+  color: var(--trk-text);
+  height: 44px;
+  max-height: 44px;
+  padding: 0 0.5rem;
+  line-height: 1.2;
   box-sizing: border-box;
   vertical-align: middle;
-  background: color-mix(in srgb, var(--trk-surface-2) 55%, var(--trk-surface));
-  border-bottom: 2px solid var(--trk-border);
+  background: color-mix(in srgb, var(--trk-surface-2) 72%, var(--trk-surface));
+  border-bottom: 2px solid var(--trk-border-strong);
+}
+
+.bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead th.bvd-txn-rows__header-cell .bvd-txn-rows__sort-btn {
+  min-height: 44px;
+  padding-block: 0.35rem;
+  line-height: 1.2;
 }
 
 .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table td {

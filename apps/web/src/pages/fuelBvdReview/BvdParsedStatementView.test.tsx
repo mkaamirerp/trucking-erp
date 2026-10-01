@@ -141,7 +141,7 @@ describe("BvdParsedStatementView purchases table", () => {
     expect(container.querySelector('[data-testid="bvd-statement-filters"]')).not.toBeNull();
     expect(container.textContent).toContain("Search this statement");
     expect(container.querySelector('[data-testid="bvd-statement-result-count"]')?.textContent).toBe(
-      "2 transactions",
+      "2 charges",
     );
     expect(container.querySelectorAll('[data-testid="bvd-purchases-full-table"] tbody tr').length).toBe(2);
   });

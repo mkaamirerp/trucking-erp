@@ -195,6 +195,12 @@ describe("ProcessedStatementWorkspace", () => {
     expect(row111?.querySelector('[data-testid="bvd-express-col-category"]')?.textContent).toBe("LUMPER");
   });
 
+  it("filter meta uses charges wording", async () => {
+    const rows = build838710Rows();
+    await renderWorkspace(rows);
+    expect(container.querySelector('[data-testid="bvd-statement-result-count"]')?.textContent).toBe("42 charges");
+  });
+
   it("838710 card table has no tax columns", async () => {
     const rows = build838710Rows();
     await renderWorkspace(rows);
