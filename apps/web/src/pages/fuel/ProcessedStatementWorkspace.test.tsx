@@ -199,6 +199,8 @@ describe("ProcessedStatementWorkspace", () => {
     const rows = build838710Rows();
     await renderWorkspace(rows);
     expect(container.querySelectorAll(".processed-statement-section--charges").length).toBe(2);
+    expect(container.querySelector('[data-testid="bvd-txn-sticky-header"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="bvd-express-sticky-header"]')).toBeTruthy();
   });
 
   it("filter meta uses charges wording", async () => {

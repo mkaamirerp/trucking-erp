@@ -699,18 +699,43 @@
   border-spacing: 0;
 }
 
-/* Processed-record charge tables: frozen header + Fuel nav–style orange rule */
-.processed-statement-section--charges .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead,
-.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table thead.bvd-express-rows__thead {
-  position: sticky;
-  /* Sticky within .trk-app-main scrollport (layout places main below TopNav). */
-  top: 0;
-  z-index: 25;
+/* Processed-record charge tables: sticky host + synced header (see processedChargeTableStickyLayout.tsx) */
+.bvd-processed-charge-table {
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
 }
 
-.processed-statement-section--charges .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead th.bvd-txn-rows__header-cell,
-.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table th.bvd-express-rows__header-cell {
-  position: relative;
+.bvd-processed-charge-table__sticky-host {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  background: color-mix(in srgb, var(--trk-surface-2) 88%, var(--trk-bg));
+}
+
+.bvd-processed-charge-table__sticky-clip {
+  width: 100%;
+  overflow: hidden;
+}
+
+.bvd-processed-charge-table__sticky-track {
+  will-change: transform;
+}
+
+.bvd-processed-charge-table__hscroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bvd-processed-charge-table__header-table {
+  margin: 0;
+}
+
+.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__header-cell,
+.processed-statement-section--charges .bvd-processed-charge-table .bvd-express-rows__header-cell {
   background: color-mix(in srgb, var(--trk-surface-2) 88%, var(--trk-bg));
   border-bottom: none;
   box-shadow:

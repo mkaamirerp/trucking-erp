@@ -167,7 +167,11 @@ export default function ProcessedStatementWorkspace({
           className="processed-statement-section processed-statement-section--charges mb-2"
           aria-label="Fuel and card transactions"
         >
-          <BvdTransactionRowsTable transactions={filteredCard} cardNumber={cardNumber} />
+          <BvdTransactionRowsTable
+            transactions={filteredCard}
+            cardNumber={cardNumber}
+            processedStickyHeader
+          />
         </section>
       ) : null}
 
@@ -182,7 +186,11 @@ export default function ProcessedStatementWorkspace({
           >
             Express Charges
           </h3>
-          <BvdExpressRowsTable rows={filteredExpress} canonicalByRowId={searchCtx.canonicalByRowId} />
+          <BvdExpressRowsTable
+            rows={filteredExpress}
+            canonicalByRowId={searchCtx.canonicalByRowId}
+            processedStickyHeader
+          />
         </section>
       ) : null}
     </div>

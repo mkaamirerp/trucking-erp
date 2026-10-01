@@ -1,4 +1,8 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ProcessedChargeStickyShell,
+  useProcessedChargeTableSticky,
+} from "../fuel/processedChargeTableStickyLayout";
 import type { FuelBvdRow } from "../../api";
 import { displayCell, operationalCell } from "./bvdParsedDisplay";
 import { bvdProductDisplayLabel } from "./bvdProductDisplay";
@@ -23,6 +27,8 @@ type Props = {
   transactions: FuelBvdRow[];
   /** From statement header — shown in expanded panel only. */
   cardNumber: string;
+  /** Processed workspace: sticky header outside horizontal scroller (Fuel Home expand). */
+  processedStickyHeader?: boolean;
 };
 
 type ColumnDef = {
@@ -139,9 +145,15 @@ function SortableHeader({
   );
 }
 
-export default function BvdTransactionRowsTable({ transactions, cardNumber }: Props) {
+export default function BvdTransactionRowsTable({
+  transactions,
+  cardNumber,
+  processedStickyHeader = false,
+}: Props) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [sort, setSort] = useState<FuelBvdTxnSortState | null>(null);
+  const bodyTableRef = useRef<HTMLTableElement | null>(null);
+  const sticky = useProcessedChargeTableSticky(bodyTableRef);
 
   const activeTaxes = useMemo(() => activeBvdTxnTaxColumns(transactions), [transactions]);
   const sortableColumns = useMemo(() => buildSortableColumns(activeTaxes), [activeTaxes]);
@@ -165,28 +177,32 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
     });
   };
 
-  return (
-    <div
-      className="bvd-statement__table-wrap bvd-txn-rows"
-      data-testid="bvd-txn-rows-table"
-      data-active-tax-columns={activeTaxes.map((t) => t.field).join(",")}
-    >
-      <table className="bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases bvd-txn-rows__table">
-        <thead className="bvd-txn-rows__thead">
-          <tr className="bvd-txn-rows__header-row">
-            <th className="bvd-txn-rows__col-chevron bvd-txn-rows__header-cell" aria-hidden="true" scope="col" />
-            {sortableColumns.map((col) => (
-              <SortableHeader
-                key={col.key}
-                column={col.key}
-                label={col.label}
-                className={col.className}
-                sort={sort}
-                onSort={handleSort}
-              />
-            ))}
-          </tr>
-        </thead>
+  useLayoutEffect(() => {
+    if (processedStickyHeader) sticky.syncWidths();
+  }, [processedStickyHeader, displayTransactions, expandedId, sort, sticky]);
+
+  const tableClass =
+    "bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases bvd-txn-rows__table";
+
+  const headerRow = (
+    <thead className="bvd-txn-rows__thead">
+      <tr className="bvd-txn-rows__header-row">
+        <th className="bvd-txn-rows__col-chevron bvd-txn-rows__header-cell" aria-hidden="true" scope="col" />
+        {sortableColumns.map((col) => (
+          <SortableHeader
+            key={col.key}
+            column={col.key}
+            label={col.label}
+            className={col.className}
+            sort={sort}
+            onSort={handleSort}
+          />
+        ))}
+      </tr>
+    </thead>
+  );
+
+  const bodyRows = (
         <tbody>
           {displayTransactions.map((row) => {
             const expanded = expandedId === row.id;
@@ -312,6 +328,43 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
             );
           })}
         </tbody>
+  );
+
+  if (processedStickyHeader) {
+    return (
+      <ProcessedChargeStickyShell
+        stickyTestId="bvd-txn-sticky-header"
+        outerTestId="bvd-txn-rows-table"
+        outerClassName="bvd-txn-rows"
+        outerDataAttrs={{
+          "data-active-tax-columns": activeTaxes.map((t) => t.field).join(","),
+        }}
+        hScrollRef={sticky.hScrollRef}
+        scrollLeft={sticky.scrollLeft}
+        onHScroll={sticky.onHScroll}
+        headerTable={
+          <table ref={sticky.headerTableRef} className={`${tableClass} bvd-processed-charge-table__header-table`}>
+            {headerRow}
+          </table>
+        }
+        bodyTable={
+          <table ref={bodyTableRef} className={tableClass}>
+            {bodyRows}
+          </table>
+        }
+      />
+    );
+  }
+
+  return (
+    <div
+      className="bvd-statement__table-wrap bvd-txn-rows"
+      data-testid="bvd-txn-rows-table"
+      data-active-tax-columns={activeTaxes.map((t) => t.field).join(",")}
+    >
+      <table className={tableClass}>
+        {headerRow}
+        {bodyRows}
       </table>
     </div>
   );

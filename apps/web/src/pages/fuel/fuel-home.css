@@ -99,14 +99,10 @@
   white-space: nowrap;
 }
 
-/* Charge grids grow with rows; no nested vertical scroll (page scroll + sticky thead). */
-.processed-statement-section--charges .bvd-txn-rows.bvd-statement__table-wrap,
-.processed-statement-section--charges .bvd-express-rows.bvd-statement__table-wrap {
-  max-width: 100%;
-  min-width: 0;
-  max-height: none;
+/* Legacy wrap overflow disabled for processed sticky layout (.bvd-processed-charge-table). */
+.processed-statement-section--charges .bvd-processed-charge-table.bvd-txn-rows,
+.processed-statement-section--charges .bvd-processed-charge-table.bvd-express-rows {
   overflow: visible;
-  -webkit-overflow-scrolling: touch;
 }
 
 .processed-statement-summary {
