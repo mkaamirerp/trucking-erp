@@ -700,11 +700,17 @@
 }
 
 /* Processed-record charge tables: frozen header + Fuel nav–style orange rule */
+.processed-statement-section--charges .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead,
+.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table thead.bvd-express-rows__thead {
+  position: sticky;
+  /* Sticky within .trk-app-main scrollport (layout places main below TopNav). */
+  top: 0;
+  z-index: 25;
+}
+
 .processed-statement-section--charges .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead th.bvd-txn-rows__header-cell,
 .processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table th.bvd-express-rows__header-cell {
-  position: sticky;
-  top: 0;
-  z-index: 4;
+  position: relative;
   background: color-mix(in srgb, var(--trk-surface-2) 88%, var(--trk-bg));
   border-bottom: none;
   box-shadow:

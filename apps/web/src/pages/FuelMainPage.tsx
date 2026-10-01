@@ -149,14 +149,6 @@ export default function FuelMainPage() {
 
   return (
     <div className="trk-page trk-page--dense" data-testid="fuel-home">
-      <header className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0 py-0.5">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold leading-tight text-[var(--trk-text)]">Fuel</h1>
-          <p className="mt-1 text-xs font-medium leading-snug text-[var(--trk-text-muted)]">
-            Upload, import, review and manage fuel card activity.
-          </p>
-        </div>
-      </header>
       {processNotice ? (
         <p className="mb-2 text-xs font-medium text-[var(--trk-success)]" role="status">{processNotice}</p>
       ) : null}

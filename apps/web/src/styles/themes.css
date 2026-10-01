@@ -31,6 +31,8 @@
   --trk-page-constrained-max: 72rem;
   /* Dense data workspace (Fuel, etc.): ~8px min, ~12px max desktop gutter; opt-in via .trk-page--dense */
   --trk-dense-gutter: clamp(0.5rem, 0.6vw, 0.75rem);
+  /* TopNav.tsx header row: sticky top-0, inner flex h-14 */
+  --trk-topnav-height: 3.5rem;
 }
 
 /* ---------------------------------------------------------------------------
