@@ -2,7 +2,7 @@ import { Fragment, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { getFuelBvdImportRows, type FuelBvdCompletedBasic, type FuelBvdRow } from "../../api";
 import { OPS } from "../../routes";
-import RecentActivityStatementTxnPanel from "./RecentActivityStatementTxnPanel";
+import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
 import {
   formatFuelActivityCadTotal,
@@ -15,6 +15,7 @@ import {
   fuelActivityPaymentLabel,
 } from "./fuelActivityInvoiceDisplay";
 import "../fuelBvdReview/bvd-parsed-statement.css";
+import "./fuel-home.css";
 
 type Props = {
   activity: FuelBvdCompletedBasic[];
@@ -32,10 +33,7 @@ type Props = {
   highlightImportId?: string | null;
 };
 
-type LoadedInvoice = {
-  transactions: FuelBvdRow[];
-  cardNumber: string;
-};
+type LoadedInvoice = import("./fuelRecentActivityRows").FuelDashboardImportRows;
 
 export default function FuelRecentActivitySection({
   activity,
@@ -80,7 +78,7 @@ export default function FuelRecentActivitySection({
 
   return (
     <section
-      className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2"
+      className="fuel-recent-activity rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2"
       data-testid="fuel-recent-activity"
     >
       <div className="mb-2 flex items-center justify-between">
@@ -108,8 +106,8 @@ export default function FuelRecentActivitySection({
       ) : activity.length === 0 ? (
         <p className="text-xs text-[var(--trk-text-muted)]">{emptyMessage}</p>
       ) : (
-        <div className="trk-scroll-x">
-          <table className="min-w-full text-left text-xs">
+        <div className="trk-scroll-x fuel-recent-activity__scroll">
+          <table className="fuel-recent-activity__table text-left text-xs">
             <thead className="text-[10px] uppercase text-[var(--trk-text-muted)]">
               <tr>
                 <th className="w-6 py-1 pr-1" aria-hidden="true" />
@@ -263,16 +261,23 @@ export default function FuelRecentActivitySection({
                     </tr>
                     {isExpanded ? (
                       <tr key={`${row.import_id}-detail`} className="border-t border-[var(--trk-border)]">
-                        <td colSpan={12} className="bg-[var(--trk-bg)] px-2 py-2">
+                        <td colSpan={12} className="fuel-recent-activity__detail-cell bg-[var(--trk-bg)] px-2 py-2">
                           {loadError && expandedImportId === row.import_id ? (
                             <p className="text-xs text-[var(--trk-danger)]" role="alert">{loadError}</p>
                           ) : null}
                           {loadingImportId === row.import_id ? (
                             <p className="text-xs text-[var(--trk-text-muted)]">Loading transactions…</p>
-                          ) : expandedData && expandedData.transactions.length > 0 ? (
-                            <RecentActivityStatementTxnPanel
+                          ) : expandedData && expandedData.chargeCount > 0 ? (
+                            <div
+                              className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
+                              data-testid={`fuel-activity-txn-scroll-${row.import_id}`}
+                            >
+                            <ProcessedStatementWorkspace
                               importId={row.import_id}
-                              transactions={expandedData.transactions}
+                              sourceRows={expandedData.sourceRows}
+                              invoiceNumber={row.invoice_number}
+                              invoiceTotal={row.total_amount}
+                              currency={row.currency}
                               cardNumber={expandedData.cardNumber || row.card_number || ""}
                               fullInvoiceLink={
                                 onOpenProcessed ? (
@@ -295,8 +300,9 @@ export default function FuelRecentActivitySection({
                                 )
                               }
                             />
-                          ) : expandedData && expandedData.transactions.length === 0 ? (
-                            <p className="text-xs text-[var(--trk-text-muted)]">No purchase transactions.</p>
+                            </div>
+                          ) : expandedData && expandedData.chargeCount === 0 ? (
+                            <p className="text-xs text-[var(--trk-text-muted)]">No accepted charges on this invoice.</p>
                           ) : null}
                         </td>
                       </tr>

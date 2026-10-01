@@ -1,0 +1,64 @@
+/* Fuel home — viewport containment + dense workspace (no page-level horizontal scroll). */
+
+.fuel-recent-activity {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.fuel-recent-activity__scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fuel-recent-activity__table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+.fuel-recent-activity__detail-cell {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: top;
+  /* Block table-cell min-content sizing from wide nested BVD grid */
+  contain: inline-size;
+}
+
+/* BVD txn block inside expanded invoice — internal scroll, never widen the page. */
+.fuel-activity-txn-contained {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  contain: inline-size;
+}
+
+.fuel-activity-txn-contained .bvd-statement-filters {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.fuel-activity-txn-contained .bvd-statement-filters__search {
+  min-width: 0;
+}
+
+.fuel-activity-txn-contained .bvd-statement-filters__row {
+  min-width: 0;
+}
+
+.processed-statement-section .bvd-txn-rows.bvd-statement__table-wrap,
+.processed-statement-section .bvd-express-rows.bvd-statement__table-wrap {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.processed-statement-summary {
+  line-height: 1.35;
+}

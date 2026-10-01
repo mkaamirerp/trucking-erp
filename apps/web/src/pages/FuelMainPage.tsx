@@ -19,6 +19,7 @@ import { readFuelProcessedReturn } from "./fuelBvdReview/bvdUploadCompletion";
 import FuelRecentActivitySection from "./fuel/FuelRecentActivitySection";
 import FuelBvdProcessingWorkspace from "./fuelBvdReview/FuelBvdProcessingWorkspace";
 import FuelBvdProcessedRecordView from "./fuelBvdReview/FuelBvdProcessedRecordView";
+import "./fuel/fuel-home.css";
 
 export default function FuelMainPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -148,10 +149,10 @@ export default function FuelMainPage() {
 
   return (
     <div className="trk-page trk-page--dense" data-testid="fuel-home">
-      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div>
-          <h1 className="text-xl font-semibold text-[var(--trk-text)]">Fuel</h1>
-          <p className="text-xs text-[var(--trk-text-muted)]">
+      <header className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0 py-0.5">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold leading-tight text-[var(--trk-text)]">Fuel</h1>
+          <p className="mt-1 text-xs font-medium leading-snug text-[var(--trk-text-muted)]">
             Upload, import, review and manage fuel card activity.
           </p>
         </div>
@@ -160,7 +161,7 @@ export default function FuelMainPage() {
         <p className="mb-2 text-xs font-medium text-[var(--trk-success)]" role="status">{processNotice}</p>
       ) : null}
 
-      <section className="mb-3 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
+      <section className="mb-2 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5">
         <div className="flex flex-wrap items-end gap-3">
           <FuelProviderCombobox
             catalog={catalog}
@@ -171,8 +172,8 @@ export default function FuelMainPage() {
         </div>
       </section>
 
-      <div className="mb-3 grid gap-3 lg:grid-cols-[1fr_auto]">
-        <section className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2">
+      <div className="mb-2 grid gap-2 lg:grid-cols-[1fr_auto]">
+        <section className="rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5">
           <div className="flex flex-wrap items-center gap-3">
             <input
               ref={fileInputRef}

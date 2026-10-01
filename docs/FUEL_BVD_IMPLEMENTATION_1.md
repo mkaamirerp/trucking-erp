@@ -1291,7 +1291,7 @@ Other imports are **not** deleted.
 
 ## RECENT ACTIVITY — EXPANDED TRANSACTION DISPLAY CONTRACT (LOCKED)
 
-**Surface:** Fuel dashboard → Recent activity → expand a completed BVD invoice → compact transaction table (`BvdTransactionRowsTable`).
+**Surface:** Fuel dashboard → Recent activity → expand a completed BVD invoice → **processed statement workspace** (`ProcessedStatementWorkspace`: card `TRANSACTION` grid + optional `EXPRESS_TRANSACTION` grid, shared search/date filters, section totals reconciling to invoice header).
 
 **Authority:** Accepted / effective BVD transaction fields only (`operationalCell` on permanent `fuel_bvd` rows returned by `GET /fuel/bvd/imports/{import_id}/rows`). No recalculation, allocation, FX, or inference.
 
@@ -1326,6 +1326,21 @@ expand | Date/Time | Unit | Source driver | Location | Product | Qty | Discount 
 ```
 
 Bracketed tax columns appear only when applicable.
+
+### Column width (compact table — LOCKED)
+
+**Do not** give compact columns equal percentage or flex shares. Layout is defined in `bvd-parsed-statement.css` (`.bvd-txn-rows`).
+
+| Group | Columns | Behavior |
+|-------|---------|----------|
+| **Content-sized** | caret, Date/Time, Unit, Product, Qty, Discount, visible tax columns, Final amount, Currency | Shrink to intrinsic content (`width: 1px` + `nowrap` on `.bvd-txn-rows__col-compact`); numeric headers use content-width sort buttons |
+| **Flex / leftover** | Source driver, Location | `.bvd-txn-rows__col-flex` — absorb remaining table width |
+
+Rules:
+
+- No **document** horizontal overflow on Fuel home: `.trk-page--dense` uses inset padding (no negative `margin-inline`); `.fuel-recent-activity` / `.fuel-activity-txn-contained` use `contain: inline-size` + `overflow-x: auto`; compact txn table must not inherit `.bvd-statement__table--txn { min-width: 75rem }` (scoped with `:not(.bvd-txn-rows__table)`).
+- Preserve view-only sorting and dynamic per-invoice tax columns.
+- Do **not** apply the 21-column `.bvd-statement__table--txn` percentage `col.*` grid or full-statement `table-layout: fixed` rules to `BvdTransactionRowsTable` (`bvd-txn-rows__table`).
 
 ### Sorting (view-only)
 

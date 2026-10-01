@@ -88,7 +88,7 @@ describe("FuelRecentActivitySection", () => {
 
   it("C: shows invoice summaries only before expand", async () => {
     await renderSection([completed("imp-a", "972201")]);
-    expect(container.querySelector('[data-testid="fuel-activity-txn-panel-imp-a"]')).toBeNull();
+    expect(container.querySelector('[data-testid="fuel-processed-statement-imp-a"]')).toBeNull();
     expect(container.querySelector('[data-testid^="bvd-txn-row-"]')).toBeNull();
     expect(container.textContent).toContain("972201");
     expect(container.querySelector('[data-testid="fuel-activity-card-imp-a"]')?.textContent).toBe(
@@ -162,7 +162,7 @@ describe("FuelRecentActivitySection", () => {
 
     expect(apiMocks.getFuelBvdImportRows).toHaveBeenCalledTimes(1);
     expect(apiMocks.getFuelBvdImportRows).toHaveBeenCalledWith("imp-a");
-    expect(container.querySelector('[data-testid="fuel-activity-txn-panel-imp-a"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="fuel-processed-statement-imp-a"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="bvd-statement-filters"]')).toBeTruthy();
     expect(container.textContent).toContain("Search this statement");
     expect(container.querySelector('[data-testid="bvd-txn-row-2"]')).toBeTruthy();
@@ -193,7 +193,7 @@ describe("FuelRecentActivitySection", () => {
     expect(container.querySelector('[data-testid="fuel-activity-invoice-imp-a"]')?.getAttribute("data-expanded")).toBe(
       "false",
     );
-    expect(container.querySelector('[data-testid="fuel-activity-txn-panel-imp-b"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="fuel-processed-statement-imp-b"]')).toBeTruthy();
     expect(apiMocks.getFuelBvdImportRows).toHaveBeenCalledWith("imp-b");
   });
 });

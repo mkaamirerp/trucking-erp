@@ -69,6 +69,25 @@ HUMAN REVIEWED VALUE
 
 Do not permanently represent a known parser mistake as though it were provider truth.
 
+---
+
+## Screen roles (ingestion vs processed operational record)
+
+**Ingestion / review screen** (upload, staging, PDF side-by-side, parser output, reconciliation gates, human corrections **before** Process):
+
+- Provider adapters (BVD PDF/API, future CSV/API/manual).
+- Temporary/admin workspace — **not** the long-term place operators search old driver/unit/charge history.
+
+**Process succeeds** → accepted permanent `fuel_bvd` → canonical `fuel_transactions`.
+
+**Processed Fuel record / history** (Fuel Home Recent activity expand, full stored detail, future global history):
+
+- Permanent operational admin workspace: search, filter, unit/driver/card, provider references, categories/reasons, amounts, dates, disputes, settlement trace (later), source/PDF drill-down.
+- Must represent **all accepted charge rows** for that import (e.g. card `TRANSACTION` + `EXPRESS_TRANSACTION`), not a subset.
+- Control rows such as `EXPRESS_SUBTOTAL` are **not** charges and are not shown as line items.
+
+Do **not** redesign the ingestion/review screen into a history screen.
+
 The permanent audit trail must be able to answer:
 
 - which original document/payload was processed;
