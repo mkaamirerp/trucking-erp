@@ -1,6 +1,13 @@
 import { Fragment, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { getFuelBvdImportRows, type FuelBvdCompletedBasic, type FuelBvdRow } from "../../api";
+import {
+  getFuelBvdImportRows,
+  getFuelNationwideImportRows,
+  getFuelNationwideSourceReconciliation,
+  type FuelBvdCompletedBasic,
+  type FuelBvdRow,
+} from "../../api";
+import NationwideParsedStatementView from "../fuelNationwideReview/NationwideParsedStatementView";
 import { OPS } from "../../routes";
 import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
@@ -28,7 +35,7 @@ type Props = {
   onViewAllClick?: () => void;
   emptyMessage?: string;
   /** Open processed record in Fuel home overlay (normal flow). */
-  onOpenProcessed?: (importId: string) => void;
+  onOpenProcessed?: (importId: string, provider: string) => void;
   /** Brief highlight after Process (import_id). */
   highlightImportId?: string | null;
 };
@@ -60,11 +67,31 @@ export default function FuelRecentActivitySection({
       setLoadError(null);
       if (loaded[importId]) return;
 
+      setLoadingImportId(importId);
       if (provider === "NATIONWIDE") {
-        setLoaded((prev) => ({
-          ...prev,
-          [importId]: { sourceRows: [], chargeCount: 0, cardNumber: "" },
-        }));
+        try {
+          const [nationwideRows, nationwideReconciliation] = await Promise.all([
+            getFuelNationwideImportRows(importId),
+            getFuelNationwideSourceReconciliation(importId),
+          ]);
+          const purchaseCount = nationwideRows.filter((r) => r.row_type === "TRANSACTION").length;
+          setLoaded((prev) => ({
+            ...prev,
+            [importId]: {
+              sourceRows: [],
+              cardTransactions: [],
+              expressCharges: [],
+              chargeCount: purchaseCount,
+              cardNumber: "",
+              nationwideRows,
+              nationwideReconciliation,
+            },
+          }));
+        } catch (e: unknown) {
+          setLoadError(e instanceof Error ? e.message : "Could not load Nationwide statement");
+        } finally {
+          setLoadingImportId(null);
+        }
         return;
       }
 
@@ -169,7 +196,7 @@ export default function FuelRecentActivitySection({
                             data-testid={`fuel-activity-invoice-link-${row.import_id}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onOpenProcessed(row.import_id);
+                              onOpenProcessed(row.import_id, row.provider);
                             }}
                           >
                             {row.invoice_number}
@@ -250,7 +277,7 @@ export default function FuelRecentActivitySection({
                             data-testid={`fuel-activity-open-${row.import_id}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onOpenProcessed(row.import_id);
+                              onOpenProcessed(row.import_id, row.provider);
                             }}
                           >
                             Open
@@ -293,7 +320,7 @@ export default function FuelRecentActivitySection({
                                     type="button"
                                     className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
                                     data-testid={`fuel-activity-full-invoice-${row.import_id}`}
-                                    onClick={() => onOpenProcessed(row.import_id)}
+                                    onClick={() => onOpenProcessed(row.import_id, row.provider)}
                                   >
                                     Open full invoice
                                   </button>
@@ -309,10 +336,18 @@ export default function FuelRecentActivitySection({
                               }
                             />
                             </div>
-                          ) : row.provider === "NATIONWIDE" ? (
-                            <p className="text-xs text-[var(--trk-text-muted)]">
-                              Nationwide purchases and controls — use Open for the full processed statement.
-                            </p>
+                          ) : expandedData?.nationwideRows?.length ? (
+                            <div
+                              className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
+                              data-testid={`fuel-activity-nationwide-detail-${row.import_id}`}
+                            >
+                              <NationwideParsedStatementView
+                                rows={expandedData.nationwideRows}
+                                statusLabel="Processed"
+                                onOpenPdf={() => onOpenProcessed?.(row.import_id, row.provider)}
+                                sourceReconciliation={expandedData.nationwideReconciliation ?? null}
+                              />
+                            </div>
                           ) : expandedData && expandedData.chargeCount === 0 ? (
                             <p className="text-xs text-[var(--trk-text-muted)]">No accepted charges on this invoice.</p>
                           ) : null}

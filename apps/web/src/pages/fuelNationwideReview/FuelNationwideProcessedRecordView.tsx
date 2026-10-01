@@ -76,7 +76,12 @@ export default function FuelNationwideProcessedRecordView({
   ) : error ? (
     <p className="p-6 text-sm text-[var(--trk-danger)]">{error}</p>
   ) : (
-    <>
+    <div
+      className="fuel-processed-record flex min-h-0 flex-1 flex-col"
+      data-testid="fuel-nationwide-processed-record"
+      data-transaction-count={rows.filter((r) => r.row_type === "TRANSACTION").length}
+      data-control-count={rows.filter((r) => r.row_type === "CONTROL").length}
+    >
       <BvdPdfPopupModal
         open={pdfOpen}
         onClose={() => setPdfOpen(false)}
@@ -99,7 +104,7 @@ export default function FuelNationwideProcessedRecordView({
           Processed Nationwide source record — read-only. No staging corrections or Process actions.
         </p>
       </footer>
-    </>
+    </div>
   );
 
   if (variant === "overlay") {

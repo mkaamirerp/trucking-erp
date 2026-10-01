@@ -264,9 +264,8 @@ export default function FuelMainPage() {
         onViewAllClick={() => setShowAllActivity(true)}
         emptyMessage="No completed imports yet."
         highlightImportId={highlightImportId}
-        onOpenProcessed={(importId) => {
-          const row = completed.find((c) => c.import_id === importId);
-          setProcessedProvider(row?.provider === "NATIONWIDE" ? "NATIONWIDE" : "BVD");
+        onOpenProcessed={(importId, provider) => {
+          setProcessedProvider(provider === "NATIONWIDE" ? "NATIONWIDE" : "BVD");
           setProcessedImportId(importId);
         }}
       />

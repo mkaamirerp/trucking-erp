@@ -129,6 +129,14 @@ async def test_processed_nationwide_appears_in_completed_history() -> None:
             )
         )
         assert perm is not None
+        detail_rows = await list_nationwide_import_rows_for_review(
+            session, tenant_id=TENANT_A, import_id=import_id
+        )
+        assert detail_rows is not None
+        assert sum(1 for r in detail_rows if r.get("row_type") == "TRANSACTION") == 12
+        assert sum(1 for r in detail_rows if r.get("row_type") == "CONTROL") == 14
+        txns = [r for r in detail_rows if r.get("row_type") == "TRANSACTION"]
+        assert txns[0].get("product") in ("DIESEL", "REEFER", "SCALE")
         batch = await session.scalar(
             select(FuelSourceBatch).where(
                 FuelSourceBatch.tenant_id == TENANT_A,

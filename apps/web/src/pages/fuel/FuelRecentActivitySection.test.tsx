@@ -135,7 +135,7 @@ describe("FuelRecentActivitySection", () => {
     await act(async () => {
       openBtn.click();
     });
-    expect(onOpen).toHaveBeenCalledWith("imp-a");
+    expect(onOpen).toHaveBeenCalledWith("imp-a", "BVD");
     expect(openBtn.tagName).toBe("BUTTON");
   });
 

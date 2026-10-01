@@ -1,4 +1,4 @@
-import type { FuelBvdRow } from "../../api";
+import type { FuelBvdRow, FuelNationwideRow, FuelNationwideSourceReconciliation } from "../../api";
 import { splitProcessedStatementCharges } from "./processedStatementCharges";
 
 export type FuelDashboardImportRows = {
@@ -7,6 +7,8 @@ export type FuelDashboardImportRows = {
   expressCharges: FuelBvdRow[];
   chargeCount: number;
   cardNumber: string;
+  nationwideRows?: FuelNationwideRow[];
+  nationwideReconciliation?: FuelNationwideSourceReconciliation | null;
 };
 
 export function parseBvdImportRowsForDashboard(rows: FuelBvdRow[]): FuelDashboardImportRows {
