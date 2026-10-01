@@ -217,4 +217,46 @@ describe("ProcessedStatementWorkspace", () => {
     expect(header).not.toMatch(/\bGST\b/);
     expect(header).toMatch(/Discount/);
   });
+
+  it("processed charge tables avoid nested vertical scroll containers", async () => {
+    const rows = build838710Rows();
+    await renderWorkspace(rows);
+    const hscrolls = container.querySelectorAll(".bvd-processed-charge-table__hscroll");
+    expect(hscrolls.length).toBe(2);
+    for (const el of hscrolls) {
+      const style = (el as HTMLElement).style;
+      expect(style.overflowY).not.toBe("auto");
+      expect(style.overflowY).not.toBe("scroll");
+      expect(style.maxHeight).toBe("");
+    }
+    expect(container.querySelector('[data-testid="bvd-txn-sticky-header"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="bvd-express-sticky-header"]')).toBeTruthy();
+  });
+
+  it("processed sticky hosts use page-scroll sticky positioning", async () => {
+    const rows = build838710Rows();
+    await renderWorkspace(rows);
+    const cardSticky = container.querySelector('[data-testid="bvd-txn-sticky-header"]') as HTMLElement;
+    const expressSticky = container.querySelector('[data-testid="bvd-express-sticky-header"]') as HTMLElement;
+    expect(cardSticky.className).toContain("bvd-processed-charge-table__sticky-host");
+    expect(expressSticky.className).toContain("bvd-processed-charge-table__sticky-host");
+  });
+
+  it("wraps multi-word processed headers for readability", async () => {
+    const rows = build838710Rows();
+    await renderWorkspace(rows);
+    const wraps = container.querySelectorAll('[data-processed-header-wrap="true"]');
+    expect(wraps.length).toBeGreaterThan(0);
+    const retailWrap = Array.from(wraps).find((el) => el.textContent?.includes("Retail"));
+    expect(retailWrap?.querySelectorAll(".bvd-processed-header-label__line").length).toBe(2);
+  });
+
+  it("body numeric cells keep compact nowrap classes in processed layout", async () => {
+    const rows = build838710Rows();
+    await renderWorkspace(rows);
+    const retail = container.querySelector('[data-testid="bvd-txn-col-retail"]') as HTMLElement;
+    expect(retail).toBeTruthy();
+    expect(retail.className).toMatch(/bvd-txn-rows__col-compact/);
+    expect(retail.className).toMatch(/bvd-txn-rows__col-numeric/);
+  });
 });

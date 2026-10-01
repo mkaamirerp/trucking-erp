@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import type { FuelBvdRow, FuelCanonicalTransaction } from "../../api";
+import { ProcessedChargeHeaderLabel } from "../fuel/processedChargeHeaderLabels";
 import {
   ProcessedChargeStickyShell,
   useProcessedChargeTableSticky,
@@ -20,26 +21,30 @@ function categoryLabel(row: FuelBvdRow, canonicalByRowId?: Map<number, FuelCanon
   return "—";
 }
 
-function ExpressHeaderRow() {
+function ExpressHeaderRow({ wrapLabels }: { wrapLabels?: boolean }) {
+  const label = (text: string) =>
+    wrapLabels ? <ProcessedChargeHeaderLabel label={text} /> : text;
   return (
     <thead className="bvd-express-rows__thead">
       <tr className="bvd-express-rows__header-row">
         <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">
-          Date / Time
+          {label("Date / Time")}
         </th>
-        <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">Unit</th>
+        <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">
+          Unit
+        </th>
         <th
           className="bvd-express-rows__col-flex bvd-express-rows__col-driver bvd-express-rows__header-cell"
           scope="col"
         >
-          Source driver
+          {label("Source driver")}
         </th>
         <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">
-          Provider ref
+          {label("Provider ref")}
         </th>
         <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">Auth</th>
         <th className="bvd-express-rows__col-flex bvd-express-rows__header-cell" scope="col">
-          Provider reason
+          {label("Provider reason")}
         </th>
         <th
           className="bvd-express-rows__col-compact bvd-express-rows__col-numeric bvd-express-rows__header-cell"
@@ -150,7 +155,7 @@ export default function BvdExpressRowsTable({
         onHScroll={sticky.onHScroll}
         headerTable={
           <table ref={sticky.headerTableRef} className={`${tableClass} bvd-processed-charge-table__header-table`}>
-            <ExpressHeaderRow />
+            <ExpressHeaderRow wrapLabels />
           </table>
         }
         bodyTable={

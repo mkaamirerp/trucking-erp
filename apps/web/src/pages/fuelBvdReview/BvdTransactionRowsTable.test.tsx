@@ -53,12 +53,18 @@ describe("BvdTransactionRowsTable", () => {
     container.remove();
   });
 
-  function renderTable(rows: FuelBvdRow[]) {
+  function renderTable(rows: FuelBvdRow[], opts?: { processedStickyHeader?: boolean }) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     act(() => {
-      root.render(<BvdTransactionRowsTable transactions={rows} cardNumber="4237111" />);
+      root.render(
+        <BvdTransactionRowsTable
+          transactions={rows}
+          cardNumber="4237111"
+          processedStickyHeader={opts?.processedStickyHeader}
+        />,
+      );
     });
   }
 
@@ -270,6 +276,31 @@ describe("BvdTransactionRowsTable", () => {
       (el) => el.textContent,
     );
     expect(units).toEqual(["001107", "S1107"]);
+  });
+
+  it("processed sticky layout exposes synced header track and hscroll siblings", () => {
+    renderTable([txn(1)], { processedStickyHeader: true });
+    expect(container.querySelector('[data-testid="bvd-txn-sticky-header"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="bvd-txn-sticky-header-hscroll"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="bvd-txn-sticky-header-track"]')).toBeTruthy();
+    expect(container.querySelector(".bvd-processed-charge-table__hscroll tbody tr")).toBeTruthy();
+    expect(container.querySelector(".bvd-processed-charge-table__header-table thead")).toBeTruthy();
+  });
+
+  it("972201 processed sticky header includes HST column", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(
+        <BvdTransactionRowsTable transactions={rows972201} cardNumber="4237111" processedStickyHeader />,
+      );
+    });
+    expect(container.querySelector('[data-testid="bvd-txn-rows-table"]')?.getAttribute("data-active-tax-columns")).toBe(
+      "hst",
+    );
+    expect(container.querySelector('[data-testid="bvd-txn-sort-hst"]')).toBeTruthy();
+    expect(container.querySelector('[data-processed-header-wrap="true"]')).toBeTruthy();
   });
 
   it("expanded row stays attached after sort", () => {
