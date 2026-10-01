@@ -20,15 +20,18 @@ from app.services.fuel_canonical import BATCH_STATUS_FINALIZED
 from app.services.fuel_controls import (
     CONTROL_TYPE_CARD_TOTAL,
     CONTROL_TYPE_CURRENCY_TOTAL,
+    CONTROL_TYPE_INVOICE_TOTAL,
     CONTROL_TYPE_PROVIDER_DECLARED_TOTAL,
     CONTROL_TYPE_STATEMENT_TOTAL,
 )
 
+# Invoice/statement-level controls outrank per-card subtotals (Nationwide USD billing total).
 _PROVIDER_CONTROL_TYPES: tuple[str, ...] = (
-    CONTROL_TYPE_CARD_TOTAL,
     CONTROL_TYPE_CURRENCY_TOTAL,
+    CONTROL_TYPE_INVOICE_TOTAL,
     CONTROL_TYPE_PROVIDER_DECLARED_TOTAL,
     CONTROL_TYPE_STATEMENT_TOTAL,
+    CONTROL_TYPE_CARD_TOTAL,
 )
 
 
