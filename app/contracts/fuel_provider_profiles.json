@@ -406,6 +406,11 @@
       "Due Date:": "due_date",
       "Customer Name": "customer_name_raw"
     },
+    "digital_pdf_extraction": {
+      "enabled": true,
+      "mode": "nationwide_transaction_table",
+      "notes": "Embedded-text table on page 2; not the BVD auth-line parser."
+    },
     "ai_forbidden_authority_fields_note": "Provider profile must not authorize truck_id, driver_id, payee, O/O pricing, settlement, or posting.",
     "structured_export": {
       "status": "BLOCKED_BY_SOURCE_EVIDENCE",

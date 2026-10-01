@@ -405,10 +405,19 @@ def extract_digital_pdf_source_rows(
             "LAYOUT_UNRECOGNIZED",
             f"layout status={layout.status} missing={layout.missing_required_anchors}",
         )
-    _digital_spec(profile)
+    spec = _digital_spec(profile)
     parser_version = f"{profile['provider_code']}:{profile['profile_version']}"
 
-    spec = _digital_spec(profile)
+    mode = str(spec.get("mode") or "bvd_auth_line")
+    if mode == "nationwide_transaction_table":
+        from app.services.fuel_digital_pdf_nationwide_table import extract_nationwide_digital_pdf_rows
+
+        rows, nw_warnings = extract_nationwide_digital_pdf_rows(
+            page_texts=page_texts,
+            profile=profile,
+        )
+        return rows, list(extract_warnings) + nw_warnings, parser_version
+
     auth_pattern = str(spec.get("transaction_auth_line_pattern") or "^$")
     auth_re = re.compile(auth_pattern)
     use_geometry = geometry_extraction_enabled(profile)
