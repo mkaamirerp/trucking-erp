@@ -135,9 +135,18 @@ describe("ProcessedStatementWorkspace", () => {
 
     await renderWorkspace(rows);
     expect(container.querySelector('[data-testid="processed-charge-count"]')?.textContent).toMatch(/42 charges/i);
-    expect(container.querySelector('[data-testid="processed-card-section-total"]')?.textContent).toContain("7,370.94");
-    expect(container.querySelector('[data-testid="processed-express-section-total"]')?.textContent).toContain("1,676.78");
-    expect(container.querySelector('[data-testid="processed-invoice-total"]')?.textContent).toContain("9,047.72");
+    const summary = container.querySelector('[data-testid="processed-statement-summary"]');
+    expect(summary?.querySelector('[data-testid="processed-card-section-total"]')?.textContent).toContain(
+      "7,370.94",
+    );
+    expect(summary?.querySelector('[data-testid="processed-express-section-total"]')?.textContent).toContain(
+      "1,676.78",
+    );
+    expect(summary?.querySelector('[data-testid="processed-invoice-total"]')?.textContent).toContain("9,047.72");
+    expect(container.querySelector('[data-testid="processed-card-section-heading"]')).toBeNull();
+    const cardSection = container.querySelector('[aria-label="Fuel and card transactions"]');
+    expect(cardSection?.querySelector("thead")).not.toBeNull();
+    expect(cardSection?.textContent).not.toMatch(/Fuel \/ Card Transactions\s*\(\d+\)\s*—/);
     expect(container.querySelector('[data-testid="bvd-express-row-111"]')).toBeTruthy();
     expect(container.querySelectorAll('[data-testid^="bvd-txn-row-"]').length).toBe(31);
     expect(container.querySelectorAll('[data-testid^="bvd-express-row-"]').length).toBe(11);

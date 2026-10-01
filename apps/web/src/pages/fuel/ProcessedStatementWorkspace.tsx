@@ -91,9 +91,6 @@ export default function ProcessedStatementWorkspace({
   const cardTotal = sumProcessedChargeFinalAmount(sections.cardTransactions);
   const expressTotal = sumProcessedChargeFinalAmount(sections.expressCharges);
   const combinedTotal = cardTotal + expressTotal;
-  const filteredCardTotal = sumProcessedChargeFinalAmount(filteredCard);
-  const filteredExpressTotal = sumProcessedChargeFinalAmount(filteredExpress);
-
   const displayCurrency = (currency?.trim() || operationalCell(searchableRows[0] ?? ({} as FuelBvdRow), "cur") || "—").trim();
 
   return (
@@ -106,19 +103,46 @@ export default function ProcessedStatementWorkspace({
           <div className="text-[11px] font-semibold text-[var(--trk-text-muted)]" data-testid="processed-charge-count">
             {sections.chargeCount} charges
           </div>
-          {sections.cardTransactions.length > 0 ? (
-            <div className="text-[11px] text-[var(--trk-text)]" data-testid="processed-card-section-total">
-              Fuel / Card Transactions ({sections.cardTransactions.length}) = {formatProcessedMoneyTotal(cardTotal)}
+          <div className="processed-statement-summary-lines">
+            {sections.cardTransactions.length > 0 ? (
+              <div
+                className="processed-statement-summary-line"
+                data-testid="processed-card-section-total"
+              >
+                <span className="processed-statement-summary-line__label">Fuel / Card Transactions</span>
+                <span className="processed-statement-summary-line__count">
+                  {sections.cardTransactions.length}
+                </span>
+                <span className="processed-statement-summary-line__amount">
+                  {formatProcessedMoneyTotal(cardTotal)}
+                </span>
+              </div>
+            ) : null}
+            {sections.expressCharges.length > 0 ? (
+              <div
+                className="processed-statement-summary-line"
+                data-testid="processed-express-section-total"
+              >
+                <span className="processed-statement-summary-line__label">Express Charges</span>
+                <span className="processed-statement-summary-line__count">
+                  {sections.expressCharges.length}
+                </span>
+                <span className="processed-statement-summary-line__amount">
+                  {formatProcessedMoneyTotal(expressTotal)}
+                </span>
+              </div>
+            ) : null}
+            <div
+              className="processed-statement-summary-line processed-statement-summary-line--total"
+              data-testid="processed-invoice-total"
+            >
+              <span className="processed-statement-summary-line__label">Processed Invoice Total</span>
+              <span className="processed-statement-summary-line__count" aria-hidden="true" />
+              <span className="processed-statement-summary-line__amount">
+                {invoiceTotal?.trim() || formatProcessedMoneyTotal(combinedTotal)}
+                {displayCurrency ? ` ${displayCurrency}` : ""}
+              </span>
             </div>
-          ) : null}
-          {sections.expressCharges.length > 0 ? (
-            <div className="text-[11px] text-[var(--trk-text)]" data-testid="processed-express-section-total">
-              Express Charges ({sections.expressCharges.length}) = {formatProcessedMoneyTotal(expressTotal)}
-            </div>
-          ) : null}
-          <div className="text-[11px] font-semibold text-[var(--trk-text)]" data-testid="processed-invoice-total">
-            Processed Invoice Total = {invoiceTotal?.trim() || formatProcessedMoneyTotal(combinedTotal)}
-            {displayCurrency ? ` ${displayCurrency}` : ""}
           </div>
         </div>
         <div className="shrink-0">{fullInvoiceLink}</div>
@@ -139,17 +163,7 @@ export default function ProcessedStatementWorkspace({
       />
 
       {sections.cardTransactions.length > 0 ? (
-        <section className="processed-statement-section mb-3" aria-label="Fuel and card transactions">
-          <h3
-            className="mb-1 text-[11px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]"
-            data-testid="processed-card-section-heading"
-          >
-            Fuel / Card Transactions ({filteredCard.length}
-            {filteredCard.length !== sections.cardTransactions.length
-              ? ` of ${sections.cardTransactions.length}`
-              : ""}
-            ) — {formatProcessedMoneyTotal(filteredCardTotal)}
-          </h3>
+        <section className="processed-statement-section mb-2" aria-label="Fuel and card transactions">
           <BvdTransactionRowsTable transactions={filteredCard} cardNumber={cardNumber} />
         </section>
       ) : null}
@@ -157,14 +171,10 @@ export default function ProcessedStatementWorkspace({
       {sections.expressCharges.length > 0 ? (
         <section className="processed-statement-section" aria-label="Express charges">
           <h3
-            className="mb-1 text-[11px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]"
-            data-testid="processed-express-section-heading"
+            className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]"
+            data-testid="processed-express-section-label"
           >
-            Express Charges ({filteredExpress.length}
-            {filteredExpress.length !== sections.expressCharges.length
-              ? ` of ${sections.expressCharges.length}`
-              : ""}
-            ) — {formatProcessedMoneyTotal(filteredExpressTotal)}
+            Express Charges
           </h3>
           <BvdExpressRowsTable rows={filteredExpress} canonicalByRowId={searchCtx.canonicalByRowId} />
         </section>

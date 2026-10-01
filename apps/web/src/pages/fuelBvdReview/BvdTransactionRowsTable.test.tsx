@@ -88,13 +88,23 @@ describe("BvdTransactionRowsTable", () => {
     expect(productCell?.textContent).not.toContain("DEF");
   });
 
-  it("B: main table does not expose auth or retail columns", () => {
+  it("B: main table shows retail/billed but not auth or site # columns", () => {
     renderTable([txn(1)]);
     const h = headerText();
+    expect(h).toMatch(/Retail price/);
+    expect(h).toMatch(/Billed price/);
     expect(h).not.toMatch(/Auth Code/i);
-    expect(h).not.toMatch(/Retail/i);
     expect(h).not.toMatch(/Site #/i);
+    expect(container.querySelector('[data-testid="bvd-txn-col-retail"]')?.textContent).toBe("2.2390");
+    expect(container.querySelector('[data-testid="bvd-txn-col-billed"]')?.textContent).toBe("2.2390");
     expect(container.textContent).not.toContain("A204040667-TA");
+  });
+
+  it("column header row is distinct from body rows", () => {
+    renderTable([txn(1)]);
+    expect(container.querySelector("thead.bvd-txn-rows__thead tr.bvd-txn-rows__header-row")).not.toBeNull();
+    expect(container.querySelector("tbody tr.bvd-txn-rows__main")).not.toBeNull();
+    expect(container.querySelector("thead th.bvd-txn-rows__header-cell")).not.toBeNull();
   });
 
   it("discount column always exists with 0.00 for zero source discount", () => {
@@ -160,9 +170,11 @@ describe("BvdTransactionRowsTable", () => {
     expect(detail).not.toBeNull();
     expect(detail?.textContent).toContain("A204040667-TA");
     expect(detail?.textContent).toContain("Site # 54228");
-    expect(detail?.querySelector('[data-testid="bvd-txn-tax-hst"]')?.textContent).toMatch(/HST/);
-    expect(detail?.querySelector('[data-testid="bvd-txn-tax-gst"]')).toBeNull();
+    expect(container.querySelector('[data-testid="bvd-txn-col-hst"]')?.textContent).toBe("185.33");
+    expect(detail?.querySelector('[data-testid="bvd-txn-tax-hst"]')).toBeNull();
     expect(detail?.textContent).not.toMatch(/Discount/);
+    expect(detail?.textContent).not.toMatch(/Retail price/i);
+    expect(detail?.textContent).not.toContain("JASPREET");
 
     act(() => {
       row.click();
@@ -170,21 +182,24 @@ describe("BvdTransactionRowsTable", () => {
     expect(container.querySelector('[data-testid="bvd-txn-detail-1"]')).toBeNull();
   });
 
-  it("G: non-zero discount in expanded panel", () => {
+  it("G: non-zero discount in main row only", () => {
     renderTable([txn(1, { disc_amt: "5.00" })]);
+    expect(container.querySelector('[data-testid="bvd-txn-col-discount"]')?.textContent).toBe("5.00");
     const row = container.querySelector('[data-testid="bvd-txn-row-1"]') as HTMLElement;
     act(() => row.click());
-    expect(container.querySelector('[data-testid="bvd-txn-discount"]')?.textContent).toBe("5.00");
+    expect(container.querySelector('[data-testid="bvd-txn-discount"]')).toBeNull();
   });
 
-  it("I: differing retail shown when expanded", () => {
-    renderTable([txn(1, { retail: "2.50", billed: "2.39" })]);
+  it("I: retail and billed in main row; not duplicated in expanded detail", () => {
+    renderTable([txn(1, { retail: "3.9890", billed: "3.1067" })]);
+    expect(container.querySelector('[data-testid="bvd-txn-col-retail"]')?.textContent).toBe("3.9890");
+    expect(container.querySelector('[data-testid="bvd-txn-col-billed"]')?.textContent).toBe("3.1067");
     const row = container.querySelector('[data-testid="bvd-txn-row-1"]') as HTMLElement;
     act(() => row.click());
     const detail = container.querySelector('[data-testid="bvd-txn-detail-1"]');
-    expect(detail?.textContent).toMatch(/Retail price/);
-    expect(detail?.textContent).toContain("2.50");
-    expect(detail?.textContent).toContain("2.39");
+    expect(detail?.textContent).not.toMatch(/Retail price/i);
+    expect(detail?.textContent).not.toMatch(/Billed price/i);
+    expect(detail?.textContent).toContain("Pre-tax");
   });
 
   it("main row shows Fuel for TA", () => {

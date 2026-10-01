@@ -52,6 +52,42 @@
   min-width: 0;
 }
 
+.processed-statement-summary-lines {
+  margin-top: 0.25rem;
+  display: grid;
+  gap: 0.15rem;
+  font-size: 11px;
+}
+
+.processed-statement-summary-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.75rem 1rem;
+  align-items: baseline;
+  color: var(--trk-text);
+}
+
+.processed-statement-summary-line--total {
+  font-weight: 600;
+  margin-top: 0.1rem;
+}
+
+.processed-statement-summary-line__label {
+  min-width: 0;
+}
+
+.processed-statement-summary-line__count {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 1.5rem;
+}
+
+.processed-statement-summary-line__amount {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .processed-statement-section .bvd-txn-rows.bvd-statement__table-wrap,
 .processed-statement-section .bvd-express-rows.bvd-statement__table-wrap {
   max-width: 100%;

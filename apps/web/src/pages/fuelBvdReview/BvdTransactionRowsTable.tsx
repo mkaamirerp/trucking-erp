@@ -14,9 +14,6 @@ import {
   sortFuelBvdTransactions,
 } from "./fuelBvdTxnTableSort";
 import {
-  bvdTxnDiscountAmount,
-  bvdTxnNonZeroTaxLines,
-  bvdTxnPriceDisplay,
   formatBvdTransactionDateTime,
   formatBvdTxnLocationShort,
   formatBvdTxnSiteDetail,
@@ -43,6 +40,18 @@ const BASE_SORTABLE_COLUMNS: ColumnDef[] = [
   { key: "qty", label: "Qty", className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric" },
 ];
 
+const RETAIL_COLUMN: ColumnDef = {
+  key: "retail",
+  label: "Retail price",
+  className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price",
+};
+
+const BILLED_COLUMN: ColumnDef = {
+  key: "billed",
+  label: "Billed price",
+  className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price",
+};
+
 const DISCOUNT_COLUMN: ColumnDef = {
   key: "discount",
   label: "Discount",
@@ -65,6 +74,8 @@ function taxColumnDef(tax: BvdTxnActiveTaxColumn): ColumnDef {
 function buildSortableColumns(activeTaxes: BvdTxnActiveTaxColumn[]): ColumnDef[] {
   return [
     ...BASE_SORTABLE_COLUMNS,
+    RETAIL_COLUMN,
+    BILLED_COLUMN,
     DISCOUNT_COLUMN,
     ...activeTaxes.map(taxColumnDef),
     ...TAIL_SORTABLE_COLUMNS,
@@ -106,7 +117,7 @@ function SortableHeader({
   const indicator = active ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
 
   return (
-    <th className={className} scope="col">
+    <th className={`bvd-txn-rows__header-cell ${className ?? ""}`} scope="col">
       <button
         type="button"
         className="bvd-txn-rows__sort-btn"
@@ -161,9 +172,9 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
       data-active-tax-columns={activeTaxes.map((t) => t.field).join(",")}
     >
       <table className="bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases bvd-txn-rows__table">
-        <thead>
-          <tr>
-            <th className="bvd-txn-rows__col-chevron" aria-hidden="true" scope="col" />
+        <thead className="bvd-txn-rows__thead">
+          <tr className="bvd-txn-rows__header-row">
+            <th className="bvd-txn-rows__col-chevron bvd-txn-rows__header-cell" aria-hidden="true" scope="col" />
             {sortableColumns.map((col) => (
               <SortableHeader
                 key={col.key}
@@ -179,12 +190,11 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
         <tbody>
           {displayTransactions.map((row) => {
             const expanded = expandedId === row.id;
-            const taxes = bvdTxnNonZeroTaxLines(row);
-            const discount = bvdTxnDiscountAmount(row);
-            const prices = bvdTxnPriceDisplay(row);
             const site = formatBvdTxnSiteDetail(row);
             const finalAmt = operationalCell(row, "final_amt");
             const cur = operationalCell(row, "cur");
+            const retail = displayCell(row, "retail");
+            const billed = displayCell(row, "billed");
 
             return (
               <Fragment key={row.id}>
@@ -229,6 +239,18 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
                     data-testid="bvd-txn-col-qty"
                   >
                     {operationalCell(row, "qty") || "—"}
+                  </td>
+                  <td
+                    className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price"
+                    data-testid="bvd-txn-col-retail"
+                  >
+                    {retail || "—"}
+                  </td>
+                  <td
+                    className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price"
+                    data-testid="bvd-txn-col-billed"
+                  >
+                    {billed || "—"}
                   </td>
                   <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
@@ -278,31 +300,8 @@ export default function BvdTransactionRowsTable({ transactions, cardNumber }: Pr
                               ) : null}
                             </span>
                           </DetailField>
-                          {prices.showRetail ? (
-                            <DetailField label="Retail price">{prices.retail || "—"}</DetailField>
-                          ) : null}
-                          <DetailField label="Billed price">{prices.billed || "—"}</DetailField>
                           <DetailField label="Pre-tax amount">
                             {operationalCell(row, "pre_tax_amt") || "—"}
-                          </DetailField>
-                          {taxes.length > 0 ? (
-                            <DetailField label="Taxes">
-                              <span className="bvd-txn-rows__tax-list">
-                                {taxes.map((t) => (
-                                  <span key={t.key} data-testid={`bvd-txn-tax-${t.key}`}>
-                                    {t.label} {t.amount}
-                                  </span>
-                                ))}
-                              </span>
-                            </DetailField>
-                          ) : null}
-                          {discount ? (
-                            <DetailField label="Discount">
-                              <span data-testid="bvd-txn-discount">{discount}</span>
-                            </DetailField>
-                          ) : null}
-                          <DetailField label="Final amount">
-                            {finalAmt ? `${finalAmt}${cur ? ` ${cur}` : ""}` : "—"}
                           </DetailField>
                         </div>
                       </div>

@@ -177,9 +177,11 @@ describe("FuelRecentActivitySection", () => {
     await act(async () => {
       txnRowEl.click();
     });
+    expect(container.querySelector('[data-testid="bvd-txn-row-2"] [data-testid="bvd-txn-col-hst"]')?.textContent).toMatch(
+      /\d/,
+    );
     const detail = container.querySelector('[data-testid="bvd-txn-detail-2"]');
-    expect(detail?.textContent).toMatch(/HST/);
-    expect(detail?.querySelector('[data-testid="bvd-txn-tax-gst"]')).toBeNull();
+    expect(detail?.querySelector('[data-testid="bvd-txn-tax-hst"]')).toBeNull();
     expect(detail?.textContent).not.toMatch(/Discount/);
 
     const rowB = container.querySelector('[data-testid="fuel-activity-invoice-imp-b"]') as HTMLElement;
