@@ -98,8 +98,12 @@ def extract_nationwide_rows_from_digital_pdf(pdf_bytes: bytes) -> tuple[list[Fue
                 mapped["row_label"] = str(raw["row_label"])
             if raw.get("declared_amount"):
                 mapped["declared_amount"] = str(raw["declared_amount"])
+            if raw.get("Currency"):
+                mapped["currency"] = str(raw["Currency"])
             if raw.get("GST"):
                 mapped["gst"] = str(raw["GST"])
+            if raw.get("QST"):
+                mapped["qst"] = str(raw["QST"])
             if raw.get("PST") is not None:
                 mapped["pst"] = str(raw["PST"])
             mapped["control_type"] = control_type

@@ -11,6 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from app.services.fuel_digital_pdf_extract import DigitalPdfSourceRow, ROW_KIND_HEADER
 from app.services.fuel_digital_pdf_types import FuelDigitalPdfExtractError
+from app.services.fuel_nationwide_card_total import parse_nationwide_card_total_line
 
 ROW_KIND_CONTROL: str = "CONTROL"
 ROW_KIND_TRANSACTION: str = "TRANSACTION"
@@ -144,8 +145,7 @@ def _control_fields_from_line(line: str) -> dict[str, str | None]:
         out["PST"] = _money_display(pst.group(1))
     if _CARD_TOTAL_RE.match(line.strip()):
         out["row_label"] = "CARD_TOTAL"
-        card = line.strip().split()[0]
-        out["Card Number"] = card
+        out.update({k: v for k, v in parse_nationwide_card_total_line(line).items() if v is not None})
     return out
 
 

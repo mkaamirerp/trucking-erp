@@ -50,6 +50,7 @@ from app.services.fuel_nationwide_import import (
     FuelNationwideImportError,
 )
 from app.services.fuel_nationwide_import import NW_REVIEW_IN_PROGRESS, NW_REVIEW_SOURCE_COMPLETE
+from app.services.fuel_nationwide_card_total import apply_card_total_review_fields
 from app.services.fuel_nationwide_source_reconciliation import reconcile_nationwide_source_rows
 from app.services.fuel_source_duplicate_gate import (
     acquire_nationwide_import_advisory_lock,
@@ -131,6 +132,7 @@ def stage_row_to_dict(row: FuelNationwideStageRow, stage: FuelNationwideImportSt
     }
     for name in NATIONWIDE_SOURCE_FIELD_NAMES:
         data[name] = getattr(row, name)
+    apply_card_total_review_fields(data)
     return data
 
 

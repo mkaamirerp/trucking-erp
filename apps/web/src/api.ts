@@ -4416,6 +4416,7 @@ export type FuelNationwideRow = {
   declared_amount?: string | null;
   gst?: string | null;
   pst?: string | null;
+  qst?: string | null;
   field_corrections?: Record<string, { reviewed_value: string; extracted_value: string }>;
 };
 

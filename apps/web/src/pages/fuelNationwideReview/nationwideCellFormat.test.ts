@@ -37,7 +37,7 @@ describe("nationwideControlColumns", () => {
     });
   });
 
-  it("shows card identity and provider USD total from staged raw line", () => {
+  it("displays CARD_TOTAL from explicit API fields only", () => {
     const cols = nationwideControlColumns({
       id: 2,
       import_id: "x",
@@ -45,22 +45,37 @@ describe("nationwideControlColumns", () => {
       control_type: "CARD_TOTAL",
       row_label: "CARD_TOTAL",
       card_number: "XXXXX07588",
-      control_line_raw: "XXXXX07588 Total 154.27 $722.75 $34.56 $0.00",
+      currency: "USD",
+      declared_amount: "722.75",
     });
     expect(cols.type).toBe("CARD_TOTAL");
     expect(cols.label).toBe("XXXXX07588 · USD");
     expect(cols.amount).toBe("722.75");
   });
 
-  it("shows CAD card total with GST from provider raw line", () => {
+  it("does not scrape control_line_raw when explicit fields are absent", () => {
     const cols = nationwideControlColumns({
       id: 3,
       import_id: "x",
       row_type: "CONTROL",
       control_type: "CARD_TOTAL",
-      row_label: "CARD_TOTAL",
+      card_number: "XXXXX07588",
+      control_line_raw: "XXXXX07588 Total 154.27 $722.75 $34.56 $0.00",
+    });
+    expect(cols.amount).toBe("—");
+    expect(cols.label).toBe("XXXXX07588");
+  });
+
+  it("shows CAD card total with explicit GST field", () => {
+    const cols = nationwideControlColumns({
+      id: 4,
+      import_id: "x",
+      row_type: "CONTROL",
+      control_type: "CARD_TOTAL",
       card_number: "XXXXX87195",
-      control_line_raw: "XXXXX87195 Total GST $145.4 QST $0 674.17 $1,263.85 $0.00 $0.00",
+      currency: "CAD",
+      declared_amount: "1263.85",
+      gst: "145.40",
     });
     expect(cols.label).toBe("XXXXX87195 · CAD");
     expect(cols.amount).toBe("1263.85 · GST 145.40");
