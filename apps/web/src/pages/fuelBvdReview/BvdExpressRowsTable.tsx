@@ -21,23 +21,45 @@ export default function BvdExpressRowsTable({ rows, canonicalByRowId }: Props) {
       data-testid="bvd-express-rows-table"
     >
       <table className="bvd-statement__table bvd-statement__table--txn bvd-txn-rows__table bvd-express-rows__table">
-        <thead>
-          <tr>
-            <th className="bvd-express-rows__col-compact" scope="col">Date / Time</th>
-            <th className="bvd-express-rows__col-compact" scope="col">Unit</th>
-            <th className="bvd-express-rows__col-flex bvd-express-rows__col-driver" scope="col">
+        <thead className="bvd-express-rows__thead">
+          <tr className="bvd-express-rows__header-row">
+            <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">
+              Date / Time
+            </th>
+            <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">Unit</th>
+            <th
+              className="bvd-express-rows__col-flex bvd-express-rows__col-driver bvd-express-rows__header-cell"
+              scope="col"
+            >
               Source driver
             </th>
-            <th className="bvd-express-rows__col-compact" scope="col">Provider ref</th>
-            <th className="bvd-express-rows__col-compact" scope="col">Auth</th>
-            <th className="bvd-express-rows__col-flex" scope="col">Provider reason</th>
-            <th className="bvd-express-rows__col-compact bvd-express-rows__col-numeric" scope="col">
+            <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">
+              Provider ref
+            </th>
+            <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">Auth</th>
+            <th className="bvd-express-rows__col-flex bvd-express-rows__header-cell" scope="col">
+              Provider reason
+            </th>
+            <th
+              className="bvd-express-rows__col-compact bvd-express-rows__col-numeric bvd-express-rows__header-cell"
+              scope="col"
+            >
               Principal
             </th>
-            <th className="bvd-express-rows__col-compact bvd-express-rows__col-numeric" scope="col">Fee</th>
-            <th className="bvd-express-rows__col-compact bvd-express-rows__col-amount" scope="col">Total</th>
-            <th className="bvd-express-rows__col-compact" scope="col">Currency</th>
-            <th className="bvd-express-rows__col-compact" scope="col">Category</th>
+            <th
+              className="bvd-express-rows__col-compact bvd-express-rows__col-numeric bvd-express-rows__header-cell"
+              scope="col"
+            >
+              Fee
+            </th>
+            <th
+              className="bvd-express-rows__col-compact bvd-express-rows__col-amount bvd-express-rows__header-cell"
+              scope="col"
+            >
+              Total
+            </th>
+            <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">Currency</th>
+            <th className="bvd-express-rows__col-compact bvd-express-rows__header-cell" scope="col">Category</th>
           </tr>
         </thead>
         <tbody>

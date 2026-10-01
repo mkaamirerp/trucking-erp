@@ -35,10 +35,9 @@
 .fuel-recent-activity__detail-cell {
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  min-width: 0;
   vertical-align: top;
-  /* Block table-cell min-content sizing from wide nested BVD grid */
-  contain: inline-size;
+  /* No overflow:hidden — it breaks processed charge table sticky headers */
 }
 
 /* BVD txn block inside expanded invoice — internal scroll, never widen the page. */
@@ -48,8 +47,8 @@
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
-  contain: inline-size;
 }
 
 .fuel-activity-txn-contained .bvd-statement-filters {
@@ -101,11 +100,17 @@
   white-space: nowrap;
 }
 
-.processed-statement-section .bvd-txn-rows.bvd-statement__table-wrap,
-.processed-statement-section .bvd-express-rows.bvd-statement__table-wrap {
+/*
+ * Charge grids: local vertical + horizontal scroll so thead position:sticky
+ * works (overflow-x-only wrappers force overflow-y:auto and break page-level sticky).
+ */
+.processed-statement-section--charges .bvd-txn-rows.bvd-statement__table-wrap,
+.processed-statement-section--charges .bvd-express-rows.bvd-statement__table-wrap {
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
+  max-height: min(52vh, 32rem);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .processed-statement-summary {

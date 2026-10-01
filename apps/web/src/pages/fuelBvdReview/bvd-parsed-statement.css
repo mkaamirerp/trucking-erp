@@ -692,6 +692,49 @@
   border-bottom: 2px solid var(--trk-border-strong);
 }
 
+/* border-collapse:collapse breaks position:sticky on thead cells */
+.processed-statement-section--charges .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table,
+.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Processed-record charge tables: frozen header + Fuel nav–style orange rule */
+.processed-statement-section--charges .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead th.bvd-txn-rows__header-cell,
+.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table th.bvd-express-rows__header-cell {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: color-mix(in srgb, var(--trk-surface-2) 88%, var(--trk-bg));
+  border-bottom: none;
+  box-shadow:
+    inset 0 -3px 0 0 var(--trk-heading),
+    0 1px 0 0 var(--trk-border);
+}
+
+.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table thead.bvd-express-rows__thead tr.bvd-express-rows__header-row {
+  height: 44px;
+}
+
+.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table th.bvd-express-rows__header-cell {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--trk-text);
+  height: 44px;
+  max-height: 44px;
+  padding: 0 0.5rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+
+.processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table tbody td {
+  font-size: 13px;
+  padding: 0.45rem 0.5rem;
+}
+
 .bvd-txn-rows .bvd-statement__table.bvd-txn-rows__table thead.bvd-txn-rows__thead th.bvd-txn-rows__header-cell .bvd-txn-rows__sort-btn {
   min-height: 44px;
   padding-block: 0.35rem;

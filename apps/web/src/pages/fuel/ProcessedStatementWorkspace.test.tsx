@@ -195,6 +195,12 @@ describe("ProcessedStatementWorkspace", () => {
     expect(row111?.querySelector('[data-testid="bvd-express-col-category"]')?.textContent).toBe("LUMPER");
   });
 
+  it("charge sections use frozen-header scope class", async () => {
+    const rows = build838710Rows();
+    await renderWorkspace(rows);
+    expect(container.querySelectorAll(".processed-statement-section--charges").length).toBe(2);
+  });
+
   it("filter meta uses charges wording", async () => {
     const rows = build838710Rows();
     await renderWorkspace(rows);

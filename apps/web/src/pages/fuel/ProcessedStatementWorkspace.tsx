@@ -163,13 +163,19 @@ export default function ProcessedStatementWorkspace({
       />
 
       {sections.cardTransactions.length > 0 ? (
-        <section className="processed-statement-section mb-2" aria-label="Fuel and card transactions">
+        <section
+          className="processed-statement-section processed-statement-section--charges mb-2"
+          aria-label="Fuel and card transactions"
+        >
           <BvdTransactionRowsTable transactions={filteredCard} cardNumber={cardNumber} />
         </section>
       ) : null}
 
       {sections.expressCharges.length > 0 ? (
-        <section className="processed-statement-section" aria-label="Express charges">
+        <section
+          className="processed-statement-section processed-statement-section--charges"
+          aria-label="Express charges"
+        >
           <h3
             className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]"
             data-testid="processed-express-section-label"
