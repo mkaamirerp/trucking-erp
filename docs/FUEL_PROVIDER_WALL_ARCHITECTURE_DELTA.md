@@ -172,6 +172,14 @@ canonical fuel_transaction
 
 Provider-native rendering must **not** become a separate payroll, history, or global search workflow — only enrichment inside the shared shell.
 
+### 1.10 Canonical-first vs operational UI (presentation lock)
+
+**Canonical-first is a data/read-model rule, not a mandate to create a second canonical presentation layer.** The refined **TruckERP Processed Fuel workspace** (`ProcessedStatementWorkspace` / `TruckErpProcessedFuelWorkspace`) is the **single** operational processed-Fuel UI for all providers. Canonical `fuel_transactions` populate that workspace; provider code does **not** fork the main operational layout.
+
+- Main operational Fuel UI must **not** fork by provider (no parallel “canonical summary table” above the workspace).
+- Provider-native column sets (Nationwide Network/Ex-GST/controls; BVD Auth/Site/Express; etc.) are **source-evidence only** — drill-down, PDF, native detail panels.
+- Missing canonical or provider-mapped operational fields remain **NULL / blank / —** in the shared workspace; they must **not** trigger a provider-specific operational UI.
+
 ---
 
 ## 2. Architecture delta (today → target)
@@ -442,7 +450,7 @@ Before any refactor PR:
 - [ ] Funnel, provider wall, and Process bridge wording accepted as locked  
 - [ ] Pre-wall vs post-wall routes and `batch_id` identity accepted  
 - [ ] Canonical-first history/dashboard/search vs native evidence search accepted  
-- [ ] Stable canonical contract (§1.6), Fuel home selector lock (§1.7), payroll/accounting lock (§1.8), UI evidence boundary (§1.9) accepted  
+- [ ] Stable canonical contract (§1.6), Fuel home selector lock (§1.7), payroll/accounting lock (§1.8), UI evidence boundary (§1.9), operational UI lock (§1.10) accepted  
 - [ ] `process_fuel_import` contract matches proven BVD/Nationwide ordering  
 - [ ] Extraction helper vs forbidden workflow distinction accepted  
 - [ ] `TEST_PROVIDER` gate + registry dispatch requirement accepted  

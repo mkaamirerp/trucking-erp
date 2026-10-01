@@ -27,6 +27,10 @@ type Props = {
   invoiceNumber: string;
   invoiceTotal?: string | null;
   currency?: string | null;
+  /** TruckERP provider label (not a separate provider UI). */
+  providerLabel?: string;
+  /** When set, skip per-import BVD canonical fetch (processed batch read model). */
+  canonicalTransactions?: FuelCanonicalTransaction[];
   fullInvoiceLink: ReactNode;
 };
 
@@ -37,11 +41,13 @@ export default function ProcessedStatementWorkspace({
   invoiceNumber,
   invoiceTotal,
   currency,
+  providerLabel = "BVD",
+  canonicalTransactions,
   fullInvoiceLink,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [datePeriod, setDatePeriod] = useState<DatePeriodSelection>({ kind: "all" });
-  const [canonical, setCanonical] = useState<FuelCanonicalTransaction[]>([]);
+  const [canonical, setCanonical] = useState<FuelCanonicalTransaction[]>(canonicalTransactions ?? []);
 
   const sections = useMemo(() => splitProcessedStatementCharges(sourceRows), [sourceRows]);
   const searchableRows = useMemo(() => allProcessedStatementSearchableRows(sections), [sections]);
@@ -49,6 +55,10 @@ export default function ProcessedStatementWorkspace({
   useEffect(() => {
     setSearchQuery("");
     setDatePeriod({ kind: "all" });
+    if (canonicalTransactions) {
+      setCanonical(canonicalTransactions);
+      return;
+    }
     let cancelled = false;
     getFuelBvdCanonicalTransactions(importId)
       .then((rows) => {
@@ -60,7 +70,7 @@ export default function ProcessedStatementWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [importId]);
+  }, [importId, canonicalTransactions]);
 
   const searchCtx = useMemo(
     () => ({
@@ -94,11 +104,16 @@ export default function ProcessedStatementWorkspace({
   const displayCurrency = (currency?.trim() || operationalCell(searchableRows[0] ?? ({} as FuelBvdRow), "cur") || "—").trim();
 
   return (
-    <div data-testid={`fuel-processed-statement-${importId}`}>
+    <div
+      className="truckerp-processed-fuel-workspace"
+      data-testid="truckerp-processed-fuel-workspace"
+      data-provider={providerLabel}
+    >
+      <div data-testid={`fuel-processed-statement-${importId}`}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="processed-statement-summary min-w-0" data-testid="processed-statement-summary">
           <div className="text-xs font-bold uppercase tracking-wide text-[var(--trk-text)]">
-            BVD {invoiceNumber}
+            {providerLabel} {invoiceNumber}
           </div>
           <div className="text-[11px] font-semibold text-[var(--trk-text-muted)]" data-testid="processed-charge-count">
             {sections.chargeCount} charges
@@ -193,6 +208,7 @@ export default function ProcessedStatementWorkspace({
           />
         </section>
       ) : null}
+      </div>
     </div>
   );
 }

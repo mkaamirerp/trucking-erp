@@ -77,7 +77,7 @@ export default function NationwideProcessedEvidencePanel({ sourceImportRef, onOp
   const invoiceLabel = header?.invoice_number ? `Invoice ${header.invoice_number}` : "Nationwide import";
 
   return (
-    <>
+    <div data-testid="nationwide-source-evidence-panel">
       <BvdPdfPopupModal
         open={pdfOpen}
         onClose={() => setPdfOpen(false)}
@@ -101,6 +101,6 @@ export default function NationwideProcessedEvidencePanel({ sourceImportRef, onOp
           Open full invoice
         </button>
       ) : null}
-    </>
+    </div>
   );
 }

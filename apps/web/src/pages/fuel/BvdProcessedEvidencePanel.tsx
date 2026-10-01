@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { getFuelBvdImportRows } from "../../api";
-import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
-import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
+import { getFuelBvdSourceReconciliation } from "../../api";
 
 type Props = {
   batchId: number;
@@ -10,14 +8,10 @@ type Props = {
   onOpenFull?: () => void;
 };
 
-export default function BvdProcessedEvidencePanel({
-  sourceImportRef,
-  invoiceNumber,
-  onOpenFull,
-}: Props) {
+export default function BvdProcessedEvidencePanel({ sourceImportRef, onOpenFull }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [parsed, setParsed] = useState<ReturnType<typeof parseBvdImportRowsForDashboard> | null>(null);
+  const [passed, setPassed] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!sourceImportRef) {
@@ -27,9 +21,9 @@ export default function BvdProcessedEvidencePanel({
     }
     setLoading(true);
     setError(null);
-    void getFuelBvdImportRows(sourceImportRef)
-      .then((rows) => setParsed(parseBvdImportRowsForDashboard(rows)))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load BVD statement"))
+    void getFuelBvdSourceReconciliation(sourceImportRef)
+      .then((recon) => setPassed(recon.passed))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load BVD source evidence"))
       .finally(() => setLoading(false));
   }, [sourceImportRef]);
 
@@ -39,27 +33,28 @@ export default function BvdProcessedEvidencePanel({
   if (error) {
     return <p className="text-xs text-[var(--trk-danger)]" role="alert">{error}</p>;
   }
-  if (!parsed || parsed.chargeCount === 0) {
-    return <p className="text-xs text-[var(--trk-text-muted)]">No accepted charges on this invoice.</p>;
-  }
 
   return (
-    <ProcessedStatementWorkspace
-      importId={sourceImportRef!}
-      sourceRows={parsed.sourceRows}
-      invoiceNumber={invoiceNumber}
-      cardNumber={parsed.cardNumber}
-      fullInvoiceLink={
-        onOpenFull ? (
-          <button
-            type="button"
-            className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
-            onClick={onOpenFull}
-          >
-            Open full invoice
-          </button>
-        ) : null
-      }
-    />
+    <div className="space-y-1 text-xs" data-testid="bvd-source-evidence-panel">
+      <p className="text-[var(--trk-text-muted)]">
+        Provider-native fields (Auth, Site, Retail, Express, controls) and original PDF are available in source
+        evidence.
+      </p>
+      <p>
+        Source reconciliation:{" "}
+        <strong className={passed ? "text-[var(--trk-success)]" : "text-[var(--trk-warning)]"}>
+          {passed ? "Pass" : "Review"}
+        </strong>
+      </p>
+      {onOpenFull ? (
+        <button
+          type="button"
+          className="font-medium text-[var(--trk-accent)] hover:underline"
+          onClick={onOpenFull}
+        >
+          View provider-native statement
+        </button>
+      ) : null}
+    </div>
   );
 }

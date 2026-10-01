@@ -1,0 +1,105 @@
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  getFuelBvdImportRows,
+  getFuelNationwideImportRows,
+  getFuelProcessedBatch,
+  type FuelBvdRow,
+  type FuelCanonicalTransaction,
+} from "../../api";
+import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
+import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
+import { nationwideTransactionsToOperationalBvdRows } from "./nationwideOperationalBvdRows";
+
+type Props = {
+  batchId: number;
+  providerCode: string;
+  providerLabel: string;
+  invoiceNumber: string;
+  sourceImportRef: string | null;
+  fullInvoiceLink?: ReactNode;
+};
+
+export default function TruckErpProcessedFuelWorkspace({
+  batchId,
+  providerCode,
+  providerLabel,
+  invoiceNumber,
+  sourceImportRef,
+  fullInvoiceLink,
+}: Props) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [canonical, setCanonical] = useState<FuelCanonicalTransaction[]>([]);
+  const [sourceRows, setSourceRows] = useState<FuelBvdRow[]>([]);
+  const [cardNumber, setCardNumber] = useState("");
+  const [invoiceTotal, setInvoiceTotal] = useState<string | null>(null);
+  const [displayCurrency, setDisplayCurrency] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sourceImportRef) {
+      setError("Source import reference missing");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const code = providerCode.toUpperCase();
+    void getFuelProcessedBatch(batchId)
+      .then(async (detail) => {
+        setCanonical(detail.canonical_transactions);
+        if (detail.total_amount) {
+          setInvoiceTotal(detail.total_amount);
+        } else if (detail.cad_transaction_total) {
+          setInvoiceTotal(detail.cad_transaction_total);
+          setDisplayCurrency("CAD");
+        } else if (detail.usd_transaction_total) {
+          setInvoiceTotal(detail.usd_transaction_total);
+          setDisplayCurrency("USD");
+        }
+        if (detail.currency) setDisplayCurrency(detail.currency);
+
+        if (code === "BVD") {
+          const rows = await getFuelBvdImportRows(sourceImportRef);
+          const parsed = parseBvdImportRowsForDashboard(rows);
+          setSourceRows(parsed.sourceRows);
+          setCardNumber(parsed.cardNumber);
+          return;
+        }
+        if (code === "NATIONWIDE") {
+          const rows = await getFuelNationwideImportRows(sourceImportRef);
+          const operational = nationwideTransactionsToOperationalBvdRows(rows);
+          setSourceRows(operational);
+          const header = rows.find((r) => r.row_type === "HEADER");
+          setCardNumber(header?.card_number?.trim() || operational[0]?.card_number?.trim() || "");
+          return;
+        }
+        setError(`No operational workspace adapter for ${providerCode}`);
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not load processed workspace"))
+      .finally(() => setLoading(false));
+  }, [batchId, providerCode, sourceImportRef]);
+
+  if (loading) {
+    return <p className="text-xs text-[var(--trk-text-muted)]">Loading processed Fuel workspace…</p>;
+  }
+  if (error) {
+    return <p className="text-xs text-[var(--trk-danger)]" role="alert">{error}</p>;
+  }
+  if (!sourceImportRef || sourceRows.length === 0) {
+    return <p className="text-xs text-[var(--trk-text-muted)]">No operational transactions for this batch.</p>;
+  }
+
+  return (
+    <ProcessedStatementWorkspace
+      importId={sourceImportRef}
+      sourceRows={sourceRows}
+      cardNumber={cardNumber}
+      invoiceNumber={invoiceNumber}
+      invoiceTotal={invoiceTotal}
+      currency={displayCurrency}
+      providerLabel={providerLabel}
+      canonicalTransactions={canonical}
+      fullInvoiceLink={fullInvoiceLink}
+    />
+  );
+}

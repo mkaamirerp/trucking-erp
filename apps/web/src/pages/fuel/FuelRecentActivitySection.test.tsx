@@ -14,12 +14,16 @@ vi.mock("./processedFuelProviderRenderers", () => ({
   getProcessedFuelEvidenceRenderer: (code: string) => {
     if (code === "NATIONWIDE") {
       return function NationwideEvidenceMock() {
-        return <div data-testid="nationwide-evidence-mock">Nationwide evidence</div>;
+        return <div data-testid="nationwide-source-evidence-panel-mock">Nationwide evidence</div>;
       };
     }
     return null;
   },
   getProcessedFuelRecordOverlay: () => null,
+}));
+
+vi.mock("./TruckErpProcessedFuelWorkspace", () => ({
+  default: () => <div data-testid="truckerp-processed-fuel-workspace-mock">workspace</div>,
 }));
 
 vi.mock("../../api", async (importOriginal) => {
@@ -115,7 +119,9 @@ describe("FuelRecentActivitySection", () => {
     expect(container.textContent).toContain("Nationwide 20250522B-06142026");
     expect(container.textContent).not.toContain("BVD 20250522B");
     expect(apiMocks.getFuelBvdImportRows).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="nationwide-evidence-mock"]')).toBeTruthy();
-    expect(apiMocks.getFuelProcessedBatch).toHaveBeenCalledWith(8);
+    expect(container.querySelector('[data-testid="nationwide-source-evidence-panel-mock"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="truckerp-processed-fuel-workspace-mock"]')).toBeTruthy();
+    expect(container.textContent?.toLowerCase()).not.toContain("canonical transactions");
+    expect(apiMocks.getFuelProcessedBatch).toHaveBeenCalled();
   });
 });
