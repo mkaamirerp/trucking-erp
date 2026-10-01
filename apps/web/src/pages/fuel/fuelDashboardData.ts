@@ -1,4 +1,4 @@
-import type { FuelBvdCompletedBasic } from "../../api";
+import type { FuelProcessedSummary } from "../../api";
 
 export const FUEL_QUICK_PROVIDER_CODES = ["BVD", "LOVES", "PILOT", "WEX"] as const;
 
@@ -17,22 +17,13 @@ export function mapFuelDashboardStatsFromApi(stats: {
   };
 }
 
-export function mergeFuelCompletedHistory(
-  bvd: FuelBvdCompletedBasic[],
-  nationwide: FuelBvdCompletedBasic[],
-): FuelBvdCompletedBasic[] {
-  const merged = [...bvd, ...nationwide];
-  return merged.sort((a, b) => {
-    const ta = a.processed_at ? Date.parse(a.processed_at) : 0;
-    const tb = b.processed_at ? Date.parse(b.processed_at) : 0;
-    return tb - ta;
-  });
-}
-
-export function recentFuelActivity(completed: FuelBvdCompletedBasic[], limit = 5): FuelBvdCompletedBasic[] {
+export function recentFuelProcessedActivity(
+  completed: FuelProcessedSummary[],
+  limit = 5,
+): FuelProcessedSummary[] {
   const sorted = [...completed].sort((a, b) => {
-    const ta = a.processed_at ? Date.parse(a.processed_at) : 0;
-    const tb = b.processed_at ? Date.parse(b.processed_at) : 0;
+    const ta = a.finalized_at ? Date.parse(a.finalized_at) : 0;
+    const tb = b.finalized_at ? Date.parse(b.finalized_at) : 0;
     return tb - ta;
   });
   return sorted.slice(0, limit);

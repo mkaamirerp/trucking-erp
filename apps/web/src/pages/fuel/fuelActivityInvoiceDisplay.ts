@@ -1,4 +1,4 @@
-import type { FuelBvdCompletedBasic } from "../../api";
+import type { FuelActivityRow } from "./fuelActivityRow";
 import { formatBvdSourceDate } from "../fuelBvdReview/bvdUploadDuplicate";
 
 /** Dashboard bucket for source currency (no FX). Provider codes US/CN preserved on invoice total. */
@@ -15,7 +15,7 @@ export function fuelActivitySourceMoneyBucket(
 }
 
 /** Recent Activity Account/Card from completed-basic purchase card summary (not header alone). */
-export function formatFuelActivityAccountCard(row: FuelBvdCompletedBasic): string {
+export function formatFuelActivityAccountCard(row: FuelActivityRow): string {
   if (row.provider === "NATIONWIDE" && row.account_code?.trim()) {
     return row.account_code.trim();
   }
@@ -30,7 +30,7 @@ export function formatFuelActivityAccountCard(row: FuelBvdCompletedBasic): strin
 }
 
 /** Provider invoice payment status — not Fuel process status. */
-export function fuelActivityPaymentLabel(_row: FuelBvdCompletedBasic): string {
+export function fuelActivityPaymentLabel(_row: FuelActivityRow): string {
   return "Not tracked";
 }
 
@@ -78,14 +78,14 @@ export function formatFuelActivityDueDate(dueDate: string | null | undefined): s
   return formatBvdSourceDate(dueDate);
 }
 
-export function formatFuelActivityInvoiceDiscount(row: FuelBvdCompletedBasic): string {
+export function formatFuelActivityInvoiceDiscount(row: FuelActivityRow): string {
   if (row.invoice_disc_amt === undefined || row.invoice_disc_amt === null) return "—";
   const amt = row.invoice_disc_amt.trim();
   if (!amt) return "—";
   return amt;
 }
 
-export function formatFuelActivityCadTotal(row: FuelBvdCompletedBasic): string {
+export function formatFuelActivityCadTotal(row: FuelActivityRow): string {
   const explicit = row.cad_transaction_total?.trim();
   if (explicit) return explicit;
   const bucket = fuelActivitySourceMoneyBucket(row.currency);
@@ -94,7 +94,7 @@ export function formatFuelActivityCadTotal(row: FuelBvdCompletedBasic): string {
   return bucket === "cad" ? amt : "0.00";
 }
 
-export function formatFuelActivityUsdTotal(row: FuelBvdCompletedBasic): string {
+export function formatFuelActivityUsdTotal(row: FuelActivityRow): string {
   const explicit = row.usd_transaction_total?.trim();
   if (explicit) return explicit;
   const bucket = fuelActivitySourceMoneyBucket(row.currency);
@@ -103,7 +103,7 @@ export function formatFuelActivityUsdTotal(row: FuelBvdCompletedBasic): string {
   return bucket === "usd" ? amt : "0.00";
 }
 
-export function formatFuelActivityInvoiceTotal(row: FuelBvdCompletedBasic): string {
+export function formatFuelActivityInvoiceTotal(row: FuelActivityRow): string {
   const total = row.total_amount?.trim();
   if (!total) return "—";
   if (row.currency?.trim()) return `${total} ${row.currency.trim()}`;

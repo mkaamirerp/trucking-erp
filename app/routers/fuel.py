@@ -42,6 +42,8 @@ from app.schemas.fuel import (
     FuelBvdImportListItemOut,
     FuelBvdCompletedBasicOut,
     FuelDashboardStatsOut,
+    FuelProcessedDetailOut,
+    FuelProcessedSummaryOut,
     FuelBvdReviewSaveIn,
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
@@ -76,6 +78,7 @@ from app.services import fuel_bvd_review as bvd_review_service
 from app.services import fuel_reconciliation as reconciliation_service
 from app.services import fuel_review as review_service
 from app.services import fuel_dashboard_stats as dashboard_stats_service
+from app.services import fuel_processed_read as processed_read_service
 from app.services.fuel_bvd_import import FuelBvdImportError
 from app.services.fuel_nationwide_import import FuelNationwideImportError, import_nationwide_digital_pdf
 from app.services import fuel_nationwide_review as nationwide_review_service
@@ -212,6 +215,46 @@ async def get_fuel_dashboard_stats(
     _ = user
     stats = await dashboard_stats_service.get_fuel_dashboard_stats(db, tenant_id=tenant_id)
     return FuelDashboardStatsOut(**stats)
+
+
+# --- Post-wall canonical processed Fuel (read path) ---
+
+
+@router.get("/processed", response_model=list[FuelProcessedSummaryOut])
+async def list_processed_fuel_route(
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+    provider_code: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=500),
+):
+    _ = user
+    items = await processed_read_service.list_processed_fuel(
+        db,
+        tenant_id=tenant_id,
+        provider_code=provider_code,
+        limit=limit,
+    )
+    return [FuelProcessedSummaryOut(**item) for item in items]
+
+
+@router.get("/processed/{batch_id}", response_model=FuelProcessedDetailOut)
+async def get_processed_fuel_batch_route(
+    batch_id: int,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    detail = await processed_read_service.get_processed_fuel_batch(
+        db,
+        tenant_id=tenant_id,
+        batch_id=batch_id,
+    )
+    txns = detail.pop("canonical_transactions", [])
+    detail.pop("canonical_controls", None)
+    detail["canonical_transactions"] = [fuel_transaction_to_canonical_out(t) for t in txns]
+    return FuelProcessedDetailOut(**detail)
 
 
 # --- Segment 8: source review ---

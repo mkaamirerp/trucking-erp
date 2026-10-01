@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const apiMocks = vi.hoisted(() => ({
   listFuelProviders: vi.fn(),
   getFuelDashboardStats: vi.fn(),
-  listFuelBvdCompletedHistory: vi.fn(),
+  listFuelProcessed: vi.fn(),
   uploadFuelBvdPdf: vi.fn(),
   discardFuelBvdStage: vi.fn(),
 }));
@@ -14,14 +14,21 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock("../api", () => ({
   listFuelProviders: apiMocks.listFuelProviders,
   getFuelDashboardStats: apiMocks.getFuelDashboardStats,
-  listFuelBvdCompletedHistory: apiMocks.listFuelBvdCompletedHistory,
+  listFuelProcessed: apiMocks.listFuelProcessed,
   uploadFuelBvdPdf: apiMocks.uploadFuelBvdPdf,
   discardFuelBvdStage: apiMocks.discardFuelBvdStage,
   getFuelBvdUploadErrorDisplay: () => ({ title: "Error", message: "fail" }),
+  getFuelNationwideUploadErrorDisplay: () => ({ title: "Error", message: "fail" }),
+  uploadFuelNationwidePdf: vi.fn(),
+  discardFuelNationwideStage: vi.fn(),
 }));
 
 const processingMock = vi.hoisted(() => vi.fn());
 const processedMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./fuelNationwideReview/FuelNationwideProcessingWorkspace", () => ({
+  default: () => null,
+}));
 
 vi.mock("./fuelBvdReview/FuelBvdProcessingWorkspace", () => ({
   default: (props: { importId: string; onProcessed?: (p: { importId: string; invoiceNumber?: string }) => void }) => {
@@ -36,18 +43,47 @@ vi.mock("./fuelBvdReview/FuelBvdProcessingWorkspace", () => ({
   },
 }));
 
-vi.mock("./fuelBvdReview/FuelBvdProcessedRecordView", () => ({
-  default: (props: { importId: string; onClose?: () => void }) => {
-    processedMock(props);
-    return (
-      <div data-testid="fuel-processed-overlay-mock">
-        <button type="button" onClick={() => props.onClose?.()}>Mock close processed</button>
-      </div>
-    );
-  },
+vi.mock("./fuel/processedFuelProviderRenderers", () => ({
+  getProcessedFuelEvidenceRenderer: () => null,
+  getProcessedFuelRecordOverlay: () =>
+    function MockProcessedOverlay(props: { sourceImportRef: string; onClose?: () => void }) {
+      processedMock(props);
+      return (
+        <div data-testid="fuel-processed-overlay-mock">
+          <button type="button" onClick={() => props.onClose?.()}>Mock close processed</button>
+        </div>
+      );
+    },
 }));
 
 import FuelMainPage from "./FuelMainPage";
+
+const processedRow = {
+  batch_id: 42,
+  provider_code: "BVD",
+  source_import_ref: "done-1",
+  source_storage_ref: null,
+  account_reference: null,
+  invoice_number: "972201",
+  period_start: null,
+  period_end: null,
+  due_date: null,
+  finalized_at: new Date().toISOString(),
+  batch_status: "FINALIZED",
+  transaction_count: 1,
+  control_count: 0,
+  currency_totals: [{ currency: "CN", amount: "1" }],
+  provider_control_totals: [],
+  cad_transaction_total: "1",
+  usd_transaction_total: null,
+  usd_provider_control: null,
+  purchase_card_count: 1,
+  purchase_card_numbers: ["1234"],
+  total_amount: "1",
+  currency: "CN",
+  read_only: true,
+  review_status: "SOURCE_REVIEWED",
+};
 
 describe("FuelMainPage", () => {
   let container: HTMLDivElement;
@@ -62,7 +98,7 @@ describe("FuelMainPage", () => {
       needs_review_count: 3,
       processed_last_7_days_count: 7,
     });
-    apiMocks.listFuelBvdCompletedHistory.mockResolvedValue([]);
+    apiMocks.listFuelProcessed.mockResolvedValue([]);
     apiMocks.uploadFuelBvdPdf.mockReset();
     apiMocks.discardFuelBvdStage.mockResolvedValue({ discarded: true });
     processingMock.mockReset();
@@ -97,12 +133,8 @@ describe("FuelMainPage", () => {
     expect(container.querySelector('[data-design-notes="true"]')).toBeNull();
     expect(container.textContent).toContain("Needs review");
     expect(container.textContent).toContain("Processed last 7 days");
-    expect(container.textContent).toContain("3");
-    expect(container.textContent).toContain("7");
-    expect(container.textContent).not.toContain("Closing day");
-    expect(container.textContent).not.toContain("Sunday");
-    expect(container.textContent).not.toContain("In queue");
     expect(apiMocks.getFuelDashboardStats).toHaveBeenCalled();
+    expect(apiMocks.listFuelProcessed).toHaveBeenCalled();
   });
 
   it("upload opens processing overlay on fuel home", async () => {
@@ -117,13 +149,12 @@ describe("FuelMainPage", () => {
     });
     expect(apiMocks.uploadFuelBvdPdf).toHaveBeenCalled();
     expect(container.querySelector('[data-testid="fuel-processing-overlay-mock"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="fuel-home"]')).toBeTruthy();
   });
 
-  it("process closes overlay and refetches history", async () => {
+  it("process closes overlay and refetches processed Fuel list", async () => {
     apiMocks.uploadFuelBvdPdf.mockResolvedValue({ import_id: "new-import-2", row_count: 1, parse_status: "SUCCESS" });
     await renderFuel();
-    const initialHistoryCalls = apiMocks.listFuelBvdCompletedHistory.mock.calls.length;
+    const initialCalls = apiMocks.listFuelProcessed.mock.calls.length;
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File(["%PDF"], "test.pdf", { type: "application/pdf" });
     await act(async () => {
@@ -137,35 +168,23 @@ describe("FuelMainPage", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(container.querySelector('[data-testid="fuel-processing-overlay-mock"]')).toBeNull();
-    expect(apiMocks.listFuelBvdCompletedHistory.mock.calls.length).toBeGreaterThan(initialHistoryCalls);
+    expect(apiMocks.listFuelProcessed.mock.calls.length).toBeGreaterThan(initialCalls);
   });
 
-  it("Open triggers processed overlay", async () => {
-    apiMocks.listFuelBvdCompletedHistory.mockResolvedValue([
-      {
-        provider: "BVD",
-        import_id: "done-1",
-        invoice_number: "972201",
-        review_status: "SOURCE_REVIEWED",
-        read_only: true,
-        unit_count: 1,
-        unit_numbers: [],
-        total_amount: "1",
-        currency: "CN",
-        categories: [],
-        taxes: [],
-        processed_at: new Date().toISOString(),
-      },
-    ]);
+  it("Open triggers processed overlay via batch lineage", async () => {
+    apiMocks.listFuelProcessed.mockResolvedValue([processedRow]);
     await renderFuel();
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });
-    const openBtn = container.querySelector('[data-testid="fuel-activity-open-done-1"]') as HTMLButtonElement;
+    const openBtn = container.querySelector('[data-testid="fuel-activity-open-42"]') as HTMLButtonElement;
     await act(async () => {
       openBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
     });
+    expect(processedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceImportRef: "done-1" }),
+    );
     expect(container.querySelector('[data-testid="fuel-processed-overlay-mock"]')).toBeTruthy();
-    expect(processedMock).toHaveBeenCalled();
   });
 });

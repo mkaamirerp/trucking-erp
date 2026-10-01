@@ -643,6 +643,40 @@ class FuelDashboardStatsOut(BaseModel):
     processed_last_7_days_count: int
 
 
+class FuelProcessedCurrencyTotalOut(BaseModel):
+    currency: str
+    amount: str
+
+
+class FuelProcessedSummaryOut(BaseModel):
+    """Provider-neutral post-wall processed Fuel summary (canonical authority)."""
+
+    batch_id: int
+    provider_code: str
+    source_import_ref: str | None = None
+    source_storage_ref: str | None = None
+    account_reference: str | None = None
+    invoice_number: str
+    period_start: str | None = None
+    period_end: str | None = None
+    due_date: str | None = None
+    finalized_at: str | None = None
+    batch_status: str
+    transaction_count: int
+    control_count: int
+    currency_totals: list[FuelProcessedCurrencyTotalOut] = Field(default_factory=list)
+    provider_control_totals: list[FuelProcessedCurrencyTotalOut] = Field(default_factory=list)
+    cad_transaction_total: str | None = None
+    usd_transaction_total: str | None = None
+    usd_provider_control: str | None = None
+    purchase_card_count: int = 0
+    purchase_card_numbers: list[str] = Field(default_factory=list)
+    total_amount: str = ""
+    currency: str | None = None
+    read_only: bool = True
+    review_status: str = "SOURCE_REVIEWED"
+
+
 class FuelBvdImportOut(BaseModel):
     import_id: str
     row_count: int
@@ -908,6 +942,10 @@ class FuelCanonicalTransactionOut(BaseModel):
         if value is None:
             return None
         return format(value, "f")
+
+
+class FuelProcessedDetailOut(FuelProcessedSummaryOut):
+    canonical_transactions: list[FuelCanonicalTransactionOut] = Field(default_factory=list)
 
 
 class FuelTransactionClassificationIn(BaseModel):

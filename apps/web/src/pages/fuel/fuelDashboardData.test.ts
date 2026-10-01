@@ -1,23 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { mapFuelDashboardStatsFromApi, recentFuelActivity } from "./fuelDashboardData";
-import type { FuelBvdCompletedBasic } from "../../api";
+import { mapFuelDashboardStatsFromApi, recentFuelProcessedActivity } from "./fuelDashboardData";
+import type { FuelProcessedSummary } from "../../api";
+
+function sampleProcessed(batchId: number, finalizedAt: string): FuelProcessedSummary {
+  return {
+    batch_id: batchId,
+    provider_code: "BVD",
+    source_import_ref: `import-${batchId}`,
+    source_storage_ref: null,
+    account_reference: null,
+    invoice_number: String(972200 + batchId),
+    period_start: null,
+    period_end: null,
+    due_date: null,
+    finalized_at: finalizedAt,
+    batch_status: "FINALIZED",
+    transaction_count: 1,
+    control_count: 0,
+    currency_totals: [],
+    provider_control_totals: [],
+    cad_transaction_total: null,
+    usd_transaction_total: null,
+    usd_provider_control: null,
+    purchase_card_count: 0,
+    purchase_card_numbers: [],
+    total_amount: "1.00",
+    currency: "CAD",
+    read_only: true,
+    review_status: "SOURCE_REVIEWED",
+  };
+}
 
 describe("fuelDashboardData", () => {
-  it("returns up to five recent completed items", () => {
-    const rows: FuelBvdCompletedBasic[] = Array.from({ length: 8 }, (_, i) => ({
-      provider: "BVD",
-      import_id: `id-${i}`,
-      invoice_number: String(972200 + i),
-      review_status: "SOURCE_REVIEWED",
-      read_only: true,
-      unit_count: 1,
-      unit_numbers: [],
-      total_amount: "1.00",
-      categories: [],
-      taxes: [],
-      processed_at: new Date(2026, 0, i + 1).toISOString(),
-    }));
-    expect(recentFuelActivity(rows, 5)).toHaveLength(5);
+  it("returns up to five recent processed batches", () => {
+    const rows = Array.from({ length: 8 }, (_, i) =>
+      sampleProcessed(i, new Date(2026, 0, i + 1).toISOString()),
+    );
+    expect(recentFuelProcessedActivity(rows, 5)).toHaveLength(5);
   });
 
   it("maps dashboard stats from API shape", () => {

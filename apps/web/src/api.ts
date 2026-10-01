@@ -4344,6 +4344,59 @@ export async function listFuelBvdImports(options?: {
   return handle(res);
 }
 
+export type FuelProcessedCurrencyTotal = {
+  currency: string;
+  amount: string;
+};
+
+export type FuelProcessedSummary = {
+  batch_id: number;
+  provider_code: string;
+  source_import_ref: string | null;
+  source_storage_ref: string | null;
+  account_reference: string | null;
+  invoice_number: string;
+  period_start: string | null;
+  period_end: string | null;
+  due_date: string | null;
+  finalized_at: string | null;
+  batch_status: string;
+  transaction_count: number;
+  control_count: number;
+  currency_totals: FuelProcessedCurrencyTotal[];
+  provider_control_totals: FuelProcessedCurrencyTotal[];
+  cad_transaction_total: string | null;
+  usd_transaction_total: string | null;
+  usd_provider_control: string | null;
+  purchase_card_count: number;
+  purchase_card_numbers: string[];
+  total_amount: string;
+  currency: string | null;
+  read_only: boolean;
+  review_status: string;
+};
+
+export type FuelProcessedDetail = FuelProcessedSummary & {
+  canonical_transactions: FuelCanonicalTransaction[];
+};
+
+export async function listFuelProcessed(options?: {
+  provider_code?: string;
+  limit?: number;
+}): Promise<FuelProcessedSummary[]> {
+  const params = new URLSearchParams();
+  if (options?.provider_code) params.set("provider_code", options.provider_code);
+  if (options?.limit != null) params.set("limit", String(options.limit));
+  const qs = params.toString();
+  const res = await fetchWithTenant(`${API_BASE}/fuel/processed${qs ? `?${qs}` : ""}`);
+  return handle(res);
+}
+
+export async function getFuelProcessedBatch(batchId: number): Promise<FuelProcessedDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/processed/${batchId}`);
+  return handle(res);
+}
+
 export async function listFuelBvdCompletedHistory(): Promise<FuelBvdCompletedBasic[]> {
   const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/history`);
   return handle(res);

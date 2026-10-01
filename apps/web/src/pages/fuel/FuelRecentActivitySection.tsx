@@ -1,16 +1,7 @@
 import { Fragment, useCallback, useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  getFuelBvdImportRows,
-  getFuelNationwideImportRows,
-  getFuelNationwideSourceReconciliation,
-  type FuelBvdCompletedBasic,
-  type FuelBvdRow,
-} from "../../api";
-import NationwideParsedStatementView from "../fuelNationwideReview/NationwideParsedStatementView";
+import type { FuelProcessedSummary } from "../../api";
 import { OPS } from "../../routes";
-import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
-import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
+import { fuelActivityRowFromProcessed, type FuelActivityRow } from "./fuelActivityRow";
 import {
   formatFuelActivityCadTotal,
   formatFuelActivityDueDate,
@@ -21,26 +12,25 @@ import {
   formatFuelActivityAccountCard,
   fuelActivityPaymentLabel,
 } from "./fuelActivityInvoiceDisplay";
+import ProcessedFuelStatementShell from "./ProcessedFuelStatementShell";
 import "../fuelBvdReview/bvd-parsed-statement.css";
 import "./fuel-home.css";
 
 type Props = {
-  activity: FuelBvdCompletedBasic[];
+  activity: FuelProcessedSummary[];
   loading: boolean;
-  /** Section title (default: Recent activity). */
   heading?: string;
-  /** Show link to full history page (dashboard only). */
   showViewAllLink?: boolean;
-  /** When set, View all expands on Fuel home instead of routing elsewhere. */
   onViewAllClick?: () => void;
   emptyMessage?: string;
-  /** Open processed record in Fuel home overlay (normal flow). */
-  onOpenProcessed?: (importId: string, provider: string) => void;
-  /** Brief highlight after Process (import_id). */
-  highlightImportId?: string | null;
+  onOpenProcessed?: (batchId: number, providerCode: string, sourceImportRef: string | null) => void;
+  highlightBatchId?: number | null;
 };
 
-type LoadedInvoice = import("./fuelRecentActivityRows").FuelDashboardImportRows;
+function providerTableLabel(code: string): string {
+  if (code === "NATIONWIDE") return "Nationwide";
+  return code;
+}
 
 export default function FuelRecentActivitySection({
   activity,
@@ -50,66 +40,15 @@ export default function FuelRecentActivitySection({
   onViewAllClick,
   emptyMessage = "No completed imports yet.",
   onOpenProcessed,
-  highlightImportId = null,
+  highlightBatchId = null,
 }: Props) {
-  const [expandedImportId, setExpandedImportId] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState<Record<string, LoadedInvoice>>({});
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadingImportId, setLoadingImportId] = useState<string | null>(null);
+  const [expandedBatchId, setExpandedBatchId] = useState<number | null>(null);
 
-  const toggleInvoice = useCallback(
-    async (importId: string, provider: string) => {
-      if (expandedImportId === importId) {
-        setExpandedImportId(null);
-        return;
-      }
-      setExpandedImportId(importId);
-      setLoadError(null);
-      if (loaded[importId]) return;
+  const rows: FuelActivityRow[] = activity.map(fuelActivityRowFromProcessed);
 
-      setLoadingImportId(importId);
-      if (provider === "NATIONWIDE") {
-        try {
-          const [nationwideRows, nationwideReconciliation] = await Promise.all([
-            getFuelNationwideImportRows(importId),
-            getFuelNationwideSourceReconciliation(importId),
-          ]);
-          const purchaseCount = nationwideRows.filter((r) => r.row_type === "TRANSACTION").length;
-          setLoaded((prev) => ({
-            ...prev,
-            [importId]: {
-              sourceRows: [],
-              cardTransactions: [],
-              expressCharges: [],
-              chargeCount: purchaseCount,
-              cardNumber: "",
-              nationwideRows,
-              nationwideReconciliation,
-            },
-          }));
-        } catch (e: unknown) {
-          setLoadError(e instanceof Error ? e.message : "Could not load Nationwide statement");
-        } finally {
-          setLoadingImportId(null);
-        }
-        return;
-      }
-
-      setLoadingImportId(importId);
-      try {
-        const rows = await getFuelBvdImportRows(importId);
-        const parsed = parseBvdImportRowsForDashboard(rows);
-        setLoaded((prev) => ({ ...prev, [importId]: parsed }));
-      } catch (e: unknown) {
-        setLoadError(e instanceof Error ? e.message : "Could not load transactions");
-      } finally {
-        setLoadingImportId(null);
-      }
-    },
-    [expandedImportId, loaded],
-  );
-
-  const expandedData = expandedImportId ? loaded[expandedImportId] : null;
+  const toggleInvoice = useCallback((batchId: number) => {
+    setExpandedBatchId((prev) => (prev === batchId ? null : batchId));
+  }, []);
 
   return (
     <section
@@ -130,9 +69,9 @@ export default function FuelRecentActivitySection({
               View all
             </button>
           ) : (
-            <Link to={OPS.FUEL} className="text-xs text-[var(--trk-accent)] hover:underline">
+            <a href={OPS.FUEL} className="text-xs text-[var(--trk-accent)] hover:underline">
               View all
-            </Link>
+            </a>
           )
         ) : null}
       </div>
@@ -160,16 +99,17 @@ export default function FuelRecentActivitySection({
               </tr>
             </thead>
             <tbody>
-              {activity.map((row) => {
-                const isExpanded = expandedImportId === row.import_id;
+              {activity.map((summary, index) => {
+                const row = rows[index]!;
+                const isExpanded = expandedBatchId === summary.batch_id;
                 return (
-                  <Fragment key={row.import_id}>
+                  <Fragment key={summary.batch_id}>
                     <tr
-                      data-testid={`fuel-activity-invoice-${row.import_id}`}
+                      data-testid={`fuel-activity-invoice-${summary.batch_id}`}
                       data-expanded={isExpanded ? "true" : "false"}
                       className={`border-t border-[var(--trk-border)]${
                         isExpanded ? " bg-[var(--trk-surface-2)]/50" : ""
-                      }${highlightImportId === row.import_id ? " ring-1 ring-inset ring-[var(--trk-success)]" : ""}`}
+                      }${highlightBatchId === summary.batch_id ? " ring-1 ring-inset ring-[var(--trk-success)]" : ""}`}
                     >
                       <td className="py-1.5 pr-1 text-[var(--trk-text-muted)]">
                         <button
@@ -177,95 +117,74 @@ export default function FuelRecentActivitySection({
                           className="px-1"
                           aria-expanded={isExpanded}
                           aria-label={`${isExpanded ? "Collapse" : "Expand"} invoice ${row.invoice_number}`}
-                          onClick={() => void toggleInvoice(row.import_id, row.provider)}
+                          onClick={() => toggleInvoice(summary.batch_id)}
                         >
                           {isExpanded ? "▾" : "▸"}
                         </button>
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
-                        {row.provider === "NATIONWIDE" ? "Nationwide" : row.provider}
+                        {providerTableLabel(summary.provider_code)}
                       </td>
                       <td className="py-1.5 pr-3 font-medium">
                         {onOpenProcessed ? (
                           <button
                             type="button"
                             className="text-left font-medium text-[var(--trk-accent)] hover:underline"
-                            data-testid={`fuel-activity-invoice-link-${row.import_id}`}
+                            data-testid={`fuel-activity-invoice-link-${summary.batch_id}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onOpenProcessed(row.import_id, row.provider);
+                              onOpenProcessed(summary.batch_id, summary.provider_code, summary.source_import_ref);
                             }}
                           >
                             {row.invoice_number}
                           </button>
                         ) : (
-                          <Link
-                            to={OPS.FUEL_BVD_DETAIL(row.import_id)}
-                            className="text-[var(--trk-accent)] hover:underline"
-                            data-testid={`fuel-activity-invoice-link-${row.import_id}`}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {row.invoice_number}
-                          </Link>
+                          <span>{row.invoice_number}</span>
                         )}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-card-${row.import_id}`}
+                        onClick={() => toggleInvoice(summary.batch_id)}
+                        data-testid={`fuel-activity-card-${summary.batch_id}`}
                       >
                         {formatFuelActivityAccountCard(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-period-${row.import_id}`}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
                         {formatFuelActivityPeriod(row.period_start, row.period_end)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-due-${row.import_id}`}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
                         {formatFuelActivityDueDate(row.due_date)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 text-[var(--trk-text-muted)]"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-payment-${row.import_id}`}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
                         {fuelActivityPaymentLabel(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-discount-${row.import_id}`}
-                      >
-                        {formatFuelActivityInvoiceDiscount(row)}
-                      </td>
-                      <td
-                        className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-cad-total-${row.import_id}`}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
                         {formatFuelActivityCadTotal(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-usd-total-${row.import_id}`}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
                         {formatFuelActivityUsdTotal(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums font-medium"
-                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
-                        data-testid={`fuel-activity-invoice-total-${row.import_id}`}
-                        data-source-currency={row.currency ?? ""}
+                        onClick={() => toggleInvoice(summary.batch_id)}
                       >
                         {formatFuelActivityInvoiceTotal(row)}
                       </td>
@@ -274,83 +193,44 @@ export default function FuelRecentActivitySection({
                           <button
                             type="button"
                             className="font-medium text-[var(--trk-accent)] hover:underline"
-                            data-testid={`fuel-activity-open-${row.import_id}`}
+                            data-testid={`fuel-activity-open-${summary.batch_id}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onOpenProcessed(row.import_id, row.provider);
+                              onOpenProcessed(summary.batch_id, summary.provider_code, summary.source_import_ref);
                             }}
                           >
                             Open
                           </button>
-                        ) : (
-                          <Link
-                            to={OPS.FUEL_BVD_DETAIL(row.import_id)}
-                            className="font-medium text-[var(--trk-accent)] hover:underline"
-                            data-testid={`fuel-activity-open-${row.import_id}`}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            Open
-                          </Link>
-                        )}
+                        ) : null}
                       </td>
                     </tr>
                     {isExpanded ? (
-                      <tr key={`${row.import_id}-detail`} className="border-t border-[var(--trk-border)]">
+                      <tr key={`${summary.batch_id}-detail`} className="border-t border-[var(--trk-border)]">
                         <td colSpan={12} className="fuel-recent-activity__detail-cell bg-[var(--trk-bg)] px-2 py-2">
-                          {loadError && expandedImportId === row.import_id ? (
-                            <p className="text-xs text-[var(--trk-danger)]" role="alert">{loadError}</p>
-                          ) : null}
-                          {loadingImportId === row.import_id ? (
-                            <p className="text-xs text-[var(--trk-text-muted)]">Loading transactions…</p>
-                          ) : expandedData && expandedData.chargeCount > 0 ? (
-                            <div
-                              className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
-                              data-testid={`fuel-activity-txn-scroll-${row.import_id}`}
-                            >
-                            <ProcessedStatementWorkspace
-                              importId={row.import_id}
-                              sourceRows={expandedData.sourceRows}
-                              invoiceNumber={row.invoice_number}
-                              invoiceTotal={row.total_amount}
-                              currency={row.currency}
-                              cardNumber={expandedData.cardNumber || row.card_number || ""}
-                              fullInvoiceLink={
-                                onOpenProcessed ? (
-                                  <button
-                                    type="button"
-                                    className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
-                                    data-testid={`fuel-activity-full-invoice-${row.import_id}`}
-                                    onClick={() => onOpenProcessed(row.import_id, row.provider)}
-                                  >
-                                    Open full invoice
-                                  </button>
-                                ) : (
-                                  <Link
-                                    to={OPS.FUEL_BVD_DETAIL(row.import_id)}
-                                    className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
-                                    data-testid={`fuel-activity-full-invoice-${row.import_id}`}
-                                  >
-                                    Open full invoice
-                                  </Link>
-                                )
+                          <div
+                            className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
+                            data-testid={`fuel-activity-detail-${summary.batch_id}`}
+                          >
+                            <ProcessedFuelStatementShell
+                              batchId={summary.batch_id}
+                              providerCode={summary.provider_code}
+                              providerLabel={providerTableLabel(summary.provider_code)}
+                              invoiceNumber={summary.invoice_number}
+                              transactionCount={summary.transaction_count}
+                              controlCount={summary.control_count}
+                              sourceImportRef={summary.source_import_ref}
+                              onOpenFull={
+                                onOpenProcessed
+                                  ? () =>
+                                      onOpenProcessed(
+                                        summary.batch_id,
+                                        summary.provider_code,
+                                        summary.source_import_ref,
+                                      )
+                                  : undefined
                               }
                             />
-                            </div>
-                          ) : expandedData?.nationwideRows?.length ? (
-                            <div
-                              className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
-                              data-testid={`fuel-activity-nationwide-detail-${row.import_id}`}
-                            >
-                              <NationwideParsedStatementView
-                                rows={expandedData.nationwideRows}
-                                statusLabel="Processed"
-                                onOpenPdf={() => onOpenProcessed?.(row.import_id, row.provider)}
-                                sourceReconciliation={expandedData.nationwideReconciliation ?? null}
-                              />
-                            </div>
-                          ) : expandedData && expandedData.chargeCount === 0 ? (
-                            <p className="text-xs text-[var(--trk-text-muted)]">No accepted charges on this invoice.</p>
-                          ) : null}
+                          </div>
                         </td>
                       </tr>
                     ) : null}
