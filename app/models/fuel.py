@@ -1016,3 +1016,198 @@ class FuelBvdStageFieldCorrection(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class FuelNationwide(Base):
+    """Nationwide provider-native accepted source rows."""
+
+    __tablename__ = "fuel_nationwide"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_fuel_nationwide_tenant_id_id"),
+        Index("ix_fuel_nationwide_tenant_id", "tenant_id"),
+        Index("ix_fuel_nationwide_tenant_import", "tenant_id", "import_id"),
+        Index("ix_fuel_nationwide_tenant_import_row", "tenant_id", "import_id", "source_row_number"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    row_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+    account_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    card_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prov_st: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product: Mapped[str | None] = mapped_column(Text, nullable=True)
+    volume: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ex_gst_per_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total: Mapped[str | None] = mapped_column(Text, nullable=True)
+    network: Mapped[str | None] = mapped_column(Text, nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usa_discount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    missed_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    oon_fees: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    row_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_line_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    declared_amount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_volume: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    source_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_storage_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    processed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_warnings: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelNationwideFieldCorrection(Base):
+    __tablename__ = "fuel_nationwide_field_correction"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_fuel_nationwide_field_correction_tenant_id_id"),
+        Index("ix_fuel_nationwide_field_correction_tenant", "tenant_id"),
+        Index("ix_fuel_nationwide_field_correction_tenant_import", "tenant_id", "import_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    fuel_nationwide_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extracted_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FuelNationwideImportStage(Base):
+    __tablename__ = "fuel_nationwide_import_stage"
+    __table_args__ = (
+        Index("ix_fuel_nationwide_import_stage_tenant", "tenant_id"),
+        Index("ix_fuel_nationwide_import_stage_tenant_status", "tenant_id", "status"),
+        Index("ix_fuel_nationwide_import_stage_tenant_sha", "tenant_id", "source_file_sha256"),
+    )
+
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provider_code: Mapped[str] = mapped_column(Text, nullable=False, default="NATIONWIDE")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="ACTIVE")
+    source_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_storage_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_warnings: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class FuelNationwideStageRow(Base):
+    __tablename__ = "fuel_nationwide_stage_row"
+    __table_args__ = (
+        Index("ix_fuel_nationwide_stage_row_tenant", "tenant_id"),
+        Index("ix_fuel_nationwide_stage_row_tenant_stage", "tenant_id", "stage_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    row_type: Mapped[str] = mapped_column(Text, nullable=False)
+    account_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_start_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_end_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    card_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_date: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prov_st: Mapped[str | None] = mapped_column(Text, nullable=True)
+    product: Mapped[str | None] = mapped_column(Text, nullable=True)
+    volume: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ex_gst_per_unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total: Mapped[str | None] = mapped_column(Text, nullable=True)
+    network: Mapped[str | None] = mapped_column(Text, nullable=True)
+    currency: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usa_discount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    missed_disc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    oon_fees: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    row_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_line_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    declared_amount: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    control_volume: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class FuelNationwideStageFieldCorrection(Base):
+    __tablename__ = "fuel_nationwide_stage_field_correction"
+    __table_args__ = (
+        Index("ix_fuel_nationwide_stage_field_correction_tenant_stage", "tenant_id", "stage_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    stage_row_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    extracted_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_value: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

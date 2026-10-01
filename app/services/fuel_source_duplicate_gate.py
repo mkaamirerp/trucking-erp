@@ -17,8 +17,10 @@ from typing import Any, Final, Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fuel import FuelBvd
+from app.models.fuel import FuelBvd, FuelNationwide
 from app.services.fuel_bvd_extraction import BVD_PROVIDER_CODE, FuelBvdExtractedRow
+from app.services.fuel_nationwide_extraction import FuelNationwideExtractedRow
+from app.services.fuel_nationwide_import import NATIONWIDE_PROVIDER_CODE
 
 FUEL_DUPLICATE_EXACT: Final[str] = "FUEL_DUPLICATE_EXACT"
 FUEL_DUPLICATE_DOCUMENT: Final[str] = "FUEL_DUPLICATE_DOCUMENT"
@@ -387,6 +389,163 @@ async def check_bvd_pdf_duplicate_before_import(
         sha_matches = [m for m in sha_matches if m.import_id != exclude_import_id]
         invoice_matches = [m for m in invoice_matches if m.import_id != exclude_import_id]
     return evaluate_bvd_pdf_duplicate(
+        file_sha256=file_sha,
+        filename=filename,
+        identity=identity,
+        sha_matches=sha_matches,
+        invoice_number_matches=invoice_matches,
+    )
+
+
+@dataclass(frozen=True)
+class NationwideDocumentIdentity:
+    provider: str
+    invoice_number: str
+    invoice_start_date: str
+    invoice_end_date: str
+
+    def is_complete(self) -> bool:
+        return all([self.invoice_number, self.invoice_start_date, self.invoice_end_date])
+
+    def business_lock_key(self, tenant_id: int) -> int | None:
+        if not _norm_text(self.invoice_number):
+            return None
+        raw = f"{tenant_id}:{self.provider}:{_norm_text(self.invoice_number)}"
+        return int(hashlib.sha256(raw.encode()).hexdigest()[:15], 16) % (2**31 - 1)
+
+
+def document_identity_from_nationwide_rows(rows: Iterable[FuelNationwideExtractedRow]) -> NationwideDocumentIdentity:
+    header = next((r for r in rows if r.row_type == "HEADER"), None)
+    fields = header.fields if header else {}
+    return NationwideDocumentIdentity(
+        provider=NATIONWIDE_PROVIDER_CODE,
+        invoice_number=_norm_text(fields.get("invoice_number")),
+        invoice_start_date=_norm_text(fields.get("invoice_start_date")),
+        invoice_end_date=_norm_text(fields.get("invoice_end_date")),
+    )
+
+
+def _nationwide_header_identity_matches(row: ExistingBvdImportMatch, identity: NationwideDocumentIdentity) -> bool:
+    return (
+        _norm_text(row.invoice_number) == identity.invoice_number
+        and _norm_text(row.start_date) == identity.invoice_start_date
+        and _norm_text(row.end_date) == identity.invoice_end_date
+    )
+
+
+def evaluate_nationwide_pdf_duplicate(
+    *,
+    file_sha256: str,
+    filename: str,
+    identity: NationwideDocumentIdentity,
+    sha_matches: list[ExistingBvdImportMatch],
+    invoice_number_matches: list[ExistingBvdImportMatch],
+) -> FuelDuplicateIngestionConflict | None:
+    matched_on: list[str] = []
+    best: ExistingBvdImportMatch | None = None
+    if sha_matches:
+        matched_on.append("SHA256")
+        best = pick_best_existing_import(sha_matches)
+        if filename and any(_norm_text(m.source_file_name) == _norm_text(filename) for m in sha_matches):
+            matched_on.append("FILE_NAME")
+        if identity.is_complete() and any(_nationwide_header_identity_matches(m, identity) for m in sha_matches):
+            matched_on.append("DOCUMENT_IDENTITY")
+        return FuelDuplicateIngestionConflict(
+            code=FUEL_DUPLICATE_EXACT,
+            message="This Nationwide invoice file has already been uploaded.",
+            provider=identity.provider,
+            existing_import_id=str(best.import_id) if best else "",
+            existing_status=best.review_status or "PENDING" if best else "PENDING",
+            matched_on=matched_on,
+        )
+    identity_matches = [m for m in invoice_number_matches if _nationwide_header_identity_matches(m, identity)]
+    if identity.is_complete() and identity_matches:
+        best = pick_best_existing_import(identity_matches)
+        return FuelDuplicateIngestionConflict(
+            code=FUEL_DUPLICATE_DOCUMENT,
+            message="This Nationwide invoice has already been uploaded.",
+            provider=identity.provider,
+            existing_import_id=str(best.import_id),
+            existing_status=best.review_status or "PENDING",
+            matched_on=["DOCUMENT_IDENTITY"],
+        )
+    return None
+
+
+async def acquire_nationwide_import_advisory_lock(
+    db: AsyncSession, *, tenant_id: int, identity: NationwideDocumentIdentity
+) -> None:
+    key = identity.business_lock_key(tenant_id)
+    if key is None:
+        return
+    from sqlalchemy import text
+
+    await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
+
+
+async def check_nationwide_pdf_duplicate_before_import(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    pdf_bytes: bytes,
+    filename: str,
+    extracted_rows: list[FuelNationwideExtractedRow],
+    permanent_only: bool = False,
+    exclude_import_id: uuid.UUID | None = None,
+) -> FuelDuplicateIngestionConflict | None:
+    file_sha = sha256_hex(pdf_bytes)
+    identity = document_identity_from_nationwide_rows(extracted_rows)
+    sha_matches: list[ExistingBvdImportMatch] = []
+    invoice_matches: list[ExistingBvdImportMatch] = []
+    sha_result = await db.execute(
+        select(FuelNationwide).where(
+            FuelNationwide.tenant_id == tenant_id,
+            FuelNationwide.source_file_sha256 == file_sha,
+            FuelNationwide.review_status == "SOURCE_REVIEWED",
+        )
+    )
+    by_import: dict[uuid.UUID, ExistingBvdImportMatch] = {}
+    for row in sha_result.scalars().all():
+        if row.import_id not in by_import or row.row_type == "HEADER":
+            by_import[row.import_id] = ExistingBvdImportMatch(
+                import_id=row.import_id,
+                review_status=row.review_status,
+                uploaded_at=row.uploaded_at,
+                source_file_sha256=row.source_file_sha256,
+                source_file_name=row.source_file_name,
+                invoice_number=row.invoice_number,
+                invoice_date=row.invoice_start_date,
+                start_date=row.invoice_start_date,
+                end_date=row.invoice_end_date,
+            )
+    sha_matches = list(by_import.values())
+    if identity.invoice_number:
+        hdr_result = await db.execute(
+            select(FuelNationwide).where(
+                FuelNationwide.tenant_id == tenant_id,
+                FuelNationwide.row_type == "HEADER",
+                FuelNationwide.invoice_number == identity.invoice_number,
+                FuelNationwide.review_status == "SOURCE_REVIEWED",
+            )
+        )
+        for row in hdr_result.scalars().all():
+            invoice_matches.append(
+                ExistingBvdImportMatch(
+                    import_id=row.import_id,
+                    review_status=row.review_status,
+                    uploaded_at=row.uploaded_at,
+                    source_file_sha256=row.source_file_sha256,
+                    source_file_name=row.source_file_name,
+                    invoice_number=row.invoice_number,
+                    invoice_date=row.invoice_start_date,
+                    start_date=row.invoice_start_date,
+                    end_date=row.invoice_end_date,
+                )
+            )
+    if exclude_import_id is not None:
+        sha_matches = [m for m in sha_matches if m.import_id != exclude_import_id]
+        invoice_matches = [m for m in invoice_matches if m.import_id != exclude_import_id]
+    return evaluate_nationwide_pdf_duplicate(
         file_sha256=file_sha,
         filename=filename,
         identity=identity,
