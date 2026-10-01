@@ -19,13 +19,17 @@ from app.core.db_url import to_async_pg_url
 from app.models.fuel import FuelSourceBatch, FuelTransaction
 from app.routers import fuel as fuel_router
 from app.services.fuel_canonical import BATCH_STATUS_FINALIZED
-from app.services.fuel_controls import CONTROL_TYPE_CARD_TOTAL, CONTROL_TYPE_CURRENCY_TOTAL
+from app.services.fuel_nationwide_review import process_nationwide_import_review
+from app.services.fuel_nationwide_stage import create_nationwide_import_stage_from_pdf
 from app.services.fuel_processed_read import get_processed_fuel_batch, list_processed_fuel
+from app.services.fuel_source_duplicate_gate import sha256_hex
 from tests.support.integration_isolation import require_integration_tenant_database_url
+
+REPO = Path(__file__).resolve().parents[1]
+NW_PDF = REPO / "docs" / "fixtures" / "fuel" / "nationwide_fuel.pdf"
 
 TENANT_A = 53
 TENANT_B = 54
-DEMO_BATCH_ID = 8
 DEMO_INVOICE = "20250522B-06142026"
 TEST_PROVIDER = "TEST_PROVIDER"
 
@@ -141,19 +145,54 @@ async def test_list_processed_fuel_tenant_isolation_and_providers() -> None:
 @pytest.mark.asyncio
 @pytest.mark.skipif(REQUIRES_DB, reason="tenant DB required")
 async def test_nationwide_demo_batch_8_canonical_totals() -> None:
+    """Process fixture Nationwide invoice on tenant_pytest; assert canonical processed read totals."""
+    from tests.test_fuel_nationwide_api_routes import _purge_nationwide_fixture
+
     url = _tenant_url()
     assert url
     engine = create_async_engine(url)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    pdf = NW_PDF.read_bytes()
+    file_sha = sha256_hex(pdf)
+    import_id: uuid.UUID | None = None
+    batch_id: int | None = None
+
+    async with session_maker() as session:
+        await _purge_nationwide_fixture(session, TENANT_A, file_sha)
+        await session.commit()
+
+    async with session_maker() as session:
+        import_id, *_ = await create_nationwide_import_stage_from_pdf(
+            session,
+            tenant_id=TENANT_A,
+            tenant_slug="pytest",
+            pdf_bytes=pdf,
+            filename="nationwide_fuel.pdf",
+            uploaded_by="test",
+        )
+        await process_nationwide_import_review(
+            session,
+            tenant_id=TENANT_A,
+            import_id=import_id,
+            reviewed_by="test",
+            tenant_slug="pytest",
+        )
+        batch = await session.scalar(
+            select(FuelSourceBatch).where(
+                FuelSourceBatch.tenant_id == TENANT_A,
+                FuelSourceBatch.source_import_ref == str(import_id),
+                FuelSourceBatch.status == BATCH_STATUS_FINALIZED,
+            )
+        )
+        assert batch is not None
+        batch_id = int(batch.id)
+        await session.commit()
 
     async with session_maker() as session:
         items = await list_processed_fuel(session, tenant_id=TENANT_A)
-        nw = next((x for x in items if x.get("batch_id") == DEMO_BATCH_ID), None)
-        if nw is None:
-            nw = next((x for x in items if x.get("invoice_number") == DEMO_INVOICE), None)
-        if nw is None:
-            pytest.skip("demo Nationwide processed batch not present on tenant")
-
+        nw = next((x for x in items if x.get("batch_id") == batch_id), None)
+        assert nw is not None
+        assert nw["invoice_number"] == DEMO_INVOICE
         assert nw["provider_code"] == "NATIONWIDE"
         assert nw["transaction_count"] == 12
         assert nw["control_count"] == 14
@@ -164,8 +203,14 @@ async def test_nationwide_demo_batch_8_canonical_totals() -> None:
         if nw["currency"] is None:
             assert nw["total_amount"] in ("", None)
 
-        detail = await get_processed_fuel_batch(session, tenant_id=TENANT_A, batch_id=nw["batch_id"])
+        detail = await get_processed_fuel_batch(session, tenant_id=TENANT_A, batch_id=batch_id)
         assert len(detail["canonical_transactions"]) == 12
+
+    async with session_maker() as cleanup:
+        if import_id:
+            await _purge_nationwide_fixture(cleanup, TENANT_A, file_sha)
+            await cleanup.commit()
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
