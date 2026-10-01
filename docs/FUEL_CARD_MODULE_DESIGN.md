@@ -6,7 +6,7 @@
 
 **Purpose:** Define the Fuel/Card architecture from provider source evidence through review, later canonicalization, reconciliation, ownership, O/O settlement and posting. Fuel/Card is a money-moving subsystem. Unsupported providers, unknown layouts and guessed financial data are not allowed to enter the posting path.
 
-**Provider Wall Architecture Lock:** See `docs/FUEL_PROVIDER_WALL_ARCHITECTURE_DELTA.md`. Provider-specific code may own source identification, extraction helpers, native evidence/staging/review, native reconciliation rules, and native evidence presentation. After Process, normal TruckERP Fuel workflows are canonical/shared. Adding a provider must not create new provider-specific history, dashboard, search, classification, financial-responsibility, settlement, or processed-workflow pipelines.
+**Provider Wall Architecture Lock:** See `docs/FUEL_PROVIDER_WALL_ARCHITECTURE_DELTA.md` (locked funnel: SOURCE through payroll/accounting **consumption** — Process stops at canonical batches/transactions/controls; payroll and accounting are downstream consumers, not inside Fuel Process). Provider-specific code may own source identification, approved profile resolution, extraction helpers, native evidence/staging/review, provider source reconciliation rules, and native evidence presentation. After Process, normal TruckERP Fuel workflows are canonical/shared. Adding a provider must not create new provider-specific history, dashboard, search, classification, financial-responsibility, settlement, or processed-workflow pipelines.
 
 ---
 

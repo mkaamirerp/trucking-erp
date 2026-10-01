@@ -1,8 +1,8 @@
 # Fuel provider wall — architecture delta and file map
 
-**Status:** Planning / boundary lock (no refactor until this map is approved).  
+**Status:** Boundary lock **approved** (`cc153c8c`, `e493d95a`). Phase 2 canonical processed **read path** shipped (`8774c1f2`+); further refactors gated per §7.  
 **Branch context:** `feat/fuel-card` with live BVD + Nationwide staging → Process → canonical batches.  
-**Authoritative design:** `docs/FUEL_CARD_MODULE_DESIGN.md` (provider-native evidence before canonical meaning; one parse/validate orchestrator + provider profiles — not independent per-provider parser **workflows**).
+**Authoritative design:** `docs/FUEL_CARD_MODULE_DESIGN.md` (provider-native evidence before canonical meaning; one **Fuel** parse/validate orchestrator + approved provider profiles — not independent per-provider parser **workflows**).
 
 ---
 
@@ -10,19 +10,19 @@
 
 ```
 SOURCE
-  PDF / CSV / API
+  PDF / CSV / API / SFTP
        ↓
-IDENTIFY PROVIDER
+IDENTIFY PROVIDER / APPROVED PROFILE
        ↓
-ONE PARSE / VALIDATE ORCHESTRATOR
+ONE FUEL PARSE / VALIDATE ORCHESTRATOR
        ↓
-provider-specific profile / rules
+provider-specific profile / extraction helpers / rules
        ↓
 provider-native staging / evidence
        ↓
 review / corrections
        ↓
-provider reconciliation gates
+provider source reconciliation gates
        ↓
 PROCESS  ──►  ════════════ PROVIDER WALL ════════════
        ↓
@@ -32,13 +32,21 @@ canonical fuel_transactions
        ↓
 ONE TRUCKERP FUEL PIPELINE
        ↓
-mapping / classification
-truck / driver / owner
+canonical mapping / classification
+truck / driver / owner resolution
 financial responsibility
 O/O pricing
 settlement candidate
 history / search / dashboard / reporting
+payroll / accounting consumption
 ```
+
+**Reconciliation with design docs (no drift):**
+
+- **SOURCE / SFTP:** Intake paths come from the provider catalog and connection methods (e.g. `PDF_UPLOAD`, `REST_API`, `SFTP`, structured file). SFTP is a **source acquisition** path into the same orchestrator — not a second post-wall workflow.
+- **APPROVED PROFILE:** Provider code must resolve to an approved `fuel_provider_profile` / catalog entry before parse or Process; unknown or unapproved layouts stop at the gate (see §6 `process_fuel_import` — approved profile resolution).
+- **Extraction helpers:** Provider-specific **extraction/helper modules** are allowed; independent per-provider **parser workflows/orchestrators** are forbidden (§2).
+- **Payroll / accounting consumption:** Downstream TruckERP modules **consume** finalized canonical Fuel data (classification, responsibility, settlement candidates). Fuel Process does **not** run payroll, settlement generation, or payment posting inside Process (`docs/FUEL_CARD_MODULE_DESIGN.md`).
 
 **Process is the controlled bridge across the provider wall:** it begins with reviewed provider-native evidence and ends with canonical Fuel records (`fuel_source_batches`, `fuel_source_controls`, `fuel_transactions` with FINALIZED batch semantics).
 
@@ -98,11 +106,13 @@ Provider differences in **presentation of source evidence** are legitimate. Dupl
 
 | Layer | Today | Target |
 |--------|--------|--------|
+| Source intake | PDF/CSV/API today; SFTP/API in catalog where evidenced | **PDF / CSV / API / SFTP** → same **ONE FUEL PARSE / VALIDATE ORCHESTRATOR**; acquisition adapters only |
+| Identify | Provider code + profile at upload/handoff | **IDENTIFY PROVIDER / APPROVED PROFILE** before hydrate or Process |
 | Parse / extract | Shared `fuel_digital_pdf_extract.py` + profiles; provider modules `fuel_bvd_extraction.py`, `fuel_nationwide_extraction.py`, `fuel_digital_pdf_nationwide_table.py` | One orchestrator entry; **provider-specific extraction/helper modules allowed**; no second orchestrator per provider |
 | Parser policy | Tests reject standalone `nationwide_parser.py` style forks | **Independent provider parser workflows/orchestrators forbidden**; helpers + profile hooks required |
 | Staging | Parallel table families (`fuel_bvd_import_stage` / `fuel_nationwide_import_stage`) | Keep **per-provider staging tables**; shared stage **lifecycle** API |
 | Pre-wall routes | `/fuel/bvd/...`, `/fuel/nationwide/...` | `/fuel/providers/{provider_code}/imports/{import_id}` (+ aliases during migration) |
-| Source reconciliation | Per-provider modules | Keep **per-provider rules**; invoke from shared Process prelude |
+| Source reconciliation | Per-provider modules | **Provider source reconciliation gates**; per-provider rules invoked from shared Process prelude |
 | Process | `process_bvd_import_review` / `process_nationwide_import_review` → parallel `*_stage_to_permanent` | `process_fuel_import(...)` with provider **registry** |
 | Canonical projection | `project_bvd_rows_to_canonical` vs `project_nationwide_rows_to_canonical` | Shared finalize + **provider mapper** plugin |
 | Segment 8 canonical review | `fuel_review.py` on batches | Unchanged; staging Process lands on same batch semantics |
