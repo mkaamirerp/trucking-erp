@@ -786,6 +786,89 @@ class FuelBvdSourceReconciliationOut(BaseModel):
     currencies_seen: list[str] = Field(default_factory=list)
 
 
+class FuelNationwideImportOut(BaseModel):
+    import_id: str
+    row_count: int
+    parse_status: str
+
+
+class FuelNationwideRowOut(BaseModel):
+    id: int
+    import_id: str
+    row_type: str
+    source_page: int | None = None
+    source_row_number: int | None = None
+    parse_status: str | None = None
+    parser_version: str | None = None
+    review_status: str | None = None
+    account_code: str | None = None
+    invoice_number: str | None = None
+    invoice_start_date: str | None = None
+    invoice_end_date: str | None = None
+    due_date: str | None = None
+    customer_name: str | None = None
+    card_number: str | None = None
+    unit_number: str | None = None
+    transaction_date: str | None = None
+    city: str | None = None
+    prov_st: str | None = None
+    product: str | None = None
+    volume: str | None = None
+    ex_gst_per_unit: str | None = None
+    total: str | None = None
+    network: str | None = None
+    currency: str | None = None
+    usa_discount: str | None = None
+    missed_disc: str | None = None
+    oon_fees: str | None = None
+    control_type: str | None = None
+    row_label: str | None = None
+    control_line_raw: str | None = None
+    declared_amount: str | None = None
+    gst: str | None = None
+    pst: str | None = None
+    qst: str | None = None
+    control_volume: str | None = None
+    field_corrections: dict[str, Any] | None = None
+
+
+class FuelNationwideCorrectionItemIn(BaseModel):
+    fuel_nationwide_id: int
+    field_name: str
+    reviewed_value: str
+    correction_reason: str | None = None
+
+
+class FuelNationwideReviewSaveIn(BaseModel):
+    corrections: list[FuelNationwideCorrectionItemIn] = Field(default_factory=list)
+
+
+class FuelNationwideReviewSummaryOut(BaseModel):
+    import_id: str
+    invoice_number: str | None = None
+    row_count: int
+    transaction_count: int
+    correction_count: int
+    review_status: str
+    account_code: str | None = None
+
+
+class FuelNationwideSourceReconciliationOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    passed: bool
+    checks: list[dict[str, Any]] = Field(default_factory=list)
+    usd_row_total_sum: str | None = None
+    usd_precision_extension: str | None = None
+    usd_provider_control: str | None = None
+    usd_precision_difference: str | None = None
+    cad_ex_tax_extension: str | None = None
+    cad_ex_tax_control: str | None = None
+    cad_gst: str | None = None
+    cad_pst: str | None = None
+    cad_subtotal: str | None = None
+
+
 class FuelChargeCategoryOut(BaseModel):
     code: str
     display_name: str

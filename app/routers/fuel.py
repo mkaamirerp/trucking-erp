@@ -46,6 +46,11 @@ from app.schemas.fuel import (
     FuelBvdReviewSummaryOut,
     FuelBvdRowOut,
     FuelBvdSourceReconciliationOut,
+    FuelNationwideImportOut,
+    FuelNationwideRowOut,
+    FuelNationwideReviewSaveIn,
+    FuelNationwideReviewSummaryOut,
+    FuelNationwideSourceReconciliationOut,
     FuelCanonicalTransactionOut,
     FuelChargeCategoryOut,
     FuelClassificationAuditEventOut,
@@ -72,6 +77,8 @@ from app.services import fuel_reconciliation as reconciliation_service
 from app.services import fuel_review as review_service
 from app.services import fuel_dashboard_stats as dashboard_stats_service
 from app.services.fuel_bvd_import import FuelBvdImportError
+from app.services.fuel_nationwide_import import FuelNationwideImportError, import_nationwide_digital_pdf
+from app.services import fuel_nationwide_review as nationwide_review_service
 
 router = APIRouter(
     prefix="/fuel",
@@ -826,6 +833,174 @@ async def list_bvd_import_classification_audit(
         db, tenant_id=tenant_id, import_id=str(import_id)
     )
     return [FuelClassificationAuditEventOut(**e) for e in events]
+
+
+# --- Nationwide Implementation 1 (mirrors BVD staging / process) ---
+
+
+@router.post("/nationwide/imports", response_model=FuelNationwideImportOut)
+async def upload_nationwide_import(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    body = await file.read()
+    filename = file.filename or "nationwide.pdf"
+    uploaded_by = str(user.user_id) if user.user_id is not None else user.email
+    try:
+        import_id, row_count, parse_status = await import_nationwide_digital_pdf(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            pdf_bytes=body,
+            filename=filename,
+            uploaded_by=uploaded_by,
+        )
+    except FuelNationwideImportError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message, **exc.detail}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return FuelNationwideImportOut(
+        import_id=str(import_id),
+        row_count=row_count,
+        parse_status=parse_status,
+    )
+
+
+@router.get("/nationwide/imports/{import_id}/rows", response_model=list[FuelNationwideRowOut])
+async def list_nationwide_import_rows(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    rows = await nationwide_review_service.list_nationwide_import_rows_for_review(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nationwide import not found")
+    return [FuelNationwideRowOut(**r) for r in rows]
+
+
+@router.get(
+    "/nationwide/imports/{import_id}/source-reconciliation",
+    response_model=FuelNationwideSourceReconciliationOut,
+)
+async def get_nationwide_import_source_reconciliation(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    report = await nationwide_review_service.get_nationwide_source_reconciliation_report(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    return FuelNationwideSourceReconciliationOut(**report)
+
+
+@router.get("/nationwide/imports/{import_id}/summary", response_model=FuelNationwideReviewSummaryOut)
+async def get_nationwide_import_summary(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    summary = await nationwide_review_service.get_nationwide_import_review_summary(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    return FuelNationwideReviewSummaryOut(**summary)
+
+
+@router.post("/nationwide/imports/{import_id}/save-review")
+async def save_nationwide_import_review(
+    import_id: UUID,
+    body: FuelNationwideReviewSaveIn,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    reviewed_by = str(user.user_id) if user.user_id is not None else user.email
+    written = await nationwide_review_service.save_nationwide_import_review(
+        db,
+        tenant_id=tenant_id,
+        import_id=import_id,
+        reviewed_by=reviewed_by,
+        corrections=[c.model_dump() for c in body.corrections],
+    )
+    return {"saved_corrections": written}
+
+
+@router.post("/nationwide/imports/{import_id}/process", response_model=FuelNationwideReviewSummaryOut)
+async def process_nationwide_import_review_route(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    reviewed_by = str(user.user_id) if user.user_id is not None else user.email
+    try:
+        summary = await nationwide_review_service.process_nationwide_import_review(
+            db,
+            tenant_id=tenant_id,
+            import_id=import_id,
+            reviewed_by=reviewed_by,
+            tenant_slug=tenant_slug,
+        )
+    except FuelNationwideImportError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message, **exc.detail}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return FuelNationwideReviewSummaryOut(**summary)
+
+
+@router.post("/nationwide/imports/{import_id}/discard")
+async def discard_nationwide_import_stage_route(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    from app.services.fuel_nationwide_stage import discard_nationwide_import_stage
+
+    discarded = await discard_nationwide_import_stage(
+        db,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        stage_id=import_id,
+    )
+    if not discarded:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nationwide stage not found")
+    return {"discarded": True}
+
+
+@router.get("/nationwide/imports/{import_id}/document")
+async def get_nationwide_import_document(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    ref = await nationwide_review_service.get_nationwide_import_storage_ref(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    if ref is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nationwide import not found")
+    storage_key, filename, storage_module = ref
+    return serve_file(
+        storage_key,
+        storage_module,
+        tenant_slug=tenant_slug,
+        filename=filename or "nationwide.pdf",
+        content_type="application/pdf",
+    )
 
 
 @router.get("/bvd/imports/{import_id}/document")

@@ -23,6 +23,7 @@ from app.models.fuel import (
     FuelSourceControl,
     FuelTransaction,
 )
+from app.services.fuel_source_duplicate_gate import sha256_hex
 from app.services.fuel_canonical import BATCH_STATUS_FINALIZED
 from app.services.fuel_nationwide_review import process_nationwide_import_review
 from app.services.fuel_nationwide_stage import create_nationwide_import_stage_from_pdf
@@ -53,7 +54,14 @@ async def test_nationwide_full_process_fixture() -> None:
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     pdf = NW_PDF.read_bytes()
+    file_sha = sha256_hex(pdf)
     import_id: uuid.UUID | None = None
+
+    from tests.test_fuel_nationwide_api_routes import _purge_nationwide_fixture
+
+    async with session_maker() as session:
+        await _purge_nationwide_fixture(session, TENANT_ID, file_sha)
+        await session.commit()
 
     async with session_maker() as session:
         stage_id, count, status, _ = await create_nationwide_import_stage_from_pdf(
@@ -150,7 +158,9 @@ async def test_nationwide_full_process_fixture() -> None:
             )
             if batch:
                 await cleanup.execute(delete(FuelTransaction).where(FuelTransaction.batch_id == batch.id))
-                await cleanup.execute(delete(FuelSourceControl).where(FuelSourceControl.batch_id == batch.id))
+                await cleanup.execute(
+                    delete(FuelSourceControl).where(FuelSourceControl.batch_id == batch.id)
+                )
                 await cleanup.execute(delete(FuelSourceBatch).where(FuelSourceBatch.id == batch.id))
             await cleanup.execute(delete(FuelNationwide).where(FuelNationwide.tenant_id == TENANT_ID, FuelNationwide.import_id == import_id))
             await cleanup.execute(delete(FuelNationwideStageRow).where(FuelNationwideStageRow.tenant_id == TENANT_ID))

@@ -4377,6 +4377,135 @@ export function fuelBvdDocumentUrl(importId: string): string {
   return `${API_BASE}/fuel/bvd/imports/${encodeURIComponent(importId)}/document`;
 }
 
+export type FuelNationwideImportResult = {
+  import_id: string;
+  row_count: number;
+  parse_status: string;
+};
+
+export type FuelNationwideRow = {
+  id: number;
+  import_id: string;
+  row_type: string;
+  source_page?: number | null;
+  source_row_number?: number | null;
+  review_status?: string | null;
+  account_code?: string | null;
+  invoice_number?: string | null;
+  invoice_start_date?: string | null;
+  invoice_end_date?: string | null;
+  due_date?: string | null;
+  customer_name?: string | null;
+  card_number?: string | null;
+  unit_number?: string | null;
+  transaction_date?: string | null;
+  city?: string | null;
+  prov_st?: string | null;
+  product?: string | null;
+  volume?: string | null;
+  ex_gst_per_unit?: string | null;
+  total?: string | null;
+  network?: string | null;
+  currency?: string | null;
+  usa_discount?: string | null;
+  missed_disc?: string | null;
+  oon_fees?: string | null;
+  control_type?: string | null;
+  row_label?: string | null;
+  control_line_raw?: string | null;
+  declared_amount?: string | null;
+  gst?: string | null;
+  pst?: string | null;
+  field_corrections?: Record<string, { reviewed_value: string; extracted_value: string }>;
+};
+
+export type FuelNationwideSourceReconciliation = {
+  passed: boolean;
+  checks: Array<{ code: string; status: string; message?: string; expected?: string; actual?: string }>;
+  usd_row_total_sum?: string | null;
+  usd_precision_extension?: string | null;
+  usd_provider_control?: string | null;
+  usd_precision_difference?: string | null;
+  cad_ex_tax_control?: string | null;
+  cad_gst?: string | null;
+  cad_pst?: string | null;
+  cad_subtotal?: string | null;
+};
+
+export type FuelNationwideReviewSummary = {
+  import_id: string;
+  invoice_number?: string | null;
+  row_count: number;
+  transaction_count: number;
+  correction_count: number;
+  review_status: string;
+  account_code?: string | null;
+};
+
+export async function uploadFuelNationwidePdf(file: File): Promise<FuelNationwideImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithTenant(`${API_BASE}/fuel/nationwide/imports`, { method: "POST", body: form });
+  return handle(res);
+}
+
+export async function getFuelNationwideImportRows(importId: string): Promise<FuelNationwideRow[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/rows`);
+  return handle(res);
+}
+
+export async function getFuelNationwideSourceReconciliation(
+  importId: string,
+): Promise<FuelNationwideSourceReconciliation> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/source-reconciliation`,
+  );
+  return handle(res);
+}
+
+export async function getFuelNationwideImportSummary(importId: string): Promise<FuelNationwideReviewSummary> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/summary`);
+  return handle(res);
+}
+
+export async function saveFuelNationwideReview(
+  importId: string,
+  corrections: { fuel_nationwide_id: number; field_name: string; reviewed_value: string }[],
+): Promise<{ saved_corrections: number }> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/save-review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ corrections }),
+    },
+  );
+  return handle(res);
+}
+
+export async function processFuelNationwideImport(importId: string): Promise<FuelNationwideReviewSummary> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/process`, {
+    method: "POST",
+  });
+  return handle(res);
+}
+
+export async function discardFuelNationwideStage(importId: string): Promise<{ discarded: boolean }> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/discard`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
+export function fuelNationwideDocumentUrl(importId: string): string {
+  return `${API_BASE}/fuel/nationwide/imports/${encodeURIComponent(importId)}/document`;
+}
+
+export function getFuelNationwideUploadErrorDisplay(err: unknown): FuelBvdUploadErrorDisplay {
+  return getFuelBvdUploadErrorDisplay(err);
+}
+
 export type FuelChargeCategory = {
   code: string;
   display_name: string;

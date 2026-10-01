@@ -6,7 +6,10 @@ import {
   listFuelProviders,
   getFuelDashboardStats,
   discardFuelBvdStage,
+  discardFuelNationwideStage,
   uploadFuelBvdPdf,
+  uploadFuelNationwidePdf,
+  getFuelNationwideUploadErrorDisplay,
   type FuelBvdCompletedBasic,
   type FuelProviderCatalog,
 } from "../api";
@@ -18,6 +21,7 @@ import { parseFuelBvdDuplicateDetail } from "./fuelBvdReview/bvdUploadDuplicate"
 import { readFuelProcessedReturn } from "./fuelBvdReview/bvdUploadCompletion";
 import FuelRecentActivitySection from "./fuel/FuelRecentActivitySection";
 import FuelBvdProcessingWorkspace from "./fuelBvdReview/FuelBvdProcessingWorkspace";
+import FuelNationwideProcessingWorkspace from "./fuelNationwideReview/FuelNationwideProcessingWorkspace";
 import FuelBvdProcessedRecordView from "./fuelBvdReview/FuelBvdProcessedRecordView";
 import "./fuel/fuel-home.css";
 
@@ -37,6 +41,7 @@ export default function FuelMainPage() {
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [processNotice, setProcessNotice] = useState<string | null>(null);
   const [processingImportId, setProcessingImportId] = useState<string | null>(null);
+  const [processingProvider, setProcessingProvider] = useState<"BVD" | "NATIONWIDE">("BVD");
   const [processedImportId, setProcessedImportId] = useState<string | null>(null);
   const [highlightImportId, setHighlightImportId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -95,11 +100,12 @@ export default function FuelMainPage() {
       setUploadError("Choose a PDF or CSV file.");
       return;
     }
-    if (providerCode === "BVD" && ext === "pdf") {
+    if (ext === "pdf" && providerCode === "BVD") {
       setUploadBusy(true);
       try {
         const out = await uploadFuelBvdPdf(file);
         writeLastFuelProviderCode(providerCode);
+        setProcessingProvider("BVD");
         setProcessingImportId(out.import_id);
       } catch (err: unknown) {
         const display = getFuelBvdUploadErrorDisplay(err);
@@ -114,10 +120,25 @@ export default function FuelMainPage() {
       }
       return;
     }
+    if (ext === "pdf" && providerCode === "NATIONWIDE") {
+      setUploadBusy(true);
+      try {
+        const out = await uploadFuelNationwidePdf(file);
+        writeLastFuelProviderCode(providerCode);
+        setProcessingProvider("NATIONWIDE");
+        setProcessingImportId(out.import_id);
+      } catch (err: unknown) {
+        const display = getFuelNationwideUploadErrorDisplay(err);
+        setUploadError(`${display.title}: ${display.message}`);
+      } finally {
+        setUploadBusy(false);
+      }
+      return;
+    }
     setUploadError(
       ext === "csv"
         ? "CSV format is not configured for this provider yet."
-        : `PDF upload for provider ${providerCode} is not available from this screen yet. Use BVD for PDF imports today.`,
+        : `PDF upload for provider ${providerCode} is not available from this screen yet.`,
     );
   }
 
@@ -234,7 +255,7 @@ export default function FuelMainPage() {
         initialProviderCode={providerCode}
       />
 
-      {processingImportId ? (
+      {processingImportId && processingProvider === "BVD" ? (
         <FuelBvdProcessingWorkspace
           importId={processingImportId}
           variant="overlay"
@@ -242,12 +263,24 @@ export default function FuelMainPage() {
             const id = processingImportId;
             setProcessingImportId(null);
             if (id) {
-              void discardFuelBvdStage(id).catch(() => {
-                /* overlay already closed; best-effort discard */
-              });
+              void discardFuelBvdStage(id).catch(() => {});
             }
           }}
           onProcessed={(p) => void handleProcessed(p)}
+        />
+      ) : null}
+
+      {processingImportId && processingProvider === "NATIONWIDE" ? (
+        <FuelNationwideProcessingWorkspace
+          importId={processingImportId}
+          variant="overlay"
+          onClose={() => {
+            const id = processingImportId;
+            setProcessingImportId(null);
+            if (id) {
+              void discardFuelNationwideStage(id).catch(() => {});
+            }
+          }}
         />
       ) : null}
 

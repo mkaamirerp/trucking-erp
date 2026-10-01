@@ -33,6 +33,11 @@ from app.services.fuel_nationwide_canonical_projection import (
     finalize_batch,
     project_nationwide_rows_to_canonical,
 )
+from app.services.fuel_nationwide_correction_validate import (
+    EDITABLE_NATIONWIDE_FIELDS,
+    NationwideCorrectionValidationError,
+    validate_reviewed_nationwide_field,
+)
 from app.services.fuel_nationwide_effective import build_effective_nationwide_rows
 from app.services.fuel_nationwide_extraction import (
     FuelNationwideExtractionError,
@@ -183,6 +188,80 @@ async def _delete_stage_records(
         purge_fuel_nationwide_stage_files(tenant_slug, str(stage_id))
     except Exception:
         logger.exception("fuel_nationwide_stage purge failed stage_id=%s", stage_id)
+
+
+async def save_nationwide_stage_import_review(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    stage_id: uuid.UUID,
+    reviewed_by: str,
+    corrections: list[dict[str, Any]],
+) -> int:
+    stage = await get_active_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    if stage is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nationwide stage not found")
+    if not corrections:
+        return 0
+    row_ids = {int(c["fuel_nationwide_id"]) for c in corrections if "fuel_nationwide_id" in c}
+    result = await db.execute(
+        select(FuelNationwideStageRow).where(
+            FuelNationwideStageRow.tenant_id == tenant_id,
+            FuelNationwideStageRow.stage_id == stage_id,
+            FuelNationwideStageRow.id.in_(row_ids),
+        )
+    )
+    by_id = {r.id: r for r in result.scalars().all()}
+    if len(by_id) != len(row_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid stage row id")
+    now = _utcnow()
+    written = 0
+    for item in corrections:
+        row_id = int(item["fuel_nationwide_id"])
+        field_name = str(item["field_name"])
+        if field_name not in EDITABLE_NATIONWIDE_FIELDS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Field not editable: {field_name}")
+        row = by_id[row_id]
+        extracted = getattr(row, field_name)
+        extracted_str = "" if extracted is None else str(extracted)
+        reviewed_value = str(item.get("reviewed_value", ""))
+        if reviewed_value == extracted_str:
+            continue
+        try:
+            validate_reviewed_nationwide_field(field_name, reviewed_value, row_type=row.row_type)
+        except NationwideCorrectionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "NATIONWIDE_CORRECTION_INVALID", "field": exc.field_name, "message": str(exc)},
+            ) from exc
+        db.add(
+            FuelNationwideStageFieldCorrection(
+                tenant_id=tenant_id,
+                stage_id=stage_id,
+                stage_row_id=row_id,
+                field_name=field_name,
+                extracted_value=extracted_str,
+                reviewed_value=reviewed_value,
+                reviewed_by=reviewed_by,
+                reviewed_at=now,
+                correction_reason=item.get("correction_reason"),
+            )
+        )
+        written += 1
+    await db.commit()
+    return written
+
+
+async def get_stage_storage_ref(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    stage_id: uuid.UUID,
+) -> tuple[str, str | None] | None:
+    stage = await get_active_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    if stage is None or not stage.source_storage_ref:
+        return None
+    return stage.source_storage_ref, stage.source_file_name
 
 
 async def discard_nationwide_import_stage(
