@@ -1,5 +1,4 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ProcessedChargeHeaderLabel } from "../fuel/processedChargeHeaderLabels";
 import {
   ProcessedChargeStickyShell,
   useProcessedChargeTableSticky,
@@ -112,14 +111,12 @@ function SortableHeader({
   className,
   sort,
   onSort,
-  wrapLabel,
 }: {
   column: FuelBvdTxnSortColumn;
   label: string;
   className?: string;
   sort: FuelBvdTxnSortState | null;
   onSort: (column: FuelBvdTxnSortColumn) => void;
-  wrapLabel?: boolean;
 }) {
   const active = sort?.column === column;
   const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
@@ -137,9 +134,7 @@ function SortableHeader({
           onSort(column);
         }}
       >
-        <span className="bvd-txn-rows__sort-label">
-          {wrapLabel ? <ProcessedChargeHeaderLabel label={label} /> : label}
-        </span>
+        <span className="bvd-txn-rows__sort-label">{label}</span>
         {active ? (
           <span className="bvd-txn-rows__sort-indicator" aria-hidden="true">{indicator}</span>
         ) : (
@@ -201,7 +196,6 @@ export default function BvdTransactionRowsTable({
             className={col.className}
             sort={sort}
             onSort={handleSort}
-            wrapLabel={processedStickyHeader}
           />
         ))}
       </tr>

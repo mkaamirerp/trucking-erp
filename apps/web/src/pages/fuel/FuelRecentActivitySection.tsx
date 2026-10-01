@@ -269,7 +269,7 @@ export default function FuelRecentActivitySection({
                             <p className="text-xs text-[var(--trk-text-muted)]">Loading transactions…</p>
                           ) : expandedData && expandedData.chargeCount > 0 ? (
                             <div
-                              className="fuel-activity-txn-contained min-w-0 max-w-full w-full"
+                              className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
                               data-testid={`fuel-activity-txn-scroll-${row.import_id}`}
                             >
                             <ProcessedStatementWorkspace

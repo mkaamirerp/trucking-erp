@@ -708,7 +708,6 @@
 
 .bvd-processed-charge-table__sticky-host {
   position: sticky;
-  /* Sticks within .trk-app-main scrollport (TopNav is outside main; --trk-topnav-height documents nav row). */
   top: 0;
   z-index: 25;
   background: color-mix(in srgb, var(--trk-surface-2) 88%, var(--trk-bg));
@@ -733,58 +732,6 @@
 
 .bvd-processed-charge-table__header-table {
   margin: 0;
-}
-
-.bvd-processed-charge-table .bvd-statement__table.bvd-txn-rows__table,
-.bvd-processed-charge-table .bvd-express-rows__table {
-  table-layout: fixed;
-  width: max-content;
-  min-width: 100%;
-  max-width: none;
-}
-
-.bvd-processed-header-label {
-  display: inline-block;
-  max-width: 100%;
-  text-align: inherit;
-}
-
-.bvd-processed-header-label__line {
-  display: block;
-  line-height: 1.15;
-  white-space: nowrap;
-}
-
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__header-cell .bvd-txn-rows__sort-btn {
-  white-space: normal;
-  align-items: flex-end;
-  max-width: none;
-  gap: 0.15rem;
-}
-
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__col-numeric .bvd-txn-rows__sort-btn,
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__col-amount .bvd-txn-rows__sort-btn {
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__header-cell.bvd-txn-rows__col-price,
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__table td.bvd-txn-rows__col-price {
-  min-width: 4.875rem;
-}
-
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__header-cell.bvd-txn-rows__col-amount,
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__table td.bvd-txn-rows__col-amount {
-  min-width: 5.25rem;
-}
-
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-express-rows__header-cell,
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-express-rows__table td {
-  white-space: nowrap;
-}
-
-.processed-statement-section--charges .bvd-processed-charge-table .bvd-express-rows__header-cell {
-  white-space: normal;
 }
 
 .processed-statement-section--charges .bvd-processed-charge-table .bvd-txn-rows__header-cell,
