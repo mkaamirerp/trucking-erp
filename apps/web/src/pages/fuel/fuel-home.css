@@ -26,6 +26,12 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Expanded processed invoice: page-vertical sticky <th> must not bind to this horizontal scroller. */
+.fuel-recent-activity__scroll:has(.fuel-activity-txn-contained) {
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
 .fuel-recent-activity__table {
   width: 100%;
   max-width: 100%;

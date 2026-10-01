@@ -195,12 +195,19 @@ describe("ProcessedStatementWorkspace", () => {
     expect(row111?.querySelector('[data-testid="bvd-express-col-category"]')?.textContent).toBe("LUMPER");
   });
 
-  it("charge sections use frozen-header scope class", async () => {
+  it("charge sections use native sticky header on real thead cells", async () => {
     const rows = build838710Rows();
     await renderWorkspace(rows);
     expect(container.querySelectorAll(".processed-statement-section--charges").length).toBe(2);
-    expect(container.querySelector('[data-testid="bvd-txn-sticky-header"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="bvd-express-sticky-header"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="bvd-txn-rows-table"]')?.getAttribute("data-processed-native-sticky")).toBe(
+      "true",
+    );
+    expect(container.querySelector('[data-testid="bvd-express-rows-table"]')?.getAttribute("data-processed-native-sticky")).toBe(
+      "true",
+    );
+    expect(container.querySelector(".bvd-txn-rows__header-sticky")).toBeTruthy();
+    expect(container.querySelector(".bvd-express-rows__header-sticky")).toBeTruthy();
+    expect(container.querySelector(".bvd-processed-charge-table")).toBeNull();
   });
 
   it("filter meta uses charges wording", async () => {

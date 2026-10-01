@@ -1,8 +1,4 @@
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  ProcessedChargeStickyShell,
-  useProcessedChargeTableSticky,
-} from "../fuel/processedChargeTableStickyLayout";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import type { FuelBvdRow } from "../../api";
 import { displayCell, operationalCell } from "./bvdParsedDisplay";
 import { bvdProductDisplayLabel } from "./bvdProductDisplay";
@@ -27,7 +23,7 @@ type Props = {
   transactions: FuelBvdRow[];
   /** From statement header — shown in expanded panel only. */
   cardNumber: string;
-  /** Processed workspace: sticky header outside horizontal scroller (Fuel Home expand). */
+  /** Processed workspace: native sticky <th> in one table (Fuel Home expand). */
   processedStickyHeader?: boolean;
 };
 
@@ -35,6 +31,14 @@ type ColumnDef = {
   key: FuelBvdTxnSortColumn;
   label: string;
   className?: string;
+};
+
+const PROCESSED_TWO_LINE_HEADERS: Record<string, [string, string]> = {
+  "Date / Time": ["Date /", "Time"],
+  "Source driver": ["Source", "driver"],
+  "Retail price": ["Retail", "price"],
+  "Billed price": ["Billed", "price"],
+  "Final amount": ["Final", "amount"],
 };
 
 const BASE_SORTABLE_COLUMNS: ColumnDef[] = [
@@ -88,6 +92,18 @@ function buildSortableColumns(activeTaxes: BvdTxnActiveTaxColumn[]): ColumnDef[]
   ];
 }
 
+function processedHeaderLabel(label: string): ReactNode {
+  const lines = PROCESSED_TWO_LINE_HEADERS[label];
+  if (!lines) return label;
+  return (
+    <>
+      {lines[0]}
+      <br />
+      {lines[1]}
+    </>
+  );
+}
+
 function Chevron({ expanded }: { expanded: boolean }) {
   return (
     <span className="bvd-txn-rows__chevron" aria-hidden="true">
@@ -111,19 +127,31 @@ function SortableHeader({
   className,
   sort,
   onSort,
+  processedStickyHeader,
 }: {
   column: FuelBvdTxnSortColumn;
   label: string;
   className?: string;
   sort: FuelBvdTxnSortState | null;
   onSort: (column: FuelBvdTxnSortColumn) => void;
+  processedStickyHeader?: boolean;
 }) {
   const active = sort?.column === column;
   const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
   const indicator = active ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
+  const twoLine = processedStickyHeader && PROCESSED_TWO_LINE_HEADERS[label];
+  const headerClass = [
+    "bvd-txn-rows__header-cell",
+    processedStickyHeader ? "bvd-txn-rows__header-sticky" : "",
+    twoLine ? "bvd-txn-rows__header-twoline" : "",
+    processedStickyHeader && !twoLine ? "bvd-txn-rows__header-oneline" : "",
+    className ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <th className={`bvd-txn-rows__header-cell ${className ?? ""}`} scope="col">
+    <th className={headerClass} scope="col">
       <button
         type="button"
         className="bvd-txn-rows__sort-btn"
@@ -134,7 +162,9 @@ function SortableHeader({
           onSort(column);
         }}
       >
-        <span className="bvd-txn-rows__sort-label">{label}</span>
+        <span className="bvd-txn-rows__sort-label">
+          {processedStickyHeader ? processedHeaderLabel(label) : label}
+        </span>
         {active ? (
           <span className="bvd-txn-rows__sort-indicator" aria-hidden="true">{indicator}</span>
         ) : (
@@ -152,8 +182,6 @@ export default function BvdTransactionRowsTable({
 }: Props) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [sort, setSort] = useState<FuelBvdTxnSortState | null>(null);
-  const bodyTableRef = useRef<HTMLTableElement | null>(null);
-  const sticky = useProcessedChargeTableSticky(bodyTableRef);
 
   const activeTaxes = useMemo(() => activeBvdTxnTaxColumns(transactions), [transactions]);
   const sortableColumns = useMemo(() => buildSortableColumns(activeTaxes), [activeTaxes]);
@@ -177,32 +205,43 @@ export default function BvdTransactionRowsTable({
     });
   };
 
-  useLayoutEffect(() => {
-    if (processedStickyHeader) sticky.syncWidths();
-  }, [processedStickyHeader, displayTransactions, expandedId, sort, sticky]);
-
   const tableClass =
     "bvd-statement__table bvd-statement__table--txn bvd-statement__table--purchases bvd-txn-rows__table";
 
-  const headerRow = (
-    <thead className="bvd-txn-rows__thead">
-      <tr className="bvd-txn-rows__header-row">
-        <th className="bvd-txn-rows__col-chevron bvd-txn-rows__header-cell" aria-hidden="true" scope="col" />
-        {sortableColumns.map((col) => (
-          <SortableHeader
-            key={col.key}
-            column={col.key}
-            label={col.label}
-            className={col.className}
-            sort={sort}
-            onSort={handleSort}
-          />
-        ))}
-      </tr>
-    </thead>
-  );
+  const wrapClass = processedStickyHeader
+    ? "bvd-statement__table-wrap bvd-txn-rows bvd-txn-rows--processed-native-sticky"
+    : "bvd-statement__table-wrap bvd-txn-rows";
 
-  const bodyRows = (
+  return (
+    <div
+      className={wrapClass}
+      data-testid="bvd-txn-rows-table"
+      data-active-tax-columns={activeTaxes.map((t) => t.field).join(",")}
+      data-processed-native-sticky={processedStickyHeader ? "true" : undefined}
+    >
+      <table className={tableClass}>
+        <thead className="bvd-txn-rows__thead">
+          <tr className="bvd-txn-rows__header-row">
+            <th
+              className={`bvd-txn-rows__col-chevron bvd-txn-rows__header-cell${
+                processedStickyHeader ? " bvd-txn-rows__header-sticky" : ""
+              }`}
+              aria-hidden="true"
+              scope="col"
+            />
+            {sortableColumns.map((col) => (
+              <SortableHeader
+                key={col.key}
+                column={col.key}
+                label={col.label}
+                className={col.className}
+                sort={sort}
+                onSort={handleSort}
+                processedStickyHeader={processedStickyHeader}
+              />
+            ))}
+          </tr>
+        </thead>
         <tbody>
           {displayTransactions.map((row) => {
             const expanded = expandedId === row.id;
@@ -328,43 +367,6 @@ export default function BvdTransactionRowsTable({
             );
           })}
         </tbody>
-  );
-
-  if (processedStickyHeader) {
-    return (
-      <ProcessedChargeStickyShell
-        stickyTestId="bvd-txn-sticky-header"
-        outerTestId="bvd-txn-rows-table"
-        outerClassName="bvd-txn-rows"
-        outerDataAttrs={{
-          "data-active-tax-columns": activeTaxes.map((t) => t.field).join(","),
-        }}
-        hScrollRef={sticky.hScrollRef}
-        scrollLeft={sticky.scrollLeft}
-        onHScroll={sticky.onHScroll}
-        headerTable={
-          <table ref={sticky.headerTableRef} className={`${tableClass} bvd-processed-charge-table__header-table`}>
-            {headerRow}
-          </table>
-        }
-        bodyTable={
-          <table ref={bodyTableRef} className={tableClass}>
-            {bodyRows}
-          </table>
-        }
-      />
-    );
-  }
-
-  return (
-    <div
-      className="bvd-statement__table-wrap bvd-txn-rows"
-      data-testid="bvd-txn-rows-table"
-      data-active-tax-columns={activeTaxes.map((t) => t.field).join(",")}
-    >
-      <table className={tableClass}>
-        {headerRow}
-        {bodyRows}
       </table>
     </div>
   );
