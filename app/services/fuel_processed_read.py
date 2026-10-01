@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fuel import FuelSourceBatch, FuelSourceControl, FuelTransaction
+from app.schemas.fuel import fuel_transaction_to_operational_out
 from app.services.fuel_canonical import BATCH_STATUS_FINALIZED
 from app.services.fuel_controls import (
     CONTROL_TYPE_CARD_TOTAL,
@@ -282,4 +283,7 @@ async def get_processed_fuel_batch(
     summary = _summary_from_batch(batch, transactions=transactions, controls=controls)
     summary["canonical_transactions"] = transactions
     summary["canonical_controls"] = controls
+    summary["operational_transactions"] = [
+        fuel_transaction_to_operational_out(t) for t in transactions
+    ]
     return summary

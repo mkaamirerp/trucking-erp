@@ -196,6 +196,10 @@ The HTML wireframe **[`docs/FUEL_UI_CONTRACT_WIREFRAME.html`](./FUEL_UI_CONTRACT
 
 Implementation refactors must conform to this wireframe plus §1.9–§1.10; the wireframe wins on **layout and what may appear on the main page vs Open source**.
 
+### 1.12 Operational transaction contract (Checkpoint 1)
+
+**`FuelProcessedOperationalTransactionOut`** / **`operational_transactions`** on **`GET /fuel/processed/{batch_id}`** is the single provider-neutral row shape for the TruckERP processed-Fuel workspace (Checkpoint 2 UI). Mapped only from **`fuel_transactions`** via **`fuel_transaction_to_operational_out`** — no provider-native staging reads.
+
 ---
 
 ## 2. Architecture delta (today → target)

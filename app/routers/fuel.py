@@ -61,6 +61,7 @@ from app.schemas.fuel import (
     FuelTransactionClassificationIn,
     FuelUnresolvedReasonGroupOut,
     fuel_transaction_to_canonical_out,
+    fuel_transaction_to_operational_out,
     FuelReconciliationOut,
     FuelReconciliationRunIn,
     FuelReviewConfirmIn,
@@ -254,6 +255,9 @@ async def get_processed_fuel_batch_route(
     txns = detail.pop("canonical_transactions", [])
     detail.pop("canonical_controls", None)
     detail["canonical_transactions"] = [fuel_transaction_to_canonical_out(t) for t in txns]
+    # operational_transactions: provider-neutral workspace rows (Checkpoint 1), from service mapper
+    if "operational_transactions" not in detail:
+        detail["operational_transactions"] = [fuel_transaction_to_operational_out(t) for t in txns]
     return FuelProcessedDetailOut(**detail)
 
 

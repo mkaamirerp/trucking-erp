@@ -4378,6 +4378,7 @@ export type FuelProcessedSummary = {
 
 export type FuelProcessedDetail = FuelProcessedSummary & {
   canonical_transactions: FuelCanonicalTransaction[];
+  operational_transactions: FuelProcessedOperationalTransaction[];
 };
 
 export async function listFuelProcessed(options?: {
@@ -4625,6 +4626,42 @@ export type FuelCanonicalTransaction = {
   classification?: string | null;
   classification_status?: string | null;
   classification_source?: string | null;
+};
+
+/** Checkpoint 1: provider-neutral TruckERP processed-Fuel workspace row (fuel_transactions only). */
+export type FuelProcessedOperationalTransaction = {
+  id: number;
+  batch_id: number;
+  source_row_order: number;
+  source_row_id: string | null;
+  source_vendor: string;
+  transaction_date: string | null;
+  transaction_datetime_source: string;
+  transaction_timezone_source: string | null;
+  unit_number_snapshot: string | null;
+  card_or_account_id: string | null;
+  driver_id: number | null;
+  truck_id: number | null;
+  owner_operator_payee_id: number | null;
+  city: string | null;
+  province_state: string | null;
+  country: string | null;
+  merchant_site: string | null;
+  product: string | null;
+  product_code_raw: string | null;
+  quantity: string | null;
+  quantity_unit: string | null;
+  unit_price: string | null;
+  total_amount: string | null;
+  currency: string | null;
+  principal_amount: string | null;
+  provider_fee_amount: string | null;
+  classification: string | null;
+  classification_status: string | null;
+  financial_responsibility: string | null;
+  owner_operator_charge_amount: string | null;
+  settlement_deduction_candidate: boolean | null;
+  settlement_deduction_basis_amount: string | null;
 };
 
 export async function getFuelChargeCategories(): Promise<FuelChargeCategory[]> {

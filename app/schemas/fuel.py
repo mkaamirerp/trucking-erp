@@ -944,8 +944,80 @@ class FuelCanonicalTransactionOut(BaseModel):
         return format(value, "f")
 
 
+class FuelProcessedOperationalTransactionOut(BaseModel):
+    """Provider-neutral TruckERP processed-Fuel workspace row (Checkpoint 1).
+
+    Sourced only from ``fuel_transactions``. No provider-native staging tables.
+    """
+
+    id: int
+    batch_id: int
+    source_row_order: int
+    source_row_id: str | None = None
+    source_vendor: str
+
+    transaction_date: str | None = None
+    transaction_datetime_source: str
+    transaction_timezone_source: str | None = None
+
+    unit_number_snapshot: str | None = None
+    card_or_account_id: str | None = None
+    driver_id: int | None = None
+    truck_id: int | None = None
+    owner_operator_payee_id: int | None = None
+
+    city: str | None = None
+    province_state: str | None = None
+    country: str | None = None
+    merchant_site: str | None = None
+
+    product: str | None = None
+    product_code_raw: str | None = None
+
+    quantity: str | None = None
+    quantity_unit: str | None = None
+    unit_price: str | None = None
+
+    total_amount: str | None = None
+    currency: str | None = None
+    principal_amount: str | None = None
+    provider_fee_amount: str | None = None
+
+    classification: str | None = None
+    classification_status: str | None = None
+
+    financial_responsibility: str | None = None
+    owner_operator_charge_amount: str | None = None
+    settlement_deduction_candidate: bool | None = None
+    settlement_deduction_basis_amount: str | None = None
+
+    @field_serializer(
+        "quantity",
+        "unit_price",
+        "total_amount",
+        "principal_amount",
+        "provider_fee_amount",
+        "owner_operator_charge_amount",
+        "settlement_deduction_basis_amount",
+        when_used="json",
+    )
+    def _serialize_operational_money(self, value: str | Decimal | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, Decimal):
+            return format(value, "f")
+        return value
+
+
+# JSON field contract for Checkpoint 1 tests (BVD / Nationwide / TEST_PROVIDER must match).
+OPERATIONAL_TRANSACTION_FIELD_NAMES: frozenset[str] = frozenset(
+    FuelProcessedOperationalTransactionOut.model_fields.keys()
+)
+
+
 class FuelProcessedDetailOut(FuelProcessedSummaryOut):
     canonical_transactions: list[FuelCanonicalTransactionOut] = Field(default_factory=list)
+    operational_transactions: list[FuelProcessedOperationalTransactionOut] = Field(default_factory=list)
 
 
 class FuelTransactionClassificationIn(BaseModel):
@@ -993,6 +1065,18 @@ class FuelClassificationAuditEventOut(BaseModel):
     apply_matching_in_import: bool | None = None
 
 
+def _format_fuel_decimal(amount: Decimal | None) -> str | None:
+    if amount is None:
+        return None
+    return format(amount, "f")
+
+
+def _iso_fuel_date(value: date | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
 def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
     return FuelCanonicalTransactionOut(
         id=txn.id,
@@ -1009,4 +1093,42 @@ def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
         classification=txn.classification,
         classification_status=txn.classification_status,
         classification_source=txn.classification_source,
+    )
+
+
+def fuel_transaction_to_operational_out(txn: Any) -> FuelProcessedOperationalTransactionOut:
+    """Map one ``fuel_transactions`` row to the TruckERP operational workspace contract."""
+    return FuelProcessedOperationalTransactionOut(
+        id=txn.id,
+        batch_id=txn.batch_id,
+        source_row_order=txn.source_row_order,
+        source_row_id=txn.source_row_id,
+        source_vendor=txn.source_vendor,
+        transaction_date=_iso_fuel_date(txn.transaction_date),
+        transaction_datetime_source=txn.transaction_datetime_source,
+        transaction_timezone_source=txn.transaction_timezone_source,
+        unit_number_snapshot=txn.unit_number_snapshot,
+        card_or_account_id=txn.card_or_account_id,
+        driver_id=txn.driver_id,
+        truck_id=txn.truck_id,
+        owner_operator_payee_id=txn.owner_operator_payee_id,
+        city=txn.city,
+        province_state=txn.province_state,
+        country=txn.country,
+        merchant_site=txn.merchant_site,
+        product=txn.product,
+        product_code_raw=txn.product_code_raw,
+        quantity=_format_fuel_decimal(txn.quantity),
+        quantity_unit=txn.quantity_unit,
+        unit_price=_format_fuel_decimal(txn.unit_price),
+        total_amount=_format_fuel_decimal(txn.total_amount),
+        currency=txn.currency,
+        principal_amount=_format_fuel_decimal(txn.principal_amount),
+        provider_fee_amount=_format_fuel_decimal(txn.provider_fee_amount),
+        classification=txn.classification,
+        classification_status=txn.classification_status,
+        financial_responsibility=txn.financial_responsibility,
+        owner_operator_charge_amount=_format_fuel_decimal(txn.owner_operator_charge_amount),
+        settlement_deduction_candidate=txn.settlement_deduction_candidate,
+        settlement_deduction_basis_amount=_format_fuel_decimal(txn.settlement_deduction_basis_amount),
     )
