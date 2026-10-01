@@ -4,7 +4,8 @@
 **Phase 2 verification:** Fuel suite `RUN_FUEL_TENANT_MIGRATE=1 ./scripts/run_fuel_pytest.sh tests/test_fuel*.py` — **392 passed, 0 skipped, 0 failed**. Authenticated **browser** acceptance on demo remains **pending** (automated browser reached `/login` without an authenticated session).  
 **Next:** Further refactors gated per §7 (Phase 3+ not started).  
 **Branch context:** `feat/fuel-card` with live BVD + Nationwide staging → Process → canonical batches.  
-**Authoritative design:** `docs/FUEL_CARD_MODULE_DESIGN.md` (provider-native evidence before canonical meaning; one **Fuel** parse/validate orchestrator + approved provider profiles — not independent per-provider parser **workflows**).
+**Authoritative design:** `docs/FUEL_CARD_MODULE_DESIGN.md` (provider-native evidence before canonical meaning; one **Fuel** parse/validate orchestrator + approved provider profiles — not independent per-provider parser **workflows**).  
+**Authoritative post-Process Fuel UI (visual):** [`docs/FUEL_UI_CONTRACT_WIREFRAME.html`](./FUEL_UI_CONTRACT_WIREFRAME.html) — wireframe contract for Fuel home / expanded processed row / Open source overlay (Checkpoint 0).
 
 ---
 
@@ -179,6 +180,21 @@ Provider-native rendering must **not** become a separate payroll, history, or gl
 - Main operational Fuel UI must **not** fork by provider (no parallel “canonical summary table” above the workspace).
 - Provider-native column sets (Nationwide Network/Ex-GST/controls; BVD Auth/Site/Express; etc.) are **source-evidence only** — drill-down, PDF, native detail panels.
 - Missing canonical or provider-mapped operational fields remain **NULL / blank / —** in the shared workspace; they must **not** trigger a provider-specific operational UI.
+
+### 1.11 Post-Process Fuel UI wireframe (visual contract — Checkpoint 0)
+
+The HTML wireframe **[`docs/FUEL_UI_CONTRACT_WIREFRAME.html`](./FUEL_UI_CONTRACT_WIREFRAME.html)** is the **authoritative visual contract** for post-Process Fuel on the main Fuel page. It locks:
+
+1. Main Fuel **expanded row** = **one** TruckERP operational workspace (no parallel parser block).
+2. Operational workspace = **canonical / final TruckERP fields only** (processed batch read model).
+3. **Same operational layout** for every provider.
+4. **No** provider-native / parser values **inline** on the main Fuel expand row.
+5. **Open source** → separate provider-native evidence overlay/view.
+6. **Close** returns to the main Fuel operational workspace.
+7. **BVD** = visual/design baseline only; **BVD source types/components are not** the shared TruckERP data contract.
+8. **Never** map Nationwide / WEX / others into `FuelBvdRow` (or BVD UI components) to fake a shared workspace.
+
+Implementation refactors must conform to this wireframe plus §1.9–§1.10; the wireframe wins on **layout and what may appear on the main page vs Open source**.
 
 ---
 
@@ -450,7 +466,7 @@ Before any refactor PR:
 - [ ] Funnel, provider wall, and Process bridge wording accepted as locked  
 - [ ] Pre-wall vs post-wall routes and `batch_id` identity accepted  
 - [ ] Canonical-first history/dashboard/search vs native evidence search accepted  
-- [ ] Stable canonical contract (§1.6), Fuel home selector lock (§1.7), payroll/accounting lock (§1.8), UI evidence boundary (§1.9), operational UI lock (§1.10) accepted  
+- [ ] Stable canonical contract (§1.6), Fuel home selector lock (§1.7), payroll/accounting lock (§1.8), UI evidence boundary (§1.9), operational UI lock (§1.10), visual wireframe (§1.11 / `FUEL_UI_CONTRACT_WIREFRAME.html`) accepted  
 - [ ] `process_fuel_import` contract matches proven BVD/Nationwide ordering  
 - [ ] Extraction helper vs forbidden workflow distinction accepted  
 - [ ] `TEST_PROVIDER` gate + registry dispatch requirement accepted  

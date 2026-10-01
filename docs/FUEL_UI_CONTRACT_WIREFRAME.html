@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TruckERP Fuel — Post-Process UI Contract (Wireframe)</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --surface: #fff;
+      --border: #c5c9d0;
+      --text: #1a1d23;
+      --muted: #5c6573;
+      --accent: #2563eb;
+      --ok: #15803d;
+      --bad: #b91c1c;
+      --warn: #b45309;
+      --mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--text);
+      background: var(--bg);
+    }
+    header {
+      background: var(--text);
+      color: #fff;
+      padding: 1.25rem 1.5rem;
+    }
+    header h1 { margin: 0 0 0.35rem; font-size: 1.25rem; font-weight: 700; }
+    header p { margin: 0; opacity: 0.88; font-size: 0.9rem; max-width: 52rem; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+    h2 { font-size: 1.05rem; margin: 2rem 0 0.75rem; border-bottom: 2px solid var(--border); padding-bottom: 0.35rem; }
+    h3 { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .locks {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .locks ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    .locks li { margin: 0.35rem 0; }
+    .locks strong { color: var(--text); }
+    .frame {
+      background: var(--surface);
+      border: 2px solid var(--text);
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 1rem 0 1.5rem;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }
+    .frame-title {
+      background: #e8eaed;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-bottom: 1px solid var(--border);
+    }
+    .frame-body { padding: 0.75rem; }
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      padding: 0.5rem;
+      background: #eef0f3;
+      border-radius: 6px;
+      margin-bottom: 0.75rem;
+      font-size: 0.8rem;
+    }
+    .pill {
+      padding: 0.2rem 0.5rem;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      background: #fff;
+      color: var(--muted);
+    }
+    table.wf {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    table.wf th, table.wf td {
+      border: 1px solid var(--border);
+      padding: 0.35rem 0.5rem;
+      text-align: left;
+    }
+    table.wf th { background: #eef0f3; font-weight: 600; }
+    .row-collapsed { background: #fafbfc; }
+    .expand { color: var(--muted); width: 1.5rem; }
+    .detail {
+      background: #f8f9fb;
+      border: 2px solid var(--accent);
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin-top: 0.5rem;
+    }
+    .detail-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+    .workspace {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      padding: 0.65rem;
+    }
+    .ws-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+    .ws-meta { font-size: 0.75rem; color: var(--muted); font-weight: 400; }
+    .filter-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.75rem;
+    }
+    .filter-bar span {
+      border: 1px solid var(--border);
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      background: #f4f5f7;
+    }
+    .txn-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 2px;
+      font-size: 0.65rem;
+      text-align: center;
+    }
+    .txn-grid .gh { background: #dfe3e8; font-weight: 700; padding: 0.25rem; }
+    .txn-grid .gc { background: #f9fafb; border: 1px solid #e5e7eb; padding: 0.2rem; }
+    .actions { margin-top: 0.65rem; display: flex; gap: 0.75rem; align-items: center; }
+    .btn {
+      display: inline-block;
+      padding: 0.35rem 0.65rem;
+      border-radius: 5px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--accent);
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .forbidden {
+      border: 2px dashed var(--bad);
+      background: #fef2f2;
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin: 1rem 0;
+      font-size: 0.85rem;
+    }
+    .forbidden h3 { color: var(--bad); margin-top: 0; }
+    .forbidden ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+    .overlay {
+      position: relative;
+      border: 3px solid var(--text);
+      border-radius: 10px;
+      background: #fff;
+      min-height: 280px;
+    }
+    .overlay-chrome {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0.75rem;
+      background: #1a1d23;
+      color: #fff;
+      font-size: 0.85rem;
+    }
+    .overlay-body {
+      padding: 0.75rem;
+      font-size: 0.8rem;
+    }
+    .native-cols {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 2px;
+      margin-top: 0.5rem;
+      font-size: 0.65rem;
+    }
+    .native-cols div { border: 1px solid #fcd34d; background: #fffbeb; padding: 0.2rem; text-align: center; }
+    .flow {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      background: #1a1d23;
+      color: #e5e7eb;
+      padding: 1rem;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      margin: 1rem 0;
+    }
+    .note {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin: 0.5rem 0 1rem;
+    }
+    .tag-ok { color: var(--ok); font-weight: 700; }
+    .tag-bad { color: var(--bad); font-weight: 700; }
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TruckERP Fuel — Post-Process UI Contract</h1>
+    <p>
+      Authoritative <strong>visual</strong> contract for Fuel home / Recent Activity after Process.
+      Pairs with <code>docs/FUEL_PROVIDER_WALL_ARCHITECTURE_DELTA.md</code> (provider wall, canonical read model).
+      Checkpoint 0 — wireframe only; implementation must conform.
+    </p>
+  </header>
+
+  <main>
+    <section class="locks" aria-labelledby="locks-heading">
+      <h2 id="locks-heading" style="margin-top:0;border:none;">Locked concepts</h2>
+      <ol>
+        <li><strong>Main Fuel expanded row</strong> = <strong>ONE</strong> TruckERP operational workspace (no second table, no inline parser block).</li>
+        <li>Operational workspace uses <strong>canonical / final TruckERP fields only</strong> (<code>fuel_transactions</code>, batch summary DTOs).</li>
+        <li><strong>Same operational layout</strong> for BVD, Nationwide, WEX, and future providers.</li>
+        <li><strong>Provider-native / parser values are NOT rendered inline</strong> on the main Fuel page expand row.</li>
+        <li><strong>&quot;Open source&quot;</strong> opens a <strong>separate</strong> provider-native evidence overlay or view.</li>
+        <li><strong>Close</strong> on that overlay returns to the main Fuel workspace (expand row or list context unchanged).</li>
+        <li><strong>BVD is the visual / design baseline only</strong> — BVD source data types and components are <strong>NOT</strong> the shared TruckERP data contract.</li>
+        <li><strong>Never</strong> adapt Nationwide, WEX, etc. into <code>FuelBvdRow</code> (or BVD tables) just to reuse BVD components.</li>
+      </ol>
+    </section>
+
+    <h2>State 1 — Fuel home (Recent Activity)</h2>
+    <p class="note">List is canonical-first (<code>batch_id</code>). Provider shown as lineage/badge only.</p>
+
+    <div class="frame">
+      <div class="frame-title">Screen: Fuel / Recent activity</div>
+      <div class="frame-body">
+        <div class="toolbar">
+          <span class="pill">Provider selector → pre-wall upload only</span>
+          <span class="pill">Upload file</span>
+          <span class="pill">Dashboard stats</span>
+        </div>
+        <table class="wf">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Provider</th>
+              <th>Invoice</th>
+              <th>Period</th>
+              <th>Totals</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="row-collapsed">
+              <td class="expand">▸</td>
+              <td>Nationwide</td>
+              <td>20250522B-06142026</td>
+              <td>…</td>
+              <td>CAD / USD</td>
+              <td><span class="btn">Open</span></td>
+            </tr>
+            <tr>
+              <td class="expand">▾</td>
+              <td>BVD</td>
+              <td>838710</td>
+              <td>…</td>
+              <td>CAD</td>
+              <td><span class="btn">Open</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="detail">
+          <div class="detail-label">Expanded row — allowed: single TruckERP operational workspace</div>
+          <div class="workspace">
+            <div class="ws-header">
+              <span>TruckERP Processed Fuel workspace</span>
+              <span class="ws-meta">batch #6 · 42 txns · provider badge: BVD</span>
+            </div>
+            <div class="filter-bar">
+              <span>Search canonical fields</span>
+              <span>Date period</span>
+              <span>N charges</span>
+            </div>
+            <div class="txn-grid" aria-label="Operational columns (same for all providers)">
+              <div class="gh">Date</div>
+              <div class="gh">Unit</div>
+              <div class="gh">Driver / payee</div>
+              <div class="gh">Card</div>
+              <div class="gh">Product</div>
+              <div class="gh">Qty</div>
+              <div class="gh">Amount</div>
+              <div class="gh">Cur</div>
+              <div class="gc">…</div>
+              <div class="gc">…</div>
+              <div class="gc">—</div>
+              <div class="gc">…</div>
+              <div class="gc">DF</div>
+              <div class="gc">…</div>
+              <div class="gc">…</div>
+              <div class="gc">US</div>
+            </div>
+            <p class="note" style="margin:0.5rem 0 0;">
+              Data source: <code>GET /fuel/processed/{batch_id}</code> canonical transactions only.
+              Missing fields → blank / — (valid).
+            </p>
+            <div class="actions">
+              <span class="btn btn-primary">Open source</span>
+              <span class="note" style="margin:0;">Optional: open full-screen workspace via Open on row — same contract</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="forbidden" role="note">
+      <h3>Forbidden on main Fuel expand (do not ship)</h3>
+      <ul>
+        <li>Extra &quot;Canonical transactions&quot; mini-table above the workspace</li>
+        <li>Inline &quot;Source evidence&quot; section with Nationwide parser columns (Network, Ex-GST, controls, …)</li>
+        <li>Inline BVD parser columns (Auth, Site, Retail, Express native grid) under the operational grid</li>
+        <li>Two transaction worlds visible at once (operational + parser)</li>
+        <li>Mapping Nationwide/WEX rows into <code>FuelBvdRow</code> to reuse BVD tables</li>
+      </ul>
+    </div>
+
+    <h2>State 2 — Open source (overlay)</h2>
+    <p class="note">Full-screen or modal overlay. Provider-specific renderer via registry. Not embedded in expand row.</p>
+
+    <div class="frame">
+      <div class="frame-title">Screen: Open source → provider-native evidence</div>
+      <div class="frame-body">
+        <div class="overlay">
+          <div class="overlay-chrome">
+            <span>Fuel / Source evidence · Nationwide · invoice …</span>
+            <span class="btn" style="background:#374151;border-color:#374151;color:#fff;">Close</span>
+          </div>
+          <div class="overlay-body">
+            <p><strong>Provider-native parser view only.</strong> Original parsed fields, controls, reconciliation strip, PDF/CSV.</p>
+            <div class="actions">
+              <span class="btn">View original PDF</span>
+              <span class="btn">View native controls</span>
+            </div>
+            <div class="native-cols" aria-label="Example Nationwide-native columns (evidence only)">
+              <div>Network</div>
+              <div>Ex-GST</div>
+              <div>USA Disc</div>
+              <div>OON Fees</div>
+              <div>CARD_TOTAL</div>
+              <div>…</div>
+            </div>
+            <p class="note">BVD overlay: Auth, Site, Retail, Billed, HST, Express sections — same rule: evidence only.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Navigation flow</h2>
+    <pre class="flow">Fuel home / Recent activity
+  └─ expand row
+       └─ ONE TruckERP operational workspace (canonical fields, shared layout)
+            └─ [Open source]
+                 └─ provider-native evidence overlay (parser / PDF / controls)
+                      └─ [Close] → back to operational workspace (expand row)</pre>
+
+    <h2>Design baseline vs data contract</h2>
+    <table class="wf">
+      <thead>
+        <tr>
+          <th></th>
+          <th>BVD-derived design baseline</th>
+          <th>Shared TruckERP contract</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Layout</td>
+          <td class="tag-ok">Yes — summary, filters, transaction grid density</td>
+          <td>One layout for all providers</td>
+        </tr>
+        <tr>
+          <td>Row model</td>
+          <td class="tag-bad">FuelBvdRow, BVD tables</td>
+          <td class="tag-ok">Canonical transaction DTO / fuel_transactions</td>
+        </tr>
+        <tr>
+          <td>Provider parser columns</td>
+          <td class="tag-bad">Not on main page</td>
+          <td class="tag-ok">Open source overlay only</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <footer>
+      Document: <code>docs/FUEL_UI_CONTRACT_WIREFRAME.html</code> · Checkpoint 0 visual contract ·
+      Cross-ref: <code>FUEL_PROVIDER_WALL_ARCHITECTURE_DELTA.md</code> §1.9, §1.10, §1.11
+    </footer>
+  </main>
+</body>
+</html>
