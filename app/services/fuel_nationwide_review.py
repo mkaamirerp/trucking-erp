@@ -9,7 +9,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fuel import FuelNationwide
+from app.models.fuel import FuelNationwide, FuelSourceBatch
+from app.services.fuel_canonical import BATCH_STATUS_FINALIZED
+from app.services.fuel_nationwide_canonical_projection import NATIONWIDE_VENDOR
+from app.services.fuel_nationwide_completed_basic import build_nationwide_completed_basic_projection
+from app.services.fuel_nationwide_card_total import apply_card_total_review_fields
 from app.services.fuel_nationwide_effective import build_effective_nationwide_rows
 from app.services.fuel_nationwide_import import (
     NATIONWIDE_SOURCE_FIELD_NAMES,
@@ -48,6 +52,8 @@ def fuel_nationwide_row_to_dict(row: FuelNationwide) -> dict[str, Any]:
     }
     for name in NATIONWIDE_SOURCE_FIELD_NAMES:
         data[name] = getattr(row, name)
+    if data.get("row_type") == "CONTROL":
+        apply_card_total_review_fields(data)
     return data
 
 
@@ -170,6 +176,63 @@ async def process_nationwide_import_review(
     if summary["review_status"] == NW_REVIEW_SOURCE_COMPLETE:
         return summary
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nationwide import not in active stage")
+
+
+async def get_nationwide_completed_basic_projection(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    import_id: uuid.UUID,
+) -> dict[str, Any]:
+    rows = await list_nationwide_import_rows_for_review(db, tenant_id=tenant_id, import_id=import_id)
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nationwide import not found")
+    batch = await db.scalar(
+        select(FuelSourceBatch).where(
+            FuelSourceBatch.tenant_id == tenant_id,
+            FuelSourceBatch.source_import_ref == str(import_id),
+            FuelSourceBatch.provider_code == NATIONWIDE_VENDOR,
+            FuelSourceBatch.status == BATCH_STATUS_FINALIZED,
+        )
+    )
+    if batch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nationwide processed import not found")
+    processed_at = batch.finalized_at.isoformat() if batch.finalized_at else None
+    header = next((r for r in rows if r.get("row_type") == "HEADER"), None)
+    return build_nationwide_completed_basic_projection(
+        rows,
+        import_id=str(import_id),
+        review_status=(header or {}).get("review_status"),
+        processed_at=processed_at,
+    )
+
+
+async def list_nationwide_completed_history(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    result = await db.execute(
+        select(FuelSourceBatch)
+        .where(
+            FuelSourceBatch.tenant_id == tenant_id,
+            FuelSourceBatch.provider_code == NATIONWIDE_VENDOR,
+            FuelSourceBatch.status == BATCH_STATUS_FINALIZED,
+            FuelSourceBatch.source_import_ref.isnot(None),
+        )
+        .order_by(FuelSourceBatch.finalized_at.desc().nullslast(), FuelSourceBatch.id.desc())
+        .limit(limit)
+    )
+    out: list[dict[str, Any]] = []
+    for batch in result.scalars().all():
+        import_id = uuid.UUID(str(batch.source_import_ref))
+        out.append(
+            await get_nationwide_completed_basic_projection(
+                db, tenant_id=tenant_id, import_id=import_id
+            )
+        )
+    return out
 
 
 async def get_nationwide_import_storage_ref(

@@ -17,6 +17,18 @@ export function mapFuelDashboardStatsFromApi(stats: {
   };
 }
 
+export function mergeFuelCompletedHistory(
+  bvd: FuelBvdCompletedBasic[],
+  nationwide: FuelBvdCompletedBasic[],
+): FuelBvdCompletedBasic[] {
+  const merged = [...bvd, ...nationwide];
+  return merged.sort((a, b) => {
+    const ta = a.processed_at ? Date.parse(a.processed_at) : 0;
+    const tb = b.processed_at ? Date.parse(b.processed_at) : 0;
+    return tb - ta;
+  });
+}
+
 export function recentFuelActivity(completed: FuelBvdCompletedBasic[], limit = 5): FuelBvdCompletedBasic[] {
   const sorted = [...completed].sort((a, b) => {
     const ta = a.processed_at ? Date.parse(a.processed_at) : 0;

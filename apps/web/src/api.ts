@@ -4324,6 +4324,12 @@ export type FuelBvdCompletedBasic = {
   currency?: string | null;
   categories: FuelBvdCompletedBasicLine[];
   taxes: FuelBvdCompletedBasicLine[];
+  account_code?: string | null;
+  usd_transaction_total?: string | null;
+  cad_transaction_total?: string | null;
+  usd_provider_control?: string | null;
+  transaction_count?: number | null;
+  control_count?: number | null;
 };
 
 export async function listFuelBvdImports(options?: {
@@ -4340,6 +4346,11 @@ export async function listFuelBvdImports(options?: {
 
 export async function listFuelBvdCompletedHistory(): Promise<FuelBvdCompletedBasic[]> {
   const res = await fetchWithTenant(`${API_BASE}/fuel/bvd/history`);
+  return handle(res);
+}
+
+export async function listFuelNationwideCompletedHistory(): Promise<FuelBvdCompletedBasic[]> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/nationwide/history`);
   return handle(res);
 }
 

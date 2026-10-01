@@ -838,6 +838,33 @@ async def list_bvd_import_classification_audit(
 # --- Nationwide Implementation 1 (mirrors BVD staging / process) ---
 
 
+@router.get("/nationwide/history", response_model=list[FuelBvdCompletedBasicOut])
+async def list_nationwide_completed_history(
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    items = await nationwide_review_service.list_nationwide_completed_history(
+        db, tenant_id=tenant_id
+    )
+    return [FuelBvdCompletedBasicOut(**item) for item in items]
+
+
+@router.get("/nationwide/imports/{import_id}/completed-basic", response_model=FuelBvdCompletedBasicOut)
+async def get_nationwide_completed_basic(
+    import_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    payload = await nationwide_review_service.get_nationwide_completed_basic_projection(
+        db, tenant_id=tenant_id, import_id=import_id
+    )
+    return FuelBvdCompletedBasicOut(**payload)
+
+
 @router.post("/nationwide/imports", response_model=FuelNationwideImportOut)
 async def upload_nationwide_import(
     file: UploadFile = File(...),

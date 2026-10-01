@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fuel import FuelBvd, FuelBvdImportStage, FuelSourceBatch
 from app.services.fuel_bvd_canonical_projection import BVD_VENDOR
+from app.services.fuel_nationwide_canonical_projection import NATIONWIDE_VENDOR
 from app.services.fuel_bvd_review import BVD_REVIEW_IN_PROGRESS, BVD_REVIEW_PENDING
 from app.services.fuel_bvd_stage import STAGE_STATUS_ACTIVE
 from app.services.fuel_canonical import BATCH_STATUS_FINALIZED
@@ -46,14 +47,14 @@ async def count_needs_review(db: AsyncSession, *, tenant_id: int) -> int:
 
 
 async def count_processed_last_7_days(db: AsyncSession, *, tenant_id: int) -> int:
-    """BVD imports with canonical batch FINALIZED in the rolling 7-day window (finalized_at only)."""
+    """Fuel imports with canonical batch FINALIZED in the rolling 7-day window (finalized_at only)."""
     cutoff = _utcnow() - timedelta(days=PROCESSED_LOOKBACK_DAYS)
     count = await db.scalar(
         select(func.count(func.distinct(FuelSourceBatch.source_import_ref)))
         .select_from(FuelSourceBatch)
         .where(
             FuelSourceBatch.tenant_id == tenant_id,
-            FuelSourceBatch.provider_code == BVD_VENDOR,
+            FuelSourceBatch.provider_code.in_((BVD_VENDOR, NATIONWIDE_VENDOR)),
             FuelSourceBatch.status == BATCH_STATUS_FINALIZED,
             FuelSourceBatch.finalized_at.isnot(None),
             FuelSourceBatch.finalized_at >= cutoff,

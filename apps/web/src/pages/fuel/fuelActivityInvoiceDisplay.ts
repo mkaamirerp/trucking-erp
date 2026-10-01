@@ -16,6 +16,9 @@ export function fuelActivitySourceMoneyBucket(
 
 /** Recent Activity Account/Card from completed-basic purchase card summary (not header alone). */
 export function formatFuelActivityAccountCard(row: FuelBvdCompletedBasic): string {
+  if (row.provider === "NATIONWIDE" && row.account_code?.trim()) {
+    return row.account_code.trim();
+  }
   const count = row.purchase_card_count ?? 0;
   const numbers = row.purchase_card_numbers ?? [];
   if (count <= 0) return "—";
@@ -83,6 +86,8 @@ export function formatFuelActivityInvoiceDiscount(row: FuelBvdCompletedBasic): s
 }
 
 export function formatFuelActivityCadTotal(row: FuelBvdCompletedBasic): string {
+  const explicit = row.cad_transaction_total?.trim();
+  if (explicit) return explicit;
   const bucket = fuelActivitySourceMoneyBucket(row.currency);
   const amt = row.total_amount?.trim();
   if (!bucket || !amt) return "—";
@@ -90,6 +95,8 @@ export function formatFuelActivityCadTotal(row: FuelBvdCompletedBasic): string {
 }
 
 export function formatFuelActivityUsdTotal(row: FuelBvdCompletedBasic): string {
+  const explicit = row.usd_transaction_total?.trim();
+  if (explicit) return explicit;
   const bucket = fuelActivitySourceMoneyBucket(row.currency);
   const amt = row.total_amount?.trim();
   if (!bucket || !amt) return "—";

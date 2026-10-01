@@ -51,7 +51,7 @@ export default function FuelRecentActivitySection({
   const [loadingImportId, setLoadingImportId] = useState<string | null>(null);
 
   const toggleInvoice = useCallback(
-    async (importId: string) => {
+    async (importId: string, provider: string) => {
       if (expandedImportId === importId) {
         setExpandedImportId(null);
         return;
@@ -59,6 +59,14 @@ export default function FuelRecentActivitySection({
       setExpandedImportId(importId);
       setLoadError(null);
       if (loaded[importId]) return;
+
+      if (provider === "NATIONWIDE") {
+        setLoaded((prev) => ({
+          ...prev,
+          [importId]: { sourceRows: [], chargeCount: 0, cardNumber: "" },
+        }));
+        return;
+      }
 
       setLoadingImportId(importId);
       try {
@@ -142,16 +150,16 @@ export default function FuelRecentActivitySection({
                           className="px-1"
                           aria-expanded={isExpanded}
                           aria-label={`${isExpanded ? "Collapse" : "Expand"} invoice ${row.invoice_number}`}
-                          onClick={() => void toggleInvoice(row.import_id)}
+                          onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         >
                           {isExpanded ? "▾" : "▸"}
                         </button>
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                       >
-                        {row.provider}
+                        {row.provider === "NATIONWIDE" ? "Nationwide" : row.provider}
                       </td>
                       <td className="py-1.5 pr-3 font-medium">
                         {onOpenProcessed ? (
@@ -179,56 +187,56 @@ export default function FuelRecentActivitySection({
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-card-${row.import_id}`}
                       >
                         {formatFuelActivityAccountCard(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-period-${row.import_id}`}
                       >
                         {formatFuelActivityPeriod(row.period_start, row.period_end)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-due-${row.import_id}`}
                       >
                         {formatFuelActivityDueDate(row.due_date)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 text-[var(--trk-text-muted)]"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-payment-${row.import_id}`}
                       >
                         {fuelActivityPaymentLabel(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-discount-${row.import_id}`}
                       >
                         {formatFuelActivityInvoiceDiscount(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-cad-total-${row.import_id}`}
                       >
                         {formatFuelActivityCadTotal(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-usd-total-${row.import_id}`}
                       >
                         {formatFuelActivityUsdTotal(row)}
                       </td>
                       <td
                         className="cursor-pointer py-1.5 pr-3 tabular-nums font-medium"
-                        onClick={() => void toggleInvoice(row.import_id)}
+                        onClick={() => void toggleInvoice(row.import_id, row.provider)}
                         data-testid={`fuel-activity-invoice-total-${row.import_id}`}
                         data-source-currency={row.currency ?? ""}
                       >
@@ -301,6 +309,10 @@ export default function FuelRecentActivitySection({
                               }
                             />
                             </div>
+                          ) : row.provider === "NATIONWIDE" ? (
+                            <p className="text-xs text-[var(--trk-text-muted)]">
+                              Nationwide purchases and controls — use Open for the full processed statement.
+                            </p>
                           ) : expandedData && expandedData.chargeCount === 0 ? (
                             <p className="text-xs text-[var(--trk-text-muted)]">No accepted charges on this invoice.</p>
                           ) : null}

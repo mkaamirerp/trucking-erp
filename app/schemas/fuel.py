@@ -683,6 +683,12 @@ class FuelBvdCompletedBasicOut(BaseModel):
     currency: str | None = None
     categories: list[FuelBvdCompletedBasicLineOut] = Field(default_factory=list)
     taxes: list[FuelBvdCompletedBasicLineOut] = Field(default_factory=list)
+    account_code: str | None = None
+    usd_transaction_total: str | None = None
+    cad_transaction_total: str | None = None
+    usd_provider_control: str | None = None
+    transaction_count: int | None = None
+    control_count: int | None = None
 
 
 class FuelBvdRowOut(BaseModel):

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   getFuelBvdUploadErrorDisplay,
   listFuelBvdCompletedHistory,
+  listFuelNationwideCompletedHistory,
   listFuelProviders,
   getFuelDashboardStats,
   discardFuelBvdStage,
@@ -15,7 +16,12 @@ import {
 } from "../api";
 import FuelConfigureApiModal from "./fuel/FuelConfigureApiModal";
 import FuelProviderCombobox from "./fuel/FuelProviderCombobox";
-import { mapFuelDashboardStatsFromApi, recentFuelActivity, type FuelDashboardStats } from "./fuel/fuelDashboardData";
+import {
+  mapFuelDashboardStatsFromApi,
+  mergeFuelCompletedHistory,
+  recentFuelActivity,
+  type FuelDashboardStats,
+} from "./fuel/fuelDashboardData";
 import { readLastFuelProviderCode, writeLastFuelProviderCode } from "./fuel/fuelLastProvider";
 import { parseFuelBvdDuplicateDetail } from "./fuelBvdReview/bvdUploadDuplicate";
 import { readFuelProcessedReturn } from "./fuelBvdReview/bvdUploadCompletion";
@@ -23,6 +29,7 @@ import FuelRecentActivitySection from "./fuel/FuelRecentActivitySection";
 import FuelBvdProcessingWorkspace from "./fuelBvdReview/FuelBvdProcessingWorkspace";
 import FuelNationwideProcessingWorkspace from "./fuelNationwideReview/FuelNationwideProcessingWorkspace";
 import FuelBvdProcessedRecordView from "./fuelBvdReview/FuelBvdProcessedRecordView";
+import FuelNationwideProcessedRecordView from "./fuelNationwideReview/FuelNationwideProcessedRecordView";
 import "./fuel/fuel-home.css";
 
 export default function FuelMainPage() {
@@ -43,17 +50,19 @@ export default function FuelMainPage() {
   const [processingImportId, setProcessingImportId] = useState<string | null>(null);
   const [processingProvider, setProcessingProvider] = useState<"BVD" | "NATIONWIDE">("BVD");
   const [processedImportId, setProcessedImportId] = useState<string | null>(null);
+  const [processedProvider, setProcessedProvider] = useState<"BVD" | "NATIONWIDE">("BVD");
   const [highlightImportId, setHighlightImportId] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const refresh = useCallback(async () => {
-    const [providers, history, dashboardStats] = await Promise.all([
+    const [providers, bvdHistory, nationwideHistory, dashboardStats] = await Promise.all([
       listFuelProviders(),
       listFuelBvdCompletedHistory(),
+      listFuelNationwideCompletedHistory(),
       getFuelDashboardStats(),
     ]);
     setCatalog(providers);
-    setCompleted(history);
+    setCompleted(mergeFuelCompletedHistory(bvdHistory, nationwideHistory));
     setStats(mapFuelDashboardStatsFromApi(dashboardStats));
 
     const last = readLastFuelProviderCode();
@@ -129,7 +138,16 @@ export default function FuelMainPage() {
         setProcessingImportId(out.import_id);
       } catch (err: unknown) {
         const display = getFuelNationwideUploadErrorDisplay(err);
-        setUploadError(`${display.title}: ${display.message}`);
+        const dup = parseFuelBvdDuplicateDetail(err);
+        if (dup?.existing_import_id && dup.existing_status === "SOURCE_REVIEWED") {
+          setUploadError(
+            `${display.title}: ${display.message} Open the processed invoice from Recent activity below.`,
+          );
+        } else if (dup?.existing_import_id) {
+          setUploadError(`${display.title}: ${display.message} Existing import: ${dup.existing_import_id}.`);
+        } else {
+          setUploadError(`${display.title}: ${display.message}`);
+        }
       } finally {
         setUploadBusy(false);
       }
@@ -246,7 +264,11 @@ export default function FuelMainPage() {
         onViewAllClick={() => setShowAllActivity(true)}
         emptyMessage="No completed imports yet."
         highlightImportId={highlightImportId}
-        onOpenProcessed={(importId) => setProcessedImportId(importId)}
+        onOpenProcessed={(importId) => {
+          const row = completed.find((c) => c.import_id === importId);
+          setProcessedProvider(row?.provider === "NATIONWIDE" ? "NATIONWIDE" : "BVD");
+          setProcessedImportId(importId);
+        }}
       />
 
       <FuelConfigureApiModal
@@ -285,8 +307,15 @@ export default function FuelMainPage() {
         />
       ) : null}
 
-      {processedImportId ? (
+      {processedImportId && processedProvider === "BVD" ? (
         <FuelBvdProcessedRecordView
+          importId={processedImportId}
+          variant="overlay"
+          onClose={() => setProcessedImportId(null)}
+        />
+      ) : null}
+      {processedImportId && processedProvider === "NATIONWIDE" ? (
+        <FuelNationwideProcessedRecordView
           importId={processedImportId}
           variant="overlay"
           onClose={() => setProcessedImportId(null)}
