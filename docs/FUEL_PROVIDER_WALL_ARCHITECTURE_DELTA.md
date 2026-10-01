@@ -1,6 +1,8 @@
 # Fuel provider wall — architecture delta and file map
 
-**Status:** Boundary lock **approved** (`cc153c8c`, `e493d95a`). Phase 2 canonical processed **read path** shipped (`8774c1f2`+); further refactors gated per §7.  
+**Status:** Boundary lock **approved** (`cc153c8c`, `e493d95a`). **Phase 2** canonical processed read path is **implemented** on `feat/fuel-card` (local and `origin/feat/fuel-card` synchronized; commits through `b8b1bcd9`+).  
+**Phase 2 verification:** Fuel suite `RUN_FUEL_TENANT_MIGRATE=1 ./scripts/run_fuel_pytest.sh tests/test_fuel*.py` — **392 passed, 0 skipped, 0 failed**. Authenticated **browser** acceptance on demo remains **pending** (automated browser reached `/login` without an authenticated session).  
+**Next:** Further refactors gated per §7 (Phase 3+ not started).  
 **Branch context:** `feat/fuel-card` with live BVD + Nationwide staging → Process → canonical batches.  
 **Authoritative design:** `docs/FUEL_CARD_MODULE_DESIGN.md` (provider-native evidence before canonical meaning; one **Fuel** parse/validate orchestrator + approved provider profiles — not independent per-provider parser **workflows**).
 
@@ -100,6 +102,76 @@ Do not add per-provider “global Fuel search” implementations. Post-wall sear
 
 Provider differences in **presentation of source evidence** are legitimate. Duplicate **workflows** (history API, dashboard merge, Open routing, Process entrypoints) are not.
 
+### 1.6 Stable canonical TruckERP Fuel contract
+
+After Process, TruckERP consumes **one provider-neutral canonical Fuel contract** (`fuel_source_batches`, `fuel_source_controls`, `fuel_transactions` and shared DTOs/APIs). Provider differences **do not** redefine TruckERP field names or semantics.
+
+**Rules:**
+
+- Canonical field names and semantics are the **same** for BVD, Nationwide, WEX, and future providers.
+- When a provider does not supply a value for a canonical field, that field may remain **NULL** (or unset) — no provider-specific “shadow columns” on the canonical model.
+- Provider-only facts stay in **provider-native evidence**, `provider_raw`, and native tables — not as alternate canonical meanings.
+- Adding a new global TruckERP business concept requires an **intentional canonical model change** (migration + design), not a provider-specific schema exception.
+
+**Representative canonical concepts** (illustrative; not every provider populates every field):
+
+- Provider / source lineage (`provider_code`, `source_import_ref`, `source_row_order`, `batch_id`)
+- `transaction_date`, `transaction_datetime_source`, timezone fields
+- `unit_number_snapshot`, `card_or_account_id`
+- Driver / truck / payee references (`driver_id`, `truck_id`, `owner_operator_payee_id` when resolved)
+- `city`, `province_state`, `country`, `merchant_site`
+- `product` / `product_code_raw` / category-related canonical fields
+- `quantity`, `quantity_unit`, `unit_price`, `unit_price_basis`
+- `currency`, discount fields, tax fields (`hst_amount`, `gst_amount`, etc.)
+- `total_amount`, `principal_amount`, `provider_fee_amount`
+- `financial_responsibility`, `owner_operator_charge_amount`, settlement / deduction candidacy flags
+- `provider_raw` and source linkage for audit drill-down
+
+Mappers **project** provider evidence into this contract; they do not fork the contract per vendor.
+
+### 1.7 Main Fuel page / provider selector lock
+
+- **Main Fuel page / Recent Activity** shows **all** processed Fuel by default, **regardless of provider** (canonical list; optional display filter only — not separate per-provider history apps).
+- The **provider selector** primarily controls **pre-wall ingestion** (upload handoff, staging workspace, native review entry). It must **not** turn post-wall payroll, history, search, or Open into a provider-specific application.
+- **Provider name** may appear as **lineage / badge** (column, header, audit) — not as a separate product workflow.
+- Normal post-wall behavior stays **shared**: one processed list, one shell, registry-backed evidence renderers.
+
+### 1.8 Payroll / accounting lock
+
+Payroll, accounting, driver-pay, and owner-operator downstream logic **consume canonical Fuel records** only.
+
+They must **not** require provider-specific business branches such as:
+
+- `if provider == BVD` …
+- `if provider == Nationwide` …
+- `if provider == WEX` …
+
+**Normal questions** are canonical:
+
+- Transactions for **driver**, **truck/unit**, **payee**
+- **Category**, **financial responsibility**, **settlement candidate**
+- **Amount**, **currency**, **date**
+
+**Provider identity** is lineage and audit evidence — not the business data contract. (Fuel Process still does not execute payroll or accounting posting; see funnel and `docs/FUEL_CARD_MODULE_DESIGN.md`.)
+
+### 1.9 Canonical view vs source evidence (UI boundary)
+
+| Surface | Rule |
+|---------|------|
+| **Normal processed view** | Canonical TruckERP fields and labels; same operational shape for every provider |
+| **Source evidence drill-down** | Provider-native labels/columns, native controls, original PDF/CSV/API/file — **provider-specific renderer allowed here only** |
+
+**Conceptual drill-down chain:**
+
+```text
+canonical fuel_transaction
+  → source lineage (batch_id, source_import_ref, source_row_order)
+  → accepted provider-native row
+  → original source evidence (file / API artifact)
+```
+
+Provider-native rendering must **not** become a separate payroll, history, or global search workflow — only enrichment inside the shared shell.
+
 ---
 
 ## 2. Architecture delta (today → target)
@@ -133,6 +205,7 @@ Add a **fictitious** provider `TEST_PROVIDER` with **one** transaction fixture a
 **Fail (architecture rejected):** Adding `TEST_PROVIDER` requires any of:
 
 - A new provider **`if` / `elif` branch** (or equivalent hardcoded dispatch) in processed history, dashboard, search, classification, financial responsibility, settlement, or other **post-wall** workflow
+- A **payroll** provider branch, **driver-pay** provider branch, or **O/O settlement** provider branch keyed on provider code (same rule as above: canonical queries only)
 - A dedicated `list_test_provider_history()` (or per-provider list) instead of canonical `list_processed_fuel`
 - A new dashboard merge function or provider-specific processed search entrypoint
 - A separate Process **application** workflow component (provider Process **hooks** inside shared orchestration are OK)
@@ -143,14 +216,14 @@ Existing BVD + Nationwide duplication is **documented debt** to remove, not a pa
 
 ---
 
-## 4. Known symptom (approved diagnosis, fix deferred)
+## 4. Known symptom (historical; Phase 2 read-path target)
 
-Recent Activity expand on Fuel home (`FuelRecentActivitySection.tsx`):
+Pre–Phase-2 Recent Activity expand on Fuel home (`FuelRecentActivitySection.tsx`) exhibited **BVD-default plumbing**:
 
-1. **Branch order:** Renders `ProcessedStatementWorkspace` when `chargeCount > 0` **before** checking `nationwideRows`. Nationwide sets `chargeCount` from TRANSACTION rows but leaves `sourceRows` empty → BVD workspace with empty charges.
-2. **Hardcoded label:** `ProcessedStatementWorkspace` titles rows `BVD {invoiceNumber}` regardless of provider.
+1. **Branch order:** `ProcessedStatementWorkspace` when `chargeCount > 0` before Nationwide native rows → empty BVD workspace / “0 charges”.
+2. **Hardcoded label:** `BVD {invoiceNumber}` on a non-BVD provider.
 
-This is **BVD plumbing as default Fuel plumbing**, not a Nationwide parse failure. Fix belongs in the **MUST BECOME SHARED** bucket (canonical-first activity + registry-backed evidence expand), not a Nationwide-only patch—unless an emergency UX fix is approved before refactor.
+**Phase 2 direction:** canonical-first activity + `ProcessedFuelStatementShell` + registry evidence panels (§1.7, §1.9). Authenticated browser confirmation on demo remains pending (see **Status**).
 
 ---
 
@@ -351,9 +424,9 @@ ProcessedFuelShell({ batchId })  // canonical-first Open
 
 ## 7. Suggested refactor phases (approval-gated)
 
-1. **Document & gate** — This file + `TEST_PROVIDER` fixture spec.  
-2. **Read path** — `GET /fuel/processed` from `fuel_source_batches`; frontend Recent Activity/history canonical-first; registry for evidence expand.  
-3. **Write path** — `process_fuel_import` delegating to existing `*_stage_to_permanent` (no behavior change).  
+1. **Document & gate** — This file + `TEST_PROVIDER` fixture spec. **Done** (approved + hardened).  
+2. **Read path** — **Done (Phase 2, `feat/fuel-card`):** `GET /fuel/processed` from `fuel_source_batches`; Fuel home Recent Activity canonical-first; registry for evidence expand.  
+3. **Write path** — `process_fuel_import` delegating to existing `*_stage_to_permanent` (no behavior change). **Not started (Phase 3).**  
 4. **Route migration** — Pre-wall `/fuel/providers/{provider_code}/imports/{import_id}`; post-wall `/fuel/processed/{batch_id}`; legacy aliases deprecated.  
 5. **Dashboard** — Shared `needs_review` via provider registry adapters.  
 6. **WEX** — Allow whatever provider-specific **source** adapter, native schema, profile, mapper, reconciliation, and native renderer real WEX evidence requires — **no new post-wall application workflow** (history, dashboard, search, classification, responsibility, settlement entrypoints stay shared).
@@ -369,18 +442,17 @@ Before any refactor PR:
 - [ ] Funnel, provider wall, and Process bridge wording accepted as locked  
 - [ ] Pre-wall vs post-wall routes and `batch_id` identity accepted  
 - [ ] Canonical-first history/dashboard/search vs native evidence search accepted  
+- [ ] Stable canonical contract (§1.6), Fuel home selector lock (§1.7), payroll/accounting lock (§1.8), UI evidence boundary (§1.9) accepted  
 - [ ] `process_fuel_import` contract matches proven BVD/Nationwide ordering  
 - [ ] Extraction helper vs forbidden workflow distinction accepted  
 - [ ] `TEST_PROVIDER` gate + registry dispatch requirement accepted  
 - [ ] File map K / M / S reviewed  
 - [ ] Phase order agreed (read-first recommended)
 
-**After this delta is approved (documentation follow-up, not blocking code refactor):**
+**Documentation cross-reference (done):**
 
-- [ ] Add a short **Provider Wall Architecture Lock** cross-reference (link to this file) in:
-  - `docs/FUEL_CARD_MODULE_DESIGN.md`
-  - `docs/FUEL_CARD_IMPLEMENTATION_PLAN.md`  
-  so future work cannot miss the boundary.
+- [x] **Provider Wall Architecture Lock** in `docs/FUEL_CARD_MODULE_DESIGN.md`  
+- [ ] Optional: same xref in `docs/FUEL_CARD_IMPLEMENTATION_PLAN.md` if not already present  
 
 ---
 
