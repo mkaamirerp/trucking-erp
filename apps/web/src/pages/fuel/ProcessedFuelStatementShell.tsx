@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { getFuelProcessedBatch } from "../../api";
 import TruckErpProcessedFuelWorkspace from "./TruckErpProcessedFuelWorkspace";
-import { getProcessedFuelEvidenceRenderer } from "./processedFuelProviderRenderers";
 
 export type ProcessedFuelShellProps = {
   batchId: number;
@@ -11,7 +10,8 @@ export type ProcessedFuelShellProps = {
   transactionCount: number;
   controlCount: number;
   sourceImportRef: string | null;
-  onOpenFull?: () => void;
+  /** Opens provider-native overlay from Fuel home (not inline on expand). */
+  onOpenSource?: () => void;
 };
 
 function providerDisplayLabel(code: string, label: string): string {
@@ -26,11 +26,9 @@ export default function ProcessedFuelStatementShell({
   transactionCount,
   controlCount,
   sourceImportRef,
-  onOpenFull,
+  onOpenSource,
 }: ProcessedFuelShellProps) {
   const [lineageSourceImportRef, setLineageSourceImportRef] = useState<string | null>(sourceImportRef);
-
-  const EvidencePanel = getProcessedFuelEvidenceRenderer(providerCode);
 
   useEffect(() => {
     setLineageSourceImportRef(sourceImportRef);
@@ -66,33 +64,18 @@ export default function ProcessedFuelStatementShell({
         invoiceNumber={invoiceNumber}
         sourceImportRef={lineageSourceImportRef}
         fullInvoiceLink={
-          onOpenFull ? (
+          onOpenSource ? (
             <button
               type="button"
               className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
-              onClick={onOpenFull}
+              data-testid={`fuel-open-source-${batchId}`}
+              onClick={onOpenSource}
             >
-              Open full invoice
+              Open source
             </button>
           ) : null
         }
       />
-
-      <section data-testid={`fuel-processed-evidence-${batchId}`}>
-        <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
-          Source evidence
-        </h4>
-        {EvidencePanel ? (
-          <EvidencePanel
-            batchId={batchId}
-            sourceImportRef={lineageSourceImportRef}
-            invoiceNumber={invoiceNumber}
-            onOpenFull={onOpenFull}
-          />
-        ) : (
-          <p className="text-xs text-[var(--trk-text-muted)]">No native evidence renderer for {providerCode}.</p>
-        )}
-      </section>
     </div>
   );
 }

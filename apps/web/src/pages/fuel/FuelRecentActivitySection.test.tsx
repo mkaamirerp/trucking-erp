@@ -10,22 +10,6 @@ const apiMocks = vi.hoisted(() => ({
   getFuelNationwideSourceReconciliation: vi.fn(),
 }));
 
-vi.mock("./processedFuelProviderRenderers", () => ({
-  getProcessedFuelEvidenceRenderer: (code: string) => {
-    if (code === "NATIONWIDE") {
-      return function NationwideEvidenceMock() {
-        return <div data-testid="nationwide-source-evidence-panel-mock">Nationwide evidence</div>;
-      };
-    }
-    return null;
-  },
-  getProcessedFuelRecordOverlay: () => null,
-}));
-
-vi.mock("./TruckErpProcessedFuelWorkspace", () => ({
-  default: () => <div data-testid="truckerp-processed-fuel-workspace-mock">workspace</div>,
-}));
-
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
   return {
@@ -37,7 +21,59 @@ vi.mock("../../api", async (importOriginal) => {
   };
 });
 
+const processedOverlayMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./processedFuelProviderRenderers", () => ({
+  getProcessedFuelRecordOverlay: () =>
+    function MockOverlay(props: { sourceImportRef: string; onClose?: () => void }) {
+      processedOverlayMock(props);
+      return (
+        <div data-testid="fuel-processed-overlay-from-activity">
+          <button type="button" onClick={() => props.onClose?.()}>Close overlay</button>
+        </div>
+      );
+    },
+}));
+
 import FuelRecentActivitySection from "./FuelRecentActivitySection";
+import { getProcessedFuelRecordOverlay } from "./processedFuelProviderRenderers";
+
+const bvdTxn = {
+  id: 1,
+  import_id: "bvd-uuid-1",
+  row_type: "TRANSACTION",
+  transaction_date: "2025-01-02",
+  prod: "DF",
+  final_amt: "10.00",
+  cur: "US",
+};
+
+const bvdSummary: FuelProcessedSummary = {
+  batch_id: 42,
+  provider_code: "BVD",
+  source_import_ref: "bvd-uuid-1",
+  source_storage_ref: null,
+  account_reference: null,
+  invoice_number: "972201",
+  period_start: null,
+  period_end: null,
+  due_date: null,
+  finalized_at: new Date().toISOString(),
+  batch_status: "FINALIZED",
+  transaction_count: 1,
+  control_count: 0,
+  currency_totals: [],
+  provider_control_totals: [],
+  cad_transaction_total: "1",
+  usd_transaction_total: null,
+  usd_provider_control: null,
+  purchase_card_count: 1,
+  purchase_card_numbers: [],
+  total_amount: "1",
+  currency: "CN",
+  read_only: true,
+  review_status: "SOURCE_REVIEWED",
+};
 
 const nationwideSummary: FuelProcessedSummary = {
   batch_id: 8,
@@ -74,15 +110,19 @@ describe("FuelRecentActivitySection", () => {
   let root: Root;
 
   beforeEach(() => {
-    apiMocks.getFuelProcessedBatch.mockResolvedValue({
-      ...nationwideSummary,
-      canonical_transactions: [{ id: 1, batch_id: 8, total_amount: "10", currency_raw: "USD" }],
-    });
+    processedOverlayMock.mockReset();
+    apiMocks.getFuelProcessedBatch.mockImplementation(async (batchId: number) => ({
+      batch_id: batchId,
+      source_import_ref: batchId === 8 ? nationwideSummary.source_import_ref : bvdSummary.source_import_ref,
+      canonical_transactions: [],
+      total_amount: "10",
+      currency: "USD",
+    }));
     apiMocks.getFuelNationwideImportRows.mockResolvedValue([
       { id: 1, row_type: "TRANSACTION", import_id: nationwideSummary.source_import_ref },
     ]);
     apiMocks.getFuelNationwideSourceReconciliation.mockResolvedValue({});
-    apiMocks.getFuelBvdImportRows.mockReset();
+    apiMocks.getFuelBvdImportRows.mockResolvedValue([bvdTxn]);
   });
 
   afterEach(() => {
@@ -90,38 +130,83 @@ describe("FuelRecentActivitySection", () => {
     container.remove();
   });
 
-  async function renderSection() {
+  async function renderSection(
+    activity: FuelProcessedSummary[],
+    onOpenProcessed?: (batchId: number, provider: string, ref: string | null) => void,
+  ) {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <FuelRecentActivitySection
-          activity={[nationwideSummary]}
-          loading={false}
-          onOpenProcessed={vi.fn()}
-        />,
+        <FuelRecentActivitySection activity={activity} loading={false} onOpenProcessed={onOpenProcessed} />,
       );
       await new Promise((r) => setTimeout(r, 0));
     });
   }
 
-  it("expands Nationwide into shared processed shell, not BVD workspace", async () => {
-    await renderSection();
+  async function expandBatch(batchId: number) {
     const expandBtn = container.querySelector(
-      `[data-testid="fuel-activity-invoice-${nationwideSummary.batch_id}"] button`,
+      `[data-testid="fuel-activity-invoice-${batchId}"] button`,
     ) as HTMLButtonElement;
     await act(async () => {
       expandBtn.click();
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 80));
     });
+  }
+
+  it("expands Nationwide into TruckERP workspace without inline source evidence", async () => {
+    await renderSection([nationwideSummary], vi.fn());
+    await expandBatch(8);
     expect(container.querySelector(`[data-testid="fuel-processed-shell-8"]`)).toBeTruthy();
     expect(container.textContent).toContain("Nationwide 20250522B-06142026");
-    expect(container.textContent).not.toContain("BVD 20250522B");
+    expect(container.textContent).not.toMatch(/Source evidence/i);
+    expect(container.querySelector('[data-testid="fuel-processed-evidence-8"]')).toBeNull();
+    expect(container.querySelector('[data-testid="truckerp-processed-fuel-workspace"]')).toBeTruthy();
     expect(apiMocks.getFuelBvdImportRows).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="nationwide-source-evidence-panel-mock"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="truckerp-processed-fuel-workspace-mock"]')).toBeTruthy();
-    expect(container.textContent?.toLowerCase()).not.toContain("canonical transactions");
-    expect(apiMocks.getFuelProcessedBatch).toHaveBeenCalled();
+  });
+
+  it("expands BVD into TruckERP workspace without inline BVD evidence panel", async () => {
+    await renderSection([bvdSummary], vi.fn());
+    await expandBatch(42);
+    expect(container.querySelector('[data-testid="truckerp-processed-fuel-workspace"]')).toBeTruthy();
+    expect(container.textContent).not.toMatch(/Source evidence/i);
+    expect(apiMocks.getFuelBvdImportRows).toHaveBeenCalledWith("bvd-uuid-1");
+  });
+
+  it("Open source from expanded workspace passes batch lineage; row stays expanded", async () => {
+    const onOpenProcessed = vi.fn();
+    await renderSection([nationwideSummary], onOpenProcessed);
+    await expandBatch(8);
+    const openBtn = container.querySelector('[data-testid="fuel-open-source-8"]') as HTMLButtonElement;
+    await act(async () => {
+      openBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(onOpenProcessed).toHaveBeenCalledWith(8, "NATIONWIDE", nationwideSummary.source_import_ref);
+    expect(container.querySelector('[data-testid="fuel-activity-detail-8"]')).toBeTruthy();
+  });
+
+  it("Nationwide Open source overlay mounts via record overlay registry", async () => {
+    const Overlay = getProcessedFuelRecordOverlay("NATIONWIDE");
+    expect(Overlay).toBeTruthy();
+    const overlayHost = document.createElement("div");
+    document.body.appendChild(overlayHost);
+    const overlayRoot = createRoot(overlayHost);
+    await act(async () => {
+      overlayRoot.render(
+        <Overlay
+          sourceImportRef={nationwideSummary.source_import_ref!}
+          variant="overlay"
+          onClose={() => undefined}
+        />,
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(processedOverlayMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceImportRef: nationwideSummary.source_import_ref }),
+    );
+    act(() => overlayRoot.unmount());
+    overlayHost.remove();
   });
 });

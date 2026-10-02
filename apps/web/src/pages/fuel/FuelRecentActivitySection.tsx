@@ -199,7 +199,7 @@ export default function FuelRecentActivitySection({
                               onOpenProcessed(summary.batch_id, summary.provider_code, summary.source_import_ref);
                             }}
                           >
-                            Open
+                            Open source
                           </button>
                         ) : null}
                       </td>
@@ -219,7 +219,7 @@ export default function FuelRecentActivitySection({
                               transactionCount={summary.transaction_count}
                               controlCount={summary.control_count}
                               sourceImportRef={summary.source_import_ref}
-                              onOpenFull={
+                              onOpenSource={
                                 onOpenProcessed
                                   ? () =>
                                       onOpenProcessed(

@@ -171,7 +171,7 @@ describe("FuelMainPage", () => {
     expect(apiMocks.listFuelProcessed.mock.calls.length).toBeGreaterThan(initialCalls);
   });
 
-  it("Open triggers processed overlay via batch lineage", async () => {
+  it("Open source triggers processed overlay via batch lineage", async () => {
     apiMocks.listFuelProcessed.mockResolvedValue([processedRow]);
     await renderFuel();
     await act(async () => {
@@ -186,5 +186,27 @@ describe("FuelMainPage", () => {
       expect.objectContaining({ sourceImportRef: "done-1" }),
     );
     expect(container.querySelector('[data-testid="fuel-processed-overlay-mock"]')).toBeTruthy();
+  });
+
+  it("Close on processed source overlay returns to Fuel home", async () => {
+    apiMocks.listFuelProcessed.mockResolvedValue([processedRow]);
+    await renderFuel();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const openBtn = container.querySelector('[data-testid="fuel-activity-open-42"]') as HTMLButtonElement;
+    await act(async () => {
+      openBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const closeBtn = container.querySelector(
+      '[data-testid="fuel-processed-overlay-mock"] button',
+    ) as HTMLButtonElement;
+    await act(async () => {
+      closeBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(container.querySelector('[data-testid="fuel-processed-overlay-mock"]')).toBeNull();
+    expect(container.querySelector('[data-testid="fuel-home"]')).toBeTruthy();
   });
 });
