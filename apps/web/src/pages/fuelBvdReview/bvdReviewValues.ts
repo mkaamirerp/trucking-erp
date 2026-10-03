@@ -7,6 +7,10 @@ export function draftKey(rowId: number, field: string) {
 }
 
 export function extractedValue(row: FuelBvdRow, field: string): string {
+  const fromCorrection = row.field_corrections?.[field]?.extracted_value;
+  if (fromCorrection !== undefined && fromCorrection !== null) {
+    return String(fromCorrection);
+  }
   const v = row[field as keyof FuelBvdRow];
   if (v === null || v === undefined || v === "") return "";
   return String(v);

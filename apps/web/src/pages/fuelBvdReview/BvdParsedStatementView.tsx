@@ -12,12 +12,11 @@ import {
 import ProcessedStatementFilterBar from "./ProcessedStatementFilterBar";
 import {
   BVD_FIELD_LABELS,
-  BVD_HEADER_CLIENT_FIELDS,
-  BVD_HEADER_DATE_FIELDS,
-  BVD_HEADER_IDENTITY_STRIP_FIELDS,
+  BVD_HEADER_FIELDS,
   BVD_EXPRESS_COLUMNS,
   BVD_TRANSACTION_COLUMNS,
 } from "../fuelBvdReviewLabels";
+import { fieldsForRowType } from "./bvdFieldSlots";
 import BvdCorrectedFieldCell from "./BvdCorrectedFieldCell";
 import { displayCell, operationalCell, sortBvdRows } from "./bvdParsedDisplay";
 import { type BvdValidationMetric, type BvdValidationStatus } from "./bvdParsedValidation";
@@ -79,6 +78,44 @@ function HeaderCell({ label, value }: { label: string; value: string }) {
   );
 }
 
+function AuditHeaderField({
+  header,
+  field,
+  presentation,
+  drafts,
+  readOnly,
+  onFieldDraft,
+  onInlineCommit,
+}: {
+  header: FuelBvdRow;
+  field: string;
+  presentation: "processing-review" | "full-stored-detail";
+  drafts: DraftMap;
+  readOnly: boolean;
+  onFieldDraft?: (rowId: number, field: string, value: string) => void;
+  onInlineCommit?: (rowId: number, field: string, value: string) => void | Promise<void>;
+}) {
+  const label = BVD_FIELD_LABELS[field] ?? field;
+  const value = displayCell(header, field);
+  if (presentation === "processing-review" && (onFieldDraft || onInlineCommit)) {
+    return (
+      <div className="bvd-audit-details__cell">
+        <span className="bvd-audit-details__label">{label}</span>
+        <BvdCorrectedFieldCell
+          row={header}
+          field={field}
+          drafts={drafts}
+          presentation={presentation}
+          readOnly={readOnly}
+          onFieldDraft={onFieldDraft}
+          onInlineCommit={onInlineCommit}
+        />
+      </div>
+    );
+  }
+  return <HeaderCell label={label} value={value} />;
+}
+
 function PdfIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -122,6 +159,7 @@ type Props = {
   /** Authoritative backend source-reconciliation (effective reviewed values). */
   sourceReconciliation?: FuelBvdSourceReconciliation | null;
   readOnly?: boolean;
+  onFieldDraft?: (rowId: number, field: string, value: string) => void;
   onInlineCommit?: (rowId: number, field: string, value: string) => void | Promise<void>;
   /** Processed read-only record: local search + date filter (one statement only). */
   statementSearchContext?: ProcessedStatementSearchContext;
@@ -135,6 +173,7 @@ export default function BvdParsedStatementView({
   drafts = {},
   sourceReconciliation = null,
   readOnly = false,
+  onFieldDraft,
   onInlineCommit,
   statementSearchContext,
 }: Props) {
@@ -191,6 +230,8 @@ export default function BvdParsedStatementView({
   const unitsMetric = validation.metrics.find((m) => m.id === "units_processed");
 
   const [controlsOpen, setControlsOpen] = useState(false);
+  const canEditInline =
+    presentation === "processing-review" && Boolean(onFieldDraft || onInlineCommit);
 
   const productGrandLines = grandTotals.filter((r) => grandTotalRowKind(r) === "product-line");
   const statementGrandLine = grandTotals.find((r) => grandTotalRowKind(r) === "statement-total");
@@ -253,40 +294,24 @@ export default function BvdParsedStatementView({
           </div>
 
           {header ? (
-            <details className="bvd-audit-details">
+            <details className="bvd-audit-details" open={presentation === "processing-review"}>
               <summary className="bvd-audit-details__summary">
                 Invoice, client &amp; tax details (audit)
               </summary>
               <div className="bvd-audit-details__body">
                 <div className="bvd-audit-details__grid">
-                  <HeaderCell label="Invoice #" value={displayCell(header, "invoice_number")} />
-                  {BVD_HEADER_DATE_FIELDS.map((field) => (
-                    <HeaderCell
+                  {BVD_HEADER_FIELDS.map((field) => (
+                    <AuditHeaderField
                       key={field}
-                      label={BVD_FIELD_LABELS[field] ?? field}
-                      value={displayCell(header, field)}
+                      header={header}
+                      field={field}
+                      presentation={presentation}
+                      drafts={drafts}
+                      readOnly={readOnly}
+                      onFieldDraft={onFieldDraft}
+                      onInlineCommit={onInlineCommit}
                     />
                   ))}
-                  {BVD_HEADER_IDENTITY_STRIP_FIELDS.map((field) => (
-                    <HeaderCell
-                      key={field}
-                      label={BVD_FIELD_LABELS[field] ?? field}
-                      value={displayCell(header, field)}
-                    />
-                  ))}
-                </div>
-                <div className="bvd-audit-details__client">
-                  {BVD_HEADER_CLIENT_FIELDS.map((field) => {
-                    const val = displayCell(header, field);
-                    if (!val) return null;
-                    return (
-                      <HeaderCell
-                        key={field}
-                        label={BVD_FIELD_LABELS[field] ?? field}
-                        value={val}
-                      />
-                    );
-                  })}
                 </div>
               </div>
             </details>
@@ -346,6 +371,7 @@ export default function BvdParsedStatementView({
                             drafts={presentation === "processing-review" ? drafts : {}}
                             presentation={presentation}
                             readOnly={readOnly}
+                            onFieldDraft={onFieldDraft}
                             onInlineCommit={onInlineCommit}
                           />
                         </td>
@@ -393,6 +419,7 @@ export default function BvdParsedStatementView({
                               drafts={presentation === "processing-review" ? drafts : {}}
                               presentation={presentation}
                               readOnly={readOnly}
+                              onFieldDraft={onFieldDraft}
                               onInlineCommit={onInlineCommit}
                             />
                           )}
@@ -440,15 +467,32 @@ export default function BvdParsedStatementView({
                     </tr>
                   </thead>
                   <tbody>
-                    {controlRows.map((row) => (
-                      <tr key={row.id} className="bvd-control-row">
-                        {txnColumns.map((c, i) => (
-                          <td key={c.field}>
-                            {i === 0 ? controlRowTitle(row) : displayCell(row, c.field)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
+                    {controlRows.map((row) => {
+                      const editableFields = new Set(fieldsForRowType(row.row_type));
+                      return (
+                        <tr key={row.id} className="bvd-control-row">
+                          {txnColumns.map((c, i) => (
+                            <td key={c.field}>
+                              {i === 0 ? (
+                                controlRowTitle(row)
+                              ) : canEditInline && editableFields.has(c.field) ? (
+                                <BvdCorrectedFieldCell
+                                  row={row}
+                                  field={c.field}
+                                  drafts={drafts}
+                                  presentation={presentation}
+                                  readOnly={readOnly}
+                                  onFieldDraft={onFieldDraft}
+                                  onInlineCommit={onInlineCommit}
+                                />
+                              ) : (
+                                displayCell(row, c.field)
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -468,14 +512,47 @@ export default function BvdParsedStatementView({
                 const isZero =
                   (!amount || amount === "0.00" || amount === "0") &&
                   (!qty || qty === "0.00" || qty === "0");
+                const grandEditable = canEditInline;
+                const amountField = fieldsForRowType(row.row_type).includes("final_amount")
+                  ? "final_amount"
+                  : "final_amt";
                 return (
                   <article
                     key={row.id}
                     className={`bvd-grand-card${isZero ? " bvd-grand-card--zero" : ""}`}
                   >
                     <span className="bvd-grand-card__label">{label}</span>
-                    <span className="bvd-grand-card__amount">{amount || "—"}</span>
-                    {qty ? <span className="bvd-grand-card__qty">QTY {qty}</span> : null}
+                    <span className="bvd-grand-card__amount">
+                      {grandEditable ? (
+                        <BvdCorrectedFieldCell
+                          row={row}
+                          field={amountField}
+                          drafts={drafts}
+                          presentation={presentation}
+                          readOnly={readOnly}
+                          onFieldDraft={onFieldDraft}
+                          onInlineCommit={onInlineCommit}
+                        />
+                      ) : (
+                        amount || "—"
+                      )}
+                    </span>
+                    <span className="bvd-grand-card__qty">
+                      QTY{" "}
+                      {grandEditable ? (
+                        <BvdCorrectedFieldCell
+                          row={row}
+                          field="qty"
+                          drafts={drafts}
+                          presentation={presentation}
+                          readOnly={readOnly}
+                          onFieldDraft={onFieldDraft}
+                          onInlineCommit={onInlineCommit}
+                        />
+                      ) : (
+                        qty || "—"
+                      )}
+                    </span>
                   </article>
                 );
               })}
@@ -483,11 +560,40 @@ export default function BvdParsedStatementView({
                 <article className="bvd-grand-card bvd-grand-card--statement-total">
                   <span className="bvd-grand-card__label">Grand Total</span>
                   <span className="bvd-grand-card__amount">
-                    {displayCell(statementGrandLine, "final_amount") ||
-                      displayCell(statementGrandLine, "final_amt")}
+                    {canEditInline ? (
+                      <BvdCorrectedFieldCell
+                        row={statementGrandLine}
+                        field={
+                          fieldsForRowType(statementGrandLine.row_type).includes("final_amount")
+                            ? "final_amount"
+                            : "final_amt"
+                        }
+                        drafts={drafts}
+                        presentation={presentation}
+                        readOnly={readOnly}
+                        onFieldDraft={onFieldDraft}
+                        onInlineCommit={onInlineCommit}
+                      />
+                    ) : (
+                      displayCell(statementGrandLine, "final_amount") ||
+                      displayCell(statementGrandLine, "final_amt")
+                    )}
                   </span>
                   <span className="bvd-grand-card__qty">
-                    QTY {displayCell(statementGrandLine, "qty") || "—"}
+                    QTY{" "}
+                    {canEditInline ? (
+                      <BvdCorrectedFieldCell
+                        row={statementGrandLine}
+                        field="qty"
+                        drafts={drafts}
+                        presentation={presentation}
+                        readOnly={readOnly}
+                        onFieldDraft={onFieldDraft}
+                        onInlineCommit={onInlineCommit}
+                      />
+                    ) : (
+                      displayCell(statementGrandLine, "qty") || "—"
+                    )}
                   </span>
                 </article>
               ) : null}
@@ -501,8 +607,35 @@ export default function BvdParsedStatementView({
             <div className="bvd-statement__legend">
               {legends.map((row) => (
                 <div key={row.id} className="bvd-statement__legend-row">
-                  <span className="bvd-statement__value">{displayCell(row, "legend_code")}</span>
-                  <span className="bvd-statement__value">{displayCell(row, "legend_product_name")}</span>
+                  {canEditInline ? (
+                    <>
+                      <BvdCorrectedFieldCell
+                        row={row}
+                        field="legend_code"
+                        drafts={drafts}
+                        presentation={presentation}
+                        readOnly={readOnly}
+                        onFieldDraft={onFieldDraft}
+                        onInlineCommit={onInlineCommit}
+                      />
+                      <BvdCorrectedFieldCell
+                        row={row}
+                        field="legend_product_name"
+                        drafts={drafts}
+                        presentation={presentation}
+                        readOnly={readOnly}
+                        onFieldDraft={onFieldDraft}
+                        onInlineCommit={onInlineCommit}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <span className="bvd-statement__value">{displayCell(row, "legend_code")}</span>
+                      <span className="bvd-statement__value">
+                        {displayCell(row, "legend_product_name")}
+                      </span>
+                    </>
+                  )}
                 </div>
               ))}
             </div>

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FuelBvdRow } from "../../api";
 import BvdCorrectedFieldCell from "./BvdCorrectedFieldCell";
 
@@ -36,6 +36,28 @@ describe("BvdCorrectedFieldCell", () => {
     });
     expect(container.textContent).toContain("1,610.86");
     expect(container.textContent).toContain("*");
+  });
+
+  it("draft mode exposes edit trigger when onFieldDraft is set", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const r = row({
+      id: 2,
+      row_type: "TRANSACTION",
+      final_amt: "272.00",
+    });
+    act(() => {
+      root.render(
+        <BvdCorrectedFieldCell
+          row={r}
+          field="final_amt"
+          presentation="processing-review"
+          onFieldDraft={vi.fn()}
+        />,
+      );
+    });
+    expect(container.querySelector("button.bvd-inline-edit-trigger")).toBeTruthy();
   });
 
   it("shows extracted line on processed detail", () => {

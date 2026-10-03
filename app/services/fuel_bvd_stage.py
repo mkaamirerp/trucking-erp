@@ -653,6 +653,15 @@ async def save_stage_import_review(
         extracted_str = "" if extracted is None else str(extracted)
         reviewed_value = str(item.get("reviewed_value", ""))
         if reviewed_value == extracted_str:
+            await db.execute(
+                delete(FuelBvdStageFieldCorrection).where(
+                    FuelBvdStageFieldCorrection.tenant_id == tenant_id,
+                    FuelBvdStageFieldCorrection.stage_id == stage_id,
+                    FuelBvdStageFieldCorrection.stage_row_id == row_id,
+                    FuelBvdStageFieldCorrection.field_name == field_name,
+                )
+            )
+            written += 1
             continue
         try:
             validate_reviewed_bvd_field(field_name, reviewed_value, row_type=row.row_type)

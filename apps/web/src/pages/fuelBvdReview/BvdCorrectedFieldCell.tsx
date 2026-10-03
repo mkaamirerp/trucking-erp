@@ -14,6 +14,8 @@ type Props = {
   drafts?: DraftMap;
   presentation: "processing-review" | "full-stored-detail";
   readOnly?: boolean;
+  /** Persist unsaved edits locally until Save review / Process (processing workspace). */
+  onFieldDraft?: (rowId: number, field: string, value: string) => void;
   onInlineCommit?: (rowId: number, field: string, value: string) => void | Promise<void>;
 };
 
@@ -23,6 +25,7 @@ export default function BvdCorrectedFieldCell({
   drafts = {},
   presentation,
   readOnly = false,
+  onFieldDraft,
   onInlineCommit,
 }: Props) {
   const extracted = extractedValue(row, field);
@@ -32,7 +35,7 @@ export default function BvdCorrectedFieldCell({
   const editable =
     presentation === "processing-review" &&
     !readOnly &&
-    Boolean(onInlineCommit) &&
+    Boolean(onFieldDraft || onInlineCommit) &&
     fieldsForRowType(row.row_type).includes(field);
 
   const [editing, setEditing] = useState(false);
@@ -53,8 +56,12 @@ export default function BvdCorrectedFieldCell({
   }, [editing]);
 
   const commit = async () => {
-    setEditing(false);
     const next = local.trim();
+    setEditing(false);
+    if (onFieldDraft) {
+      onFieldDraft(row.id, field, next);
+      return;
+    }
     const baseline = extracted || "";
     if (next === baseline && !corrected) {
       return;

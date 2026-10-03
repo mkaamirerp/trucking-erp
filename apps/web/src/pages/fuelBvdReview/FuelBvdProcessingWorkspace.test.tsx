@@ -37,10 +37,6 @@ vi.mock("./BvdParsedStatementView", () => ({
   default: () => <div data-testid="bvd-parsed-view">statement</div>,
 }));
 
-vi.mock("./BvdReviewCorrectionsPanel", () => ({
-  default: () => <div data-testid="bvd-review-corrections-panel">corrections</div>,
-}));
-
 vi.mock("./BvdPdfPopupModal", () => ({
   default: () => null,
 }));

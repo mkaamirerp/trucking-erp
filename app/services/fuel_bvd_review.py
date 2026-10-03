@@ -262,6 +262,15 @@ async def save_bvd_import_review(
         extracted_str = "" if extracted is None else str(extracted)
         reviewed_value = str(item.get("reviewed_value", ""))
         if reviewed_value == extracted_str:
+            await db.execute(
+                delete(FuelBvdFieldCorrection).where(
+                    FuelBvdFieldCorrection.tenant_id == tenant_id,
+                    FuelBvdFieldCorrection.import_id == import_id,
+                    FuelBvdFieldCorrection.fuel_bvd_id == row_id,
+                    FuelBvdFieldCorrection.field_name == field_name,
+                )
+            )
+            written += 1
             continue
         try:
             validate_reviewed_bvd_field(

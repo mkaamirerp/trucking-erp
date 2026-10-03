@@ -19,6 +19,7 @@ describe("bvdReviewValues", () => {
   it("uses persisted correction overlay", () => {
     const row: FuelBvdRow = {
       ...baseRow,
+      unit_number: "110A",
       field_corrections: {
         unit_number: { extracted_value: "1100", reviewed_value: "110A" },
       },

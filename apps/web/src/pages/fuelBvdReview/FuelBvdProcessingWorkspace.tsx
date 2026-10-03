@@ -16,12 +16,12 @@ import { OPS } from "../../routes";
 import FuelFullScreenOverlay from "../fuel/FuelFullScreenOverlay";
 import BvdParsedStatementView from "./BvdParsedStatementView";
 import BvdPdfPopupModal from "./BvdPdfPopupModal";
-import BvdReviewCorrectionsPanel from "./BvdReviewCorrectionsPanel";
 import { loadBvdPdfDocument } from "./loadBvdPdfDocument";
 import { buildFuelProcessedReturnPath } from "./bvdUploadCompletion";
 import {
   draftKey,
   extractedValue,
+  persistedReviewed,
   type DraftMap,
   reviewedValue,
 } from "./bvdReviewValues";
@@ -98,7 +98,12 @@ export function buildCorrectionsPayload(rows: FuelBvdRow[], drafts: DraftMap) {
     for (const field of fields) {
       const ext = extractedValue(row, field);
       const rev = reviewedValue(row, field, drafts);
-      if (rev !== ext) corrections.push({ fuel_bvd_id: row.id, field_name: field, reviewed_value: rev });
+      const saved = persistedReviewed(row, field);
+      if (rev !== ext) {
+        corrections.push({ fuel_bvd_id: row.id, field_name: field, reviewed_value: rev });
+      } else if (saved !== null && saved !== ext) {
+        corrections.push({ fuel_bvd_id: row.id, field_name: field, reviewed_value: ext });
+      }
     }
   }
   return corrections;
@@ -186,32 +191,28 @@ export default function FuelBvdProcessingWorkspace({
   }, [rows, header]);
   const readOnly = reviewStatus === "SOURCE_REVIEWED";
 
-  const onDraft = useCallback((rowId: number, field: string, value: string) => {
-    setDrafts((prev) => ({ ...prev, [draftKey(rowId, field)]: value }));
-  }, []);
-
-  const handleInlineCommit = async (rowId: number, field: string, value: string) => {
-    if (readOnly) return;
-    setSaving(true);
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      await saveFuelBvdReview(importId, [
-        { fuel_bvd_id: rowId, field_name: field, reviewed_value: value },
-      ]);
+  const onFieldDraft = useCallback(
+    (rowId: number, field: string, value: string) => {
+      if (readOnly) return;
+      setActionError(null);
+      setActionSuccess(null);
+      const row = rows.find((r) => r.id === rowId);
+      const ext = row ? extractedValue(row, field) : "";
+      const key = draftKey(rowId, field);
+      const trimmed = value.trim();
       setDrafts((prev) => {
-        const next = { ...prev };
-        delete next[draftKey(rowId, field)];
-        return next;
+        if (trimmed === ext) {
+          if (!(key in prev)) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        }
+        if (prev[key] === trimmed) return prev;
+        return { ...prev, [key]: trimmed };
       });
-      await load();
-      setActionSuccess("Review saved — validations refreshed");
-    } catch (e: unknown) {
-      setActionError(formatFuelBvdReviewActionError(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+    },
+    [readOnly, rows],
+  );
 
   const handleSaveReview = async () => {
     if (readOnly) return;
@@ -219,13 +220,16 @@ export default function FuelBvdProcessingWorkspace({
     setActionError(null);
     setActionSuccess(null);
     try {
-      const result = await saveFuelBvdReview(importId, buildCorrectionsPayload(rows, drafts));
+      const pending = buildCorrectionsPayload(rows, drafts);
+      const result = await saveFuelBvdReview(importId, pending);
       setDrafts({});
       await load();
       setActionSuccess(
         result.saved_corrections > 0
-          ? `Review saved (${result.saved_corrections} correction${result.saved_corrections === 1 ? "" : "s"})`
-          : "Review saved",
+          ? `Review saved (${result.saved_corrections} correction${result.saved_corrections === 1 ? "" : "s"}) — checks refreshed`
+          : pending.length > 0
+            ? "Review saved — checks refreshed"
+            : "Review saved",
       );
     } catch (e: unknown) {
       setActionError(formatFuelBvdReviewActionError(e));
@@ -375,9 +379,8 @@ export default function FuelBvdProcessingWorkspace({
           drafts={drafts}
           sourceReconciliation={sourceReconciliation}
           readOnly={readOnly}
-          onInlineCommit={handleInlineCommit}
+          onFieldDraft={onFieldDraft}
         />
-        <BvdReviewCorrectionsPanel rows={rows} drafts={drafts} readOnly={readOnly} onDraft={onDraft} />
         <footer className="bvd-statement__footer-bar sticky bottom-0 z-20">
           <div className="flex w-full flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -387,7 +390,7 @@ export default function FuelBvdProcessingWorkspace({
                 <p className="text-xs font-medium text-[var(--trk-success)]" role="status">{actionSuccess}</p>
               ) : (
                 <p className="text-xs text-[var(--trk-text-muted)]">
-                  Full provider fields above · PDF on demand · corrections below
+                  Click values to edit inline · Save review to apply changes and refresh checks
                 </p>
               )}
             </div>
