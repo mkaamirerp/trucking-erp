@@ -2,26 +2,19 @@
 # Reload production API: rebuild API image and recreate the API container only.
 # Does not rebuild nginx.
 #
-# Usage (canonical prod tree):
+# Usage:
 #   /home/admin/trucking_erp/scripts/reload_api.sh
-#
-# Fuel feature worktree (this repo path):
-#   REPO_ROOT=/home/admin/trucking_erp-fuel /home/admin/trucking_erp-fuel/scripts/reload_api.sh
 
 set -euo pipefail
 
 PROD_ROOT="/home/admin/trucking_erp"
-FUEL_ROOT="/home/admin/trucking_erp-fuel"
 
 REPO_ROOT="$(cd "${REPO_ROOT:-$PROD_ROOT}" && pwd)"
 
-case "$REPO_ROOT" in
-  "$PROD_ROOT"|"$FUEL_ROOT") ;;
-  *)
-    echo "ERROR: API reload must use ${PROD_ROOT} or ${FUEL_ROOT} (got ${REPO_ROOT})." >&2
-    exit 1
-    ;;
-esac
+if [ "$REPO_ROOT" != "$PROD_ROOT" ]; then
+  echo "ERROR: API reload must use ${PROD_ROOT} (got ${REPO_ROOT})." >&2
+  exit 1
+fi
 
 cd "$REPO_ROOT"
 
@@ -32,12 +25,8 @@ fi
 export COMPOSE_PROJECT_NAME=trucking_erp
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
-if [ "$REPO_ROOT" = "$PROD_ROOT" ] && [ "$branch" != "main" ]; then
+if [ "$branch" != "main" ]; then
   echo "ERROR: ${PROD_ROOT} reload requires branch main (got ${branch})." >&2
-  exit 1
-fi
-if [ "$REPO_ROOT" = "$FUEL_ROOT" ] && [ "$branch" != "feat/fuel-card" ] && [ "$branch" != "main" ]; then
-  echo "ERROR: ${FUEL_ROOT} reload requires feat/fuel-card or main (got ${branch})." >&2
   exit 1
 fi
 

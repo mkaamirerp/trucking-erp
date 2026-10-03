@@ -174,6 +174,12 @@ export default function FuelRecentActivitySection({
                         className="cursor-pointer py-1.5 pr-3 tabular-nums"
                         onClick={() => toggleInvoice(summary.batch_id)}
                       >
+                        {formatFuelActivityInvoiceDiscount(row)}
+                      </td>
+                      <td
+                        className="cursor-pointer py-1.5 pr-3 tabular-nums"
+                        onClick={() => toggleInvoice(summary.batch_id)}
+                      >
                         {formatFuelActivityCadTotal(row)}
                       </td>
                       <td
