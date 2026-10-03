@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getFuelProcessedBatch } from "../../api";
+import { getFuelProcessedBatch, type FuelProcessedCurrencyFinancial } from "../../api";
 import TruckErpProcessedFuelWorkspace from "./TruckErpProcessedFuelWorkspace";
 
 export type ProcessedFuelShellProps = {
@@ -10,6 +10,7 @@ export type ProcessedFuelShellProps = {
   transactionCount: number;
   controlCount: number;
   sourceImportRef: string | null;
+  currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
   /** Opens provider-native overlay from Fuel home (not inline on expand). */
   onOpenSource?: () => void;
 };
@@ -26,6 +27,7 @@ export default function ProcessedFuelStatementShell({
   transactionCount,
   controlCount,
   sourceImportRef,
+  currencyFinancialSummaries,
   onOpenSource,
 }: ProcessedFuelShellProps) {
   const [lineageSourceImportRef, setLineageSourceImportRef] = useState<string | null>(sourceImportRef);
@@ -63,6 +65,7 @@ export default function ProcessedFuelStatementShell({
         providerLabel={displayLabel}
         invoiceNumber={invoiceNumber}
         sourceImportRef={lineageSourceImportRef}
+        currencyFinancialSummaries={currencyFinancialSummaries}
         fullInvoiceLink={
           onOpenSource ? (
             <button

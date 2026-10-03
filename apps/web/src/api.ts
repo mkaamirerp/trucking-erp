@@ -4349,6 +4349,13 @@ export type FuelProcessedCurrencyTotal = {
   amount: string;
 };
 
+export type FuelProcessedCurrencyFinancial = {
+  currency: string;
+  total_amount: string;
+  /** Null when discount is not known for all lines in this currency bucket. */
+  discount_amount: string | null;
+};
+
 export type FuelProcessedSummary = {
   batch_id: number;
   provider_code: string;
@@ -4364,6 +4371,7 @@ export type FuelProcessedSummary = {
   transaction_count: number;
   control_count: number;
   currency_totals: FuelProcessedCurrencyTotal[];
+  currency_financial_summaries: FuelProcessedCurrencyFinancial[];
   provider_control_totals: FuelProcessedCurrencyTotal[];
   cad_transaction_total: string | null;
   usd_transaction_total: string | null;

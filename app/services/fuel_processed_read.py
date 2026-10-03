@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import Any, Final, Sequence
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -54,16 +54,43 @@ def _iso_datetime(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
+# Pre-canonical persisted rows only (BVD CUR tokens). Not the TruckERP currency model.
+# Provider normalization happens at projection time (classify_currency / provider profiles).
+_LEGACY_READ_CURRENCY_ALIASES: Final[dict[str, str]] = {
+    "US": "USD",
+    "CN": "CAD",
+}
+
+
+def _legacy_read_currency_raw_compat(raw: str | None) -> str | None:
+    """Map legacy source tokens when canonical ``currency`` was not stored on old rows."""
+    cur = (raw or "").strip().upper()
+    if not cur:
+        return None
+    return _LEGACY_READ_CURRENCY_ALIASES.get(cur, cur)
+
+
+def _fuel_transaction_currency_key(row: FuelTransaction) -> str | None:
+    """Group key: canonical ISO on ``FuelTransaction.currency``; raw compat fallback only."""
+    canonical = (row.currency or "").strip()
+    if canonical:
+        return canonical.upper()
+    return _legacy_read_currency_raw_compat(row.currency_raw)
+
+
+def _fuel_control_currency_key(ctrl: FuelSourceControl) -> str | None:
+    canonical = (ctrl.currency or "").strip()
+    if canonical:
+        return canonical.upper()
+    return _legacy_read_currency_raw_compat(ctrl.currency_raw)
+
+
 def _money_amounts_by_currency(rows: Sequence[FuelTransaction]) -> dict[str, Decimal]:
     totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for row in rows:
-        cur = (row.currency or row.currency_raw or "").strip().upper()
+        cur = _fuel_transaction_currency_key(row)
         if not cur:
             continue
-        if cur == "US":
-            cur = "USD"
-        if cur == "CN":
-            cur = "CAD"
         amt = row.total_amount
         if amt is None:
             continue
@@ -71,17 +98,55 @@ def _money_amounts_by_currency(rows: Sequence[FuelTransaction]) -> dict[str, Dec
     return dict(totals)
 
 
+def _discount_rollup_by_currency(rows: Sequence[FuelTransaction]) -> dict[str, Decimal | None]:
+    """Per-currency discount sum when every line is known; None if any line is unknown."""
+    sums: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    unknown: set[str] = set()
+    for row in rows:
+        cur = _fuel_transaction_currency_key(row)
+        if not cur:
+            continue
+        amt = row.provider_discount_amount
+        if amt is None:
+            unknown.add(cur)
+            continue
+        if cur not in unknown:
+            sums[cur] += amt
+    result: dict[str, Decimal | None] = {}
+    for cur in set(sums) | unknown:
+        if cur in unknown:
+            result[cur] = None
+        else:
+            result[cur] = sums[cur]
+    return result
+
+
+def _currency_financial_summaries_from_transactions(
+    transactions: Sequence[FuelTransaction],
+) -> list[dict[str, Any]]:
+    txn_totals = _money_amounts_by_currency(transactions)
+    discount_rollups = _discount_rollup_by_currency(transactions)
+    return [
+        {
+            "currency": cur,
+            "total_amount": _format_decimal(txn_totals[cur]) or "0",
+            "discount_amount": (
+                _format_decimal(discount_rollups[cur])
+                if discount_rollups.get(cur) is not None
+                else None
+            ),
+        }
+        for cur in sorted(txn_totals.keys())
+    ]
+
+
 def _provider_control_by_currency(controls: Sequence[FuelSourceControl]) -> dict[str, Decimal]:
     ranked: dict[str, tuple[int, Decimal]] = {}
     priority = {t: i for i, t in enumerate(_PROVIDER_CONTROL_TYPES)}
     for ctrl in controls:
-        cur = (ctrl.currency or ctrl.currency_raw or "").strip().upper()
+        cur = _fuel_control_currency_key(ctrl)
         if not cur:
             continue
-        if cur == "US":
-            cur = "USD"
-        if cur == "CN":
-            cur = "CAD"
         if ctrl.control_type not in priority:
             continue
         amt = ctrl.declared_amount
@@ -118,6 +183,7 @@ def _summary_from_batch(
         {"currency": cur, "amount": _format_decimal(amt) or "0"}
         for cur, amt in sorted(txn_totals.items())
     ]
+    currency_financial_summaries = _currency_financial_summaries_from_transactions(transactions)
     provider_control_totals = [
         {"currency": cur, "amount": _format_decimal(amt) or "0"}
         for cur, amt in sorted(control_totals.items())
@@ -140,7 +206,9 @@ def _summary_from_batch(
         "transaction_count": len(transactions),
         "control_count": len(controls),
         "currency_totals": currency_totals,
+        "currency_financial_summaries": currency_financial_summaries,
         "provider_control_totals": provider_control_totals,
+        # Legacy compatibility fields (CAD/USD buckets). Primary UI uses currency_financial_summaries.
         "cad_transaction_total": _format_decimal(txn_totals.get("CAD")),
         "usd_transaction_total": _format_decimal(txn_totals.get("USD")),
         "usd_provider_control": _format_decimal(control_totals.get("USD")),

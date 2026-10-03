@@ -38,6 +38,60 @@
   table-layout: fixed;
 }
 
+/* One invoice: N tight currency sub-rows (no inner border/gap between currency lines). */
+.fuel-activity-invoice-band {
+  border-top: 1px solid var(--trk-border);
+}
+
+.fuel-activity-invoice-band--expanded {
+  background: color-mix(in srgb, var(--trk-surface-2) 50%, transparent);
+}
+
+.fuel-activity-invoice-band--highlight {
+  box-shadow: inset 0 0 0 1px var(--trk-success);
+}
+
+.fuel-activity-invoice-band__continuation {
+  border-top: none !important;
+}
+
+.fuel-activity-invoice-band__money {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+  vertical-align: middle;
+  line-height: 1.35;
+}
+
+.fuel-activity-invoice-band:not(:has(+ .fuel-activity-invoice-band__continuation))
+  .fuel-activity-invoice-band__money:not(.fuel-activity-invoice-band__money--continuation) {
+  padding-bottom: 0.375rem;
+}
+
+.fuel-activity-invoice-band:has(+ .fuel-activity-invoice-band__continuation)
+  .fuel-activity-invoice-band__money:not(.fuel-activity-invoice-band__money--continuation) {
+  padding-bottom: 0;
+}
+
+.fuel-activity-invoice-band__continuation .fuel-activity-invoice-band__money--continuation {
+  padding-top: 0;
+  padding-bottom: 0.375rem;
+}
+
+.fuel-activity-invoice-band__identity {
+  vertical-align: middle;
+}
+
+.fuel-activity-money-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  line-height: 1.35;
+}
+
+.fuel-activity-money-stack__line {
+  white-space: nowrap;
+}
+
 .fuel-recent-activity__detail-cell {
   width: 100%;
   max-width: 100%;

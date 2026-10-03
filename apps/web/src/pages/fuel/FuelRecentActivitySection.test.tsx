@@ -63,6 +63,9 @@ const bvdSummary: FuelProcessedSummary = {
   transaction_count: 1,
   control_count: 0,
   currency_totals: [],
+  currency_financial_summaries: [
+    { currency: "CN", total_amount: "1", discount_amount: "0.00" },
+  ],
   provider_control_totals: [],
   cad_transaction_total: "1",
   usd_transaction_total: null,
@@ -92,6 +95,10 @@ const nationwideSummary: FuelProcessedSummary = {
   currency_totals: [
     { currency: "CAD", amount: "1263.85" },
     { currency: "USD", amount: "5197.67" },
+  ],
+  currency_financial_summaries: [
+    { currency: "CAD", total_amount: "1263.85", discount_amount: "0.00" },
+    { currency: "USD", total_amount: "5197.67", discount_amount: "34.56" },
   ],
   provider_control_totals: [{ currency: "USD", amount: "5197.69" }],
   cad_transaction_total: "1263.85",
@@ -154,6 +161,24 @@ describe("FuelRecentActivitySection", () => {
       await new Promise((r) => setTimeout(r, 80));
     });
   }
+
+  it("shows tight per-currency sub-rows for mixed Nationwide invoice", async () => {
+    await renderSection([nationwideSummary], vi.fn());
+    expect(container.querySelector('[data-testid="fuel-activity-currency-line-CAD"]')?.textContent).toBe("CAD");
+    const cadRow = container.querySelector('[data-currency-band="CAD"]');
+    const usdRow = container.querySelector('[data-currency-band="USD"]');
+    expect(cadRow?.className).not.toContain("continuation");
+    expect(usdRow?.className).toContain("continuation");
+    expect(container.textContent).toContain("0.00");
+    expect(container.textContent).toContain("34.56");
+    expect(container.querySelector('[data-testid="fuel-activity-invoice-total-line-CAD"]')?.textContent).toBe(
+      "1263.85 CAD",
+    );
+    expect(container.querySelector('[data-testid="fuel-activity-invoice-total-line-USD"]')?.textContent).toBe(
+      "5197.67 USD",
+    );
+    expect(container.querySelectorAll('[data-testid="fuel-activity-invoice-8"]').length).toBe(1);
+  });
 
   it("expands Nationwide into TruckERP workspace without inline source evidence", async () => {
     await renderSection([nationwideSummary], vi.fn());

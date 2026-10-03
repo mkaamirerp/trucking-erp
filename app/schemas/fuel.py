@@ -648,6 +648,14 @@ class FuelProcessedCurrencyTotalOut(BaseModel):
     amount: str
 
 
+class FuelProcessedCurrencyFinancialOut(BaseModel):
+    """Per-currency statement money (no FX); canonical purchase rollups."""
+
+    currency: str
+    total_amount: str
+    discount_amount: str | None = None
+
+
 class FuelProcessedSummaryOut(BaseModel):
     """Provider-neutral post-wall processed Fuel summary (canonical authority)."""
 
@@ -665,6 +673,9 @@ class FuelProcessedSummaryOut(BaseModel):
     transaction_count: int
     control_count: int
     currency_totals: list[FuelProcessedCurrencyTotalOut] = Field(default_factory=list)
+    currency_financial_summaries: list[FuelProcessedCurrencyFinancialOut] = Field(
+        default_factory=list
+    )
     provider_control_totals: list[FuelProcessedCurrencyTotalOut] = Field(default_factory=list)
     cad_transaction_total: str | None = None
     usd_transaction_total: str | None = None

@@ -18,6 +18,7 @@ function sampleProcessed(batchId: number, finalizedAt: string): FuelProcessedSum
     transaction_count: 1,
     control_count: 0,
     currency_totals: [],
+    currency_financial_summaries: [{ currency: "CAD", total_amount: "1.00", discount_amount: "0" }],
     provider_control_totals: [],
     cad_transaction_total: null,
     usd_transaction_total: null,

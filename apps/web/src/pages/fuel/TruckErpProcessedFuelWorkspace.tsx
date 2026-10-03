@@ -5,6 +5,7 @@ import {
   getFuelProcessedBatch,
   type FuelBvdRow,
   type FuelCanonicalTransaction,
+  type FuelProcessedCurrencyFinancial,
 } from "../../api";
 import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
@@ -19,6 +20,7 @@ type Props = {
   providerLabel: string;
   invoiceNumber: string;
   sourceImportRef: string | null;
+  currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
   fullInvoiceLink?: ReactNode;
 };
 
@@ -28,6 +30,7 @@ export default function TruckErpProcessedFuelWorkspace({
   providerLabel,
   invoiceNumber,
   sourceImportRef,
+  currencyFinancialSummaries: currencyFinancialSummariesProp,
   fullInvoiceLink,
 }: Props) {
   const [loading, setLoading] = useState(true);
@@ -37,6 +40,9 @@ export default function TruckErpProcessedFuelWorkspace({
   const [cardNumber, setCardNumber] = useState("");
   const [invoiceTotal, setInvoiceTotal] = useState<string | null>(null);
   const [displayCurrency, setDisplayCurrency] = useState<string | null>(null);
+  const [currencyFinancialSummaries, setCurrencyFinancialSummaries] = useState<
+    FuelProcessedCurrencyFinancial[]
+  >(currencyFinancialSummariesProp ?? []);
 
   useEffect(() => {
     if (!sourceImportRef) {
@@ -50,6 +56,11 @@ export default function TruckErpProcessedFuelWorkspace({
     void getFuelProcessedBatch(batchId)
       .then(async (detail) => {
         setCanonical(detail.canonical_transactions);
+        setCurrencyFinancialSummaries(
+          detail.currency_financial_summaries?.length
+            ? detail.currency_financial_summaries
+            : currencyFinancialSummariesProp ?? [],
+        );
         if (detail.total_amount) {
           setInvoiceTotal(detail.total_amount);
         } else if (detail.cad_transaction_total) {
@@ -105,6 +116,7 @@ export default function TruckErpProcessedFuelWorkspace({
       currency={displayCurrency}
       providerLabel={providerLabel}
       canonicalTransactions={canonical}
+      currencyFinancialSummaries={currencyFinancialSummaries}
       fullInvoiceLink={fullInvoiceLink}
     />
   );

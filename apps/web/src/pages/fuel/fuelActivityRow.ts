@@ -1,4 +1,8 @@
-import type { FuelProcessedSummary } from "../../api";
+import type {
+  FuelProcessedCurrencyFinancial,
+  FuelProcessedCurrencyTotal,
+  FuelProcessedSummary,
+} from "../../api";
 
 /** Row shape for Fuel Recent Activity formatters (provider-neutral). */
 export type FuelActivityRow = {
@@ -17,6 +21,8 @@ export type FuelActivityRow = {
   purchase_card_numbers: string[];
   due_date: string | null;
   invoice_disc_amt: string;
+  currency_financial_summaries: FuelProcessedCurrencyFinancial[];
+  currency_totals: FuelProcessedCurrencyTotal[];
   total_amount: string;
   currency: string | null;
   cad_transaction_total: string | null;
@@ -43,6 +49,8 @@ export function fuelActivityRowFromProcessed(summary: FuelProcessedSummary): Fue
     purchase_card_numbers: summary.purchase_card_numbers,
     due_date: summary.due_date,
     invoice_disc_amt: "",
+    currency_financial_summaries: summary.currency_financial_summaries ?? [],
+    currency_totals: summary.currency_totals ?? [],
     total_amount: summary.total_amount,
     currency: summary.currency,
     cad_transaction_total: summary.cad_transaction_total,

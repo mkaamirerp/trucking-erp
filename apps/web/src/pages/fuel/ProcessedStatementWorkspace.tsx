@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { getFuelBvdCanonicalTransactions, type FuelBvdRow, type FuelCanonicalTransaction } from "../../api";
+import {
+  getFuelBvdCanonicalTransactions,
+  type FuelBvdRow,
+  type FuelCanonicalTransaction,
+  type FuelProcessedCurrencyFinancial,
+} from "../../api";
 import BvdExpressRowsTable from "../fuelBvdReview/BvdExpressRowsTable";
 import BvdTransactionRowsTable from "../fuelBvdReview/BvdTransactionRowsTable";
 import {
@@ -17,6 +22,12 @@ import {
   allProcessedStatementSearchableRows,
   splitProcessedStatementCharges,
 } from "./processedStatementCharges";
+import {
+  formatFuelActivityInvoiceTotalFromCurrencySummaries,
+  formatFuelActivityStatementCurrencyLine,
+  fuelCurrencyFinancialFromApi,
+  type FuelCurrencyFinancialLine,
+} from "./fuelActivityCurrencyFinancial";
 import { formatProcessedMoneyTotal, sumProcessedChargeFinalAmount } from "./processedStatementMoney";
 
 type Props = {
@@ -31,6 +42,7 @@ type Props = {
   providerLabel?: string;
   /** When set, skip per-import BVD canonical fetch (processed batch read model). */
   canonicalTransactions?: FuelCanonicalTransaction[];
+  currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
   fullInvoiceLink: ReactNode;
 };
 
@@ -43,6 +55,7 @@ export default function ProcessedStatementWorkspace({
   currency,
   providerLabel = "BVD",
   canonicalTransactions,
+  currencyFinancialSummaries,
   fullInvoiceLink,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,6 +115,15 @@ export default function ProcessedStatementWorkspace({
   const expressTotal = sumProcessedChargeFinalAmount(sections.expressCharges);
   const combinedTotal = cardTotal + expressTotal;
   const displayCurrency = (currency?.trim() || operationalCell(searchableRows[0] ?? ({} as FuelBvdRow), "cur") || "—").trim();
+  const currencyLines: FuelCurrencyFinancialLine[] = fuelCurrencyFinancialFromApi(
+    currencyFinancialSummaries,
+  );
+  const processedInvoiceTotalLabel =
+    currencyLines.length > 0
+      ? formatFuelActivityInvoiceTotalFromCurrencySummaries(currencyLines)
+      : invoiceTotal?.trim()
+        ? `${invoiceTotal.trim()}${currency ? ` ${currency}` : ""}`
+        : `${formatProcessedMoneyTotal(combinedTotal)}${displayCurrency ? ` ${displayCurrency}` : ""}`;
 
   return (
     <div
@@ -147,16 +169,26 @@ export default function ProcessedStatementWorkspace({
                 </span>
               </div>
             ) : null}
+            {currencyLines.map((line) => (
+              <div
+                key={line.currency}
+                className="processed-statement-summary-line"
+                data-testid={`processed-currency-summary-${line.currency}`}
+              >
+                <span className="processed-statement-summary-line__label">
+                  {formatFuelActivityStatementCurrencyLine(line)}
+                </span>
+                <span className="processed-statement-summary-line__count" aria-hidden="true" />
+                <span className="processed-statement-summary-line__amount" aria-hidden="true" />
+              </div>
+            ))}
             <div
               className="processed-statement-summary-line processed-statement-summary-line--total"
               data-testid="processed-invoice-total"
             >
               <span className="processed-statement-summary-line__label">Processed Invoice Total</span>
               <span className="processed-statement-summary-line__count" aria-hidden="true" />
-              <span className="processed-statement-summary-line__amount">
-                {invoiceTotal?.trim() || formatProcessedMoneyTotal(combinedTotal)}
-                {displayCurrency ? ` ${displayCurrency}` : ""}
-              </span>
+              <span className="processed-statement-summary-line__amount">{processedInvoiceTotalLabel}</span>
             </div>
           </div>
         </div>

@@ -1,5 +1,9 @@
 import type { FuelActivityRow } from "./fuelActivityRow";
 import {
+  formatFuelActivityInvoiceTotalFromCurrencySummaries,
+  resolveFuelCurrencyFinancialSummaries,
+} from "./fuelActivityCurrencyFinancial";
+import {
   formatDualCurrencyInvoiceTotalLabel,
   formatProviderMoneyAmount,
 } from "./fuelProviderMoneyDisplay";
@@ -117,6 +121,11 @@ export function formatFuelActivityUsdTotal(row: FuelActivityRow): string {
 }
 
 export function formatFuelActivityInvoiceTotal(row: FuelActivityRow): string {
+  const currencyLines = resolveFuelCurrencyFinancialSummaries(row);
+  if (currencyLines.length > 0) {
+    return formatFuelActivityInvoiceTotalFromCurrencySummaries(currencyLines);
+  }
+
   const total = row.total_amount?.trim();
   const currency = row.currency?.trim();
   if (total && currency) return `${total} ${currency}`;
