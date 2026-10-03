@@ -1,5 +1,13 @@
 import type { FuelBvdRow, FuelNationwideRow } from "../../api";
 
+/**
+ * Nationwide → shared processed-statement row list.
+ *
+ * `FuelBvdRow` is a legacy API/DTO name (parsed import line items). The same shape powers
+ * ProcessedStatementWorkspace / BvdTransactionRowsTable for BVD, Nationwide, and future providers.
+ * This module is Nationwide-only mapping — not BVD business logic.
+ */
+
 function nationwideDiscountAmount(row: FuelNationwideRow): string {
   const usa = row.usa_discount?.trim();
   if (usa) return usa;
@@ -8,8 +16,9 @@ function nationwideDiscountAmount(row: FuelNationwideRow): string {
   return "";
 }
 
-/** Map Nationwide TRANSACTION rows into BVD-shaped operational rows (shared TruckERP workspace). */
-export function nationwideTransactionsToOperationalBvdRows(rows: FuelNationwideRow[]): FuelBvdRow[] {
+export function adaptNationwideImportRowsForProcessedStatement(
+  rows: FuelNationwideRow[],
+): FuelBvdRow[] {
   const header = rows.find((r) => r.row_type === "HEADER");
   const fallbackCard = header?.card_number?.trim() || "";
   return rows

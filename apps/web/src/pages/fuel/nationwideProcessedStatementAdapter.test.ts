@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { nationwideTransactionsToOperationalBvdRows } from "./nationwideOperationalBvdRows";
+import { adaptNationwideImportRowsForProcessedStatement } from "./nationwideProcessedStatementAdapter";
 import { processedStatementCellDisplay } from "./processedStatementCellDisplay";
 
-describe("nationwideTransactionsToOperationalBvdRows", () => {
-  it("maps unit price and discount into shared operational columns", () => {
-    const rows = nationwideTransactionsToOperationalBvdRows([
+describe("adaptNationwideImportRowsForProcessedStatement", () => {
+  it("maps unit price and discount into shared statement columns", () => {
+    const rows = adaptNationwideImportRowsForProcessedStatement([
       {
         id: 10,
         import_id: "nw-1",
