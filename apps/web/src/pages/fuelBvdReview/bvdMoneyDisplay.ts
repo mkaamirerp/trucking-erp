@@ -1,10 +1,6 @@
+import { isProviderMoneyDashLike } from "../fuel/fuelProviderMoneyDisplay";
 import { formatMoneyDisplay } from "./bvdCompletedBasicProjection";
 import { parseBvdMoneyString } from "./bvdParsedValidation";
-
-function isDashLikeMoney(raw: string): boolean {
-  const t = raw.trim();
-  return t === "" || t === "-" || t === "—" || t === "-$" || t === "$-" || t === "$";
-}
 
 /** BVD provider money columns: PDF zero often stored blank — show 0.00 (FUEL_BVD_IMPLEMENTATION_1). */
 export const BVD_PROVIDER_MONEY_FIELDS = new Set([
@@ -42,7 +38,7 @@ export function formatBvdTxnCompactMoney(
   options?: { emptyAsZero?: boolean },
 ): string {
   const t = raw.trim();
-  if (isDashLikeMoney(t)) {
+  if (isProviderMoneyDashLike(t)) {
     return options?.emptyAsZero ? "0.00" : "—";
   }
   const formatted = formatMoneyDisplay(t);

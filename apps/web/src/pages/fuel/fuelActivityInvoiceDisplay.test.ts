@@ -147,6 +147,40 @@ describe("838710 US currency display", () => {
   });
 });
 
+describe("multi-currency processed summary (Nationwide-style)", () => {
+  const nwRow = {
+    provider: "NATIONWIDE",
+    batch_id: 1,
+    source_import_ref: "imp-nw",
+    invoice_number: "20250522B-06142026",
+    review_status: "SOURCE_REVIEWED",
+    read_only: true,
+    processed_at: null,
+    period_start: "2026-06-08",
+    period_end: "2026-06-14",
+    card_number: "20250522B",
+    account_code: "20250522B",
+    purchase_card_count: 0,
+    purchase_card_numbers: [],
+    due_date: "2026-06-15",
+    invoice_disc_amt: "",
+    total_amount: "",
+    currency: null,
+    cad_transaction_total: "1263.8500",
+    usd_transaction_total: "5197.6700",
+    usd_provider_control: null,
+    transaction_count: 10,
+    control_count: 2,
+  };
+
+  it("fills CAD/USD columns and invoice total without single-currency fields", () => {
+    expect(formatFuelActivityCadTotal(nwRow)).toBe("1263.8500");
+    expect(formatFuelActivityUsdTotal(nwRow)).toBe("5197.6700");
+    expect(formatFuelActivityInvoiceTotal(nwRow)).toBe("1263.8500 CAD · 5197.6700 USD");
+    expect(formatFuelActivityInvoiceDiscount(nwRow)).toBe("0.00");
+  });
+});
+
 describe("formatFuelActivityAccountCard", () => {
   const base = goldenCompletedBasic();
 

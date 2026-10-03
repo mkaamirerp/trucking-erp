@@ -1,4 +1,8 @@
 import type { FuelNationwideRow } from "../../api";
+import {
+  formatProviderMoneyAmount,
+  isProviderMoneyDashLike,
+} from "../fuel/fuelProviderMoneyDisplay";
 
 const MONEY_FIELDS = new Set([
   "ex_gst_per_unit",
@@ -7,11 +11,6 @@ const MONEY_FIELDS = new Set([
   "missed_disc",
   "oon_fees",
 ]);
-
-function isDashLike(s: string): boolean {
-  const t = s.trim();
-  return t === "" || t === "-" || t === "—" || t === "-$" || t === "$-" || t === "$";
-}
 
 function parseMoneyNumber(s: string): number | null {
   const cleaned = s.replace(/[$,\s]/g, "");
