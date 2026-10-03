@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import type { FuelBvdRow } from "../../api";
+import { processedStatementCellDisplay } from "../fuel/processedStatementCellDisplay";
 import { displayCell, operationalCell } from "./bvdParsedDisplay";
 import { bvdProductDisplayLabel } from "./bvdProductDisplay";
 import {
@@ -246,10 +247,7 @@ export default function BvdTransactionRowsTable({
           {displayTransactions.map((row) => {
             const expanded = expandedId === row.id;
             const site = formatBvdTxnSiteDetail(row);
-            const finalAmt = operationalCell(row, "final_amt");
             const cur = operationalCell(row, "cur");
-            const retail = displayCell(row, "retail");
-            const billed = displayCell(row, "billed");
 
             return (
               <Fragment key={row.id}>
@@ -293,19 +291,19 @@ export default function BvdTransactionRowsTable({
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
                     data-testid="bvd-txn-col-qty"
                   >
-                    {operationalCell(row, "qty") || "—"}
+                    {processedStatementCellDisplay(row, "qty")}
                   </td>
                   <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price"
                     data-testid="bvd-txn-col-retail"
                   >
-                    {retail || "—"}
+                    {processedStatementCellDisplay(row, "retail")}
                   </td>
                   <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price"
                     data-testid="bvd-txn-col-billed"
                   >
-                    {billed || "—"}
+                    {processedStatementCellDisplay(row, "billed")}
                   </td>
                   <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
@@ -326,7 +324,7 @@ export default function BvdTransactionRowsTable({
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-amount"
                     data-testid="bvd-txn-col-final"
                   >
-                    {finalAmt || "—"}
+                    {processedStatementCellDisplay(row, "final_amt")}
                   </td>
                   <td className="bvd-txn-rows__col-compact" data-testid="bvd-txn-col-cur">
                     {cur || "—"}
@@ -356,7 +354,7 @@ export default function BvdTransactionRowsTable({
                             </span>
                           </DetailField>
                           <DetailField label="Pre-tax amount">
-                            {operationalCell(row, "pre_tax_amt") || "—"}
+                            {processedStatementCellDisplay(row, "pre_tax_amt")}
                           </DetailField>
                         </div>
                       </div>
