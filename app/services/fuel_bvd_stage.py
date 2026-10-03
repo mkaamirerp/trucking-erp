@@ -892,12 +892,5 @@ async def process_stage_to_permanent(
     except Exception:
         logger.exception("stage cleanup after successful process failed stage_id=%s", stage_id)
 
-    from app.services.fuel_classification_persistence import (
-        best_effort_backfill_classifications_for_import,
-    )
-
-    await best_effort_backfill_classifications_for_import(
-        db, tenant_id=tenant_id, import_id=str(import_id)
-    )
 
     return await get_bvd_import_review_summary(db, tenant_id=tenant_id, import_id=import_id)

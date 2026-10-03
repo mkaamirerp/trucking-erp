@@ -552,7 +552,4 @@ async def process_nationwide_stage_to_permanent(
     except Exception:
         logger.exception("stage cleanup after process failed")
 
-    from app.services.fuel_classification_persistence import best_effort_backfill_classifications_for_import
-
-    await best_effort_backfill_classifications_for_import(db, tenant_id=tenant_id, import_id=str(import_id))
     return await get_nationwide_import_review_summary(db, tenant_id=tenant_id, import_id=import_id)
