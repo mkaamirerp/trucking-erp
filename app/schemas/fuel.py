@@ -919,6 +919,7 @@ class FuelChargeCategoryOut(BaseModel):
 class FuelCanonicalTransactionOut(BaseModel):
     id: int
     batch_id: int
+    source_row_id: str | None = None
     source_vendor: str | None = None
     provider_section_raw: str | None = None
     provider_transaction_identity: str | None = None
@@ -926,6 +927,10 @@ class FuelCanonicalTransactionOut(BaseModel):
     product_code_raw: str | None = None
     principal_amount: Decimal | None = None
     provider_fee_amount: Decimal | None = None
+    unit_price: Decimal | None = None
+    billed_amount: Decimal | None = None
+    retail_amount: Decimal | None = None
+    provider_discount_amount: Decimal | None = None
     total_amount: Decimal | None = None
     currency_raw: str | None = None
     classification: str | None = None
@@ -935,6 +940,10 @@ class FuelCanonicalTransactionOut(BaseModel):
     @field_serializer(
         "principal_amount",
         "provider_fee_amount",
+        "unit_price",
+        "billed_amount",
+        "retail_amount",
+        "provider_discount_amount",
         "total_amount",
         when_used="json",
     )
@@ -1081,6 +1090,7 @@ def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
     return FuelCanonicalTransactionOut(
         id=txn.id,
         batch_id=txn.batch_id,
+        source_row_id=txn.source_row_id,
         source_vendor=getattr(txn, "source_vendor", None),
         provider_section_raw=txn.provider_section_raw,
         provider_transaction_identity=txn.provider_transaction_identity,
@@ -1088,6 +1098,10 @@ def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
         product_code_raw=txn.product_code_raw,
         principal_amount=txn.principal_amount,
         provider_fee_amount=txn.provider_fee_amount,
+        unit_price=txn.unit_price,
+        billed_amount=txn.billed_amount,
+        retail_amount=txn.retail_amount,
+        provider_discount_amount=txn.provider_discount_amount,
         total_amount=txn.total_amount,
         currency_raw=txn.currency_raw,
         classification=txn.classification,

@@ -8,7 +8,10 @@ import {
 } from "../../api";
 import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
-import { adaptNationwideImportRowsForProcessedStatement } from "./nationwideProcessedStatementAdapter";
+import {
+  adaptNationwideImportRowsForProcessedStatement,
+  applyNationwideCanonicalPricesToStatementRows,
+} from "./nationwideProcessedStatementAdapter";
 
 type Props = {
   batchId: number;
@@ -67,7 +70,10 @@ export default function TruckErpProcessedFuelWorkspace({
         }
         if (code === "NATIONWIDE") {
           const rows = await getFuelNationwideImportRows(sourceImportRef);
-          const operational = adaptNationwideImportRowsForProcessedStatement(rows);
+          const operational = applyNationwideCanonicalPricesToStatementRows(
+            adaptNationwideImportRowsForProcessedStatement(rows),
+            detail.canonical_transactions,
+          );
           setSourceRows(operational);
           const header = rows.find((r) => r.row_type === "HEADER");
           setCardNumber(header?.card_number?.trim() || operational[0]?.card_number?.trim() || "");

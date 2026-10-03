@@ -4614,6 +4614,7 @@ export type FuelClassificationAuditEvent = {
 export type FuelCanonicalTransaction = {
   id: number;
   batch_id: number;
+  source_row_id?: string | null;
   source_vendor?: string | null;
   provider_section_raw?: string | null;
   provider_transaction_identity?: string | null;
@@ -4621,6 +4622,10 @@ export type FuelCanonicalTransaction = {
   product_code_raw?: string | null;
   principal_amount?: string | null;
   provider_fee_amount?: string | null;
+  unit_price?: string | null;
+  billed_amount?: string | null;
+  retail_amount?: string | null;
+  provider_discount_amount?: string | null;
   total_amount?: string | null;
   currency_raw?: string | null;
   classification?: string | null;
