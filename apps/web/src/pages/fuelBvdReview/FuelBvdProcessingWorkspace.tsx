@@ -18,6 +18,7 @@ import BvdParsedStatementView from "./BvdParsedStatementView";
 import BvdPdfPopupModal from "./BvdPdfPopupModal";
 import { loadBvdPdfDocument } from "./loadBvdPdfDocument";
 import { buildFuelProcessedReturnPath } from "./bvdUploadCompletion";
+import { bvdParserMoneyBaseline, isBvdProviderMoneyField } from "./bvdParsedDisplay";
 import {
   draftKey,
   extractedValue,
@@ -198,10 +199,11 @@ export default function FuelBvdProcessingWorkspace({
       setActionSuccess(null);
       const row = rows.find((r) => r.id === rowId);
       const ext = row ? extractedValue(row, field) : "";
+      const baseline = isBvdProviderMoneyField(field) ? bvdParserMoneyBaseline(field, ext) : ext.trim();
       const key = draftKey(rowId, field);
       const trimmed = value.trim();
       setDrafts((prev) => {
-        if (trimmed === ext) {
+        if (trimmed === baseline) {
           if (!(key in prev)) return prev;
           const next = { ...prev };
           delete next[key];

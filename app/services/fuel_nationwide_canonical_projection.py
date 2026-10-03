@@ -33,7 +33,12 @@ from app.services.fuel_controls import (
     CONTROL_TYPE_TAX_CONTROL,
     CONTROL_TYPE_UNIT_SUBTOTAL,
 )
-from app.services.fuel_money import quantize_money, quantize_quantity, to_optional_decimal
+from app.services.fuel_money import (
+    quantize_money,
+    quantize_quantity,
+    quantize_unit_price,
+    to_optional_decimal,
+)
 from app.services.fuel_nationwide_import import (
     NATIONWIDE_PROVIDER_CODE,
     NATIONWIDE_SOURCE_FIELD_NAMES,
@@ -73,6 +78,41 @@ def _quantity_decimal(raw: Any) -> Decimal | None:
     if err or dec is None:
         return None
     return quantize_quantity(dec)
+
+
+def _unit_price_decimal(raw: Any) -> Decimal | None:
+    dec, err = parse_nationwide_decimal(raw)
+    if err or dec is None:
+        return None
+    return quantize_unit_price(dec)
+
+
+def _parsed_discount_total(raw: Any) -> Decimal | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str) and raw.strip() == "":
+        return None
+    dec, err = parse_nationwide_decimal(raw)
+    if err or dec is None:
+        return None
+    return dec
+
+
+def _derive_nationwide_retail_unit_price(
+    *,
+    billed_unit_price: Decimal | None,
+    quantity: Decimal | None,
+    usa_discount_total: Decimal | None,
+) -> Decimal | None:
+    if billed_unit_price is None:
+        return None
+    if quantity is None or quantity == 0:
+        return None
+    if usa_discount_total is None:
+        return None
+    if usa_discount_total == 0:
+        return billed_unit_price
+    return quantize_unit_price(billed_unit_price + (usa_discount_total / quantity))
 
 
 def _parse_statement_date(raw: str | None) -> date | None:
@@ -197,6 +237,30 @@ def _build_purchase_transaction(
             "PURCHASE_TOTAL_MISSING",
             f"purchase row {fuel_nationwide_id} missing total",
         )
+    quantity = to_optional_decimal(_row_get(effective, "volume"))
+    billed_unit = _unit_price_decimal(_row_get(effective, "ex_gst_per_unit"))
+    discount_total = _parsed_discount_total(effective.get("usa_discount"))
+    retail_unit = _derive_nationwide_retail_unit_price(
+        billed_unit_price=billed_unit,
+        quantity=quantity,
+        usa_discount_total=discount_total,
+    )
+    provider_raw = _raw_provider_payload(
+        effective, fuel_nationwide_id=fuel_nationwide_id, import_id=import_id
+    )
+    if (
+        retail_unit is not None
+        and billed_unit is not None
+        and discount_total is not None
+        and discount_total != 0
+    ):
+        provider_raw = {
+            **provider_raw,
+            "derived_canonical": {
+                "retail_unit_price": format(retail_unit, "f"),
+                "formula": "billed_unit_price + provider_discount_amount / quantity",
+            },
+        }
     return FuelTransaction(
         tenant_id=tenant_id,
         batch_id=batch_id,
@@ -213,10 +277,12 @@ def _build_purchase_transaction(
         province_state=_row_get(effective, "prov_st"),
         product=_row_get(effective, "product"),
         product_code_raw=_row_get(effective, "product"),
-        quantity=to_optional_decimal(_row_get(effective, "volume")),
+        quantity=quantity,
         quantity_unit=_quantity_unit(cur_iso),
-        unit_price=to_optional_decimal(_row_get(effective, "ex_gst_per_unit")),
+        unit_price=billed_unit,
         unit_price_basis=_unit_price_basis(cur_iso),
+        billed_amount=quantize_money(billed_unit) if billed_unit is not None else None,
+        retail_amount=quantize_money(retail_unit) if retail_unit is not None else None,
         total_amount=total,
         currency_raw=cur_raw,
         currency=cur_iso,
@@ -226,7 +292,7 @@ def _build_purchase_transaction(
         out_of_network_fee=_money_decimal(effective.get("oon_fees")),
         classification=None,
         classification_status=CLASSIFICATION_STATUS_UNMAPPED,
-        provider_raw=_raw_provider_payload(effective, fuel_nationwide_id=fuel_nationwide_id, import_id=import_id),
+        provider_raw=provider_raw,
         review_status="CONFIRMED",
         parsed_row_role="TRANSACTION",
         **ts,

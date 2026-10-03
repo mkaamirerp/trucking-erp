@@ -21,18 +21,24 @@ function parseMoneyNumber(s: string): number | null {
 
 /** Presentation-only formatting; does not mutate source values. */
 export function formatNationwideCell(field: string, raw: unknown): string {
-  if (raw == null) return "—";
-  const s = String(raw).trim();
-  if (s === "") return "—";
+  const s = raw == null ? "" : String(raw).trim();
 
-  if (field === "oon_fees" || MONEY_FIELDS.has(field)) {
-    if (isDashLike(s)) return "—";
-    const n = parseMoneyNumber(s);
-    if (n !== null && n === 0) return "0.00";
-    if (field === "oon_fees" && s === "-$") return "—";
-    return s;
+  if (MONEY_FIELDS.has(field)) {
+    if (field === "oon_fees") {
+      if (isProviderMoneyDashLike(s)) return "—";
+      const n = parseMoneyNumber(s);
+      if (n !== null && n === 0) return "0.00";
+      return s;
+    }
+    if (!isProviderMoneyDashLike(s)) {
+      const n = parseMoneyNumber(s);
+      if (n !== null && n === 0) return "0.00";
+      return s;
+    }
+    return formatProviderMoneyAmount(s, { emptyAsZero: true });
   }
 
+  if (!s) return "—";
   return s;
 }
 
