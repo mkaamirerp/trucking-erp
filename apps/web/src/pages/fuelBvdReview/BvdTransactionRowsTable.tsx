@@ -356,6 +356,9 @@ export default function BvdTransactionRowsTable({
                           <DetailField label="Pre-tax amount">
                             {processedStatementCellDisplay(row, "pre_tax_amt")}
                           </DetailField>
+                          {row.notes_raw?.trim() ? (
+                            <DetailField label="Provider fields">{row.notes_raw}</DetailField>
+                          ) : null}
                         </div>
                       </div>
                     </td>

@@ -8,14 +8,6 @@ import type { FuelBvdRow, FuelNationwideRow } from "../../api";
  * This module is Nationwide-only mapping — not BVD business logic.
  */
 
-function nationwideDiscountAmount(row: FuelNationwideRow): string {
-  const usa = row.usa_discount?.trim();
-  if (usa) return usa;
-  const missed = row.missed_disc?.trim();
-  if (missed) return missed;
-  return "";
-}
-
 export function adaptNationwideImportRowsForProcessedStatement(
   rows: FuelNationwideRow[],
 ): FuelBvdRow[] {
@@ -25,6 +17,16 @@ export function adaptNationwideImportRowsForProcessedStatement(
     .filter((r) => r.row_type === "TRANSACTION")
     .map((r) => {
       const unitPrice = r.ex_gst_per_unit?.trim() || "";
+      const usaDiscount = r.usa_discount?.trim() || "";
+      const missedDisc = r.missed_disc?.trim() || "";
+      const oonFees = r.oon_fees?.trim() || "";
+      const providerExtras = [
+        usaDiscount ? `USA Discount: ${usaDiscount}` : "",
+        missedDisc ? `Missed Disc: ${missedDisc}` : "",
+        oonFees && oonFees !== "-" && oonFees !== "—" ? `OON Fees: ${oonFees}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
       return {
         id: r.id,
         import_id: r.import_id,
@@ -36,11 +38,13 @@ export function adaptNationwideImportRowsForProcessedStatement(
         prov_st: r.prov_st,
         prod: r.product,
         qty: r.volume,
-        retail: unitPrice,
+        // Nationwide has Ex-GST ($/U), not BVD retail vs billed spread — do not duplicate into both.
+        retail: "",
         billed: unitPrice,
-        disc_amt: nationwideDiscountAmount(r),
+        disc_amt: "",
         final_amt: r.total,
         cur: r.currency,
+        notes_raw: providerExtras || null,
       };
     });
 }

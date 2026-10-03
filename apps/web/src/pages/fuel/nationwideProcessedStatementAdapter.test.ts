@@ -30,10 +30,29 @@ describe("adaptNationwideImportRowsForProcessedStatement", () => {
         currency: "USD",
       },
     ]);
-    expect(rows[0].retail).toBe("1.2345");
     expect(rows[0].billed).toBe("1.2345");
-    expect(processedStatementCellDisplay(rows[0], "retail")).toBe("1.2345");
-    expect(processedStatementCellDisplay(rows[1], "retail")).toBe("0.00");
+    expect(rows[0].retail).toBe("");
+    expect(processedStatementCellDisplay(rows[0], "retail")).toBe("0.00");
+    expect(processedStatementCellDisplay(rows[0], "billed")).toBe("1.2345");
+    expect(processedStatementCellDisplay(rows[0], "disc_amt")).toBe("0.00");
+    expect(rows[1].notes_raw ?? "").toBe("");
     expect(processedStatementCellDisplay(rows[1], "disc_amt")).toBe("0.00");
+  });
+
+  it("does not map USA Discount into BVD disc_amt column", () => {
+    const rows = adaptNationwideImportRowsForProcessedStatement([
+      {
+        id: 12,
+        import_id: "nw-1",
+        row_type: "TRANSACTION",
+        ex_gst_per_unit: "4.829",
+        usa_discount: "3.69",
+        total: "357.39",
+        currency: "USD",
+        volume: "74.01",
+      },
+    ]);
+    expect(processedStatementCellDisplay(rows[0], "disc_amt")).toBe("0.00");
+    expect(rows[0].notes_raw).toContain("USA Discount: 3.69");
   });
 });
