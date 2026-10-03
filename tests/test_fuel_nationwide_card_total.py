@@ -33,6 +33,21 @@ def test_parse_nationwide_card_total_fixture_lines() -> None:
         else:
             assert "GST" not in parsed or parsed.get("GST") is None
 
+    usd = parse_nationwide_card_total_line(
+        "XXXXX07588 Total 154.27 $722.75 $34.56 $0.00"
+    )
+    assert usd["control_volume"] == "154.27"
+    assert usd["USA Discount"] == "34.56"
+    assert usd["Missed Disc"] == "0.00"
+
+    cad = parse_nationwide_card_total_line(
+        "XXXXX87195 Total GST $145.4 QST $0 674.17 $1,263.85 $0.00 $0.00"
+    )
+    assert cad["control_volume"] == "674.17"
+    assert cad["declared_amount"] == "1263.85"
+    assert cad["USA Discount"] == "0.00"
+    assert cad["Missed Disc"] == "0.00"
+
 
 def test_review_projection_fills_explicit_card_total_fields_without_frontend_scraping() -> None:
     row = {
@@ -47,6 +62,9 @@ def test_review_projection_fills_explicit_card_total_fields_without_frontend_scr
     apply_card_total_review_fields(row)
     assert row["currency"] == "USD"
     assert row["declared_amount"] == "722.75"
+    assert row["control_volume"] == "154.27"
+    assert row["usa_discount"] == "34.56"
+    assert row["missed_disc"] == "0.00"
     assert row["gst"] is None
 
 
@@ -59,3 +77,12 @@ def test_review_projection_does_not_overwrite_existing_explicit_values() -> None
     }
     apply_card_total_review_fields(row)
     assert row["declared_amount"] == "722.75"
+
+
+def test_card_total_volume_does_not_match_inside_money_amount() -> None:
+    parsed = parse_nationwide_card_total_line(
+        "XXXXX87195 Total GST $145.4 QST $0 674.17 $1,263.85 $0.00 $0.00"
+    )
+
+    assert parsed["control_volume"] == "674.17"
+    assert parsed["declared_amount"] == "1263.85"

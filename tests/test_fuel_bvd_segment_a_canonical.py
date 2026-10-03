@@ -198,6 +198,76 @@ def test_bvd_972201_canonical_two_rows() -> None:
     assert_canonical_money_gate(txns, controls, expected_transaction_count=2, expected_total=Decimal("3421.01"))
 
 
+
+@pytest.mark.skipif(not BVD_838710.is_file(), reason="838710 fixture missing")
+def test_bvd_purchase_price_basis_is_billed_and_quantity_unit_not_invented() -> None:
+    txns, _, _ = _project_fixture(BVD_838710)
+
+    purchases = [
+        t for t in txns
+        if t.provider_section_raw == SECTION_FUEL_CARD
+    ]
+
+    assert purchases
+    assert all(t.unit_price_basis == "BILLED" for t in purchases)
+    assert all(t.quantity_unit is None for t in purchases)
+
+
+@pytest.mark.skipif(not BVD_838710.is_file(), reason="838710 fixture missing")
+def test_bvd_838710_invoice_control_preserves_structured_source_values() -> None:
+    _, controls, _ = _project_fixture(BVD_838710)
+
+    invoice = next(
+        c for c in controls
+        if c.control_type == CONTROL_TYPE_INVOICE_TOTAL
+        and c.control_label_raw == "Grand Total"
+    )
+
+    assert invoice.quantity == Decimal("2340.4200")
+    assert invoice.pre_tax_amount == Decimal("7326.6900")
+    assert invoice.discount_amount == Decimal("1370.7600")
+    assert invoice.hst_amount == Decimal("0.0000")
+    assert invoice.gst_amount == Decimal("0.0000")
+    assert invoice.pst_amount == Decimal("0.0000")
+    assert invoice.qst_amount == Decimal("0.0000")
+    assert invoice.declared_amount == Decimal("9047.7200")
+
+
+@pytest.mark.skipif(not BVD_838710.is_file(), reason="838710 fixture missing")
+def test_bvd_card_control_preserves_discount_and_pre_tax() -> None:
+    _, controls, _ = _project_fixture(BVD_838710)
+
+    card = next(
+        c for c in controls
+        if c.control_type == CONTROL_TYPE_CARD_TOTAL
+        and c.scope_card_or_account_id == "4237160"
+    )
+
+    assert card.pre_tax_amount == Decimal("1340.4800")
+    assert card.discount_amount == Decimal("210.0000")
+    assert card.declared_amount == Decimal("1340.4800")
+
+
+@pytest.mark.skipif(not BVD_972201.is_file(), reason="972201 fixture missing")
+def test_bvd_972201_invoice_control_preserves_canadian_tax_values() -> None:
+    _, controls, _ = _project_fixture(BVD_972201)
+
+    invoice = next(
+        c for c in controls
+        if c.control_type == CONTROL_TYPE_INVOICE_TOTAL
+        and c.control_label_raw == "Grand Total"
+    )
+
+    assert invoice.currency == "CAD"
+    assert invoice.quantity == Decimal("1474.0000")
+    assert invoice.pre_tax_amount == Decimal("3027.4400")
+    assert invoice.hst_amount == Decimal("393.5700")
+    assert invoice.gst_amount == Decimal("0.0000")
+    assert invoice.pst_amount == Decimal("0.0000")
+    assert invoice.qst_amount == Decimal("0.0000")
+    assert invoice.discount_amount == Decimal("0.0000")
+    assert invoice.declared_amount == Decimal("3421.0100")
+
 def test_line_arithmetic_variance_is_info_not_fail() -> None:
     rows = [
         {

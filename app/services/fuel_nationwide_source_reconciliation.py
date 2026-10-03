@@ -36,6 +36,7 @@ class NationwideSourceReconciliationResult:
     cad_gst: str | None = None
     cad_pst: str | None = None
     cad_subtotal: str | None = None
+    card_controls: list[dict[str, str | None]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +60,7 @@ class NationwideSourceReconciliationResult:
             "cad_gst": self.cad_gst,
             "cad_pst": self.cad_pst,
             "cad_subtotal": self.cad_subtotal,
+            "card_controls": list(self.card_controls),
         }
 
 
@@ -134,16 +136,32 @@ def _money_from_control_line(line: str | None) -> Decimal | None:
 
 def reconcile_nationwide_source_rows(rows: list[dict[str, Any]]) -> NationwideSourceReconciliationResult:
     result = NationwideSourceReconciliationResult(passed=True)
+
     header = next((r for r in rows if r.get("row_type") == ROW_HEADER), None)
     if header is None:
         result.passed = False
         result.checks.append(
-            NationwideReconciliationCheck("HEADER_MISSING", "FAIL", "HEADER row required")
+            NationwideReconciliationCheck(
+                "HEADER_MISSING",
+                "FAIL",
+                "HEADER row required",
+            )
         )
         return result
 
     transactions = [r for r in rows if r.get("row_type") == ROW_TRANSACTION]
     controls = [r for r in rows if r.get("row_type") == ROW_CONTROL]
+
+    if not transactions:
+        result.passed = False
+        result.checks.append(
+            NationwideReconciliationCheck(
+                "NO_TRANSACTIONS",
+                "FAIL",
+                "at least one purchase transaction is required",
+            )
+        )
+        return result
 
     for ctl in controls:
         if ctl.get("control_type") in (None, "", CONTROL_TYPE_UNKNOWN):
@@ -156,126 +174,237 @@ def reconcile_nationwide_source_rows(rows: list[dict[str, Any]]) -> NationwideSo
                 )
             )
 
-    usd_txns = [t for t in transactions if (t.get("currency") or "").upper() == "USD"]
-    cad_txns = [t for t in transactions if (t.get("currency") or "").upper() == "CAD"]
+    usd_txns = [
+        t
+        for t in transactions
+        if (t.get("currency") or "").upper() == "USD"
+    ]
+    cad_txns = [
+        t
+        for t in transactions
+        if (t.get("currency") or "").upper() == "CAD"
+    ]
 
-    usd_row_sum = sum((parse_nationwide_decimal(t.get("total"))[0] or Decimal("0") for t in usd_txns), Decimal("0"))
-    result.usd_row_total_sum = format(usd_row_sum, "f")
+    # --------------------------------------------------
+    # USD reconciliation is required only when USD rows
+    # actually exist in this provider document.
+    # --------------------------------------------------
 
-    usd_ext = _extension_sum(usd_txns)
-    usd_ext_rounded = _round_money(usd_ext)
-    result.usd_precision_extension = format(usd_ext, "f")
-
-    usd_billing = next(
-        (c for c in controls if (c.get("row_label") or "") == "USD_BILLING_TOTAL"),
-        None,
-    )
-    usd_control_amt: Decimal | None = None
-    if usd_billing:
-        usd_control_amt, _ = parse_nationwide_decimal(usd_billing.get("declared_amount"))
-    if usd_control_amt is None:
-        result.passed = False
-        result.checks.append(
-            NationwideReconciliationCheck("USD_BILLING_CONTROL_MISSING", "FAIL", "USD billing control required")
+    if usd_txns:
+        usd_row_sum = sum(
+            (
+                parse_nationwide_decimal(t.get("total"))[0] or Decimal("0")
+                for t in usd_txns
+            ),
+            Decimal("0"),
         )
-    else:
-        result.usd_provider_control = format(usd_control_amt, "f")
-        diff = usd_ext_rounded - usd_control_amt
-        result.usd_precision_difference = f"{_round_money(diff):.2f}"
-        if usd_ext_rounded != usd_control_amt:
-            result.passed = False
-            result.checks.append(
-                NationwideReconciliationCheck(
-                    "USD_PRECISION_CONTROL",
-                    "FAIL",
-                    "ROUND(SUM(volume×unit),2) must equal USD billing control",
-                    expected=format(usd_control_amt, "f"),
-                    actual=format(usd_ext_rounded, "f"),
-                )
-            )
-        else:
-            result.checks.append(
-                NationwideReconciliationCheck(
-                    "USD_PRECISION_CONTROL",
-                    "PASS",
-                    "USD precision extension matches provider billing control",
-                    expected=format(usd_control_amt, "f"),
-                    actual=format(usd_ext_rounded, "f"),
-                )
-            )
+        result.usd_row_total_sum = format(usd_row_sum, "f")
 
-    cad_ext = _extension_sum(cad_txns)
-    cad_ext_rounded = _round_money(cad_ext)
-    result.cad_ex_tax_extension = format(cad_ext, "f")
+        usd_ext = _extension_sum(usd_txns)
+        usd_ext_rounded = _round_money(usd_ext)
+        result.usd_precision_extension = format(usd_ext, "f")
 
-    ex_tax_ctl = _control_line_prefix(rows, "total ex-gst")
-    ex_tax_amt = _money_from_control_line(ex_tax_ctl.get("control_line_raw") if ex_tax_ctl else None)
-    if ex_tax_amt is None:
-        result.passed = False
-        result.checks.append(
-            NationwideReconciliationCheck("CAD_EX_TAX_CONTROL_MISSING", "FAIL", "Total Ex-GST & PST control missing")
+        usd_billing = next(
+            (
+                c
+                for c in controls
+                if (c.get("row_label") or "") == "USD_BILLING_TOTAL"
+            ),
+            None,
         )
-    else:
-        result.cad_ex_tax_control = format(ex_tax_amt, "f")
-        if cad_ext_rounded != ex_tax_amt:
+
+        usd_control_amt: Decimal | None = None
+        if usd_billing:
+            usd_control_amt, _ = parse_nationwide_decimal(
+                usd_billing.get("declared_amount")
+            )
+
+        if usd_control_amt is None:
             result.passed = False
             result.checks.append(
                 NationwideReconciliationCheck(
-                    "CAD_EX_TAX",
+                    "USD_BILLING_CONTROL_MISSING",
                     "FAIL",
-                    "CAD volume×unit rounded must match ex-tax control",
-                    expected=format(ex_tax_amt, "f"),
-                    actual=format(cad_ext_rounded, "f"),
+                    "USD billing control required when USD transactions exist",
                 )
             )
         else:
-            result.checks.append(NationwideReconciliationCheck("CAD_EX_TAX", "PASS", "CAD ex-tax control OK"))
+            result.usd_provider_control = format(usd_control_amt, "f")
+            diff = usd_ext_rounded - usd_control_amt
+            result.usd_precision_difference = f"{_round_money(diff):.2f}"
 
-    gst_ctl = _control_line_prefix(rows, "gst $")
-    gst_amt = _money_from_control_line(gst_ctl.get("control_line_raw") if gst_ctl else None)
-    pst_ctl = _control_line_prefix(rows, "pst $")
-    pst_amt = _money_from_control_line(pst_ctl.get("control_line_raw") if pst_ctl else None) or Decimal("0")
-    sub_ctl = _control_line_prefix(rows, "subtotal")
-    sub_amt = _money_from_control_line(sub_ctl.get("control_line_raw") if sub_ctl else None)
+            if usd_ext_rounded != usd_control_amt:
+                result.passed = False
+                result.checks.append(
+                    NationwideReconciliationCheck(
+                        "USD_PRECISION_CONTROL",
+                        "FAIL",
+                        "ROUND(SUM(volume×unit),2) must equal USD billing control",
+                        expected=format(usd_control_amt, "f"),
+                        actual=format(usd_ext_rounded, "f"),
+                    )
+                )
+            else:
+                result.checks.append(
+                    NationwideReconciliationCheck(
+                        "USD_PRECISION_CONTROL",
+                        "PASS",
+                        "USD precision extension matches provider billing control",
+                        expected=format(usd_control_amt, "f"),
+                        actual=format(usd_ext_rounded, "f"),
+                    )
+                )
 
-    if gst_amt is not None:
-        result.cad_gst = f"{_round_money(gst_amt):.2f}"
-    if pst_amt is not None:
-        result.cad_pst = f"{_round_money(pst_amt):.2f}"
-    if sub_amt is not None:
-        result.cad_subtotal = f"{_round_money(sub_amt):.2f}"
+    # --------------------------------------------------
+    # CAD reconciliation is required only when CAD rows
+    # actually exist in this provider document.
+    # --------------------------------------------------
 
-    if ex_tax_amt is not None and gst_amt is not None and sub_amt is not None:
-        expected_sub = _round_money(ex_tax_amt + gst_amt + pst_amt)
-        if expected_sub != sub_amt:
+    if cad_txns:
+        cad_ext = _extension_sum(cad_txns)
+        cad_ext_rounded = _round_money(cad_ext)
+        result.cad_ex_tax_extension = format(cad_ext, "f")
+
+        ex_tax_ctl = _control_line_prefix(rows, "total ex-gst")
+        ex_tax_amt = _money_from_control_line(
+            ex_tax_ctl.get("control_line_raw") if ex_tax_ctl else None
+        )
+
+        if ex_tax_amt is None:
             result.passed = False
             result.checks.append(
                 NationwideReconciliationCheck(
-                    "CAD_TAX_SUBTOTAL",
+                    "CAD_EX_TAX_CONTROL_MISSING",
                     "FAIL",
-                    "ex-tax + GST + PST must equal subtotal",
-                    expected=format(sub_amt, "f"),
-                    actual=format(expected_sub, "f"),
+                    "Total Ex-GST & PST control required when CAD transactions exist",
                 )
             )
         else:
-            result.checks.append(NationwideReconciliationCheck("CAD_TAX_SUBTOTAL", "PASS", "CAD tax/subtotal OK"))
+            result.cad_ex_tax_control = format(ex_tax_amt, "f")
 
-    card_controls = [c for c in controls if c.get("control_type") == CONTROL_TYPE_CARD_TOTAL]
+            if cad_ext_rounded != ex_tax_amt:
+                result.passed = False
+                result.checks.append(
+                    NationwideReconciliationCheck(
+                        "CAD_EX_TAX",
+                        "FAIL",
+                        "CAD volume×unit rounded must match ex-tax control",
+                        expected=format(ex_tax_amt, "f"),
+                        actual=format(cad_ext_rounded, "f"),
+                    )
+                )
+            else:
+                result.checks.append(
+                    NationwideReconciliationCheck(
+                        "CAD_EX_TAX",
+                        "PASS",
+                        "CAD ex-tax control OK",
+                    )
+                )
+
+        gst_ctl = _control_line_prefix(rows, "gst $")
+        gst_amt = _money_from_control_line(
+            gst_ctl.get("control_line_raw") if gst_ctl else None
+        )
+
+        pst_ctl = _control_line_prefix(rows, "pst $")
+        pst_amt = (
+            _money_from_control_line(
+                pst_ctl.get("control_line_raw") if pst_ctl else None
+            )
+            or Decimal("0")
+        )
+
+        sub_ctl = _control_line_prefix(rows, "subtotal")
+        sub_amt = _money_from_control_line(
+            sub_ctl.get("control_line_raw") if sub_ctl else None
+        )
+
+        if gst_amt is not None:
+            result.cad_gst = f"{_round_money(gst_amt):.2f}"
+
+        if pst_amt is not None:
+            result.cad_pst = f"{_round_money(pst_amt):.2f}"
+
+        if sub_amt is not None:
+            result.cad_subtotal = f"{_round_money(sub_amt):.2f}"
+
+        if ex_tax_amt is not None and gst_amt is not None and sub_amt is not None:
+            expected_sub = _round_money(ex_tax_amt + gst_amt + pst_amt)
+
+            if expected_sub != sub_amt:
+                result.passed = False
+                result.checks.append(
+                    NationwideReconciliationCheck(
+                        "CAD_TAX_SUBTOTAL",
+                        "FAIL",
+                        "ex-tax + GST + PST must equal subtotal",
+                        expected=format(sub_amt, "f"),
+                        actual=format(expected_sub, "f"),
+                    )
+                )
+            else:
+                result.checks.append(
+                    NationwideReconciliationCheck(
+                        "CAD_TAX_SUBTOTAL",
+                        "PASS",
+                        "CAD tax/subtotal OK",
+                    )
+                )
+
+    # --------------------------------------------------
+    # CARD_TOTAL extension proof applies to evidenced
+    # USD card controls. CAD has its own tax/control math.
+    # --------------------------------------------------
+
+    card_controls = [
+        c
+        for c in controls
+        if c.get("control_type") == CONTROL_TYPE_CARD_TOTAL
+    ]
+
     for ctl in card_controls:
         line = ctl.get("control_line_raw") or ""
+
         card = ctl.get("card_number")
         if not card and line:
             card = line.split()[0]
+
+        currency = (ctl.get("currency") or "").upper() or None
+
+        declared, declared_err = parse_nationwide_decimal(
+            ctl.get("declared_amount")
+        )
+        if declared is None or declared_err:
+            declared = _card_total_declared(line)
+
+        if card and currency and declared is not None:
+            result.card_controls.append(
+                {
+                    "card_number": str(card),
+                    "currency": currency,
+                    "declared_amount": format(declared, "f"),
+                }
+            )
+
+        if currency == "CAD" or " GST " in line.upper():
+            continue
+
         if not card:
             continue
-        if " GST " in line.upper():
-            continue
-        card_txns = [t for t in usd_txns if (t.get("card_number") or "").upper() == card.upper()]
+
+        card_txns = [
+            t
+            for t in usd_txns
+            if (t.get("card_number") or "").upper() == card.upper()
+        ]
+
         if not card_txns:
             continue
+
         ext = _round_money(_extension_sum(card_txns))
         declared = _card_total_declared(line)
+
         if declared is None:
             result.passed = False
             result.checks.append(
@@ -286,6 +415,7 @@ def reconcile_nationwide_source_rows(rows: list[dict[str, Any]]) -> NationwideSo
                 )
             )
             continue
+
         if ext != declared:
             result.passed = False
             result.checks.append(
@@ -307,17 +437,5 @@ def reconcile_nationwide_source_rows(rows: list[dict[str, Any]]) -> NationwideSo
                     actual=format(ext, "f"),
                 )
             )
-
-    if len(transactions) != 12:
-        result.passed = False
-        result.checks.append(
-            NationwideReconciliationCheck(
-                "TRANSACTION_COUNT",
-                "FAIL",
-                "expected 12 purchase rows",
-                expected="12",
-                actual=str(len(transactions)),
-            )
-        )
 
     return result

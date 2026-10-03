@@ -114,6 +114,9 @@ async def test_nationwide_full_process_fixture() -> None:
         )
         assert batch is not None
         assert batch.status == BATCH_STATUS_FINALIZED
+        assert batch.invoice_date is None
+        assert batch.statement_start.isoformat() == "2026-06-08"
+        assert batch.statement_end.isoformat() == "2026-06-14"
 
         txns = (
             await session.execute(
@@ -128,6 +131,18 @@ async def test_nationwide_full_process_fixture() -> None:
         assert usd == Decimal("5197.67")
         assert cad == Decimal("1263.85")
         assert all(t.driver_name_snapshot is None for t in txns)
+
+        cad_rows = [t for t in txns if t.currency == "CAD"]
+        usd_rows = [t for t in txns if t.currency == "USD"]
+
+        assert len(cad_rows) == 1
+        assert len(usd_rows) == 11
+
+        assert all(t.quantity_unit == "litres" for t in cad_rows)
+        assert all(t.unit_price_basis == "EX_TAX" for t in cad_rows)
+
+        assert all(t.quantity_unit == "gallons" for t in usd_rows)
+        assert all(t.unit_price_basis == "FINAL_GALLON_PRICE" for t in usd_rows)
 
         usd_ctl = await session.scalar(
             select(FuelSourceControl.declared_amount)

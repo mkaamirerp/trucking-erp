@@ -10,7 +10,12 @@ import pytest
 
 from app.services.fuel_nationwide_effective import build_effective_nationwide_rows
 from app.services.fuel_nationwide_extraction import extract_nationwide_rows_from_digital_pdf
-from app.services.fuel_nationwide_import import NATIONWIDE_SOURCE_FIELD_NAMES, ROW_TRANSACTION
+from app.services.fuel_nationwide_import import (
+    NATIONWIDE_SOURCE_FIELD_NAMES,
+    ROW_CONTROL,
+    ROW_HEADER,
+    ROW_TRANSACTION,
+)
 from app.services.fuel_nationwide_source_reconciliation import reconcile_nationwide_source_rows
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,6 +46,18 @@ def test_real_fixture_reconciliation_passes() -> None:
     assert result.cad_pst == "0.00"
     assert result.cad_subtotal == "1263.85"
 
+    card_controls = {
+        (
+            c["card_number"],
+            c["currency"],
+            c["declared_amount"],
+        )
+        for c in result.card_controls
+    }
+
+    assert ("XXXXX07588", "USD", "722.75") in card_controls
+    assert ("XXXXX87195", "CAD", "1263.85") in card_controls
+
 
 def test_usd_quantity_tamper_fails() -> None:
     rows = copy.deepcopy(_rows_from_pdf())
@@ -56,3 +73,104 @@ def test_usd_billing_control_tamper_fails() -> None:
     ctl["declared_amount"] = "1.00"
     result = reconcile_nationwide_source_rows(rows)
     assert result.passed is False
+
+def test_usd_only_document_does_not_require_cad_controls() -> None:
+    rows = [
+        {
+            "row_type": ROW_HEADER,
+            "invoice_number": "USD-ONLY",
+        },
+        {
+            "row_type": ROW_TRANSACTION,
+            "currency": "USD",
+            "volume": "10.00",
+            "ex_gst_per_unit": "2.00",
+            "total": "20.00",
+            "card_number": "XXXXX1",
+        },
+        {
+            "row_type": ROW_CONTROL,
+            "control_type": "CURRENCY_TOTAL",
+            "row_label": "USD_BILLING_TOTAL",
+            "declared_amount": "20.00",
+            "currency": "USD",
+            "control_line_raw": "USD billing total $20.00",
+        },
+    ]
+
+    result = reconcile_nationwide_source_rows(rows)
+
+    assert result.passed is True
+    assert result.usd_provider_control == "20.00"
+    assert result.cad_ex_tax_control is None
+    assert not any(
+        c.code == "CAD_EX_TAX_CONTROL_MISSING"
+        for c in result.checks
+    )
+
+
+def test_cad_only_document_does_not_require_usd_control() -> None:
+    rows = [
+        {
+            "row_type": ROW_HEADER,
+            "invoice_number": "CAD-ONLY",
+        },
+        {
+            "row_type": ROW_TRANSACTION,
+            "currency": "CAD",
+            "volume": "10.00",
+            "ex_gst_per_unit": "2.00",
+            "total": "22.60",
+        },
+        {
+            "row_type": ROW_CONTROL,
+            "control_type": "INVOICE_SUMMARY",
+            "control_line_raw": "Total Ex-GST & PST $20.00",
+        },
+        {
+            "row_type": ROW_CONTROL,
+            "control_type": "TAX_CONTROL",
+            "control_line_raw": "GST $2.60",
+        },
+        {
+            "row_type": ROW_CONTROL,
+            "control_type": "TAX_CONTROL",
+            "control_line_raw": "PST $0.00",
+        },
+        {
+            "row_type": ROW_CONTROL,
+            "control_type": "PROVIDER_DECLARED_TOTAL",
+            "control_line_raw": "Subtotal $22.60",
+        },
+    ]
+
+    result = reconcile_nationwide_source_rows(rows)
+
+    assert result.passed is True
+    assert result.usd_provider_control is None
+    assert result.cad_ex_tax_control == "20.00"
+    assert result.cad_gst == "2.60"
+    assert result.cad_pst == "0.00"
+    assert result.cad_subtotal == "22.60"
+    assert not any(
+        c.code == "USD_BILLING_CONTROL_MISSING"
+        for c in result.checks
+    )
+
+
+def test_document_without_transactions_fails() -> None:
+    rows = [
+        {
+            "row_type": ROW_HEADER,
+            "invoice_number": "EMPTY",
+        }
+    ]
+
+    result = reconcile_nationwide_source_rows(rows)
+
+    assert result.passed is False
+    assert any(
+        c.code == "NO_TRANSACTIONS"
+        and c.status == "FAIL"
+        for c in result.checks
+    )

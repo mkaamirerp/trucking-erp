@@ -522,7 +522,12 @@ async def process_nationwide_stage_to_permanent(
             db.add(ctrl)
         await db.flush()
 
-        assert_nationwide_canonical_money_gate(canonical_txns, expected_transaction_count=expected_money_count)
+        assert_nationwide_canonical_money_gate(
+            canonical_txns,
+            canonical_controls,
+            expected_transaction_count=expected_money_count,
+            source_reconciliation=reconciliation,
+        )
         finalize_batch(batch, reviewed_by=reviewed_by)
         await db.commit()
     except FuelNationwideCanonicalProjectionError as exc:

@@ -33,7 +33,7 @@ from app.services.fuel_controls import (
     CONTROL_TYPE_TAX_CONTROL,
     CONTROL_TYPE_UNIT_SUBTOTAL,
 )
-from app.services.fuel_money import quantize_money, to_optional_decimal
+from app.services.fuel_money import quantize_money, quantize_quantity, to_optional_decimal
 from app.services.fuel_nationwide_import import (
     NATIONWIDE_PROVIDER_CODE,
     NATIONWIDE_SOURCE_FIELD_NAMES,
@@ -66,6 +66,13 @@ def _money_decimal(raw: Any) -> Decimal | None:
     if err or dec is None:
         return None
     return quantize_money(dec)
+
+
+def _quantity_decimal(raw: Any) -> Decimal | None:
+    dec, err = parse_nationwide_decimal(raw)
+    if err or dec is None:
+        return None
+    return quantize_quantity(dec)
 
 
 def _parse_statement_date(raw: str | None) -> date | None:
@@ -136,7 +143,9 @@ def build_fuel_source_batch(
         provider_code=NATIONWIDE_VENDOR,
         source_type=SOURCE_TYPE_PDF,
         invoice_number=_row_get(header, "invoice_number"),
-        invoice_date=_parse_statement_date(_row_get(header, "invoice_start_date")),
+        # Nationwide source evidence provides a statement period, not a distinct
+        # invoice date. Do not manufacture invoice_date from statement_start.
+        invoice_date=None,
         statement_start=_parse_statement_date(_row_get(header, "invoice_start_date")),
         statement_end=_parse_statement_date(_row_get(header, "invoice_end_date")),
         due_date=_parse_statement_date(_row_get(header, "due_date")),
@@ -205,7 +214,9 @@ def _build_purchase_transaction(
         product=_row_get(effective, "product"),
         product_code_raw=_row_get(effective, "product"),
         quantity=to_optional_decimal(_row_get(effective, "volume")),
+        quantity_unit=_quantity_unit(cur_iso),
         unit_price=to_optional_decimal(_row_get(effective, "ex_gst_per_unit")),
+        unit_price_basis=_unit_price_basis(cur_iso),
         total_amount=total,
         currency_raw=cur_raw,
         currency=cur_iso,
@@ -303,6 +314,8 @@ def project_nationwide_rows_to_canonical(
                     source_row_id=str(nw_id),
                     currency_raw=cur_raw,
                     currency=cur_iso,
+                    quantity=_quantity_decimal(eff.get("control_volume")),
+                    discount_amount=_money_decimal(eff.get("usa_discount")),
                     declared_amount=declared,
                     gst_amount=_money_decimal(eff.get("gst")),
                     pst_amount=_money_decimal(eff.get("pst")),
@@ -316,20 +329,153 @@ def project_nationwide_rows_to_canonical(
 
 def assert_nationwide_canonical_money_gate(
     transactions: list[FuelTransaction],
+    controls: list[FuelSourceControl],
     *,
     expected_transaction_count: int,
+    source_reconciliation: Any,
 ) -> None:
     if len(transactions) != expected_transaction_count:
         raise FuelNationwideCanonicalProjectionError(
             "CANONICAL_TXN_COUNT",
             f"expected {expected_transaction_count} transactions, got {len(transactions)}",
         )
+
     for t in transactions:
         if t.total_amount is None:
             raise FuelNationwideCanonicalProjectionError(
                 "CANONICAL_TOTAL_MISSING",
                 f"transaction {t.id} missing total_amount",
             )
+
+    def _controls_of_type(control_type: str) -> list[FuelSourceControl]:
+        return [c for c in controls if c.control_type == control_type]
+
+    if source_reconciliation.usd_provider_control is not None:
+        usd_controls = [
+            c
+            for c in _controls_of_type(CONTROL_TYPE_CURRENCY_TOTAL)
+            if c.currency == "USD"
+        ]
+        if len(usd_controls) != 1:
+            raise FuelNationwideCanonicalProjectionError(
+                "USD_CONTROL_MISSING",
+                f"expected 1 USD CURRENCY_TOTAL control, got {len(usd_controls)}",
+            )
+
+        expected = _money_decimal(source_reconciliation.usd_provider_control)
+        actual = usd_controls[0].declared_amount
+        if expected is None or actual is None or quantize_money(actual) != expected:
+            raise FuelNationwideCanonicalProjectionError(
+                "USD_CONTROL_MISMATCH",
+                f"canonical USD control {actual} != source control {expected}",
+            )
+
+    if source_reconciliation.cad_ex_tax_control is not None:
+        ex_tax_controls = [
+            c
+            for c in _controls_of_type(CONTROL_TYPE_INVOICE_SUMMARY)
+            if (c.control_label_raw or "").casefold().startswith("total ex-gst")
+        ]
+        if len(ex_tax_controls) != 1:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_EX_TAX_CONTROL_MISSING",
+                f"expected 1 canonical CAD Ex-GST control, got {len(ex_tax_controls)}",
+            )
+
+        expected = _money_decimal(source_reconciliation.cad_ex_tax_control)
+        actual = ex_tax_controls[0].declared_amount
+        if expected is None or actual is None or quantize_money(actual) != expected:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_EX_TAX_CONTROL_MISMATCH",
+                f"canonical CAD Ex-GST control {actual} != source control {expected}",
+            )
+
+    if source_reconciliation.cad_gst is not None:
+        gst_controls = [
+            c
+            for c in _controls_of_type(CONTROL_TYPE_TAX_CONTROL)
+            if c.gst_amount is not None
+        ]
+        if len(gst_controls) != 1:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_GST_CONTROL_MISSING",
+                f"expected 1 canonical GST control, got {len(gst_controls)}",
+            )
+
+        expected = _money_decimal(source_reconciliation.cad_gst)
+        actual = gst_controls[0].gst_amount
+        if expected is None or actual is None or quantize_money(actual) != expected:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_GST_CONTROL_MISMATCH",
+                f"canonical GST control {actual} != source control {expected}",
+            )
+
+    if source_reconciliation.cad_pst is not None:
+        pst_controls = [
+            c
+            for c in _controls_of_type(CONTROL_TYPE_TAX_CONTROL)
+            if c.pst_amount is not None
+        ]
+        if len(pst_controls) != 1:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_PST_CONTROL_MISSING",
+                f"expected 1 canonical PST control, got {len(pst_controls)}",
+            )
+
+        expected = _money_decimal(source_reconciliation.cad_pst)
+        actual = pst_controls[0].pst_amount
+        if expected is None or actual is None or quantize_money(actual) != expected:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_PST_CONTROL_MISMATCH",
+                f"canonical PST control {actual} != source control {expected}",
+            )
+
+    if source_reconciliation.cad_subtotal is not None:
+        subtotal_controls = [
+            c
+            for c in _controls_of_type(CONTROL_TYPE_PROVIDER_DECLARED_TOTAL)
+            if (c.control_label_raw or "").casefold().startswith("subtotal")
+        ]
+        if len(subtotal_controls) != 1:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_SUBTOTAL_CONTROL_MISSING",
+                f"expected 1 canonical CAD subtotal control, got {len(subtotal_controls)}",
+            )
+
+        expected = _money_decimal(source_reconciliation.cad_subtotal)
+        actual = subtotal_controls[0].declared_amount
+        if expected is None or actual is None or quantize_money(actual) != expected:
+            raise FuelNationwideCanonicalProjectionError(
+                "CAD_SUBTOTAL_CONTROL_MISMATCH",
+                f"canonical CAD subtotal {actual} != source control {expected}",
+            )
+
+    expected_card_totals = sorted(
+        (
+            str(item.get("card_number") or ""),
+            str(item.get("currency") or ""),
+            _money_decimal(item.get("declared_amount")),
+        )
+        for item in source_reconciliation.card_controls
+    )
+
+    canonical_card_totals = sorted(
+        (
+            str(c.scope_card_or_account_id or ""),
+            str(c.currency or ""),
+            quantize_money(c.declared_amount)
+            if c.declared_amount is not None
+            else None,
+        )
+        for c in controls
+        if c.control_type == CONTROL_TYPE_CARD_TOTAL
+    )
+
+    if expected_card_totals != canonical_card_totals:
+        raise FuelNationwideCanonicalProjectionError(
+            "CARD_CONTROLS_MISMATCH",
+            "canonical Nationwide CARD_TOTAL controls do not match validated source controls",
+        )
 
 
 def finalize_batch(batch: FuelSourceBatch, *, reviewed_by: str) -> None:

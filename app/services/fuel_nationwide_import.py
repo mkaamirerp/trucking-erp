@@ -67,6 +67,7 @@ _PROVIDER_KEY_TO_COLUMN: dict[str, str] = {
     "declared_amount": "declared_amount",
     "row_label": "row_label",
     "control_line_raw": "control_line_raw",
+    "control_volume": "control_volume",
 }
 
 _HEADER_KEY_TO_COLUMN: dict[str, str] = {

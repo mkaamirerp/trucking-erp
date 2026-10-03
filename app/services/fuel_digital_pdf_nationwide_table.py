@@ -31,6 +31,7 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _GST_LINE_RE = re.compile(r"^GST\s+\$?([\d,]+\.?\d*)", re.IGNORECASE)
 _PST_LINE_RE = re.compile(r"^PST\s+\$?([\d,]+\.?\d*)", re.IGNORECASE)
 _MONEY_ONLY_LINE_RE = re.compile(r"^\$([\d,]+\.\d{2})$")
+_TOTAL_VOLUME_RE = re.compile(r"^Total\s+Volume\s+([\d,]+\.?\d*)$", re.IGNORECASE)
 
 
 def _money_display(value: str) -> str:
@@ -137,6 +138,11 @@ def _is_control_line(line: str) -> bool:
 
 def _control_fields_from_line(line: str) -> dict[str, str | None]:
     out: dict[str, str | None] = {"control_line_raw": line.strip()}
+
+    total_volume = _TOTAL_VOLUME_RE.match(line.strip())
+    if total_volume:
+        out["control_volume"] = _money_display(total_volume.group(1))
+
     gst = _GST_LINE_RE.match(line.strip())
     if gst:
         out["GST"] = _money_display(gst.group(1))

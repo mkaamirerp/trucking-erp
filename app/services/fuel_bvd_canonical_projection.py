@@ -41,7 +41,7 @@ from app.services.fuel_controls import (
     CONTROL_TYPE_PRODUCT_SUBTOTAL,
     assert_no_source_row_double_count,
 )
-from app.services.fuel_money import quantize_money, to_optional_decimal
+from app.services.fuel_money import quantize_money, quantize_quantity, to_optional_decimal
 
 BVD_VENDOR = "BVD"
 SECTION_FUEL_CARD = "FUEL_CARD_TRANSACTIONS"
@@ -70,6 +70,13 @@ def _money_decimal(raw: Any) -> Decimal | None:
     if err or dec is None:
         return None
     return quantize_money(dec)
+
+
+def _quantity_decimal(raw: Any) -> Decimal | None:
+    dec, err = parse_bvd_decimal(raw)
+    if err or dec is None:
+        return None
+    return quantize_quantity(dec)
 
 
 def _parse_statement_date(raw: str | None) -> date | None:
@@ -227,7 +234,9 @@ def _build_purchase_transaction(
         product_code_raw=_row_get(effective, "prod"),
         product=_row_get(effective, "prod"),
         quantity=to_optional_decimal(_row_get(effective, "qty") or None) if _row_get(effective, "qty") else None,
+        quantity_unit=None,
         unit_price=to_optional_decimal(_row_get(effective, "billed") or None) if _row_get(effective, "billed") else None,
+        unit_price_basis="BILLED",
         provider_discount_rate=to_optional_decimal(_row_get(effective, "disc_rate") or None)
         if _row_get(effective, "disc_rate")
         else None,
@@ -337,6 +346,13 @@ def _build_control(
         source_row_id=str(fuel_bvd_id),
         currency_raw=cur_raw,
         currency=cur_iso,
+        quantity=_quantity_decimal(raw.get("qty")),
+        pre_tax_amount=_money_decimal(raw.get("pre_tax_amt")),
+        hst_amount=_money_decimal(raw.get("hst")),
+        gst_amount=_money_decimal(raw.get("gst")),
+        pst_amount=_money_decimal(raw.get("pst")),
+        qst_amount=_money_decimal(raw.get("qst")),
+        discount_amount=_money_decimal(raw.get("disc_amt")),
         declared_amount=declared_amount,
         provider_raw=_control_provider_payload(
             raw,

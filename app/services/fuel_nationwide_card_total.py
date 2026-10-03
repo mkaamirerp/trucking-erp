@@ -12,6 +12,13 @@ _CARD_TOTAL_LINE_RE = re.compile(r"^X+\d+\s+Total\b", re.IGNORECASE)
 _MONEY_TWO_DEC_RE = re.compile(r"\$([\d,]+\.\d{2})")
 _GST_IN_LINE_RE = re.compile(r"\bGST\s*\$?([\d,]+\.?\d*)", re.IGNORECASE)
 _QST_IN_LINE_RE = re.compile(r"\bQST\s*\$?([\d,]+\.?\d*)", re.IGNORECASE)
+_CARD_TOTAL_VOLUME_RE = re.compile(
+    r"\bTotal\b"
+    r"(?:\s+GST\s*\$?[\d,]+\.?\d*)?"
+    r"(?:\s+QST\s*\$?[\d,]+\.?\d*)?"
+    r"\s+([\d,]+\.\d{2})\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize_money_text(raw: str) -> str:
@@ -50,12 +57,32 @@ def parse_nationwide_card_total_line(line: str | None) -> dict[str, str | None]:
         if qst and qst not in ("0", "0.00"):
             out["QST"] = qst
 
+    # CARD_TOTAL layout after the provider labels is:
+    #   Volume, Total, USA Discount, Missed Disc
+    # OON Fees is not printed on these evidenced CARD_TOTAL lines, so do not
+    # manufacture it.
+    volume_m = _CARD_TOTAL_VOLUME_RE.search(stripped)
+    if volume_m:
+        out["control_volume"] = _normalize_money_text(volume_m.group(1))
+
+    named_tax_values = {
+        value
+        for value in (out.get("GST"), out.get("QST"))
+        if value
+    }
+
     two_dec_amounts = [_normalize_money_text(m) for m in _MONEY_TWO_DEC_RE.findall(stripped)]
     two_dec_amounts = [a for a in two_dec_amounts if a]
-    if currency == "USD" and two_dec_amounts:
-        out["declared_amount"] = two_dec_amounts[0]
-    elif currency == "CAD" and two_dec_amounts:
-        out["declared_amount"] = max(two_dec_amounts, key=lambda a: Decimal(a))
+
+    # Remove named tax amounts before positional Total/Discount interpretation.
+    positional_money = [v for v in two_dec_amounts if v not in named_tax_values]
+
+    if positional_money:
+        out["declared_amount"] = positional_money[0]
+    if len(positional_money) >= 2:
+        out["USA Discount"] = positional_money[1]
+    if len(positional_money) >= 3:
+        out["Missed Disc"] = positional_money[2]
 
     return out
 
@@ -87,3 +114,15 @@ def apply_card_total_review_fields(row: dict[str, Any]) -> None:
     qst = parsed.get("QST")
     if qst and not row.get("qst"):
         row["qst"] = qst
+
+    volume = parsed.get("control_volume")
+    if volume and not row.get("control_volume"):
+        row["control_volume"] = volume
+
+    usa_discount = parsed.get("USA Discount")
+    if usa_discount and not row.get("usa_discount"):
+        row["usa_discount"] = usa_discount
+
+    missed_disc = parsed.get("Missed Disc")
+    if missed_disc and not row.get("missed_disc"):
+        row["missed_disc"] = missed_disc
