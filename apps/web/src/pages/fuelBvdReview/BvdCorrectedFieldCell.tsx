@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FuelBvdRow } from "../../api";
 import { fieldsForRowType } from "./bvdFieldSlots";
+import { bvdParserMoneyBaseline, bvdReviewFieldDisplay, isBvdProviderMoneyField } from "./bvdParsedDisplay";
 import {
   extractedValue,
   isFieldCorrected,
@@ -31,7 +32,7 @@ export default function BvdCorrectedFieldCell({
   const extracted = extractedValue(row, field);
   const effective = reviewedValue(row, field, drafts);
   const corrected = isFieldCorrected(row, field, drafts);
-  const display = effective || extracted || "—";
+  const display = bvdReviewFieldDisplay(row, field, drafts);
   const editable =
     presentation === "processing-review" &&
     !readOnly &&
@@ -40,6 +41,7 @@ export default function BvdCorrectedFieldCell({
 
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(display === "—" ? "" : display);
+  const parserBaseline = bvdParserMoneyBaseline(field, extracted);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -62,11 +64,12 @@ export default function BvdCorrectedFieldCell({
       onFieldDraft(row.id, field, next);
       return;
     }
-    const baseline = extracted || "";
+    const baseline = isBvdProviderMoneyField(field) ? parserBaseline : extracted || "";
     if (next === baseline && !corrected) {
       return;
     }
-    if (next === effective) {
+    const effectiveRaw = effective || extracted;
+    if (next === effectiveRaw || (isBvdProviderMoneyField(field) && next === bvdReviewFieldDisplay(row, field, drafts))) {
       return;
     }
     await onInlineCommit?.(row.id, field, next);

@@ -18,7 +18,13 @@ import {
 } from "../fuelBvdReviewLabels";
 import { fieldsForRowType } from "./bvdFieldSlots";
 import BvdCorrectedFieldCell from "./BvdCorrectedFieldCell";
-import { displayCell, operationalCell, sortBvdRows } from "./bvdParsedDisplay";
+import {
+  displayCell,
+  formatBvdProviderMoneyField,
+  isBvdProviderMoneyField,
+  operationalCell,
+  sortBvdRows,
+} from "./bvdParsedDisplay";
 import { type BvdValidationMetric, type BvdValidationStatus } from "./bvdParsedValidation";
 import {
   reconciliationStripFromBackend,
@@ -67,6 +73,15 @@ function controlRowTitle(row: FuelBvdRow): string {
 function grandTotalRowKind(row: FuelBvdRow): "statement-total" | "product-line" {
   if (displayCell(row, "row_label") === "Grand Total") return "statement-total";
   return "product-line";
+}
+
+function readOnlyStatementCell(row: FuelBvdRow, field: string): string {
+  const raw = operationalCell(row, field);
+  if (isBvdProviderMoneyField(field)) {
+    return formatBvdProviderMoneyField(raw);
+  }
+  const t = raw.trim();
+  return t || "—";
 }
 
 function HeaderCell({ label, value }: { label: string; value: string }) {
@@ -486,7 +501,7 @@ export default function BvdParsedStatementView({
                                   onInlineCommit={onInlineCommit}
                                 />
                               ) : (
-                                displayCell(row, c.field)
+                                readOnlyStatementCell(row, c.field)
                               )}
                             </td>
                           ))}

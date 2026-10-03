@@ -52,6 +52,8 @@ describe("fuelBvdTxnMoneyColumns", () => {
   it("zero discount displays 0.00", () => {
     expect(bvdTxnDiscountDisplay(txn(1, { disc_amt: "0.00" }))).toBe("0.00");
     expect(bvdTxnDiscountDisplay(txn(1, { disc_amt: "0" }))).toBe("0.00");
+    expect(bvdTxnDiscountDisplay(txn(1, { disc_amt: "" }))).toBe("0.00");
+    expect(bvdTxnDiscountDisplay(txn(1, {}))).toBe("0.00");
   });
 
   it("non-zero discount displays formatted amount", () => {

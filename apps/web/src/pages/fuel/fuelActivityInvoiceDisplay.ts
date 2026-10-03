@@ -79,9 +79,9 @@ export function formatFuelActivityDueDate(dueDate: string | null | undefined): s
 }
 
 export function formatFuelActivityInvoiceDiscount(row: FuelActivityRow): string {
-  if (row.invoice_disc_amt === undefined || row.invoice_disc_amt === null) return "—";
+  if (row.invoice_disc_amt === undefined || row.invoice_disc_amt === null) return "0.00";
   const amt = row.invoice_disc_amt.trim();
-  if (!amt) return "—";
+  if (!amt || amt === "-" || amt === "—") return "0.00";
   return amt;
 }
 

@@ -1,5 +1,5 @@
 import type { FuelBvdRow } from "../../api";
-import { formatMoneyDisplay } from "./bvdCompletedBasicProjection";
+import { formatBvdTxnCompactMoney } from "./bvdMoneyDisplay";
 import { operationalCell } from "./bvdParsedDisplay";
 import { parseBvdMoneyString } from "./bvdParsedValidation";
 import { isNonZeroMoney } from "./bvdTransactionRowPresentation";
@@ -25,25 +25,14 @@ export function activeBvdTxnTaxColumns(transactions: FuelBvdRow[]): BvdTxnActive
   );
 }
 
-/** Compact table money cell — known zero → 0.00; missing → —; else formatted source. */
-export function formatBvdTxnCompactMoney(raw: string): string {
-  const t = raw.trim();
-  if (!t) return "—";
-  const formatted = formatMoneyDisplay(t);
-  if (formatted) return formatted;
-  const n = parseBvdMoneyString(t);
-  if (n !== null) {
-    return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  return t;
-}
+export { formatBvdTxnCompactMoney } from "./bvdMoneyDisplay";
 
 export function bvdTxnDiscountDisplay(row: FuelBvdRow): string {
-  return formatBvdTxnCompactMoney(operationalCell(row, "disc_amt"));
+  return formatBvdTxnCompactMoney(operationalCell(row, "disc_amt"), { emptyAsZero: true });
 }
 
 export function bvdTxnTaxDisplay(row: FuelBvdRow, field: BvdTxnTaxField): string {
-  return formatBvdTxnCompactMoney(operationalCell(row, field));
+  return formatBvdTxnCompactMoney(operationalCell(row, field), { emptyAsZero: true });
 }
 
 export function sumBvdTxnMoneyField(transactions: FuelBvdRow[], field: string): number {

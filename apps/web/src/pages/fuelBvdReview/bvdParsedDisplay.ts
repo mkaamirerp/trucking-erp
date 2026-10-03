@@ -1,5 +1,18 @@
 import type { FuelBvdRow } from "../../api";
 import { BVD_SECTION_ORDER } from "../fuelBvdReviewLabels";
+import {
+  bvdParserMoneyBaseline,
+  formatBvdProviderMoneyField,
+  isBvdProviderMoneyField,
+} from "./bvdMoneyDisplay";
+import { extractedValue, reviewedValue, type DraftMap } from "./bvdReviewValues";
+
+export {
+  BVD_PROVIDER_MONEY_FIELDS,
+  bvdParserMoneyBaseline,
+  formatBvdProviderMoneyField,
+  isBvdProviderMoneyField,
+} from "./bvdMoneyDisplay";
 
 const TYPE_RANK: Record<string, number> = Object.fromEntries(BVD_SECTION_ORDER.map((t, i) => [t, i]));
 
@@ -28,4 +41,14 @@ export function operationalCell(row: FuelBvdRow, field: string): string {
     return String(reviewed);
   }
   return displayCell(row, field);
+}
+
+/** Review/processing UI display for one field (effective + zero-as-0.00 money formatting). */
+export function bvdReviewFieldDisplay(row: FuelBvdRow, field: string, drafts: DraftMap = {}): string {
+  const raw = reviewedValue(row, field, drafts) || extractedValue(row, field);
+  if (isBvdProviderMoneyField(field)) {
+    return formatBvdProviderMoneyField(raw);
+  }
+  const t = raw.trim();
+  return t || "—";
 }
