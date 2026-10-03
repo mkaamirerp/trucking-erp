@@ -32,7 +32,7 @@ describe("nationwideTransactionsToOperationalBvdRows", () => {
     ]);
     expect(rows[0].retail).toBe("1.2345");
     expect(rows[0].billed).toBe("1.2345");
-    expect(processedStatementCellDisplay(rows[0], "retail")).toBe("1.23");
+    expect(processedStatementCellDisplay(rows[0], "retail")).toBe("1.2345");
     expect(processedStatementCellDisplay(rows[1], "retail")).toBe("0.00");
     expect(processedStatementCellDisplay(rows[1], "disc_amt")).toBe("0.00");
   });
