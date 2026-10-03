@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   getFuelBvdImportRows,
   getFuelNationwideImportRows,
@@ -6,6 +6,7 @@ import {
   type FuelBvdRow,
   type FuelCanonicalTransaction,
   type FuelProcessedCurrencyFinancial,
+  type FuelProcessedCurrencyTotal,
 } from "../../api";
 import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
@@ -21,7 +22,7 @@ type Props = {
   invoiceNumber: string;
   sourceImportRef: string | null;
   currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
-  fullInvoiceLink?: ReactNode;
+  providerControlTotals?: FuelProcessedCurrencyTotal[];
 };
 
 export default function TruckErpProcessedFuelWorkspace({
@@ -31,7 +32,7 @@ export default function TruckErpProcessedFuelWorkspace({
   invoiceNumber,
   sourceImportRef,
   currencyFinancialSummaries: currencyFinancialSummariesProp,
-  fullInvoiceLink,
+  providerControlTotals: providerControlTotalsProp,
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +44,9 @@ export default function TruckErpProcessedFuelWorkspace({
   const [currencyFinancialSummaries, setCurrencyFinancialSummaries] = useState<
     FuelProcessedCurrencyFinancial[]
   >(currencyFinancialSummariesProp ?? []);
+  const [providerControlTotals, setProviderControlTotals] = useState<FuelProcessedCurrencyTotal[]>(
+    providerControlTotalsProp ?? [],
+  );
 
   useEffect(() => {
     if (!sourceImportRef) {
@@ -60,6 +64,11 @@ export default function TruckErpProcessedFuelWorkspace({
           detail.currency_financial_summaries?.length
             ? detail.currency_financial_summaries
             : currencyFinancialSummariesProp ?? [],
+        );
+        setProviderControlTotals(
+          detail.provider_control_totals?.length
+            ? detail.provider_control_totals
+            : providerControlTotalsProp ?? [],
         );
         if (detail.total_amount) {
           setInvoiceTotal(detail.total_amount);
@@ -117,7 +126,7 @@ export default function TruckErpProcessedFuelWorkspace({
       providerLabel={providerLabel}
       canonicalTransactions={canonical}
       currencyFinancialSummaries={currencyFinancialSummaries}
-      fullInvoiceLink={fullInvoiceLink}
+      providerControlTotals={providerControlTotals}
     />
   );
 }

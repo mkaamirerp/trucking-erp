@@ -123,40 +123,152 @@
   min-width: 0;
 }
 
-.processed-statement-summary-lines {
-  margin-top: 0.25rem;
-  display: grid;
-  gap: 0.15rem;
-  font-size: 11px;
-}
-
-.processed-statement-summary-line {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 0.75rem 1rem;
-  align-items: baseline;
+/* Expanded fuel statement — approved wireframe (docs/wireframes/fuel-expanded-statement-target.html) */
+.fuel-expanded-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.75rem 0.875rem 0.65rem;
+  border: 1px solid var(--trk-border);
+  border-radius: 0.5rem;
+  background: var(--trk-surface);
   color: var(--trk-text);
 }
 
-.processed-statement-summary-line--total {
-  font-weight: 600;
-  margin-top: 0.1rem;
-}
-
-.processed-statement-summary-line__label {
+.fuel-expanded-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: nowrap;
+  margin-bottom: 0.5rem;
   min-width: 0;
 }
 
-.processed-statement-summary-line__count {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  min-width: 1.5rem;
+.fuel-expanded-header__title {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--trk-text);
+  white-space: nowrap;
 }
 
-.processed-statement-summary-line__amount {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
+.fuel-expanded-header__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--trk-text-muted);
   white-space: nowrap;
+}
+
+.fuel-expanded-header__link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--trk-accent);
+  cursor: pointer;
+}
+
+.fuel-expanded-header__link:hover {
+  text-decoration: underline;
+}
+
+.fuel-expanded-header__doc-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--trk-accent);
+  border-radius: 2px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.fuel-expanded-header__doc-icon::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 4px;
+  height: 1.5px;
+  background: var(--trk-accent);
+  box-shadow: 0 3px 0 var(--trk-accent);
+}
+
+.fuel-expanded-card .truckerp-processed-fuel-workspace {
+  margin-top: 0;
+}
+
+.fuel-expanded-card .processed-statement-section--charges {
+  margin-top: 0.5rem;
+}
+
+.fuel-currency-panel {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.fuel-currency-panel__head,
+.fuel-currency-panel__row {
+  display: grid;
+  grid-template-columns: 3rem 3.5rem 5.5rem 7.5rem minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+
+.fuel-currency-panel__head {
+  margin-bottom: 0.25rem;
+  font-size: 11px;
+  color: var(--trk-text-muted);
+}
+
+.fuel-currency-panel__head span:nth-child(n + 2):nth-child(-n + 4) {
+  text-align: right;
+}
+
+.fuel-currency-panel__row--continuation {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.fuel-currency-panel__ccy,
+.fuel-currency-panel__total {
+  font-weight: 700;
+  color: var(--trk-text);
+}
+
+.fuel-currency-panel__num {
+  text-align: right;
+  color: var(--trk-text);
+}
+
+.fuel-currency-panel__note {
+  text-align: right;
+  font-size: 11px;
+  color: var(--trk-warning);
+  white-space: nowrap;
+}
+
+.fuel-currency-panel__express {
+  margin: 0.5rem 0 0;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--trk-border);
+  font-size: 10px;
+  color: var(--trk-text-muted);
+}
+
+.fuel-currency-panel__fallback {
+  font-weight: 600;
+  font-size: 12px;
 }
 
 /* Legacy wrap overflow disabled for processed sticky layout (.bvd-processed-charge-table). */

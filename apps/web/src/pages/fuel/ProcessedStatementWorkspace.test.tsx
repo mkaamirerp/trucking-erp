@@ -112,7 +112,9 @@ describe("ProcessedStatementWorkspace", () => {
           invoiceNumber="838710"
           invoiceTotal="9,047.72"
           currency="US"
-          fullInvoiceLink={<a href="/detail">Open full invoice</a>}
+          currencyFinancialSummaries={[
+            { currency: "USD", total_amount: "9047.72", discount_amount: "0" },
+          ]}
         />,
       );
     });
@@ -136,13 +138,11 @@ describe("ProcessedStatementWorkspace", () => {
     await renderWorkspace(rows);
     expect(container.querySelector('[data-testid="processed-charge-count"]')?.textContent).toMatch(/42 charges/i);
     const summary = container.querySelector('[data-testid="processed-statement-summary"]');
-    expect(summary?.querySelector('[data-testid="processed-card-section-total"]')?.textContent).toContain(
-      "7,370.94",
+    expect(summary?.querySelector('[data-testid="processed-card-section-total"]')?.textContent).toContain("31");
+    expect(summary?.querySelector('[data-testid="processed-express-section-total"]')?.textContent).toContain("11");
+    expect(summary?.querySelector('[data-testid="processed-currency-summary-USD"]')?.textContent).toContain(
+      "9,047.72",
     );
-    expect(summary?.querySelector('[data-testid="processed-express-section-total"]')?.textContent).toContain(
-      "1,676.78",
-    );
-    expect(summary?.querySelector('[data-testid="processed-invoice-total"]')?.textContent).toContain("9,047.72");
     expect(container.querySelector('[data-testid="processed-card-section-heading"]')).toBeNull();
     const cardSection = container.querySelector('[aria-label="Fuel and card transactions"]');
     expect(cardSection?.querySelector("thead")).not.toBeNull();

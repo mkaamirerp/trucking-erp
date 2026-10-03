@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getFuelBvdCanonicalTransactions,
   type FuelBvdRow,
   type FuelCanonicalTransaction,
   type FuelProcessedCurrencyFinancial,
+  type FuelProcessedCurrencyTotal,
 } from "../../api";
 import BvdExpressRowsTable from "../fuelBvdReview/BvdExpressRowsTable";
 import BvdTransactionRowsTable from "../fuelBvdReview/BvdTransactionRowsTable";
@@ -24,10 +25,10 @@ import {
 } from "./processedStatementCharges";
 import {
   formatFuelActivityInvoiceTotalFromCurrencySummaries,
-  formatFuelActivityStatementCurrencyLine,
   fuelCurrencyFinancialFromApi,
   type FuelCurrencyFinancialLine,
 } from "./fuelActivityCurrencyFinancial";
+import ProcessedStatementSummaryBar from "./ProcessedStatementSummaryBar";
 import { formatProcessedMoneyTotal, sumProcessedChargeFinalAmount } from "./processedStatementMoney";
 
 type Props = {
@@ -43,7 +44,7 @@ type Props = {
   /** When set, skip per-import BVD canonical fetch (processed batch read model). */
   canonicalTransactions?: FuelCanonicalTransaction[];
   currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
-  fullInvoiceLink: ReactNode;
+  providerControlTotals?: FuelProcessedCurrencyTotal[];
 };
 
 export default function ProcessedStatementWorkspace({
@@ -56,7 +57,7 @@ export default function ProcessedStatementWorkspace({
   providerLabel = "BVD",
   canonicalTransactions,
   currencyFinancialSummaries,
-  fullInvoiceLink,
+  providerControlTotals = [],
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [datePeriod, setDatePeriod] = useState<DatePeriodSelection>({ kind: "all" });
@@ -132,67 +133,16 @@ export default function ProcessedStatementWorkspace({
       data-provider={providerLabel}
     >
       <div data-testid={`fuel-processed-statement-${importId}`}>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="processed-statement-summary min-w-0" data-testid="processed-statement-summary">
-          <div className="text-xs font-bold uppercase tracking-wide text-[var(--trk-text)]">
-            {providerLabel} {invoiceNumber}
-          </div>
-          <div className="text-[11px] font-semibold text-[var(--trk-text-muted)]" data-testid="processed-charge-count">
-            {sections.chargeCount} charges
-          </div>
-          <div className="processed-statement-summary-lines">
-            {sections.cardTransactions.length > 0 ? (
-              <div
-                className="processed-statement-summary-line"
-                data-testid="processed-card-section-total"
-              >
-                <span className="processed-statement-summary-line__label">Fuel / Card Transactions</span>
-                <span className="processed-statement-summary-line__count">
-                  {sections.cardTransactions.length}
-                </span>
-                <span className="processed-statement-summary-line__amount">
-                  {formatProcessedMoneyTotal(cardTotal)}
-                </span>
-              </div>
-            ) : null}
-            {sections.expressCharges.length > 0 ? (
-              <div
-                className="processed-statement-summary-line"
-                data-testid="processed-express-section-total"
-              >
-                <span className="processed-statement-summary-line__label">Express Charges</span>
-                <span className="processed-statement-summary-line__count">
-                  {sections.expressCharges.length}
-                </span>
-                <span className="processed-statement-summary-line__amount">
-                  {formatProcessedMoneyTotal(expressTotal)}
-                </span>
-              </div>
-            ) : null}
-            {currencyLines.map((line) => (
-              <div
-                key={line.currency}
-                className="processed-statement-summary-line"
-                data-testid={`processed-currency-summary-${line.currency}`}
-              >
-                <span className="processed-statement-summary-line__label">
-                  {formatFuelActivityStatementCurrencyLine(line)}
-                </span>
-                <span className="processed-statement-summary-line__count" aria-hidden="true" />
-                <span className="processed-statement-summary-line__amount" aria-hidden="true" />
-              </div>
-            ))}
-            <div
-              className="processed-statement-summary-line processed-statement-summary-line--total"
-              data-testid="processed-invoice-total"
-            >
-              <span className="processed-statement-summary-line__label">Processed Invoice Total</span>
-              <span className="processed-statement-summary-line__count" aria-hidden="true" />
-              <span className="processed-statement-summary-line__amount">{processedInvoiceTotalLabel}</span>
-            </div>
-          </div>
-        </div>
-        <div className="shrink-0">{fullInvoiceLink}</div>
+      <div data-testid="processed-statement-summary">
+        <ProcessedStatementSummaryBar
+          currencyLines={currencyLines}
+          canonicalTransactions={canonical}
+          cardTransactionRows={sections.cardTransactions}
+          providerControlTotals={providerControlTotals}
+          expressChargeCount={sections.expressCharges.length}
+          processedInvoiceTotalLabel={processedInvoiceTotalLabel}
+        />
+        <div className="sr-only" data-testid="processed-charge-count">{sections.chargeCount} charges</div>
       </div>
 
       <ProcessedStatementFilterBar

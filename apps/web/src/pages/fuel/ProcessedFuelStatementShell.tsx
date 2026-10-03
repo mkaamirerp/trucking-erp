@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import { getFuelProcessedBatch, type FuelProcessedCurrencyFinancial } from "../../api";
+import {
+  getFuelProcessedBatch,
+  type FuelProcessedCurrencyFinancial,
+  type FuelProcessedCurrencyTotal,
+} from "../../api";
 import TruckErpProcessedFuelWorkspace from "./TruckErpProcessedFuelWorkspace";
 
 export type ProcessedFuelShellProps = {
@@ -11,6 +15,7 @@ export type ProcessedFuelShellProps = {
   controlCount: number;
   sourceImportRef: string | null;
   currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
+  providerControlTotals?: FuelProcessedCurrencyTotal[];
   /** Opens provider-native overlay from Fuel home (not inline on expand). */
   onOpenSource?: () => void;
 };
@@ -28,6 +33,7 @@ export default function ProcessedFuelStatementShell({
   controlCount,
   sourceImportRef,
   currencyFinancialSummaries,
+  providerControlTotals,
   onOpenSource,
 }: ProcessedFuelShellProps) {
   const [lineageSourceImportRef, setLineageSourceImportRef] = useState<string | null>(sourceImportRef);
@@ -49,15 +55,27 @@ export default function ProcessedFuelStatementShell({
   const displayLabel = providerDisplayLabel(providerCode, providerLabel);
 
   return (
-    <div className="min-w-0 space-y-2" data-testid={`fuel-processed-shell-${batchId}`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-xs font-semibold text-[var(--trk-text)]">
-          {displayLabel} {invoiceNumber}
-        </h3>
-        <span className="text-[10px] text-[var(--trk-text-muted)]">
-          {transactionCount} transactions · {controlCount} controls · batch #{batchId}
+    <article
+      className="fuel-expanded-card min-w-0"
+      data-testid={`fuel-processed-shell-${batchId}`}
+    >
+      <header className="fuel-expanded-header">
+        <span className="fuel-expanded-header__title">{displayLabel} {invoiceNumber}</span>
+        <span className="fuel-expanded-header__meta">
+          batch #{batchId} · {transactionCount} transactions · {controlCount} controls
         </span>
-      </div>
+        {onOpenSource ? (
+          <button
+            type="button"
+            className="fuel-expanded-header__link"
+            data-testid={`fuel-open-source-${batchId}`}
+            onClick={onOpenSource}
+          >
+            <span className="fuel-expanded-header__doc-icon" aria-hidden="true" />
+            Open source
+          </button>
+        ) : null}
+      </header>
 
       <TruckErpProcessedFuelWorkspace
         batchId={batchId}
@@ -66,19 +84,8 @@ export default function ProcessedFuelStatementShell({
         invoiceNumber={invoiceNumber}
         sourceImportRef={lineageSourceImportRef}
         currencyFinancialSummaries={currencyFinancialSummaries}
-        fullInvoiceLink={
-          onOpenSource ? (
-            <button
-              type="button"
-              className="text-xs font-medium text-[var(--trk-accent)] hover:underline"
-              data-testid={`fuel-open-source-${batchId}`}
-              onClick={onOpenSource}
-            >
-              Open source
-            </button>
-          ) : null
-        }
+        providerControlTotals={providerControlTotals}
       />
-    </div>
+    </article>
   );
 }

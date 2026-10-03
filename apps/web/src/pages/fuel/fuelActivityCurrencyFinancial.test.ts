@@ -3,6 +3,7 @@ import type { FuelProcessedSummary } from "../../api";
 import {
   formatFuelActivityInvoiceTotalFromCurrencySummaries,
   formatFuelActivityStatementCurrencyLine,
+  processedSectionSummaryAmount,
   resolveFuelCurrencyFinancialSummaries,
 } from "./fuelActivityCurrencyFinancial";
 
@@ -78,6 +79,25 @@ describe("fuelActivityCurrencyFinancial", () => {
     expect(formatFuelActivityInvoiceTotalFromCurrencySummaries(lines)).toBe(
       "1.00 AUD · 2.00 MXN · 3.00 NZD",
     );
+  });
+
+  it("omits mixed-currency section amount instead of summing unlike currencies", () => {
+    const lines = resolveFuelCurrencyFinancialSummaries({
+      currency_financial_summaries: [
+        { currency: "CAD", total_amount: "1263.85", discount_amount: "0" },
+        { currency: "USD", total_amount: "5197.67", discount_amount: "1" },
+      ],
+      currency_totals: [],
+    });
+    expect(processedSectionSummaryAmount(lines, 6461.52, ["CAD", "USD"])).toBeNull();
+  });
+
+  it("shows single-currency section amount from summaries", () => {
+    const lines = resolveFuelCurrencyFinancialSummaries({
+      currency_financial_summaries: [{ currency: "EUR", total_amount: "8421.55", discount_amount: "0" }],
+      currency_totals: [],
+    });
+    expect(processedSectionSummaryAmount(lines, 999, [])).toBe("8421.55 EUR");
   });
 
   it("shows em dash for unknown discount and 0.00 for known zero", () => {

@@ -1,5 +1,6 @@
 import type { FuelProcessedCurrencyFinancial, FuelProcessedSummary } from "../../api";
 import { formatProviderMoneyAmount } from "./fuelProviderMoneyDisplay";
+import { formatProcessedMoneyTotal } from "./processedStatementMoney";
 
 export type FuelCurrencyFinancialLine = {
   currency: string;
@@ -60,4 +61,28 @@ export function fuelCurrencyFinancialFromApi(
     total_amount: line.total_amount,
     discount_amount: line.discount_amount,
   }));
+}
+
+/**
+ * Processed statement section header amount (e.g. Fuel / Card Transactions).
+ * Never returns a single number that mixes unlike currencies.
+ */
+export function processedSectionSummaryAmount(
+  currencyLines: FuelCurrencyFinancialLine[],
+  legacySummedAmount: number,
+  distinctLegacyCurrencyCodes: string[],
+): string | null {
+  if (currencyLines.length > 1) {
+    return null;
+  }
+  if (currencyLines.length === 1) {
+    return formatFuelCurrencyFinancialTotal(currencyLines[0]);
+  }
+  if (distinctLegacyCurrencyCodes.length > 1) {
+    return null;
+  }
+  if (distinctLegacyCurrencyCodes.length === 1) {
+    return `${formatProcessedMoneyTotal(legacySummedAmount)} ${distinctLegacyCurrencyCodes[0]}`;
+  }
+  return formatProcessedMoneyTotal(legacySummedAmount);
 }

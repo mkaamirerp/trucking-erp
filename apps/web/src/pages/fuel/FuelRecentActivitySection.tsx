@@ -339,6 +339,7 @@ export default function FuelRecentActivitySection({
                               controlCount={summary.control_count}
                               sourceImportRef={summary.source_import_ref}
                               currencyFinancialSummaries={summary.currency_financial_summaries}
+                              providerControlTotals={summary.provider_control_totals}
                               onOpenSource={
                                 onOpenProcessed
                                   ? () =>
