@@ -26,6 +26,8 @@ import { readFuelProcessedReturn } from "./fuelBvdReview/bvdUploadCompletion";
 import FuelRecentActivitySection from "./fuel/FuelRecentActivitySection";
 import FuelBvdProcessingWorkspace from "./fuelBvdReview/FuelBvdProcessingWorkspace";
 import FuelNationwideProcessingWorkspace from "./fuelNationwideReview/FuelNationwideProcessingWorkspace";
+import FuelManualEntryModal from "./fuel/FuelManualEntryModal";
+import FuelManualProcessedBatchOverlay from "./fuel/FuelManualProcessedBatchOverlay";
 import { getProcessedFuelRecordOverlay } from "./fuel/processedFuelProviderRenderers";
 import "./fuel/fuel-home.css";
 
@@ -42,6 +44,7 @@ export default function FuelMainPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [apiModalOpen, setApiModalOpen] = useState(false);
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [processNotice, setProcessNotice] = useState<string | null>(null);
   const [processingImportId, setProcessingImportId] = useState<string | null>(null);
@@ -232,6 +235,13 @@ export default function FuelMainPage() {
             <span className="hidden text-[var(--trk-border)] sm:inline">|</span>
             <button
               type="button"
+              onClick={() => setManualEntryOpen(true)}
+              className="rounded-md border border-[var(--trk-border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--trk-text)]"
+            >
+              Manual Entry
+            </button>
+            <button
+              type="button"
               onClick={() => setApiModalOpen(true)}
               className="rounded-md border border-[var(--trk-border-strong)] px-3 py-1.5 text-xs font-medium text-[var(--trk-text)]"
             >
@@ -280,6 +290,12 @@ export default function FuelMainPage() {
         initialProviderCode={providerCode}
       />
 
+      <FuelManualEntryModal
+        open={manualEntryOpen}
+        onClose={() => setManualEntryOpen(false)}
+        onProcessed={(p) => void handleProcessed(p)}
+      />
+
       {processingImportId && processingProvider === "BVD" ? (
         <FuelBvdProcessingWorkspace
           importId={processingImportId}
@@ -310,7 +326,20 @@ export default function FuelMainPage() {
         />
       ) : null}
 
-      {processedBatchId && ProcessedRecordOverlay && processedSourceImportRef ? (
+      {processedBatchId && processedProvider === "MANUAL_ENTRY" ? (
+        <FuelManualProcessedBatchOverlay
+          batchId={processedBatchId}
+          onClose={() => {
+            setProcessedBatchId(null);
+            setProcessedSourceImportRef(null);
+          }}
+        />
+      ) : null}
+
+      {processedBatchId &&
+      processedProvider !== "MANUAL_ENTRY" &&
+      ProcessedRecordOverlay &&
+      processedSourceImportRef ? (
         <ProcessedRecordOverlay
           sourceImportRef={processedSourceImportRef}
           variant="overlay"

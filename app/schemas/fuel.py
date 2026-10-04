@@ -1121,6 +1121,40 @@ def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
     )
 
 
+class FuelManualEntryStageOut(BaseModel):
+    stage_id: str
+    provider_code: str
+    status: str
+    entry_method: str
+    draft: dict[str, Any] = Field(default_factory=dict)
+    extraction_raw: dict[str, Any] | None = None
+    validation_snapshot: dict[str, Any] | None = None
+    requires_review: bool = False
+    source_file_name: str | None = None
+    has_receipt_attachment: bool = False
+    processed_batch_id: int | None = None
+    expires_at: str | None = None
+
+
+class FuelManualEntryDraftPatchIn(BaseModel):
+    draft: dict[str, Any] = Field(default_factory=dict)
+
+
+class FuelManualEntryProcessOut(BaseModel):
+    batch_id: int
+    transaction_id: int
+    provider_code: str
+    status: str
+    parser_version: str | None = None
+
+
+class FuelManualEntryValidateOut(BaseModel):
+    ok: bool = True
+    requires_review: bool = False
+    review_reasons: list[str] = Field(default_factory=list)
+    derived_fields: dict[str, str] = Field(default_factory=dict)
+
+
 def fuel_transaction_to_operational_out(txn: Any) -> FuelProcessedOperationalTransactionOut:
     """Map one ``fuel_transactions`` row to the TruckERP operational workspace contract."""
     return FuelProcessedOperationalTransactionOut(

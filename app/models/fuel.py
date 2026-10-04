@@ -1211,3 +1211,36 @@ class FuelNationwideStageFieldCorrection(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class FuelManualEntryStage(Base):
+    """Single-transaction manual fuel draft before Process commits canonical Fuel rows."""
+
+    __tablename__ = "fuel_manual_entry_stage"
+    __table_args__ = (
+        Index("ix_fuel_manual_entry_stage_tenant", "tenant_id"),
+        Index("ix_fuel_manual_entry_stage_tenant_status", "tenant_id", "status"),
+    )
+
+    stage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provider_code: Mapped[str] = mapped_column(Text, nullable=False, default="MANUAL_ENTRY")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="ACTIVE")
+    entry_method: Mapped[str] = mapped_column(Text, nullable=False, default="DIRECT")
+    draft_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    extraction_raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    validation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    requires_review: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    source_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_file_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_storage_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processed_batch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

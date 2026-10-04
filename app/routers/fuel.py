@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,7 +71,12 @@ from app.schemas.fuel import (
     FuelReviewQueueItemOut,
     FuelReviewStartIn,
     FuelReviewWorkspaceOut,
+    FuelManualEntryDraftPatchIn,
+    FuelManualEntryProcessOut,
+    FuelManualEntryStageOut,
+    FuelManualEntryValidateOut,
 )
+from app.services import fuel_manual_entry_stage as manual_entry_service
 from app.services.fuel_provider_catalog import get_provider_catalog_entry, list_provider_catalog
 from app.services import fuel_provider_connections as connections_service
 from app.services import fuel_bvd_import as bvd_import_service
@@ -1075,6 +1080,165 @@ async def get_nationwide_import_document(
         filename=filename or "nationwide.pdf",
         content_type="application/pdf",
     )
+
+
+# --- Manual Fuel Entry (staging → Process → canonical) ---
+
+
+@router.post("/manual-entry/stages", response_model=FuelManualEntryStageOut)
+async def create_manual_entry_stage(
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    uploaded_by = str(user.user_id) if user.user_id is not None else (user.email or "unknown")
+    try:
+        stage = await manual_entry_service.create_direct_stage(
+            db, tenant_id=tenant_id, created_by=uploaded_by
+        )
+        await db.commit()
+        return FuelManualEntryStageOut(**manual_entry_service.stage_to_dict(stage))
+    except Exception as exc:
+        await db.rollback()
+        manual_entry_service.raise_http(exc)
+        raise
+
+
+@router.post("/manual-entry/stages/receipt", response_model=FuelManualEntryStageOut)
+async def create_manual_entry_receipt_stage(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+    extraction_json: str | None = Form(None),
+):
+    """Store receipt file and optionally hydrate draft from structured extraction JSON (OCR hook)."""
+    import json
+
+    uploaded_by = str(user.user_id) if user.user_id is not None else (user.email or "unknown")
+    body = await file.read()
+    extraction: dict[str, Any] | None = None
+    if extraction_json and extraction_json.strip():
+        extraction = json.loads(extraction_json)
+    try:
+        stage = await manual_entry_service.create_receipt_stage_from_upload(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            created_by=uploaded_by,
+            file_bytes=body,
+            filename=file.filename or "receipt.pdf",
+            extraction=extraction,
+        )
+        await db.commit()
+        return FuelManualEntryStageOut(**manual_entry_service.stage_to_dict(stage))
+    except Exception as exc:
+        await db.rollback()
+        manual_entry_service.raise_http(exc)
+        raise
+
+
+@router.get("/manual-entry/stages/{stage_id}", response_model=FuelManualEntryStageOut)
+async def get_manual_entry_stage(
+    stage_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_VIEW)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    stage = await manual_entry_service.get_active_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    if stage is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manual entry draft not found")
+    return FuelManualEntryStageOut(**manual_entry_service.stage_to_dict(stage))
+
+
+@router.patch("/manual-entry/stages/{stage_id}", response_model=FuelManualEntryStageOut)
+async def patch_manual_entry_stage(
+    stage_id: UUID,
+    payload: FuelManualEntryDraftPatchIn,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    updated_by = str(user.user_id) if user.user_id is not None else (user.email or "unknown")
+    try:
+        stage = await manual_entry_service.update_stage_draft(
+            db,
+            tenant_id=tenant_id,
+            stage_id=stage_id,
+            patch=payload.draft,
+            updated_by=updated_by,
+        )
+        await db.commit()
+        return FuelManualEntryStageOut(**manual_entry_service.stage_to_dict(stage))
+    except Exception as exc:
+        await db.rollback()
+        manual_entry_service.raise_http(exc)
+        raise
+
+
+@router.post("/manual-entry/stages/{stage_id}/validate", response_model=FuelManualEntryValidateOut)
+async def validate_manual_entry_stage(
+    stage_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    try:
+        snapshot = await manual_entry_service.validate_stage_draft(
+            db, tenant_id=tenant_id, stage_id=stage_id
+        )
+        await db.commit()
+        return FuelManualEntryValidateOut(
+            ok=bool(snapshot.get("ok", True)),
+            requires_review=bool(snapshot.get("requires_review")),
+            review_reasons=list(snapshot.get("review_reasons") or []),
+            derived_fields=dict(snapshot.get("derived_fields") or {}),
+        )
+    except Exception as exc:
+        await db.rollback()
+        manual_entry_service.raise_http(exc)
+        raise
+
+
+@router.post("/manual-entry/stages/{stage_id}/process", response_model=FuelManualEntryProcessOut)
+async def process_manual_entry_stage(
+    stage_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    reviewed_by = str(user.user_id) if user.user_id is not None else (user.email or "unknown")
+    try:
+        out = await manual_entry_service.process_manual_entry_stage(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            stage_id=stage_id,
+            reviewed_by=reviewed_by,
+        )
+        await db.commit()
+        return FuelManualEntryProcessOut(**out)
+    except Exception as exc:
+        await db.rollback()
+        manual_entry_service.raise_http(exc)
+        raise
+
+
+@router.post("/manual-entry/stages/{stage_id}/discard")
+async def discard_manual_entry_stage(
+    stage_id: UUID,
+    user: CurrentUser = Depends(require_fuel_capability(FUEL_REVIEW_MANAGE)),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = user
+    await manual_entry_service.discard_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/bvd/imports/{import_id}/document")

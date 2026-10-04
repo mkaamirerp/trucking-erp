@@ -4751,3 +4751,104 @@ export async function setFuelTransactionClassification(
   });
   return handle(res);
 }
+
+export type FuelManualEntryStage = {
+  stage_id: string;
+  provider_code: string;
+  status: string;
+  entry_method: "DIRECT" | "RECEIPT";
+  draft: Record<string, unknown>;
+  extraction_raw?: Record<string, unknown> | null;
+  validation_snapshot?: Record<string, unknown> | null;
+  requires_review: boolean;
+  source_file_name?: string | null;
+  has_receipt_attachment: boolean;
+  processed_batch_id?: number | null;
+  expires_at?: string | null;
+};
+
+export type FuelManualEntryValidateResult = {
+  ok: boolean;
+  requires_review: boolean;
+  review_reasons: string[];
+  derived_fields: Record<string, string>;
+};
+
+export type FuelManualEntryProcessResult = {
+  batch_id: number;
+  transaction_id: number;
+  provider_code: string;
+  status: string;
+  parser_version?: string | null;
+};
+
+export async function createFuelManualEntryStage(): Promise<FuelManualEntryStage> {
+  const res = await fetchWithTenant(`${API_BASE}/fuel/manual-entry/stages`, { method: "POST" });
+  return handle(res);
+}
+
+export async function uploadFuelManualEntryReceipt(
+  file: File,
+  extractionJson?: string,
+): Promise<FuelManualEntryStage> {
+  const form = new FormData();
+  form.append("file", file);
+  if (extractionJson?.trim()) {
+    form.append("extraction_json", extractionJson);
+  }
+  const res = await fetchWithTenant(`${API_BASE}/fuel/manual-entry/stages/receipt`, {
+    method: "POST",
+    body: form,
+  });
+  return handle(res);
+}
+
+export async function getFuelManualEntryStage(stageId: string): Promise<FuelManualEntryStage> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/manual-entry/stages/${encodeURIComponent(stageId)}`,
+  );
+  return handle(res);
+}
+
+export async function patchFuelManualEntryStage(
+  stageId: string,
+  draft: Record<string, unknown>,
+): Promise<FuelManualEntryStage> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/manual-entry/stages/${encodeURIComponent(stageId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draft }),
+    },
+  );
+  return handle(res);
+}
+
+export async function validateFuelManualEntryStage(
+  stageId: string,
+): Promise<FuelManualEntryValidateResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/manual-entry/stages/${encodeURIComponent(stageId)}/validate`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
+export async function processFuelManualEntryStage(
+  stageId: string,
+): Promise<FuelManualEntryProcessResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/manual-entry/stages/${encodeURIComponent(stageId)}/process`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
+export async function discardFuelManualEntryStage(stageId: string): Promise<{ ok: boolean }> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/fuel/manual-entry/stages/${encodeURIComponent(stageId)}/discard`,
+    { method: "POST" },
+  );
+  return handle(res);
+}

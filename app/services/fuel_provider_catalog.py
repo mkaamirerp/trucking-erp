@@ -278,6 +278,20 @@ _CATALOG: Final[tuple[dict[str, Any], ...]] = (
             "Live adapters are not implemented."
         ),
     ),
+    _provider(
+        code="MANUAL_ENTRY",
+        display_name="Manual entry",
+        evidenced_methods=[CONNECTION_METHOD_MANUAL_DRIVER],
+        unverified_methods=[],
+        parser_profile_code=None,
+        expected_file_formats=["pdf", "jpg", "jpeg", "png"],
+        filename_pattern=None,
+        instructions=(
+            "Operator-entered fuel purchases and receipt-backed manual intake. "
+            "Draft → validation → admin review → Process into canonical fuel_transactions. "
+            "Receipt OCR is optional; structured extraction hydrates the shared draft form."
+        ),
+    ),
 )
 
 

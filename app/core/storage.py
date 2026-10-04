@@ -802,6 +802,26 @@ def serve_file(
     )
 
 
+async def save_fuel_manual_entry_stage_bytes(
+    tenant_slug: str,
+    stage_id: str,
+    body: bytes,
+    *,
+    filename_hint: str,
+    content_type: str = "application/pdf",
+) -> StoredFile:
+    """Receipt attachment for manual fuel entry draft (pre-Process evidence)."""
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "fuel_manual_entry_stage",
+        "stage",
+        stage_id,
+        body,
+        filename_hint=filename_hint,
+        content_type=content_type,
+    )
+
+
 def download_response(
     storage_key: str,
     module: str = "pay_documents",
