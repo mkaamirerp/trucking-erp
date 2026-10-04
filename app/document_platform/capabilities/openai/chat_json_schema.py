@@ -162,10 +162,23 @@ def _build_user_content(
     input_file_bytes: bytes | None,
     input_filename: str,
 ) -> str | list[dict[str, Any]]:
-    """Build a text-only or direct-file Chat Completions user message."""
+    """Build a text-only or multimodal Chat Completions user message."""
     if input_file_bytes is None:
         return user_text
     encoded = base64.b64encode(input_file_bytes).decode("ascii")
+    lower = (input_filename or "").lower()
+    if lower.endswith((".jpg", ".jpeg")) or input_file_bytes[:3] == b"\xff\xd8\xff":
+        mime = "image/jpeg"
+        return [
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
+            {"type": "text", "text": user_text},
+        ]
+    if lower.endswith(".png") or input_file_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+        mime = "image/png"
+        return [
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
+            {"type": "text", "text": user_text},
+        ]
     return [
         {
             "type": "file",

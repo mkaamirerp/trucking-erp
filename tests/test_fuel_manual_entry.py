@@ -144,14 +144,16 @@ def test_loves_receipt_hydration_qty_price_total() -> None:
     assert prepared["total_amount"] == "1050.02"
 
 
-def test_pilot_receipt_selects_reconciling_price_and_flags_placeholder_unit() -> None:
+def test_pilot_receipt_selects_reconciling_price_and_flags_masked_vehicle() -> None:
     draft = hydrate_draft_from_receipt_extraction(pilot_fixture_extraction())
     prepared = validate_and_prepare_draft({**draft, "currency": "CAD"}, strict=False)
     assert prepared["unit_price"] == "2.699"
     raw = prepared.get("provider_raw") or {}
     assert "2.709" in str(raw.get("unit_price_candidates_rejected", []))
     assert prepared.get("requires_review") is True
-    assert "UNIT_NUMBER_PLACEHOLDER" in (prepared.get("review_reasons") or [])
+    assert prepared.get("unit_number") is None
+    assert raw.get("vehicle_id_source_evidence") == "XXXX"
+    assert "VEHICLE_ID_MASKED" in (prepared.get("review_reasons") or [])
 
 
 def test_pilot_tax_included_does_not_force_zero_hst_amount() -> None:

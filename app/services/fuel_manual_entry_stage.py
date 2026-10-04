@@ -32,6 +32,7 @@ from app.services.fuel_manual_entry_validation import (
 )
 from app.services.fuel_manual_receipt_extract import (
     PARSER_VERSION,
+    extract_manual_fuel_receipt_from_upload_async,
     hydrate_draft_from_receipt_extraction,
 )
 from app.services.fuel_source_duplicate_gate import sha256_hex
@@ -136,7 +137,10 @@ async def create_receipt_stage_from_upload(
         file_bytes,
         filename_hint=filename or "receipt.pdf",
     )
-    extraction_raw = dict(extraction or {})
+    if extraction is not None:
+        extraction_raw = dict(extraction)
+    else:
+        extraction_raw = await extract_manual_fuel_receipt_from_upload_async(file_bytes, filename)
     draft = _empty_draft(ENTRY_METHOD_RECEIPT)
     if extraction_raw:
         draft = hydrate_draft_from_receipt_extraction(extraction_raw, entry_method=ENTRY_METHOD_RECEIPT)

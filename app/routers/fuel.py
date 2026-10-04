@@ -1113,7 +1113,7 @@ async def create_manual_entry_receipt_stage(
     db: AsyncSession = Depends(get_tenant_db),
     extraction_json: str | None = Form(None),
 ):
-    """Store receipt file and optionally hydrate draft from structured extraction JSON (OCR hook)."""
+    """Store receipt file, extract fields server-side, hydrate draft (optional extraction_json override)."""
     import json
 
     uploaded_by = str(user.user_id) if user.user_id is not None else (user.email or "unknown")

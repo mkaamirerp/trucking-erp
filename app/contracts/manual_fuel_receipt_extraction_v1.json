@@ -1,0 +1,39 @@
+{
+  "name": "manual_fuel_receipt_extraction_v1",
+  "description": "Single fuel receipt → structured fields for Manual Fuel Entry draft hydration.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "vendor": { "type": ["string", "null"] },
+      "store_number": { "type": ["string", "null"] },
+      "city": { "type": ["string", "null"] },
+      "province_state": { "type": ["string", "null"] },
+      "transaction_date": { "type": ["string", "null"], "description": "ISO date YYYY-MM-DD when possible" },
+      "transaction_time": { "type": ["string", "null"] },
+      "product": { "type": ["string", "null"] },
+      "pump": { "type": ["string", "null"] },
+      "quantity": { "type": ["string", "null"] },
+      "quantity_unit": { "type": ["string", "null"] },
+      "unit_price": { "type": ["string", "null"] },
+      "unit_price_candidates": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "pre_tax_amount": { "type": ["string", "null"] },
+      "total_amount": { "type": ["string", "null"] },
+      "printed_sales_tax": { "type": ["string", "null"] },
+      "currency": { "type": ["string", "null"], "description": "USD or CAD only if explicitly printed" },
+      "card": { "type": ["string", "null"] },
+      "authorization_number": { "type": ["string", "null"] },
+      "receipt_ticket_number": { "type": ["string", "null"] },
+      "invoice_reference": { "type": ["string", "null"] },
+      "unit_number": { "type": ["string", "null"], "description": "Only when clearly a real unit, not masked" },
+      "vehicle_id": { "type": ["string", "null"], "description": "Masked or placeholder vehicle id e.g. XXXX" },
+      "trailer_number": { "type": ["string", "null"] },
+      "company": { "type": ["string", "null"] },
+      "tax_included_note": { "type": ["string", "null"] },
+      "notes": { "type": ["string", "null"] }
+    },
+    "additionalProperties": false
+  }
+}
