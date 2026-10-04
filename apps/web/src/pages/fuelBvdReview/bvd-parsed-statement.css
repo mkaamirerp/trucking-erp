@@ -179,7 +179,232 @@
   overflow: hidden;
 }
 
-/* --- Reconciliation hero (status strip + summary cards + audit details) --- */
+/* --- Compact post-upload review summary --- */
+.bvd-compact-summary {
+  padding: 0.5rem 0.75rem 0.55rem;
+  background: var(--trk-bg);
+  border-bottom: 1px solid var(--trk-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.bvd-compact-summary__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.bvd-compact-summary__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--trk-text);
+  letter-spacing: -0.01em;
+}
+
+.bvd-compact-summary__header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.bvd-compact-summary__status {
+  font-size: 11px;
+  color: var(--trk-text-muted);
+  white-space: nowrap;
+}
+
+.bvd-compact-summary__pdf {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 5px;
+  border: 1px solid var(--trk-border-strong);
+  background: var(--trk-surface);
+  color: var(--trk-text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bvd-compact-summary__pdf:hover {
+  background: var(--trk-surface-2);
+}
+
+.bvd-compact-summary__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.bvd-compact-summary__metrics--primary {
+  align-items: center;
+}
+
+.bvd-compact-metric {
+  flex: 1 1 5.5rem;
+  min-width: 4.75rem;
+  max-width: 8.5rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--trk-border);
+  background: color-mix(in srgb, var(--trk-surface) 88%, var(--trk-bg));
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.bvd-compact-metric__label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--trk-text-muted);
+}
+
+.bvd-compact-metric__value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--trk-text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.bvd-compact-metric--reconciliation-pass {
+  border-color: color-mix(in srgb, var(--trk-success) 55%, var(--trk-border));
+  background: color-mix(in srgb, var(--trk-success) 22%, var(--trk-surface));
+}
+
+.bvd-compact-metric--reconciliation-pass .bvd-compact-metric__value {
+  color: color-mix(in srgb, var(--trk-success) 85%, var(--trk-text));
+}
+
+.bvd-compact-metric--reconciliation-fail {
+  border-color: color-mix(in srgb, var(--trk-warning) 55%, var(--trk-border));
+  background: color-mix(in srgb, var(--trk-warning) 14%, var(--trk-surface));
+}
+
+.bvd-compact-metric--reconciliation-fail .bvd-compact-metric__value {
+  color: var(--trk-warning);
+}
+
+.bvd-compact-summary__unmapped {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--trk-warning) 50%, var(--trk-border));
+  background: color-mix(in srgb, var(--trk-warning) 10%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--trk-warning);
+}
+
+.bvd-compact-summary__secondary {
+  margin: 0;
+  font-size: 10px;
+  color: var(--trk-text-muted);
+}
+
+.bvd-compact-summary__breakdown-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+}
+
+.bvd-compact-breakdown {
+  flex: 1 1 12rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.bvd-compact-breakdown__bar {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--trk-border);
+}
+
+.bvd-compact-breakdown__segment {
+  min-width: 2px;
+}
+
+.bvd-compact-breakdown__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  font-size: 10px;
+  color: var(--trk-text-muted);
+}
+
+.bvd-compact-breakdown__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.bvd-compact-breakdown__swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.bvd-compact-breakdown__legend-label {
+  font-weight: 600;
+  color: var(--trk-text);
+}
+
+.bvd-compact-breakdown__legend-amt {
+  font-variant-numeric: tabular-nums;
+}
+
+.bvd-compact-summary__audit-line {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--trk-text-muted);
+  white-space: nowrap;
+}
+
+.bvd-compact-summary__currency-tag {
+  align-self: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--trk-text-muted);
+  padding-right: 0.15rem;
+}
+
+.bvd-compact-summary__currency-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.bvd-audit-details--compact {
+  margin-top: 0.15rem;
+}
+
+.bvd-audit-details--compact .bvd-audit-details__summary {
+  font-size: 10px;
+  padding: 0.25rem 0;
+}
+
+/* --- Legacy reconciliation hero (retained for reference / gradual removal) --- */
 .bvd-review-hero {
   padding: 0.75rem 1rem;
   background: var(--trk-bg);
@@ -759,6 +984,15 @@
   min-width: 4.75rem;
 }
 
+.processed-statement-section--charges th.bvd-txn-rows__header-twoline.bvd-txn-rows__col-qty-unit,
+.processed-statement-section--charges th.bvd-txn-rows__header-oneline:has([data-testid="bvd-txn-sort-qty"]) {
+  min-width: 5.5rem;
+}
+
+.bvd-txn-rows__col-qty-unit {
+  white-space: nowrap;
+}
+
 .processed-statement-section--charges .bvd-txn-rows--processed-native-sticky .bvd-txn-rows__header-row,
 .processed-statement-section--charges .bvd-express-rows--processed-native-sticky .bvd-express-rows__header-row {
   height: auto;
@@ -771,6 +1005,15 @@
 
 .processed-statement-section--charges th.bvd-txn-rows__header-twoline.bvd-txn-rows__col-amount {
   min-width: 4.75rem;
+}
+
+.processed-statement-section--charges th.bvd-txn-rows__header-twoline.bvd-txn-rows__col-pretax,
+.processed-statement-section--charges th.bvd-txn-rows__header-oneline:has([data-testid="bvd-txn-sort-pre_tax"]) {
+  min-width: 5.25rem;
+}
+
+.processed-statement-section--charges th.bvd-txn-rows__header-twoline.bvd-txn-rows__col-pretax .bvd-txn-rows__sort-label {
+  white-space: normal;
 }
 
 .processed-statement-section--charges .bvd-express-rows .bvd-express-rows__table thead.bvd-express-rows__thead tr.bvd-express-rows__header-row {

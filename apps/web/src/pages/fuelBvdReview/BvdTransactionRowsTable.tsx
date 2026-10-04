@@ -1,11 +1,13 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import type { FuelBvdRow } from "../../api";
+import { formatFuelTxnQuantityWithUnit } from "../fuel/fuelTxnQuantityDisplay";
 import { processedStatementCellDisplay } from "../fuel/processedStatementCellDisplay";
 import { displayCell, operationalCell } from "./bvdParsedDisplay";
 import { bvdProductDisplayLabel } from "./bvdProductDisplay";
 import {
   activeBvdTxnTaxColumns,
   bvdTxnDiscountDisplay,
+  bvdTxnPreTaxDisplay,
   bvdTxnTaxDisplay,
   type BvdTxnActiveTaxColumn,
 } from "./fuelBvdTxnMoneyColumns";
@@ -39,6 +41,8 @@ const PROCESSED_TWO_LINE_HEADERS: Record<string, [string, string]> = {
   "Source driver": ["Source", "driver"],
   "Retail price": ["Retail", "price"],
   "Billed price": ["Billed", "price"],
+  "Pre-tax amount": ["Pre-tax", "amount"],
+  "Qty / unit": ["Qty /", "unit"],
   "Final amount": ["Final", "amount"],
 };
 
@@ -48,7 +52,11 @@ const BASE_SORTABLE_COLUMNS: ColumnDef[] = [
   { key: "driver", label: "Source driver", className: "bvd-txn-rows__col-flex bvd-txn-rows__col-driver" },
   { key: "location", label: "Location", className: "bvd-txn-rows__col-flex" },
   { key: "product", label: "Product", className: "bvd-txn-rows__col-compact" },
-  { key: "qty", label: "Qty", className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric" },
+  {
+    key: "qty",
+    label: "Qty / unit",
+    className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-qty-unit",
+  },
 ];
 
 const RETAIL_COLUMN: ColumnDef = {
@@ -61,6 +69,12 @@ const BILLED_COLUMN: ColumnDef = {
   key: "billed",
   label: "Billed price",
   className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price",
+};
+
+const PRE_TAX_COLUMN: ColumnDef = {
+  key: "pre_tax",
+  label: "Pre-tax amount",
+  className: "bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-pretax",
 };
 
 const DISCOUNT_COLUMN: ColumnDef = {
@@ -87,6 +101,7 @@ function buildSortableColumns(activeTaxes: BvdTxnActiveTaxColumn[]): ColumnDef[]
     ...BASE_SORTABLE_COLUMNS,
     RETAIL_COLUMN,
     BILLED_COLUMN,
+    PRE_TAX_COLUMN,
     DISCOUNT_COLUMN,
     ...activeTaxes.map(taxColumnDef),
     ...TAIL_SORTABLE_COLUMNS,
@@ -291,7 +306,7 @@ export default function BvdTransactionRowsTable({
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
                     data-testid="bvd-txn-col-qty"
                   >
-                    {processedStatementCellDisplay(row, "qty")}
+                    {formatFuelTxnQuantityWithUnit(row)}
                   </td>
                   <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric bvd-txn-rows__col-price"
@@ -304,6 +319,12 @@ export default function BvdTransactionRowsTable({
                     data-testid="bvd-txn-col-billed"
                   >
                     {processedStatementCellDisplay(row, "billed")}
+                  </td>
+                  <td
+                    className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
+                    data-testid="bvd-txn-col-pre-tax"
+                  >
+                    {bvdTxnPreTaxDisplay(row)}
                   </td>
                   <td
                     className="bvd-txn-rows__col-compact bvd-txn-rows__col-numeric"
@@ -352,9 +373,6 @@ export default function BvdTransactionRowsTable({
                                 <span className="bvd-txn-rows__site-num">{site.siteNumberLine}</span>
                               ) : null}
                             </span>
-                          </DetailField>
-                          <DetailField label="Pre-tax amount">
-                            {processedStatementCellDisplay(row, "pre_tax_amt")}
                           </DetailField>
                           {row.notes_raw?.trim() ? (
                             <DetailField label="Provider fields">{row.notes_raw}</DetailField>

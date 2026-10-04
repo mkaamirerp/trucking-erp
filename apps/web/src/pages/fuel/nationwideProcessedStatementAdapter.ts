@@ -1,5 +1,17 @@
-import type { FuelBvdRow, FuelCanonicalTransaction, FuelNationwideRow } from "../../api";
+import type {
+  FuelBvdRow,
+  FuelCanonicalTransaction,
+  FuelNationwideRow,
+  FuelNationwideSourceReconciliation,
+} from "../../api";
+import { isProviderMoneyDashLike } from "./fuelProviderMoneyDisplay";
 import { parseBvdMoneyString } from "../fuelBvdReview/bvdParsedValidation";
+import { buildNationwideCardTaxLedger, normalizeNationwideCardKey } from "./nationwideCardTotalLine";
+import {
+  applyNationwideCardTaxToStatementRows,
+  applyNationwideReconciliationCadTax,
+  nationwideStatementFinancialFields,
+} from "./nationwideStatementFinancial";
 
 /**
  * Nationwide → shared processed-statement row list.
@@ -31,11 +43,19 @@ export function deriveNationwideRetailUnitPriceFromSource(
   return formatNationwideUnitPrice(billed + discount / qty);
 }
 
+function nationwideProviderDiscountAmount(usaDiscount: string | null | undefined): string {
+  const trimmed = (usaDiscount ?? "").trim();
+  if (!trimmed || isProviderMoneyDashLike(trimmed)) return "0.00";
+  const n = parseBvdMoneyString(trimmed);
+  if (n !== null && Math.abs(n) < 0.005) return "0.00";
+  return trimmed;
+}
+
 function nationwideStatementPriceFields(
   r: Pick<FuelNationwideRow, "ex_gst_per_unit" | "volume" | "usa_discount">,
 ): { retail: string; billed: string; disc_amt: string } {
   const billed = r.ex_gst_per_unit?.trim() || "";
-  const disc_amt = r.usa_discount?.trim() || "";
+  const disc_amt = nationwideProviderDiscountAmount(r.usa_discount);
   const retail = billed
     ? deriveNationwideRetailUnitPriceFromSource(billed, r.volume?.trim() || "", disc_amt)
     : "";
@@ -65,12 +85,19 @@ export function applyNationwideCanonicalPricesToStatementRows(
 
 export function adaptNationwideImportRowsForProcessedStatement(
   rows: FuelNationwideRow[],
+  sourceReconciliation?: FuelNationwideSourceReconciliation | null,
 ): FuelBvdRow[] {
   const header = rows.find((r) => r.row_type === "HEADER");
   const fallbackCard = header?.card_number?.trim() || "";
-  return rows
+  const cardTaxLedger = buildNationwideCardTaxLedger(rows);
+
+  const purchases = rows
     .filter((r) => r.row_type === "TRANSACTION")
     .map((r) => {
+      const cardKey = normalizeNationwideCardKey(r.card_number?.trim() || fallbackCard);
+      const cardTax = cardTaxLedger.get(cardKey) ?? null;
+      const effectiveCurrency = (r.currency?.trim() || cardTax?.currency?.trim() || "").trim();
+
       const { retail, billed, disc_amt } = nationwideStatementPriceFields(r);
       const missedDisc = r.missed_disc?.trim() || "";
       const oonFees = r.oon_fees?.trim() || "";
@@ -80,6 +107,13 @@ export function adaptNationwideImportRowsForProcessedStatement(
       ]
         .filter(Boolean)
         .join(" · ");
+      const financial = nationwideStatementFinancialFields(
+        { ...r, currency: effectiveCurrency || r.currency },
+        { cardTax },
+      );
+      const currency = effectiveCurrency.toUpperCase();
+      const quantity_unit =
+        currency === "CAD" || currency === "CN" ? "litres" : currency === "USD" || currency === "US" ? "gallons" : null;
       return {
         id: r.id,
         import_id: r.import_id,
@@ -91,12 +125,21 @@ export function adaptNationwideImportRowsForProcessedStatement(
         prov_st: r.prov_st,
         prod: r.product,
         qty: r.volume,
+        quantity_unit,
         retail,
         billed,
         disc_amt,
+        pre_tax_amt: financial.pre_tax_amt,
+        hst: financial.hst,
+        gst: financial.gst,
+        pst: financial.pst,
+        qst: financial.qst,
         final_amt: r.total,
-        cur: r.currency,
+        cur: effectiveCurrency || r.currency,
         notes_raw: providerExtras || null,
       };
     });
+
+  const withCardTax = applyNationwideCardTaxToStatementRows(purchases, cardTaxLedger);
+  return applyNationwideReconciliationCadTax(withCardTax, sourceReconciliation);
 }

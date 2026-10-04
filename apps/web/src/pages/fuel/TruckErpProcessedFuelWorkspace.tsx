@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   getFuelBvdImportRows,
   getFuelNationwideImportRows,
+  getFuelNationwideSourceReconciliation,
   getFuelProcessedBatch,
   type FuelBvdRow,
   type FuelCanonicalTransaction,
@@ -10,6 +11,7 @@ import {
 } from "../../api";
 import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
+import { applyOperationalQuantityUnitToStatementRows } from "./fuelTxnQuantityDisplay";
 import {
   adaptNationwideImportRowsForProcessedStatement,
   applyNationwideCanonicalPricesToStatementRows,
@@ -81,22 +83,28 @@ export default function TruckErpProcessedFuelWorkspace({
         }
         if (detail.currency) setDisplayCurrency(detail.currency);
 
+        const withQuantityUnits = (gridRows: FuelBvdRow[]) =>
+          applyOperationalQuantityUnitToStatementRows(gridRows, detail.operational_transactions ?? []);
+
         if (code === "BVD") {
           const rows = await getFuelBvdImportRows(sourceImportRef);
           const parsed = parseBvdImportRowsForDashboard(rows);
-          setSourceRows(parsed.sourceRows);
+          setSourceRows(withQuantityUnits(parsed.sourceRows));
           setCardNumber(parsed.cardNumber);
           return;
         }
         if (code === "NATIONWIDE") {
-          const rows = await getFuelNationwideImportRows(sourceImportRef);
-          const operational = applyNationwideCanonicalPricesToStatementRows(
-            adaptNationwideImportRowsForProcessedStatement(rows),
+          const [rows, sourceReconciliation] = await Promise.all([
+            getFuelNationwideImportRows(sourceImportRef),
+            getFuelNationwideSourceReconciliation(sourceImportRef).catch(() => null),
+          ]);
+          const operationalRows = applyNationwideCanonicalPricesToStatementRows(
+            adaptNationwideImportRowsForProcessedStatement(rows, sourceReconciliation),
             detail.canonical_transactions,
           );
-          setSourceRows(operational);
+          setSourceRows(withQuantityUnits(operationalRows));
           const header = rows.find((r) => r.row_type === "HEADER");
-          setCardNumber(header?.card_number?.trim() || operational[0]?.card_number?.trim() || "");
+          setCardNumber(header?.card_number?.trim() || operationalRows[0]?.card_number?.trim() || "");
           return;
         }
         setError(`No operational workspace adapter for ${providerCode}`);

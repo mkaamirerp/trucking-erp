@@ -97,7 +97,32 @@ describe("BvdTransactionRowsTable", () => {
     expect(h).not.toMatch(/Site #/i);
     expect(container.querySelector('[data-testid="bvd-txn-col-retail"]')?.textContent).toBe("2.2390");
     expect(container.querySelector('[data-testid="bvd-txn-col-billed"]')?.textContent).toBe("2.2390");
+    expect(container.querySelector('[data-testid="bvd-txn-col-pre-tax"]')?.textContent).toBe("1,425.63");
+    expect(container.querySelector('[data-testid="bvd-txn-col-qty"]')?.textContent).toBe("719.50 L");
+    expect(headerText()).toMatch(/Qty \/ unit/i);
     expect(container.textContent).not.toContain("A204040667-TA");
+  });
+
+  it("Canadian row: pre-tax before discount and taxes; pre-tax + HST = final", () => {
+    renderTable([txn(1)]);
+    const h = headerText();
+    const retailIdx = h.indexOf("Retail price");
+    const billedIdx = h.indexOf("Billed price");
+    const preTaxIdx = h.indexOf("Pre-tax amount");
+    const discountIdx = h.indexOf("Discount");
+    const hstIdx = h.indexOf("HST");
+    const finalIdx = h.indexOf("Final amount");
+    expect(retailIdx).toBeGreaterThan(-1);
+    expect(billedIdx).toBeGreaterThan(retailIdx);
+    expect(preTaxIdx).toBeGreaterThan(billedIdx);
+    expect(discountIdx).toBeGreaterThan(preTaxIdx);
+    expect(hstIdx).toBeGreaterThan(discountIdx);
+    expect(finalIdx).toBeGreaterThan(hstIdx);
+    expect(container.querySelector('[data-testid="bvd-txn-col-pre-tax"]')?.textContent).toBe("1,425.63");
+    expect(container.querySelector('[data-testid="bvd-txn-col-qty"]')?.textContent).toBe("719.50 L");
+    expect(headerText()).toMatch(/Qty \/ unit/i);
+    expect(container.querySelector('[data-testid="bvd-txn-col-hst"]')?.textContent).toBe("185.33");
+    expect(container.querySelector('[data-testid="bvd-txn-col-final"]')?.textContent).toBe("1,610.96");
   });
 
   it("column header row is distinct from body rows", () => {
@@ -199,7 +224,10 @@ describe("BvdTransactionRowsTable", () => {
     const detail = container.querySelector('[data-testid="bvd-txn-detail-1"]');
     expect(detail?.textContent).not.toMatch(/Retail price/i);
     expect(detail?.textContent).not.toMatch(/Billed price/i);
-    expect(detail?.textContent).toContain("Pre-tax");
+    expect(detail?.textContent).not.toMatch(/Pre-tax/i);
+    expect(container.querySelector('[data-testid="bvd-txn-col-pre-tax"]')?.textContent).toBe("1,425.63");
+    expect(container.querySelector('[data-testid="bvd-txn-col-qty"]')?.textContent).toBe("719.50 L");
+    expect(headerText()).toMatch(/Qty \/ unit/i);
   });
 
   it("main row shows Fuel for TA", () => {

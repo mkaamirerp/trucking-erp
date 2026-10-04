@@ -28,9 +28,6 @@ export function resolveFuelCurrencyFinancialSummaries(
 }
 
 export function formatFuelCurrencyFinancialDiscount(line: FuelCurrencyFinancialLine): string {
-  if (line.discount_amount === null || line.discount_amount === undefined) {
-    return formatProviderMoneyAmount(null, { emptyAsZero: false });
-  }
   return formatProviderMoneyAmount(line.discount_amount, { emptyAsZero: true });
 }
 

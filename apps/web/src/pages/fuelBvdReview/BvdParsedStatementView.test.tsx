@@ -66,6 +66,41 @@ describe("BvdParsedStatementView purchases table", () => {
     }
     expect(purchases?.textContent).toContain("0.00");
     expect(purchases?.textContent).toContain("TA");
+    expect(container.querySelector('[data-testid="bvd-compact-summary"]')).not.toBeNull();
+    expect(container.textContent).toContain("BVD · Invoice 972201");
+  });
+
+  it("full-stored-detail keeps classic header and no compact summary", () => {
+    renderPurchases([
+      row({ id: 1, row_type: "HEADER", invoice_number: "972201" }),
+      row({ id: 2, row_type: "TRANSACTION", gst: "0.00" }),
+    ]);
+    act(() => {
+      root.render(
+        <BvdParsedStatementView
+          rows={[
+            row({ id: 1, row_type: "HEADER", invoice_number: "972201" }),
+            row({ id: 2, row_type: "TRANSACTION", gst: "0.00" }),
+          ]}
+          statusLabel="Completed"
+          onOpenPdf={vi.fn()}
+          presentation="full-stored-detail"
+          sourceReconciliation={{
+            passed: true,
+            transaction_total: "0",
+            all_unit_total: "0",
+            provider_grand_total: "0",
+            difference: "0.00",
+            checks: [],
+          }}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("BVD full stored detail");
+    expect(container.querySelector('[data-testid="bvd-compact-summary"]')).toBeNull();
+    expect(container.querySelector("button.bvd-statement__pdf-btn")?.textContent).toMatch(
+      /View original PDF/i,
+    );
   });
 
   it("B: full-stored-detail mode uses the same 21-column purchases grid", () => {

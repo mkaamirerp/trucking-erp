@@ -25,11 +25,9 @@ import {
   operationalCell,
   sortBvdRows,
 } from "./bvdParsedDisplay";
-import { type BvdValidationMetric, type BvdValidationStatus } from "./bvdParsedValidation";
-import {
-  reconciliationStripFromBackend,
-  type FuelBvdSourceReconciliation,
-} from "./bvdReconciliationStrip";
+import type { FuelBvdSourceReconciliation } from "./bvdReconciliationStrip";
+import { buildBvdReviewCompactSummary } from "./bvdReviewCompactSummary";
+import BvdReviewCompactSummary from "./BvdReviewCompactSummary";
 import type { DraftMap } from "./bvdReviewValues";
 import "./bvd-parsed-statement.css";
 
@@ -56,12 +54,6 @@ const TXN_COL_CLASS: Record<string, string> = {
   final_amt: "col-money",
   cur: "col-cur",
 };
-
-function validationStatusLabel(status: BvdValidationStatus): string {
-  if (status === "pass") return "Pass";
-  if (status === "fail") return "Fail";
-  return "N/A";
-}
 
 function controlRowTitle(row: FuelBvdRow): string {
   const label = displayCell(row, "row_label");
@@ -145,24 +137,6 @@ function PdfIcon() {
   );
 }
 
-function StatusCheckLine({ metric }: { metric: BvdValidationMetric }) {
-  const status = validationStatusLabel(metric.status);
-  const detail =
-    metric.subvalue
-      ? `${metric.value} (${metric.subvalue})`
-      : metric.value;
-  return (
-    <li
-      className={`bvd-status-strip__check bvd-status-strip__check--${metric.status}`}
-      title={metric.detail}
-    >
-      <span className="bvd-status-strip__check-label">{metric.label}</span>
-      <span className="bvd-status-strip__check-value">{detail}</span>
-      <span className="bvd-status-strip__check-status">{status}</span>
-    </li>
-  );
-}
-
 type Props = {
   rows: FuelBvdRow[];
   statusLabel: string;
@@ -236,13 +210,21 @@ export default function BvdParsedStatementView({
   const legends = sorted.filter((r) => r.row_type === "LEGEND");
 
   const invoiceNo = header ? displayCell(header, "invoice_number") : "";
-  const cardNo = header ? displayCell(header, "card_number") : "";
+  const useCompactSummary = presentation === "processing-review";
 
   const txnColumns = BVD_TRANSACTION_COLUMNS;
-  const validation = reconciliationStripFromBackend(sourceReconciliation);
 
-  const invoiceMetric = validation.metrics.find((m) => m.id === "invoice_amount");
-  const unitsMetric = validation.metrics.find((m) => m.id === "units_processed");
+  const compactSummary = useMemo(
+    () => buildBvdReviewCompactSummary(sorted, sourceReconciliation),
+    [sorted, sourceReconciliation],
+  );
+
+  const sourceHint =
+    presentation === "full-stored-detail"
+      ? "All provider fields preserved"
+      : "Parsed from PDF";
+
+  const hideGrandBreakdown = useCompactSummary && compactSummary.productSegments.length > 0;
 
   const [controlsOpen, setControlsOpen] = useState(false);
   const canEditInline =
@@ -251,87 +233,63 @@ export default function BvdParsedStatementView({
   const productGrandLines = grandTotals.filter((r) => grandTotalRowKind(r) === "product-line");
   const statementGrandLine = grandTotals.find((r) => grandTotalRowKind(r) === "statement-total");
 
-  return (
-    <div className="bvd-statement">
-      <div className="bvd-statement__toolbar">
-        <div>
-          <div className="bvd-statement__title">
-            {presentation === "full-stored-detail" ? "BVD full stored detail" : "BVD source review"}
-          </div>
-          <div className="bvd-statement__meta">
-            {invoiceNo ? `Invoice ${invoiceNo} · ` : ""}
-            {presentation === "full-stored-detail"
-              ? `Status: ${statusLabel} · All provider fields preserved`
-              : `Review status: ${statusLabel} · Parsed from upload`}
+  const auditDetails =
+    header ? (
+      <details className="bvd-audit-details bvd-audit-details--compact" open={false}>
+        <summary className="bvd-audit-details__summary">
+          Invoice, client &amp; tax details (audit)
+        </summary>
+        <div className="bvd-audit-details__body">
+          <div className="bvd-audit-details__grid">
+            {BVD_HEADER_FIELDS.map((field) => (
+              <AuditHeaderField
+                key={field}
+                header={header}
+                field={field}
+                presentation={presentation}
+                drafts={drafts}
+                readOnly={readOnly}
+                onFieldDraft={onFieldDraft}
+                onInlineCommit={onInlineCommit}
+              />
+            ))}
           </div>
         </div>
-        <button type="button" className="bvd-statement__pdf-btn" onClick={onOpenPdf}>
-          <PdfIcon />
-          View original PDF
-        </button>
-      </div>
+      </details>
+    ) : null;
+
+  return (
+    <div className="bvd-statement">
+      {presentation === "full-stored-detail" ? (
+        <div className="bvd-statement__toolbar">
+          <div>
+            <div className="bvd-statement__title">BVD full stored detail</div>
+            <div className="bvd-statement__meta">
+              {invoiceNo ? `Invoice ${invoiceNo} · ` : ""}
+              Status: {statusLabel} · All provider fields preserved
+            </div>
+          </div>
+          <button type="button" className="bvd-statement__pdf-btn" onClick={onOpenPdf}>
+            <PdfIcon />
+            View original PDF
+          </button>
+        </div>
+      ) : null}
 
       <div className="bvd-statement__sheet">
-        <section className="bvd-review-hero" aria-label="Reconciliation summary">
-          <div
-            className={`bvd-status-strip${validation.allPass ? " bvd-status-strip--ok" : " bvd-status-strip--warn"}`}
-            role="status"
-          >
-            <div className="bvd-status-strip__headline">
-              <span className="bvd-status-strip__title">Source reconciliation</span>
-              <span className="bvd-status-strip__verdict">
-                {validation.allPass ? "All checks passed" : "Review required before process"}
-              </span>
-            </div>
-            <ul className="bvd-status-strip__checks">
-              {validation.metrics.map((metric) => (
-                <StatusCheckLine key={metric.id} metric={metric} />
-              ))}
-            </ul>
-          </div>
-
-          <div className="bvd-summary-cards">
-            <article className="bvd-summary-card">
-              <span className="bvd-summary-card__label">Invoice total</span>
-              <span className="bvd-summary-card__value">{invoiceMetric?.value ?? "—"}</span>
-            </article>
-            <article className="bvd-summary-card">
-              <span className="bvd-summary-card__label">Units billed</span>
-              <span className="bvd-summary-card__value">{unitsMetric?.value ?? "—"}</span>
-              {unitsMetric?.subvalue ? (
-                <span className="bvd-summary-card__sub">{unitsMetric.subvalue}</span>
-              ) : null}
-            </article>
-            <article className="bvd-summary-card">
-              <span className="bvd-summary-card__label">Card #</span>
-              <span className="bvd-summary-card__value">{cardNo || "—"}</span>
-            </article>
-          </div>
-
-          {header ? (
-            <details className="bvd-audit-details" open={presentation === "processing-review"}>
-              <summary className="bvd-audit-details__summary">
-                Invoice, client &amp; tax details (audit)
-              </summary>
-              <div className="bvd-audit-details__body">
-                <div className="bvd-audit-details__grid">
-                  {BVD_HEADER_FIELDS.map((field) => (
-                    <AuditHeaderField
-                      key={field}
-                      header={header}
-                      field={field}
-                      presentation={presentation}
-                      drafts={drafts}
-                      readOnly={readOnly}
-                      onFieldDraft={onFieldDraft}
-                      onInlineCommit={onInlineCommit}
-                    />
-                  ))}
-                </div>
-              </div>
-            </details>
-          ) : null}
-        </section>
+        {useCompactSummary ? (
+          <BvdReviewCompactSummary
+            model={compactSummary}
+            statusLabel={statusLabel}
+            sourceHint={sourceHint}
+            onOpenPdf={onOpenPdf}
+            auditDetails={auditDetails}
+          />
+        ) : auditDetails ? (
+          <section className="bvd-review-hero bvd-review-hero--audit-only" aria-label="Invoice audit">
+            {auditDetails}
+          </section>
+        ) : null}
 
         {enableStatementFilters && searchableTotal > 0 ? (
           <ProcessedStatementFilterBar
@@ -515,7 +473,7 @@ export default function BvdParsedStatementView({
           </section>
         ) : null}
 
-        {grandTotals.length > 0 ? (
+        {grandTotals.length > 0 && !hideGrandBreakdown ? (
           <section className="bvd-grand-section" aria-label="Grand total product breakdown">
             <h2 className="bvd-statement__section-title">Grand total breakdown</h2>
             <p className="bvd-section-hint">Product lines from page 2 — zero rows are neutral, not warnings.</p>

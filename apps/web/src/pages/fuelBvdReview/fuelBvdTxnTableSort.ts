@@ -13,6 +13,7 @@ export type FuelBvdTxnSortColumn =
   | "qty"
   | "retail"
   | "billed"
+  | "pre_tax"
   | "discount"
   | "hst"
   | "gst"
@@ -107,6 +108,11 @@ export function compareFuelBvdTxnRows(
       return compareFuelBvdMoneyField(operationalCell(a, "retail"), operationalCell(b, "retail"));
     case "billed":
       return compareFuelBvdMoneyField(operationalCell(a, "billed"), operationalCell(b, "billed"));
+    case "pre_tax":
+      return compareFuelBvdMoneyField(
+        operationalCell(a, "pre_tax_amt"),
+        operationalCell(b, "pre_tax_amt"),
+      );
     case "discount":
       return compareFuelBvdMoneyField(operationalCell(a, "disc_amt"), operationalCell(b, "disc_amt"));
     case "hst":

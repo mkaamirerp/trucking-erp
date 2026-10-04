@@ -47,6 +47,7 @@ export function formatBvdTxnCompactMoney(
   if (n !== null) {
     return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  if (options?.emptyAsZero) return "0.00";
   return t;
 }
 

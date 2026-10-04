@@ -4085,6 +4085,8 @@ export type FuelBvdRow = {
   prov_st?: string | null;
   prod?: string | null;
   qty?: string | null;
+  /** Canonical litres / gallons when known (processed Fuel grid). */
+  quantity_unit?: string | null;
   retail?: string | null;
   billed?: string | null;
   pre_tax_amt?: string | null;

@@ -31,6 +31,10 @@ export function bvdTxnDiscountDisplay(row: FuelBvdRow): string {
   return formatBvdTxnCompactMoney(operationalCell(row, "disc_amt"), { emptyAsZero: true });
 }
 
+export function bvdTxnPreTaxDisplay(row: FuelBvdRow): string {
+  return formatBvdTxnCompactMoney(operationalCell(row, "pre_tax_amt"), { emptyAsZero: false });
+}
+
 export function bvdTxnTaxDisplay(row: FuelBvdRow, field: BvdTxnTaxField): string {
   return formatBvdTxnCompactMoney(operationalCell(row, field), { emptyAsZero: true });
 }

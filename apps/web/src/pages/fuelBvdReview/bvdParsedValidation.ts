@@ -21,7 +21,7 @@ export type BvdParsedValidation = {
 const MONEY_EPS = 0.005;
 
 export function parseBvdMoneyString(raw: string): number | null {
-  const t = raw.replace(/,/g, "").trim();
+  const t = raw.replace(/,/g, "").replace(/\$/g, "").trim();
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;

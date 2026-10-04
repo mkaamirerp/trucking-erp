@@ -96,6 +96,15 @@ describe("fuelBvdTxnTableSort", () => {
     expect(sorted.map((r) => r.id)).toEqual([2, 3, 1]);
   });
 
+  it("pre-tax amount numeric sorting", () => {
+    const rows = [
+      txn(1, { pre_tax_amt: "2,000.00" }),
+      txn(2, { pre_tax_amt: "10.00" }),
+    ];
+    const sorted = sortFuelBvdTransactions(rows, { column: "pre_tax", direction: "asc" });
+    expect(sorted.map((r) => r.id)).toEqual([2, 1]);
+  });
+
   it("final amount numeric sorting", () => {
     const rows = [
       txn(1, { final_amt: "2,000.00" }),
@@ -131,6 +140,9 @@ describe("fuelBvdTxnTableSort", () => {
       "location",
       "product",
       "qty",
+      "retail",
+      "billed",
+      "pre_tax",
       "discount",
       "hst",
       "gst",
