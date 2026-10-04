@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.core.config import get_settings
+from app.core.config import settings
 from app.services.openai_chat_json_schema import openai_chat_json_schema_content
 
 _CONTRACT_PATH = (
@@ -33,7 +33,7 @@ def _load_schema() -> tuple[dict[str, Any], str]:
 
 
 def openai_configured() -> bool:
-    return bool((get_settings().openai_api_key or "").strip())
+    return bool((settings.openai_api_key or "").strip())
 
 
 async def extract_receipt_fields_via_openai(
@@ -42,7 +42,6 @@ async def extract_receipt_fields_via_openai(
     ocr_text: str | None = None,
 ) -> dict[str, Any]:
     """Call OpenAI with receipt image/PDF + optional OCR hint; return extraction dict."""
-    settings = get_settings()
     api_key = (settings.openai_api_key or "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not configured")
