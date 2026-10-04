@@ -943,6 +943,7 @@ class FuelCanonicalTransactionOut(BaseModel):
     retail_amount: Decimal | None = None
     provider_discount_amount: Decimal | None = None
     total_amount: Decimal | None = None
+    currency: str | None = None
     currency_raw: str | None = None
     classification: str | None = None
     classification_status: str | None = None
@@ -982,6 +983,7 @@ class FuelProcessedOperationalTransactionOut(BaseModel):
 
     unit_number_snapshot: str | None = None
     card_or_account_id: str | None = None
+    driver_name_snapshot: str | None = None
     driver_id: int | None = None
     truck_id: int | None = None
     owner_operator_payee_id: int | None = None
@@ -990,6 +992,11 @@ class FuelProcessedOperationalTransactionOut(BaseModel):
     province_state: str | None = None
     country: str | None = None
     merchant_site: str | None = None
+    site_number: str | None = None
+    site_name: str | None = None
+    provider_transaction_identity: str | None = None
+    provider_reference_raw: str | None = None
+    provider_raw: dict[str, Any] = Field(default_factory=dict)
 
     product: str | None = None
     product_code_raw: str | None = None
@@ -997,6 +1004,13 @@ class FuelProcessedOperationalTransactionOut(BaseModel):
     quantity: str | None = None
     quantity_unit: str | None = None
     unit_price: str | None = None
+    retail_amount: str | None = None
+    pre_tax_amount: str | None = None
+    provider_discount_amount: str | None = None
+    gst_amount: str | None = None
+    hst_amount: str | None = None
+    pst_amount: str | None = None
+    qst_amount: str | None = None
 
     total_amount: str | None = None
     currency: str | None = None
@@ -1014,6 +1028,13 @@ class FuelProcessedOperationalTransactionOut(BaseModel):
     @field_serializer(
         "quantity",
         "unit_price",
+        "retail_amount",
+        "pre_tax_amount",
+        "provider_discount_amount",
+        "gst_amount",
+        "hst_amount",
+        "pst_amount",
+        "qst_amount",
         "total_amount",
         "principal_amount",
         "provider_fee_amount",
@@ -1114,6 +1135,7 @@ def fuel_transaction_to_canonical_out(txn: Any) -> FuelCanonicalTransactionOut:
         retail_amount=txn.retail_amount,
         provider_discount_amount=txn.provider_discount_amount,
         total_amount=txn.total_amount,
+        currency=txn.currency,
         currency_raw=txn.currency_raw,
         classification=txn.classification,
         classification_status=txn.classification_status,
@@ -1168,6 +1190,7 @@ def fuel_transaction_to_operational_out(txn: Any) -> FuelProcessedOperationalTra
         transaction_timezone_source=txn.transaction_timezone_source,
         unit_number_snapshot=txn.unit_number_snapshot,
         card_or_account_id=txn.card_or_account_id,
+        driver_name_snapshot=txn.driver_name_snapshot,
         driver_id=txn.driver_id,
         truck_id=txn.truck_id,
         owner_operator_payee_id=txn.owner_operator_payee_id,
@@ -1175,11 +1198,23 @@ def fuel_transaction_to_operational_out(txn: Any) -> FuelProcessedOperationalTra
         province_state=txn.province_state,
         country=txn.country,
         merchant_site=txn.merchant_site,
+        site_number=txn.site_number,
+        site_name=txn.site_name,
+        provider_transaction_identity=txn.provider_transaction_identity,
+        provider_reference_raw=txn.provider_reference_raw,
+        provider_raw=dict(txn.provider_raw or {}),
         product=txn.product,
         product_code_raw=txn.product_code_raw,
         quantity=_format_fuel_decimal(txn.quantity),
         quantity_unit=txn.quantity_unit,
         unit_price=_format_fuel_decimal(txn.unit_price),
+        retail_amount=_format_fuel_decimal(txn.retail_amount),
+        pre_tax_amount=_format_fuel_decimal(txn.pre_tax_amount),
+        provider_discount_amount=_format_fuel_decimal(txn.provider_discount_amount),
+        gst_amount=_format_fuel_decimal(txn.gst_amount),
+        hst_amount=_format_fuel_decimal(txn.hst_amount),
+        pst_amount=_format_fuel_decimal(txn.pst_amount),
+        qst_amount=_format_fuel_decimal(txn.qst_amount),
         total_amount=_format_fuel_decimal(txn.total_amount),
         currency=txn.currency,
         principal_amount=_format_fuel_decimal(txn.principal_amount),

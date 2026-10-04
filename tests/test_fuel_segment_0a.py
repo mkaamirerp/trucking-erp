@@ -50,6 +50,7 @@ def test_catalog_contains_locked_providers_and_no_live_adapters() -> None:
         "WEX",
         "EFS_TCHEK",
         "COMDATA",
+        "MANUAL_ENTRY",
     ]
     assert all(p["live_adapter_implemented"] is False for p in catalog)
     for provider in catalog:

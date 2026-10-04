@@ -4637,6 +4637,7 @@ export type FuelCanonicalTransaction = {
   retail_amount?: string | null;
   provider_discount_amount?: string | null;
   total_amount?: string | null;
+  currency?: string | null;
   currency_raw?: string | null;
   classification?: string | null;
   classification_status?: string | null;
@@ -4655,6 +4656,7 @@ export type FuelProcessedOperationalTransaction = {
   transaction_timezone_source: string | null;
   unit_number_snapshot: string | null;
   card_or_account_id: string | null;
+  driver_name_snapshot: string | null;
   driver_id: number | null;
   truck_id: number | null;
   owner_operator_payee_id: number | null;
@@ -4662,11 +4664,23 @@ export type FuelProcessedOperationalTransaction = {
   province_state: string | null;
   country: string | null;
   merchant_site: string | null;
+  site_number: string | null;
+  site_name: string | null;
+  provider_transaction_identity: string | null;
+  provider_reference_raw: string | null;
+  provider_raw: Record<string, unknown>;
   product: string | null;
   product_code_raw: string | null;
   quantity: string | null;
   quantity_unit: string | null;
   unit_price: string | null;
+  retail_amount: string | null;
+  pre_tax_amount: string | null;
+  provider_discount_amount: string | null;
+  gst_amount: string | null;
+  hst_amount: string | null;
+  pst_amount: string | null;
+  qst_amount: string | null;
   total_amount: string | null;
   currency: string | null;
   principal_amount: string | null;
@@ -4678,6 +4692,10 @@ export type FuelProcessedOperationalTransaction = {
   settlement_deduction_candidate: boolean | null;
   settlement_deduction_basis_amount: string | null;
 };
+
+export function fuelReviewBatchDocumentUrl(batchId: number): string {
+  return `${API_BASE}/fuel/review/batches/${batchId}/document`;
+}
 
 export async function getFuelChargeCategories(): Promise<FuelChargeCategory[]> {
   const res = await fetchWithTenant(`${API_BASE}/fuel/charge-categories`);

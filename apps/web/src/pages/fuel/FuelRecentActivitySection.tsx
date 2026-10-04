@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useState, type ReactNode } from "react";
-import type { FuelProcessedSummary } from "../../api";
+import { fuelReviewBatchDocumentUrl, type FuelProcessedSummary } from "../../api";
 import { OPS } from "../../routes";
 import { fuelActivityRowFromProcessed, type FuelActivityRow } from "./fuelActivityRow";
 import {
@@ -31,6 +31,7 @@ type Props = {
 
 function providerTableLabel(code: string): string {
   if (code === "NATIONWIDE") return "Nationwide";
+  if (code === "MANUAL_ENTRY") return "MANUAL_ENTRY";
   return code;
 }
 
@@ -341,14 +342,24 @@ export default function FuelRecentActivitySection({
                               currencyFinancialSummaries={summary.currency_financial_summaries}
                               providerControlTotals={summary.provider_control_totals}
                               onOpenSource={
-                                onOpenProcessed
-                                  ? () =>
-                                      onOpenProcessed(
-                                        summary.batch_id,
-                                        summary.provider_code,
-                                        summary.source_import_ref,
-                                      )
-                                  : undefined
+                                summary.provider_code === "MANUAL_ENTRY"
+                                  ? summary.source_storage_ref
+                                    ? () => {
+                                        window.open(
+                                          fuelReviewBatchDocumentUrl(summary.batch_id),
+                                          "_blank",
+                                          "noopener,noreferrer",
+                                        );
+                                      }
+                                    : undefined
+                                  : onOpenProcessed
+                                    ? () =>
+                                        onOpenProcessed(
+                                          summary.batch_id,
+                                          summary.provider_code,
+                                          summary.source_import_ref,
+                                        )
+                                    : undefined
                               }
                             />
                           </div>

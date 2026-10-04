@@ -5,6 +5,7 @@ import {
   type FuelCanonicalTransaction,
   type FuelProcessedCurrencyFinancial,
   type FuelProcessedCurrencyTotal,
+  type FuelProcessedOperationalTransaction,
 } from "../../api";
 import BvdExpressRowsTable from "../fuelBvdReview/BvdExpressRowsTable";
 import BvdTransactionRowsTable from "../fuelBvdReview/BvdTransactionRowsTable";
@@ -29,6 +30,7 @@ import {
   type FuelCurrencyFinancialLine,
 } from "./fuelActivityCurrencyFinancial";
 import ProcessedStatementSummaryBar from "./ProcessedStatementSummaryBar";
+import ManualProcessedSourceDetails from "./ManualProcessedSourceDetails";
 import { formatProcessedMoneyTotal, sumProcessedChargeFinalAmount } from "./processedStatementMoney";
 
 type Props = {
@@ -41,6 +43,7 @@ type Props = {
   currency?: string | null;
   /** TruckERP provider label (not a separate provider UI). */
   providerLabel?: string;
+  manualOperationalTransaction?: FuelProcessedOperationalTransaction | null;
   /** When set, skip per-import BVD canonical fetch (processed batch read model). */
   canonicalTransactions?: FuelCanonicalTransaction[];
   currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
@@ -55,6 +58,7 @@ export default function ProcessedStatementWorkspace({
   invoiceTotal,
   currency,
   providerLabel = "BVD",
+  manualOperationalTransaction,
   canonicalTransactions,
   currencyFinancialSummaries,
   providerControlTotals = [],
@@ -133,6 +137,13 @@ export default function ProcessedStatementWorkspace({
       data-provider={providerLabel}
     >
       <div data-testid={`fuel-processed-statement-${importId}`}>
+      {providerLabel === "MANUAL_ENTRY" ? (
+        <ManualProcessedSourceDetails
+          operational={manualOperationalTransaction}
+          invoiceNumber={invoiceNumber}
+          providerRaw={manualOperationalTransaction?.provider_raw}
+        />
+      ) : null}
       <div data-testid="processed-statement-summary">
         <ProcessedStatementSummaryBar
           currencyLines={currencyLines}

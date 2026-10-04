@@ -142,7 +142,7 @@ def test_operational_mapper_field_contract_is_fixed() -> None:
     )
     assert "id" in OPERATIONAL_TRANSACTION_FIELD_NAMES
     assert "unit_number_snapshot" in OPERATIONAL_TRANSACTION_FIELD_NAMES
-    assert "provider_raw" not in OPERATIONAL_TRANSACTION_FIELD_NAMES
+    assert "provider_raw" in OPERATIONAL_TRANSACTION_FIELD_NAMES
 
 
 def test_operational_mapper_has_no_provider_branches() -> None:

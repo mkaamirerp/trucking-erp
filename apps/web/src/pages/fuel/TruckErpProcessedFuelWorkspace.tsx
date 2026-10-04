@@ -8,6 +8,7 @@ import {
   type FuelCanonicalTransaction,
   type FuelProcessedCurrencyFinancial,
   type FuelProcessedCurrencyTotal,
+  type FuelProcessedOperationalTransaction,
 } from "../../api";
 import ProcessedStatementWorkspace from "./ProcessedStatementWorkspace";
 import { parseBvdImportRowsForDashboard } from "./fuelRecentActivityRows";
@@ -16,6 +17,7 @@ import {
   adaptNationwideImportRowsForProcessedStatement,
   applyNationwideCanonicalPricesToStatementRows,
 } from "./nationwideProcessedStatementAdapter";
+import { adaptManualOperationalTransactionsForProcessedStatement } from "./manualProcessedStatementAdapter";
 
 type Props = {
   batchId: number;
@@ -49,16 +51,18 @@ export default function TruckErpProcessedFuelWorkspace({
   const [providerControlTotals, setProviderControlTotals] = useState<FuelProcessedCurrencyTotal[]>(
     providerControlTotalsProp ?? [],
   );
+  const [manualOperationalTransaction, setManualOperationalTransaction] =
+    useState<FuelProcessedOperationalTransaction | null>(null);
 
   useEffect(() => {
-    if (!sourceImportRef) {
+    const code = providerCode.toUpperCase();
+    if (!sourceImportRef && code !== "MANUAL_ENTRY") {
       setError("Source import reference missing");
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-    const code = providerCode.toUpperCase();
     void getFuelProcessedBatch(batchId)
       .then(async (detail) => {
         setCanonical(detail.canonical_transactions);
@@ -95,8 +99,8 @@ export default function TruckErpProcessedFuelWorkspace({
         }
         if (code === "NATIONWIDE") {
           const [rows, sourceReconciliation] = await Promise.all([
-            getFuelNationwideImportRows(sourceImportRef),
-            getFuelNationwideSourceReconciliation(sourceImportRef).catch(() => null),
+            getFuelNationwideImportRows(sourceImportRef!),
+            getFuelNationwideSourceReconciliation(sourceImportRef!).catch(() => null),
           ]);
           const operationalRows = applyNationwideCanonicalPricesToStatementRows(
             adaptNationwideImportRowsForProcessedStatement(rows, sourceReconciliation),
@@ -105,6 +109,16 @@ export default function TruckErpProcessedFuelWorkspace({
           setSourceRows(withQuantityUnits(operationalRows));
           const header = rows.find((r) => r.row_type === "HEADER");
           setCardNumber(header?.card_number?.trim() || operationalRows[0]?.card_number?.trim() || "");
+          return;
+        }
+        if (code === "MANUAL_ENTRY") {
+          const operationalRows = adaptManualOperationalTransactionsForProcessedStatement(
+            detail.operational_transactions ?? [],
+            detail.source_import_ref,
+          );
+          setSourceRows(withQuantityUnits(operationalRows));
+          setCardNumber(operationalRows[0]?.card_number?.trim() || detail.account_reference?.trim() || "");
+          setManualOperationalTransaction(detail.operational_transactions?.[0] ?? null);
           return;
         }
         setError(`No operational workspace adapter for ${providerCode}`);
@@ -119,19 +133,20 @@ export default function TruckErpProcessedFuelWorkspace({
   if (error) {
     return <p className="text-xs text-[var(--trk-danger)]" role="alert">{error}</p>;
   }
-  if (!sourceImportRef || sourceRows.length === 0) {
+  if (sourceRows.length === 0) {
     return <p className="text-xs text-[var(--trk-text-muted)]">No operational transactions for this batch.</p>;
   }
 
   return (
     <ProcessedStatementWorkspace
-      importId={sourceImportRef}
+      importId={sourceImportRef ?? String(batchId)}
       sourceRows={sourceRows}
       cardNumber={cardNumber}
       invoiceNumber={invoiceNumber}
       invoiceTotal={invoiceTotal}
       currency={displayCurrency}
       providerLabel={providerLabel}
+      manualOperationalTransaction={manualOperationalTransaction}
       canonicalTransactions={canonical}
       currencyFinancialSummaries={currencyFinancialSummaries}
       providerControlTotals={providerControlTotals}

@@ -212,6 +212,53 @@ describe("FuelRecentActivitySection", () => {
     expect(container.querySelector('[data-testid="fuel-activity-detail-8"]')).toBeTruthy();
   });
 
+  it("MANUAL_ENTRY with receipt shows Open source; DIRECT manual hides it", async () => {
+    const receiptManual: FuelProcessedSummary = {
+      ...bvdSummary,
+      batch_id: 12,
+      provider_code: "MANUAL_ENTRY",
+      source_import_ref: "stage-uuid",
+      source_storage_ref: "storage/manual/receipt.jpg",
+      invoice_number: "41868",
+      currency_financial_summaries: [
+        { currency: "USD", total_amount: "1050.02", discount_amount: "0.00" },
+      ],
+    };
+    const directManual: FuelProcessedSummary = {
+      ...receiptManual,
+      batch_id: 13,
+      source_storage_ref: null,
+    };
+    apiMocks.getFuelProcessedBatch.mockImplementation(async (batchId: number) => ({
+      batch_id: batchId,
+      source_import_ref: "stage-uuid",
+      canonical_transactions: [{ id: 1, batch_id: batchId, currency: "USD", total_amount: "1050.02" }],
+      operational_transactions: [
+        {
+          id: 1,
+          batch_id: batchId,
+          source_row_order: 1,
+          source_row_id: "s",
+          source_vendor: "MANUAL_ENTRY",
+          transaction_datetime_source: "2026-09-12",
+          transaction_timezone_source: "DATE_ONLY",
+          merchant_site: "Love's",
+          site_number: "790",
+          provider_raw: { entry_method: "RECEIPT" },
+          currency: "USD",
+        },
+      ],
+      currency_financial_summaries: receiptManual.currency_financial_summaries,
+      total_amount: "1050.02",
+      currency: "USD",
+    }));
+    await renderSection([receiptManual, directManual], vi.fn());
+    await expandBatch(12);
+    expect(container.querySelector('[data-testid="fuel-open-source-12"]')).toBeTruthy();
+    await expandBatch(13);
+    expect(container.querySelector('[data-testid="fuel-open-source-13"]')).toBeNull();
+  });
+
   it("Nationwide Open source overlay mounts via record overlay registry", async () => {
     const Overlay = getProcessedFuelRecordOverlay("NATIONWIDE");
     expect(Overlay).toBeTruthy();

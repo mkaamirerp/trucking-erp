@@ -22,6 +22,10 @@ from app.services.fuel_manual_receipt_extract import (
     loves_fixture_extraction,
     pilot_fixture_extraction,
 )
+from app.schemas.fuel import (
+    fuel_transaction_to_canonical_out,
+    fuel_transaction_to_operational_out,
+)
 from app.services.fuel_nationwide_canonical_projection import finalize_batch
 from app.services.fuel_processed_read import _summary_from_batch
 
@@ -88,6 +92,40 @@ def test_unknown_tax_stays_null() -> None:
     draft = validate_and_prepare_draft(_minimal_draft(), strict=True)
     assert draft.get("gst_amount") is None
     assert draft.get("hst_amount") is None
+
+
+def test_receipt_loves_projection_maps_canonical_fields() -> None:
+    import uuid
+
+    from app.services.fuel_manual_receipt_extract import (
+        hydrate_draft_from_receipt_extraction,
+        loves_fixture_extraction,
+    )
+
+    draft = validate_and_prepare_draft(
+        {**hydrate_draft_from_receipt_extraction(loves_fixture_extraction()), "currency": "USD"},
+        strict=True,
+    )
+    stage_id = uuid.uuid4()
+    txn = project_manual_draft_to_transaction(
+        tenant_id=1,
+        batch_id=1,
+        stage_id=stage_id,
+        draft=draft,
+        extraction_raw=loves_fixture_extraction(),
+    )
+    assert txn.merchant_site == "Love's"
+    assert txn.site_number == "790"
+    assert txn.quantity is not None
+    assert txn.unit_price is not None
+    assert txn.billed_amount is not None
+    assert txn.retail_amount is not None
+    assert txn.pre_tax_amount == Decimal("1050.0200")
+    assert txn.provider_transaction_identity == "A255392626"
+    assert txn.provider_reference_raw == "99967251"
+    assert txn.provider_raw.get("pump") == "24"
+    assert txn.provider_raw.get("trailer_number") == "13006"
+    assert txn.provider_raw.get("entry_method") == "RECEIPT"
 
 
 def test_process_projection_populates_canonical_transaction() -> None:
@@ -169,3 +207,52 @@ def test_qty_price_total_mismatch_raises() -> None:
             strict=True,
         )
     assert exc.value.code == "QTY_PRICE_TOTAL_MISMATCH"
+
+
+def test_canonical_transaction_dto_exposes_iso_currency() -> None:
+    import uuid
+
+    draft = validate_and_prepare_draft(
+        {**hydrate_draft_from_receipt_extraction(loves_fixture_extraction()), "currency": "USD"},
+        strict=True,
+    )
+    txn = project_manual_draft_to_transaction(
+        tenant_id=1,
+        batch_id=1,
+        stage_id=uuid.uuid4(),
+        draft=draft,
+        extraction_raw=loves_fixture_extraction(),
+    )
+    txn.id = 1
+    txn.currency = "USD"
+    txn.currency_raw = "USD"
+    canonical = fuel_transaction_to_canonical_out(txn)
+    assert canonical.currency == "USD"
+    assert canonical.currency_raw == "USD"
+
+
+def test_operational_dto_exposes_receipt_identity_fields() -> None:
+    import uuid
+
+    draft = validate_and_prepare_draft(
+        {
+            **hydrate_draft_from_receipt_extraction(loves_fixture_extraction()),
+            "currency": "USD",
+            "card_or_account_id": "ending 7145",
+        },
+        strict=True,
+    )
+    txn = project_manual_draft_to_transaction(
+        tenant_id=1,
+        batch_id=1,
+        stage_id=uuid.uuid4(),
+        draft=draft,
+        extraction_raw=loves_fixture_extraction(),
+    )
+    txn.id = 1
+    operational = fuel_transaction_to_operational_out(txn)
+    assert operational.provider_transaction_identity == "A255392626"
+    assert operational.provider_reference_raw == "99967251"
+    assert operational.merchant_site == "Love's"
+    assert operational.site_number == "790"
+    assert operational.card_or_account_id == "ending 7145"

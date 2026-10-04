@@ -129,7 +129,15 @@ def project_manual_draft_to_transaction(
     unit_price_raw = to_optional_decimal(draft.get("unit_price"))
     unit_price = quantize_unit_price(unit_price_raw) if unit_price_raw is not None else None
     retail_raw = to_optional_decimal(draft.get("retail_unit_price"))
-    retail = quantize_money(retail_raw) if retail_raw is not None else None
+    retail_unit = quantize_unit_price(retail_raw) if retail_raw is not None else None
+    if retail_unit is None and unit_price is not None:
+        retail_unit = unit_price
+
+    merchant_site_val = (draft.get("merchant_site") or "").strip() or None
+    merchant_network_val = (draft.get("merchant_network") or "").strip() or None
+    auth_number = (draft.get("authorization_number") or "").strip() or None
+    receipt_ticket = (draft.get("receipt_ticket_number") or "").strip() or None
+    invoice_ref = (draft.get("invoice_reference") or "").strip() or None
 
     requires_review = bool(draft.get("requires_review"))
     review_reason = None
@@ -148,12 +156,15 @@ def project_manual_draft_to_transaction(
         unit_number_snapshot=(draft.get("unit_number") or "").strip() or None,
         card_or_account_id=(draft.get("card_or_account_id") or "").strip() or None,
         driver_name_snapshot=(draft.get("driver_name") or "").strip() or None,
-        merchant_site=(draft.get("merchant_site") or "").strip() or None,
+        merchant_site=merchant_site_val,
+        site_number=merchant_network_val,
+        site_name=merchant_site_val,
         city=(draft.get("city") or "").strip() or None,
         province_state=(draft.get("province_state") or "").strip() or None,
         country=(draft.get("country") or "").strip() or None,
         product=(draft.get("product") or "").strip() or None,
         product_code_raw=(draft.get("product") or "").strip() or None,
+        product_description_raw=(draft.get("product") or "").strip() or None,
         quantity=qty,
         quantity_unit=(draft.get("quantity_unit") or "").strip() or None,
         unit_price=unit_price,
@@ -161,25 +172,33 @@ def project_manual_draft_to_transaction(
         currency_raw=cur_raw,
         currency=cur_iso,
         processing_network=(draft.get("processing_network") or "").strip() or None,
-        merchant_network=(draft.get("merchant_network") or "").strip() or None,
+        merchant_network=merchant_network_val,
         provider_discount_amount=_money_field(draft, "provider_discount_amount"),
         pre_tax_amount=_money_field(draft, "pre_tax_amount"),
         gst_amount=_money_field(draft, "gst_amount"),
         hst_amount=_money_field(draft, "hst_amount"),
         pst_amount=_money_field(draft, "pst_amount"),
         qst_amount=_money_field(draft, "qst_amount"),
-        retail_amount=retail,
-        billed_amount=unit_price,
+        retail_amount=quantize_money(retail_unit) if retail_unit is not None else None,
+        billed_amount=quantize_money(unit_price) if unit_price is not None else None,
         total_amount=total,
-        provider_transaction_identity=(draft.get("authorization_number") or draft.get("receipt_ticket_number") or "").strip()
-        or None,
-        provider_reference_raw=(draft.get("receipt_ticket_number") or draft.get("invoice_reference") or "").strip()
-        or None,
+        provider_transaction_identity=auth_number,
+        provider_reference_raw=receipt_ticket or invoice_ref,
         provider_reason_raw=(draft.get("notes") or "").strip() or None,
         provider_raw={
             **provider_raw,
+            "entry_method": str(
+                draft.get("entry_method") or provider_raw.get("entry_method") or ENTRY_METHOD_DIRECT
+            ),
             "pump": (draft.get("pump") or "").strip() or None,
             "trailer_number": (draft.get("trailer_number") or "").strip() or None,
+            "store_number": merchant_network_val,
+            "authorization_number": auth_number,
+            "receipt_ticket_number": receipt_ticket,
+            "invoice_reference": invoice_ref,
+            "company_name": provider_raw.get("company_name")
+            or (draft.get("company") or "").strip()
+            or None,
         },
         review_status=ROW_REVIEW_CONFIRMED,
         requires_review=requires_review,
