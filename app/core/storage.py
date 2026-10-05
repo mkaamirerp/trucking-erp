@@ -802,6 +802,34 @@ def serve_file(
     )
 
 
+async def save_toll_csv_file_bytes(
+    tenant_slug: str,
+    intake_token: str,
+    body: bytes,
+    *,
+    filename_hint: str,
+) -> StoredFile:
+    """Store original Toll CSV FILE bytes. Pointer goes on toll_source_batches.source_storage_ref."""
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "toll",
+        "csv",
+        intake_token,
+        body,
+        filename_hint=filename_hint,
+        content_type="text/csv",
+    )
+
+
+def delete_toll_csv_file(
+    storage_key: str,
+    *,
+    tenant_slug: str | None = None,
+) -> None:
+    """Remove one Toll CSV object previously saved by save_toll_csv_file_bytes."""
+    get_storage().delete(storage_key, module="toll", tenant_slug=tenant_slug)
+
+
 async def save_fuel_manual_entry_stage_bytes(
     tenant_slug: str,
     stage_id: str,

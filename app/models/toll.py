@@ -53,6 +53,7 @@ READ_TYPE_PLATE: Final[str] = "PLATE"
 READ_TYPES: Final[frozenset[str]] = frozenset({READ_TYPE_DEVICE, READ_TYPE_PLATE})
 
 BATCH_STATUS_RECEIVED: Final[str] = "RECEIVED"
+BATCH_STATUS_PARSED: Final[str] = "PARSED"
 
 # Canonical amount: NUMERIC(14, 4). Never IEEE float.
 TOLL_AMOUNT_PRECISION: Final[tuple[int, int]] = (14, 4)
@@ -130,6 +131,56 @@ class TollSourceBatch(Base):
     )
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class TollFileSourceRow(Base):
+    """One generic CSV source row awaiting provider/profile normalization.
+
+    Cells keep original header keys and original text. No amount/date/unit mapping.
+    """
+
+    __tablename__ = "toll_file_source_rows"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_toll_file_source_rows_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "batch_id",
+            "source_row_order",
+            name="uq_toll_file_source_rows_tenant_batch_source_row_order",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "batch_id"],
+            ["toll_source_batches.tenant_id", "toll_source_batches.id"],
+            name="fk_toll_file_source_rows_batch_tenant",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(cells) = 'object'",
+            name="ck_toll_file_source_rows_cells_object",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(values) = 'array'",
+            name="ck_toll_file_source_rows_values_array",
+        ),
+        Index("ix_toll_file_source_rows_tenant_id", "tenant_id"),
+        Index("ix_toll_file_source_rows_tenant_batch", "tenant_id", "batch_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    batch_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    source_row_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_row_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    cells: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    values: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
 
 
 class TollTransaction(Base):
