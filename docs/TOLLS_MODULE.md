@@ -641,6 +641,84 @@ GPS payloads contain sensitive vehicle-location history. If TruckERP later enabl
 
 
 
+
+## PDF / No-Account Intake Lock
+
+TruckERP Tolls must support tolls that arrive **without any API account or transponder relationship**.
+
+Real-world cases include:
+
+- a carrier/driver has no toll-provider account or transponder
+- a toll authority sends a bill by email as a PDF
+- a toll bill is downloaded manually from a portal
+- a missing toll was not present in the API feed
+- a plate-read toll arrives separately from the normal provider feed
+
+Therefore PDF/manual document upload is a **first-class source**, not a temporary workaround.
+
+### Source types
+
+Initial Toll source types:
+
+```text
+API
+PDF
+MANUAL
+```
+
+Future structured file types may be added only when a real provider requires them.
+
+### PDF flow
+
+```text
+Admin uploads toll PDF
+        ↓
+explicit TOLL document profile
+        ↓
+shared Document Platform PDF capabilities
+        ↓
+Toll-specific extraction / normalization
+        ↓
+resolve vehicle/unit
+        ↓
+store toll transaction(s)
+        ↓
+admin history/detail
+```
+
+The calling Toll API selects the Toll profile explicitly. Document Platform must not inspect a PDF and guess that it is a toll document.
+
+### Account/transponder rule
+
+A PDF toll must **not** require:
+
+- provider connection
+- PrePass account
+- transponder number
+- device assignment
+
+Plate number, VIN, unit number, or other document evidence may be used to resolve the TruckERP vehicle/unit.
+
+If the vehicle cannot be resolved confidently, keep the transaction review/unmapped rather than guessing.
+
+### Missing-toll / overlap rule
+
+PDF upload must coexist safely with API data.
+
+A PDF may contain:
+
+- transactions already received from an API
+- transactions missing from the API
+- a mixture of both
+
+Do not blindly insert duplicates and do not blindly discard a PDF because some rows overlap.
+
+Provider/API identity should be used when available. PDF-only rows need a separate source-row/document identity and conservative duplicate detection based on the strongest available source evidence.
+
+The original PDF and extracted raw source data must be retained for audit.
+
+---
+
 ## Pull-Based Downstream Consumption Lock
 
 The Tolls module is primarily a **vehicle-linked transaction store and query source**.
@@ -1712,3 +1790,13 @@ Before changing Tolls code:
 - Example: unit 1104, Monday through Sunday.
 - Tolls does not push owner-operator, payroll, settlement, or expense actions downstream.
 - Downstream modules decide financial responsibility after pulling the relevant vehicle tolls.
+
+
+### 2026-10-05 — PDF/no-account toll intake locked
+
+- PDF is a first-class Toll source alongside API and manual entry.
+- A toll can exist without provider credentials, account number, or transponder.
+- Emailed/downloaded toll bills and missing tolls can be uploaded by admin.
+- Toll PDF uses the shared Document Platform with an explicit Toll profile; no document-type guessing.
+- PDF and API sources must coexist without blindly duplicating overlapping transactions.
+- Original PDF/raw evidence must be retained.
