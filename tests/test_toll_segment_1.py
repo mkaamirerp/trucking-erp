@@ -142,6 +142,11 @@ def test_batch_source_types_are_api_file_manual_not_pdf_csv() -> None:
     assert f"'{FILE_FORMAT_CSV}'" in format_sql
     file_only = _check_sql(TollSourceBatch.__table__, "ck_toll_source_batches_file_format_file_only")
     assert "FILE" in file_only
+    requires_format = _check_sql(
+        TollSourceBatch.__table__, "ck_toll_source_batches_file_requires_format"
+    )
+    assert "FILE" in requires_format
+    assert "NOT NULL" in requires_format.upper()
     assert TollSourceBatch.__table__.c["file_format"].nullable is True
     assert TollSourceBatch.__table__.c["provider_code"].nullable is True
     assert TollSourceBatch.__table__.c["provider_connection_id"].nullable is True

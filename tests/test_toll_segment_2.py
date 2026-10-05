@@ -28,12 +28,13 @@ from app.models.toll import (
 )
 from app.routers import tolls as tolls_router
 from app.services.toll_csv_intake import (
+    MAX_TOLL_CSV_ROWS,
     TollCsvIntakeError,
     list_duplicate_batch_ids,
     mapped_canonical_fields,
     parse_toll_csv_bytes,
-    persist_created_canonical_transactions,
     persist_toll_csv_file,
+    read_toll_csv_upload_bounded,
     sha256_hex,
 )
 from tests.test_toll_segment_1 import FORBIDDEN_TOLL_COLUMNS
@@ -61,6 +62,41 @@ class FakeResult:
 
     def scalars(self) -> FakeScalars:
         return FakeScalars(self._ids)
+
+
+def _like_needles(stmt: Any) -> list[str]:
+    try:
+        compiled = stmt.compile()
+    except Exception:
+        return []
+    needles: list[str] = []
+    for value in compiled.params.values():
+        if isinstance(value, str) and "%" in value:
+            needle = value.replace("\\%", "\x00").replace("%", "").replace("\x00", "%")
+            needle = needle.replace("\\_", "_").replace("\\\\", "\\").strip().lower()
+            if needle:
+                needles.append(needle)
+    return needles
+
+
+def _stmt_limit_offset(stmt: Any) -> tuple[int | None, int | None]:
+    def _as_int(raw: Any) -> int | None:
+        if raw is None:
+            return None
+        if hasattr(raw, "value"):
+            raw = raw.value
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    limit = _as_int(getattr(stmt, "_limit", None))
+    if limit is None:
+        limit = _as_int(getattr(stmt, "_limit_clause", None))
+    offset = _as_int(getattr(stmt, "_offset", None))
+    if offset is None:
+        offset = _as_int(getattr(stmt, "_offset_clause", None))
+    return limit, offset
 
 
 def _eq_filters(stmt: Any) -> dict[str, Any]:
@@ -94,6 +130,8 @@ class FakeTollSession:
         self.committed = False
         self.rolled_back = False
         self.raise_on_flush = False
+        self.expire_ids_on_commit = False
+        self.execute_calls = 0
 
     def add(self, obj: Any) -> None:
         self._pending.append(obj)
@@ -115,6 +153,11 @@ class FakeTollSession:
 
     async def commit(self) -> None:
         self.committed = True
+        if self.expire_ids_on_commit:
+            for batch in self.batches:
+                batch.id = None
+            for row in self.rows:
+                row.id = None
 
     async def rollback(self) -> None:
         self.rolled_back = True
@@ -125,12 +168,15 @@ class FakeTollSession:
             self.transactions.clear()
 
     async def execute(self, stmt: Any) -> FakeResult:
+        self.execute_calls += 1
         filters = _eq_filters(stmt)
         tenant_id = filters.get("tenant_id")
         source_hash = filters.get("source_hash")
         batch_id = filters.get("batch_id")
         object_id = filters.get("id")
         source_type = filters.get("source_type")
+        needles = _like_needles(stmt)
+        limit, offset = _stmt_limit_offset(stmt)
         descs = list(getattr(stmt, "column_descriptions", []) or [])
         names = [d.get("name") for d in descs]
         entity = descs[0].get("entity") if descs else None
@@ -145,7 +191,19 @@ class FakeTollSession:
             and (source_type is None or batch.source_type == source_type)
             and (object_id is None or entity is TollFileSourceRow or batch.id == object_id)
         ]
+        if needles:
+            batches = [
+                batch
+                for batch in batches
+                if any(
+                    needle in (batch.source_filename or "").lower()
+                    or needle in (batch.source_hash or "").lower()
+                    for needle in needles
+                )
+            ]
+        batches.sort(key=lambda batch: int(batch.id or 0), reverse=names != ["id"])
         if names == ["id"] and entity is not TollFileSourceRow:
+            batches.sort(key=lambda batch: int(batch.id or 0))
             return FakeResult([int(batch.id) for batch in batches])
         if entity is TollFileSourceRow or TollFileSourceRow.__tablename__ in from_names:
             rows = [
@@ -155,7 +213,12 @@ class FakeTollSession:
                 and (batch_id is None or row.batch_id == batch_id)
             ]
             rows.sort(key=lambda row: row.source_row_order)
+            start = offset or 0
+            end = start + limit if limit is not None else None
+            rows = rows[start:end]
             return FakeResult(rows)
+        if limit is not None:
+            batches = batches[:limit]
         return FakeResult(batches)
 
     async def scalar(self, stmt: Any) -> Any:
@@ -262,8 +325,13 @@ async def test_valid_csv_persists_one_file_batch_and_source_rows() -> None:
     assert [row.source_row_order for row in db.rows] == [1, 2]
     assert db.rows[0].cells["Amount"] == "$5.25"
     assert db.rows[1].values == ["2026-03-01 10:42", "I-90", "12.00", "ABC123"]
+    assert db.rows[0].source_line_number == 2
+    assert db.rows[1].source_line_number == 3
+    assert batch.csv_column_keys == ["Posted Date", "Agency", "Amount", "Plate"]
+    assert batch.csv_raw_header_names == ["Posted Date", "Agency", "Amount", "Plate"]
+    assert batch.csv_parsed_row_count == 2
+    assert batch.csv_parser_name == "generic_csv"
     assert db.transactions == []
-    assert persist_created_canonical_transactions(db, tenant_id=7, batch_id=batch.id) is False
 
 
 @pytest.mark.asyncio
@@ -600,12 +668,15 @@ def test_reject_empty_binary_pdf_xlsx() -> None:
 
 
 def test_staging_has_no_payroll_canonical_or_intake_table() -> None:
+    from app.services import toll_csv_intake as intake
+
     cols = set(TollFileSourceRow.__table__.c.keys())
     assert FORBIDDEN_TOLL_COLUMNS & cols == set()
     assert "amount" not in cols
     assert "truck_id" not in cols
     assert "ezpass_profile" not in cols
     assert "parser_name" not in cols
+    assert not hasattr(intake, "persist_created_canonical_transactions")
 
 
 def test_csv_api_route_is_registered() -> None:
@@ -648,6 +719,10 @@ async def test_csv_api_intake_and_tenant_isolation() -> None:
         assert body["row_count"] == 2
         assert body["duplicate_match_count"] == 0
         assert "file" not in body
+        assert "source_storage_ref" not in body
+        assert body["headers"] == ["Posted Date", "Agency", "Amount", "Plate"]
+        assert body["csv_column_keys"] == body["headers"]
+        assert body["csv_raw_header_names"] == ["Posted Date", "Agency", "Amount", "Plate"]
         assert body["preview_rows"][0]["Amount"] == "$5.25"
 
         second = client.post(
@@ -674,3 +749,187 @@ async def test_csv_api_intake_and_tenant_isolation() -> None:
         assert other.status_code == 201
         assert other.json()["duplicate_match_count"] == 0
         assert body["batch_id"] not in other.json()["duplicate_batch_ids"]
+        assert "source_storage_ref" not in other.json()
+
+
+def test_duplicate_and_blank_headers_normalize_in_source_order() -> None:
+    parsed = parse_toll_csv_bytes(b" Amount ,Amount,\n1,2,3\n")
+    assert parsed.header_names == (" Amount ", "Amount", "")
+    assert parsed.cell_keys == ("Amount", "Amount__2", "column_3")
+    assert parsed.rows[0].cells["Amount"] == "1"
+    assert parsed.rows[0].cells["Amount__2"] == "2"
+    assert parsed.rows[0].cells["column_3"] == "3"
+
+
+def test_extra_column_synthetic_keys_do_not_overwrite_column_5_header() -> None:
+    parsed = parse_toll_csv_bytes(b"column_5,b,c,d\nKEEP_ME,2,3,4,EXTRA\n")
+    assert parsed.cell_keys == ("column_5", "b", "c", "d", "extra_column_5")
+    assert parsed.rows[0].cells["column_5"] == "KEEP_ME"
+    assert parsed.rows[0].cells["extra_column_5"] == "EXTRA"
+    assert parsed.rows[0].values == ("KEEP_ME", "2", "3", "4", "EXTRA")
+
+
+def test_extra_column_key_is_unique_against_existing_extra_column_header() -> None:
+    parsed = parse_toll_csv_bytes(b"extra_column_5,b,c,d\nKEEP,2,3,4,EXTRA\n")
+    assert parsed.cell_keys == ("extra_column_5", "b", "c", "d", "extra_column_5__2")
+    assert parsed.rows[0].cells["extra_column_5"] == "KEEP"
+    assert parsed.rows[0].cells["extra_column_5__2"] == "EXTRA"
+
+
+def test_source_line_number_survives_skipped_blank_rows() -> None:
+    body = b"Date,Amount\nrowA,1\n\nrowB,2\n"
+    parsed = parse_toll_csv_bytes(body)
+    assert parsed.skipped_blank_row_count == 1
+    assert [row.source_row_order for row in parsed.rows] == [1, 2]
+    assert [row.source_line_number for row in parsed.rows] == [2, 4]
+
+
+def test_header_only_csv_is_rejected() -> None:
+    with pytest.raises(TollCsvIntakeError) as err:
+        parse_toll_csv_bytes(b"Date,Amount\n")
+    assert err.value.code == "TOLL_CSV_NO_DATA_ROWS"
+
+
+@pytest.mark.asyncio
+async def test_header_only_csv_does_not_store_or_persist() -> None:
+    db = FakeTollSession()
+    store = RecordingStore()
+    with pytest.raises(TollCsvIntakeError) as err:
+        await persist_toll_csv_file(
+            db,
+            tenant_id=1,
+            tenant_slug="demo",
+            filename="headers.csv",
+            body=b"Date,Amount\n",
+            store_bytes=store.store,
+            delete_stored=store.delete,
+        )
+    assert err.value.code == "TOLL_CSV_NO_DATA_ROWS"
+    assert store.saved == []
+    assert db.batches == []
+    assert db.rows == []
+    assert db.committed is False
+
+
+def test_row_cap_is_enforced_before_returning_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.toll_csv_intake.MAX_TOLL_CSV_ROWS", 2)
+    with pytest.raises(TollCsvIntakeError) as err:
+        parse_toll_csv_bytes(b"a\n1\n2\n3\n")
+    assert err.value.code == "TOLL_CSV_TOO_MANY_ROWS"
+    assert MAX_TOLL_CSV_ROWS == 50_000
+
+
+@pytest.mark.asyncio
+async def test_row_cap_rejects_before_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.toll_csv_intake.MAX_TOLL_CSV_ROWS", 1)
+    db = FakeTollSession()
+    store = RecordingStore()
+    with pytest.raises(TollCsvIntakeError) as err:
+        await persist_toll_csv_file(
+            db,
+            tenant_id=1,
+            tenant_slug="demo",
+            filename="dense.csv",
+            body=b"a\n1\n2\n",
+            store_bytes=store.store,
+            delete_stored=store.delete,
+        )
+    assert err.value.code == "TOLL_CSV_TOO_MANY_ROWS"
+    assert store.saved == []
+    assert db.batches == []
+
+
+@pytest.mark.asyncio
+async def test_bounded_upload_read_rejects_without_retaining_full_body() -> None:
+    class _ChunkedUpload:
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+            self.requested: list[int] = []
+
+        async def read(self, size: int = -1) -> bytes:
+            self.requested.append(size)
+            if size < 0:
+                chunk = self._payload
+                self._payload = b""
+                return chunk
+            chunk = self._payload[:size]
+            self._payload = self._payload[size:]
+            return chunk
+
+    upload = _ChunkedUpload(b"x" * 40)
+    with pytest.raises(TollCsvIntakeError) as err:
+        await read_toll_csv_upload_bounded(upload, max_bytes=10)
+    assert err.value.code == "TOLL_CSV_TOO_LARGE"
+    assert sum(upload.requested) <= 11
+    assert all(n <= 11 for n in upload.requested)
+
+
+@pytest.mark.asyncio
+async def test_persist_captures_primitives_before_commit_expire() -> None:
+    db = FakeTollSession()
+    db.expire_ids_on_commit = True
+    result = await persist_toll_csv_file(
+        db,
+        tenant_id=3,
+        tenant_slug="demo",
+        filename="tolls.csv",
+        body=GENERIC_CSV,
+        store_bytes=_fake_store,
+    )
+    assert db.committed is True
+    assert db.batches[0].id is None
+    assert isinstance(result.batch_id, int)
+    assert result.batch_id > 0
+    payload = result.as_api_dict()
+    assert payload["batch_id"] == result.batch_id
+    assert "source_storage_ref" not in payload
+    assert payload["csv_column_keys"] == ["Posted Date", "Agency", "Amount", "Plate"]
+
+
+@pytest.mark.asyncio
+async def test_upload_and_detail_share_normalized_ordered_keys() -> None:
+    db = FakeTollSession()
+    result = await persist_toll_csv_file(
+        db,
+        tenant_id=5,
+        tenant_slug="demo",
+        filename="dup.csv",
+        body=b" Amount ,Amount,\n1,2,3\n",
+        store_bytes=_fake_store,
+    )
+    from app.services.toll_file_history import get_toll_file_batch
+
+    detail = await get_toll_file_batch(db, tenant_id=5, batch_id=result.batch_id)
+    keys = ["Amount", "Amount__2", "column_3"]
+    assert list(result.csv_column_keys) == keys
+    assert result.as_api_dict()["headers"] == keys
+    assert result.as_api_dict()["csv_column_keys"] == keys
+    assert result.as_api_dict()["csv_raw_header_names"] == [" Amount ", "Amount", ""]
+    assert detail["headers"] == keys
+    assert detail["csv_column_keys"] == keys
+    assert detail["csv_raw_header_names"] == [" Amount ", "Amount", ""]
+    assert "source_storage_ref" not in detail
+
+
+@pytest.mark.asyncio
+async def test_header_order_does_not_follow_jsonb_object_key_order() -> None:
+    import json
+
+    from app.services.toll_file_history import get_toll_file_batch
+
+    db = FakeTollSession()
+    result = await persist_toll_csv_file(
+        db,
+        tenant_id=6,
+        tenant_slug="demo",
+        filename="order.csv",
+        body=b"Zed,Amount,Unit\nz,1,u\n",
+        store_bytes=_fake_store,
+    )
+    row = db.rows[0]
+    row.cells = json.loads(json.dumps(row.cells, sort_keys=True))
+    assert list(row.cells.keys()) != ["Zed", "Amount", "Unit"]
+    detail = await get_toll_file_batch(db, tenant_id=6, batch_id=result.batch_id)
+    assert detail["headers"] == ["Zed", "Amount", "Unit"]
+    assert detail["csv_column_keys"] == ["Zed", "Amount", "Unit"]
+    assert detail["headers"] != list(row.cells.keys())

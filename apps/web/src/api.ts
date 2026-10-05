@@ -4877,14 +4877,16 @@ export type TollFileBatchListItem = {
   file_format: string | null;
   filename: string | null;
   source_hash: string | null;
-  source_storage_ref: string | null;
   status: string;
   row_count: number;
   imported_at: string | null;
+  csv_column_keys?: string[];
+  csv_raw_header_names?: string[];
 };
 
 export type TollFileSourceRow = {
   source_row_order: number;
+  source_line_number?: number | null;
   cells: Record<string, string>;
   values: string[];
 };
@@ -4892,6 +4894,9 @@ export type TollFileSourceRow = {
 export type TollFileBatchDetail = TollFileBatchListItem & {
   headers: string[];
   rows: TollFileSourceRow[];
+  total_row_count: number;
+  row_offset: number;
+  row_limit: number;
 };
 
 export type TollCsvIntakeResult = {
@@ -4900,9 +4905,10 @@ export type TollCsvIntakeResult = {
   file_format: string;
   filename: string;
   source_hash: string;
-  source_storage_ref: string;
   row_count: number;
   headers: string[];
+  csv_raw_header_names?: string[];
+  csv_column_keys?: string[];
   duplicate_match_count: number;
   duplicate_batch_ids: number[];
   status: string;
@@ -4916,8 +4922,14 @@ export async function listTollFileBatches(q?: string): Promise<TollFileBatchList
   return handle(res);
 }
 
-export async function getTollFileBatch(batchId: number): Promise<TollFileBatchDetail> {
-  const res = await fetchWithTenant(`${API_BASE}/tolls/files/${batchId}`);
+export async function getTollFileBatch(
+  batchId: number,
+  opts?: { rowOffset?: number; rowLimit?: number },
+): Promise<TollFileBatchDetail> {
+  const url = new URL(`${API_BASE}/tolls/files/${batchId}`, window.location.origin);
+  if (opts?.rowOffset != null) url.searchParams.set("row_offset", String(opts.rowOffset));
+  if (opts?.rowLimit != null) url.searchParams.set("row_limit", String(opts.rowLimit));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
   return handle(res);
 }
 

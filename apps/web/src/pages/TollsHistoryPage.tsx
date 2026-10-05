@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   getTollFileBatch,
   listTollFileBatches,
@@ -57,6 +57,8 @@ export default function TollsHistoryPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [rowLoadingMore, setRowLoadingMore] = useState(false);
 
   const loadList = useCallback(async (search: string, preferBatchId?: number) => {
     setLoading(true);
@@ -89,7 +91,7 @@ export default function TollsHistoryPage() {
     let cancelled = false;
     setDetailLoading(true);
     setDetailError(null);
-    getTollFileBatch(expandedId)
+    getTollFileBatch(expandedId, { rowOffset: 0, rowLimit: 100 })
       .then((row) => {
         if (!cancelled) setDetail(row);
       })
@@ -130,6 +132,7 @@ export default function TollsHistoryPage() {
           : "";
       setUploadNote(`CSV uploaded and stored for mapping.${duplicate}`);
       setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       await loadList(appliedQuery, result.batch_id);
     } catch (err) {
       setUploadNote(apiErrorMessage(err));
@@ -155,6 +158,7 @@ export default function TollsHistoryPage() {
           Stores the original file as a FILE batch. Does not create canonical toll transactions.
         </p>
         <input
+          ref={fileInputRef}
           type="file"
           accept=".csv,text/csv,text/plain"
           onChange={(ev) => {
@@ -253,7 +257,29 @@ export default function TollsHistoryPage() {
                       ) : null}
                       {detailError ? <p className="text-sm text-red-600">{detailError}</p> : null}
                       {detail && detail.batch_id === item.batch_id ? (
-                        <RawSourceRowsTable detail={detail} />
+                        <RawSourceRowsTable
+                          detail={detail}
+                          loadingMore={rowLoadingMore}
+                          onLoadMore={async () => {
+                            if (rowLoadingMore) return;
+                            setRowLoadingMore(true);
+                            try {
+                              const next = await getTollFileBatch(item.batch_id, {
+                                rowOffset: detail.rows.length,
+                                rowLimit: 100,
+                              });
+                              setDetail((prev) =>
+                                prev && prev.batch_id === next.batch_id
+                                  ? { ...next, rows: [...prev.rows, ...next.rows] }
+                                  : next,
+                              );
+                            } catch (err) {
+                              setDetailError(apiErrorMessage(err));
+                            } finally {
+                              setRowLoadingMore(false);
+                            }
+                          }}
+                        />
                       ) : null}
                     </td>
                   </tr>,
@@ -268,13 +294,23 @@ export default function TollsHistoryPage() {
   );
 }
 
-function RawSourceRowsTable({ detail }: { detail: TollFileBatchDetail }) {
+function RawSourceRowsTable({
+  detail,
+  loadingMore,
+  onLoadMore,
+}: {
+  detail: TollFileBatchDetail;
+  loadingMore: boolean;
+  onLoadMore: () => void;
+}) {
   if (!detail.rows.length) {
     return <p className="text-sm text-[var(--trk-text-muted)]">No source rows in this FILE batch.</p>;
   }
-  const headers = detail.headers.length
-    ? detail.headers
-    : Array.from(new Set(detail.rows.flatMap((row) => Object.keys(row.cells))));
+  const headers = (detail.csv_column_keys && detail.csv_column_keys.length
+    ? detail.csv_column_keys
+    : detail.headers) || [];
+  const total = detail.total_row_count || detail.row_count;
+  const hasMore = detail.rows.length < total;
   return (
     <div className="space-y-2">
       <p className="text-xs font-medium uppercase tracking-wide text-[var(--trk-text-muted)]">
@@ -283,10 +319,16 @@ function RawSourceRowsTable({ detail }: { detail: TollFileBatchDetail }) {
       <p className="text-xs text-[var(--trk-text-muted)]">
         Unmapped source data — original CSV cells, not normalized toll fields.
       </p>
-      <Table headers={["#", ...headers]}>
+      <p className="text-xs text-[var(--trk-text-muted)]">
+        Showing {detail.rows.length} of {total}
+      </p>
+      <Table headers={["#", "Line", ...headers]}>
         {detail.rows.map((row) => (
           <tr key={row.source_row_order}>
             <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">{row.source_row_order}</td>
+            <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">
+              {row.source_line_number ?? "—"}
+            </td>
             {headers.map((header) => (
               <td key={header} className="px-4 py-2 text-sm text-[var(--trk-text)]">
                 {row.cells[header] ?? ""}
@@ -295,6 +337,16 @@ function RawSourceRowsTable({ detail }: { detail: TollFileBatchDetail }) {
           </tr>
         ))}
       </Table>
+      {hasMore ? (
+        <button
+          type="button"
+          disabled={loadingMore}
+          onClick={onLoadMore}
+          className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-sm text-[var(--trk-text)] disabled:opacity-50"
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      ) : null}
     </div>
   );
 }

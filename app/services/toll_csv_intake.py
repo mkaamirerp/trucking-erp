@@ -37,16 +37,20 @@ from app.models.toll import (
     SOURCE_TYPE_FILE,
     TollFileSourceRow,
     TollSourceBatch,
-    TollTransaction,
 )
 
 logger = logging.getLogger(__name__)
 
 MAX_TOLL_CSV_BYTES: Final[int] = 20 * 1024 * 1024
+#: Dense-row ceiling for one generic parse/persist request. A 20 MB CSV of tiny
+#: lines can still be millions of ORM/JSONB rows; 50_000 covers a typical
+#: monthly toll export without a streaming engine.
+MAX_TOLL_CSV_ROWS: Final[int] = 50_000
 TOLL_CSV_PARSER_NAME: Final[str] = "generic_csv"
 TOLL_CSV_PARSER_VERSION: Final[str] = "1"
 TOLL_CSV_STORAGE_MODULE: Final[str] = "toll"
 TOLL_CSV_PREVIEW_LIMIT: Final[int] = 5
+TOLL_CSV_READ_CHUNK: Final[int] = 64 * 1024
 
 _PDF_MAGIC: Final[bytes] = b"%PDF"
 _ZIP_MAGIC: Final[bytes] = b"PK\x03\x04"
@@ -84,6 +88,7 @@ class TollCsvIntakeError(Exception):
 @dataclass(frozen=True)
 class TollCsvParsedRow:
     source_row_order: int
+    source_line_number: int
     cells: dict[str, str]
     values: tuple[str, ...]
 
@@ -117,17 +122,21 @@ class TollCsvPersistResult:
     status: str
     preview_rows: tuple[dict[str, str], ...] = field(default_factory=tuple)
     provider_code: str | None = None
+    csv_raw_header_names: tuple[str, ...] = field(default_factory=tuple)
+    csv_column_keys: tuple[str, ...] = field(default_factory=tuple)
 
     def as_api_dict(self) -> dict[str, Any]:
+        keys = list(self.csv_column_keys or self.headers)
         return {
             "batch_id": self.batch_id,
             "source_type": self.source_type,
             "file_format": self.file_format,
             "filename": self.filename,
             "source_hash": self.source_hash,
-            "source_storage_ref": self.source_storage_ref,
             "row_count": self.row_count,
-            "headers": list(self.headers),
+            "headers": keys,
+            "csv_raw_header_names": list(self.csv_raw_header_names or self.headers),
+            "csv_column_keys": keys,
             "duplicate_match_count": self.duplicate_match_count,
             "duplicate_batch_ids": list(self.duplicate_batch_ids),
             "status": self.status,
@@ -232,6 +241,28 @@ def _uniquify_headers(headers: list[str]) -> list[str]:
     return keys
 
 
+def _collision_safe_extra_key(used: set[str], position: int) -> str:
+    """Synthetic extra-column key that never overwrites an existing cell key."""
+    base = f"extra_column_{position}"
+    if base not in used:
+        return base
+    suffix = 2
+    while True:
+        candidate = f"{base}__{suffix}"
+        if candidate not in used:
+            return candidate
+        suffix += 1
+
+
+def _extend_extra_keys(header_keys: tuple[str, ...], extra_keys: list[str], needed_width: int) -> None:
+    used = set(header_keys) | set(extra_keys)
+    while len(header_keys) + len(extra_keys) < needed_width:
+        position = len(header_keys) + len(extra_keys) + 1
+        key = _collision_safe_extra_key(used, position)
+        extra_keys.append(key)
+        used.add(key)
+
+
 def parse_toll_csv_bytes(body: bytes) -> TollCsvParseResult:
     text, encoding = _decode_csv_text(body)
     if not text.strip():
@@ -245,33 +276,51 @@ def parse_toll_csv_bytes(body: bytes) -> TollCsvParseResult:
     header_names = tuple(str(h) for h in raw_headers)
     if not any(name.strip() for name in header_names):
         raise TollCsvIntakeError("TOLL_CSV_NO_HEADER", "CSV file has no header row")
-    cell_keys = tuple(_uniquify_headers(list(header_names)))
+    header_keys = tuple(_uniquify_headers(list(header_names)))
+    extra_keys: list[str] = []
 
     rows: list[TollCsvParsedRow] = []
     skipped = 0
     for raw in reader:
+        line_number = int(reader.line_num)
         if not any(str(cell).strip() for cell in raw):
             skipped += 1
             continue
+        if len(rows) >= MAX_TOLL_CSV_ROWS:
+            raise TollCsvIntakeError(
+                "TOLL_CSV_TOO_MANY_ROWS",
+                f"CSV file exceeds {MAX_TOLL_CSV_ROWS} data rows",
+            )
         values = tuple(str(cell) for cell in raw)
+        if len(values) > len(header_keys) + len(extra_keys):
+            _extend_extra_keys(header_keys, extra_keys, len(values))
+        column_keys = header_keys + tuple(extra_keys)
         cells: dict[str, str] = {}
-        for index, key in enumerate(cell_keys):
+        for index, key in enumerate(column_keys):
             cells[key] = values[index] if index < len(values) else ""
-        if len(values) > len(cell_keys):
-            for extra_index in range(len(cell_keys), len(values)):
-                cells[f"column_{extra_index + 1}"] = values[extra_index]
         rows.append(
             TollCsvParsedRow(
                 source_row_order=len(rows) + 1,
+                source_line_number=line_number,
                 cells=cells,
                 values=values,
             )
         )
+    if not rows:
+        raise TollCsvIntakeError(
+            "TOLL_CSV_NO_DATA_ROWS",
+            "CSV file has a header row but no data rows",
+        )
+    column_keys = header_keys + tuple(extra_keys)
+    if extra_keys:
+        for row in rows:
+            for key in extra_keys:
+                row.cells.setdefault(key, "")
     return TollCsvParseResult(
         encoding=encoding,
         delimiter=delimiter,
         header_names=header_names,
-        cell_keys=cell_keys,
+        cell_keys=column_keys,
         rows=tuple(rows),
         skipped_blank_row_count=skipped,
         byte_size=len(body),
@@ -328,6 +377,7 @@ async def persist_toll_csv_file(
     save_original = store_bytes or save_toll_csv_file_bytes
     remove_original = delete_stored or delete_toll_csv_file
     stored: StoredFile | None = None
+    captured: dict[str, Any] | None = None
     try:
         stored = await save_original(
             tenant_slug,
@@ -344,6 +394,14 @@ async def persist_toll_csv_file(
             source_hash=parsed.source_hash,
             source_filename=filename,
             status=BATCH_STATUS_PARSED,
+            csv_raw_header_names=list(parsed.header_names),
+            csv_column_keys=list(parsed.cell_keys),
+            csv_parsed_row_count=len(parsed.rows),
+            csv_skipped_blank_row_count=parsed.skipped_blank_row_count,
+            csv_parser_name=parsed.parser_name,
+            csv_parser_version=parsed.parser_version,
+            csv_encoding=parsed.encoding,
+            csv_delimiter=parsed.delimiter,
             created_by=created_by,
             updated_by=created_by,
         )
@@ -355,18 +413,51 @@ async def persist_toll_csv_file(
                 "FILE batch was not assigned an id",
                 http_status=500,
             )
+        batch_id = int(batch.id)
+        storage_key = stored.storage_key
         for row in parsed.rows:
             db.add(
                 TollFileSourceRow(
                     tenant_id=tenant_id,
-                    batch_id=batch.id,
+                    batch_id=batch_id,
                     source_row_order=row.source_row_order,
+                    source_line_number=row.source_line_number,
                     source_row_id=None,
                     cells=dict(row.cells),
                     values=list(row.values),
                 )
             )
         await db.flush()
+        preview = tuple(dict(row.cells) for row in parsed.rows[:TOLL_CSV_PREVIEW_LIMIT])
+        captured = {
+            "batch_id": batch_id,
+            "source_type": SOURCE_TYPE_FILE,
+            "file_format": FILE_FORMAT_CSV,
+            "filename": filename,
+            "source_hash": parsed.source_hash,
+            "source_storage_ref": storage_key,
+            "row_count": len(parsed.rows),
+            "headers": parsed.cell_keys,
+            "duplicate_match_count": len(duplicate_batch_ids),
+            "duplicate_batch_ids": duplicate_batch_ids,
+            "status": BATCH_STATUS_PARSED,
+            "preview_rows": preview,
+            "provider_code": provider_code,
+            "csv_raw_header_names": parsed.header_names,
+            "csv_column_keys": parsed.cell_keys,
+        }
+    except Exception:
+        await db.rollback()
+        if stored is not None:
+            try:
+                remove_original(stored.storage_key, tenant_slug=tenant_slug)
+            except Exception:
+                logger.exception(
+                    "Toll CSV intake storage cleanup failed after DB rollback tenant_slug=%s",
+                    tenant_slug,
+                )
+        raise
+    try:
         await db.commit()
     except Exception:
         await db.rollback()
@@ -379,27 +470,24 @@ async def persist_toll_csv_file(
                     tenant_slug,
                 )
         raise
-    preview = tuple(dict(row.cells) for row in parsed.rows[:TOLL_CSV_PREVIEW_LIMIT])
-    return TollCsvPersistResult(
-        batch_id=int(batch.id),
-        source_type=SOURCE_TYPE_FILE,
-        file_format=FILE_FORMAT_CSV,
-        filename=filename,
-        source_hash=parsed.source_hash,
-        source_storage_ref=stored.storage_key,
-        row_count=len(parsed.rows),
-        headers=parsed.header_names,
-        duplicate_match_count=len(duplicate_batch_ids),
-        duplicate_batch_ids=duplicate_batch_ids,
-        status=BATCH_STATUS_PARSED,
-        preview_rows=preview,
-        provider_code=provider_code,
-    )
+    assert captured is not None
+    return TollCsvPersistResult(**captured)
 
 
-def persist_created_canonical_transactions(
-    db: AsyncSession, *, tenant_id: int, batch_id: int
-) -> bool:
-    """Segment 2 lock helper for tests: intake never hydrates toll_transactions."""
-    _ = db, tenant_id, batch_id, TollTransaction
-    return False
+async def read_toll_csv_upload_bounded(file: Any, *, max_bytes: int = MAX_TOLL_CSV_BYTES) -> bytes:
+    """Read at most max_bytes+1 from an UploadFile. Reject before retaining a huge body."""
+    buf = bytearray()
+    while True:
+        remaining = max_bytes + 1 - len(buf)
+        if remaining <= 0:
+            break
+        chunk = await file.read(min(TOLL_CSV_READ_CHUNK, remaining))
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise TollCsvIntakeError(
+                "TOLL_CSV_TOO_LARGE",
+                f"CSV file exceeds {max_bytes} bytes",
+            )
+    return bytes(buf)

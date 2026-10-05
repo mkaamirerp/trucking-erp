@@ -84,6 +84,18 @@ class TollSourceBatch(Base):
             "source_type = 'FILE' OR file_format IS NULL",
             name="ck_toll_source_batches_file_format_file_only",
         ),
+        CheckConstraint(
+            "source_type <> 'FILE' OR file_format IS NOT NULL",
+            name="ck_toll_source_batches_file_requires_format",
+        ),
+        CheckConstraint(
+            "csv_raw_header_names IS NULL OR jsonb_typeof(csv_raw_header_names) = 'array'",
+            name="ck_toll_source_batches_csv_raw_header_names_array",
+        ),
+        CheckConstraint(
+            "csv_column_keys IS NULL OR jsonb_typeof(csv_column_keys) = 'array'",
+            name="ck_toll_source_batches_csv_column_keys_array",
+        ),
         Index("ix_toll_source_batches_tenant_id", "tenant_id"),
         Index("ix_toll_source_batches_tenant_provider", "tenant_id", "provider_code"),
         Index("ix_toll_source_batches_tenant_status", "tenant_id", "status"),
@@ -115,6 +127,17 @@ class TollSourceBatch(Base):
     statement_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     invoice_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
     invoice_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    #: Ordered original CSV header labels. JSON array; not JSONB object keys.
+    csv_raw_header_names: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    #: Ordered normalized unique keys used in TollFileSourceRow.cells.
+    csv_column_keys: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    csv_parsed_row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    csv_skipped_blank_row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    csv_parser_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    csv_parser_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    csv_encoding: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    csv_delimiter: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(40), nullable=False, server_default=BATCH_STATUS_RECEIVED
@@ -171,6 +194,8 @@ class TollFileSourceRow(Base):
     batch_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
     source_row_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: Original CSV physical/source line. Independent of dense source_row_order.
+    source_line_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_row_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     cells: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     values: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)

@@ -23,10 +23,11 @@ const listItem = {
   file_format: "CSV",
   filename: "portal.csv",
   source_hash: "abc123def4567890",
-  source_storage_ref: "demo/toll/csv/x/portal.csv",
   status: "PARSED",
   row_count: 1,
   imported_at: "2026-10-04T12:00:00+00:00",
+  csv_column_keys: ["Posted Date", "Agency", "Amount", "Plate"],
+  csv_raw_header_names: ["Posted Date", "Agency", "Amount", "Plate"],
 };
 
 const uploadResult = {
@@ -35,9 +36,10 @@ const uploadResult = {
   file_format: "CSV",
   filename: "portal.csv",
   source_hash: "abc123def4567890",
-  source_storage_ref: "demo/toll/csv/x/portal.csv",
   row_count: 1,
   headers: ["Posted Date", "Agency", "Amount", "Plate"],
+  csv_column_keys: ["Posted Date", "Agency", "Amount", "Plate"],
+  csv_raw_header_names: ["Posted Date", "Agency", "Amount", "Plate"],
   duplicate_match_count: 1,
   duplicate_batch_ids: [3],
   status: "PARSED",
@@ -77,9 +79,13 @@ describe("TollsHistoryPage", () => {
     apiMocks.getTollFileBatch.mockResolvedValue({
       ...listItem,
       headers: ["Posted Date", "Agency", "Amount", "Plate"],
+      total_row_count: 1,
+      row_offset: 0,
+      row_limit: 100,
       rows: [
         {
           source_row_order: 1,
+          source_line_number: 2,
           cells: {
             "Posted Date": "2026-03-01 10:05",
             Agency: "Niagara",
@@ -128,7 +134,7 @@ describe("TollsHistoryPage", () => {
     await act(async () => {
       expand!.click();
     });
-    expect(apiMocks.getTollFileBatch).toHaveBeenCalledWith(7);
+    expect(apiMocks.getTollFileBatch).toHaveBeenCalledWith(7, { rowOffset: 0, rowLimit: 100 });
     expect(host?.textContent).toContain("Raw source rows");
     expect(host?.textContent).toContain("Unmapped source data");
     expect(host?.textContent).toContain("Posted Date");
@@ -184,5 +190,73 @@ describe("TollsHistoryPage", () => {
     expect(host?.textContent).not.toContain("Tolls imported successfully");
     expect(host?.textContent).toContain("portal.csv");
     expect(host?.textContent).toContain("File Imports");
+    const clearedInput = host!.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(clearedInput.value).toBe("");
+    const uploadAfter = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Upload CSV");
+    expect(uploadAfter?.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("loads more raw rows instead of rendering an unbounded table up front", async () => {
+    apiMocks.getTollFileBatch
+      .mockResolvedValueOnce({
+        ...listItem,
+        row_count: 2,
+        headers: ["Posted Date", "Agency", "Amount", "Plate"],
+        csv_column_keys: ["Posted Date", "Agency", "Amount", "Plate"],
+        total_row_count: 2,
+        row_offset: 0,
+        row_limit: 1,
+        rows: [
+          {
+            source_row_order: 1,
+            source_line_number: 2,
+            cells: {
+              "Posted Date": "2026-03-01 10:05",
+              Agency: "Niagara",
+              Amount: "$5.25",
+              Plate: "ABC123",
+            },
+            values: ["2026-03-01 10:05", "Niagara", "$5.25", "ABC123"],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ...listItem,
+        row_count: 2,
+        headers: ["Posted Date", "Agency", "Amount", "Plate"],
+        csv_column_keys: ["Posted Date", "Agency", "Amount", "Plate"],
+        total_row_count: 2,
+        row_offset: 1,
+        row_limit: 100,
+        rows: [
+          {
+            source_row_order: 2,
+            source_line_number: 3,
+            cells: {
+              "Posted Date": "2026-03-01 10:42",
+              Agency: "I-90",
+              Amount: "12.00",
+              Plate: "ABC123",
+            },
+            values: ["2026-03-01 10:42", "I-90", "12.00", "ABC123"],
+          },
+        ],
+      });
+    await renderPage();
+    const expand = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "#7");
+    await act(async () => {
+      expand!.click();
+    });
+    expect(host?.textContent).toContain("Showing 1 of 2");
+    expect(host?.textContent).toContain("Niagara");
+    expect(host?.textContent).not.toContain("I-90");
+    const loadMore = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Load more");
+    expect(loadMore).toBeTruthy();
+    await act(async () => {
+      loadMore!.click();
+    });
+    expect(apiMocks.getTollFileBatch).toHaveBeenLastCalledWith(7, { rowOffset: 1, rowLimit: 100 });
+    expect(host?.textContent).toContain("I-90");
+    expect(host?.textContent).toContain("Showing 2 of 2");
   });
 });
