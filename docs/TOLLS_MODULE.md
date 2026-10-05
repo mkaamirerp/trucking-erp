@@ -2996,3 +2996,202 @@ profile_status     = UNMAPPED
 ```
 
 They remain visible as historical raw FILE imports but are not reclassified as valid provider exports.
+
+
+### 2026-10-05 — Toll CSV persistence hardening locked
+
+A code review of the implemented Toll FILE/CSV foundation identified several production-boundary issues that must be corrected before the CSV profile gate or provider normalization work continues.
+
+#### Ordered CSV headers must not depend on JSONB object key order
+
+`toll_file_source_rows.cells` remains valid as JSONB raw key/value evidence, but PostgreSQL JSONB object key order must never be used to reconstruct CSV column order.
+
+Locked rule:
+
+```text
+row.cells.keys()
+    !=
+authoritative CSV column order
+```
+
+Persist ordered header metadata on `toll_source_batches`.
+
+Preserve both:
+
+```text
+csv_raw_header_names
+    = original CSV header labels in source order
+
+csv_column_keys
+    = normalized/unique keys actually used in TollFileSourceRow.cells
+```
+
+Example:
+
+```text
+raw:
+[" Amount ", "Amount", ""]
+
+normalized:
+["Amount", "Amount__2", "column_3"]
+```
+
+JSON arrays preserve element order and are appropriate for this metadata.
+
+Upload/detail/history responses must use `csv_column_keys` for the ordered working header sequence.
+
+Do not derive display order from JSONB object keys.
+
+#### Collision-safe synthetic column keys
+
+When a row contains more values than the header, synthetic keys must never overwrite a legitimate source column.
+
+Generated keys such as `column_5` must be collision-safe against all existing normalized header keys.
+
+Raw CSV evidence must never be overwritten during generic parsing.
+
+#### Commit/result boundary
+
+All primitive values needed for the API result, especially `batch_id`, must be captured after flush and before `await db.commit()`.
+
+Do not rely on ORM attribute access after commit where `expire_on_commit=True` may trigger async lazy IO.
+
+A successful DB commit must not later appear to the caller as a failed import because response construction touched expired ORM state.
+
+#### FILE history query efficiency
+
+FILE import list/search must not:
+
+- load all tenant batches into Python before filtering/limiting
+- run one source-row query per batch
+- load raw source rows merely to count them
+
+Search/filter/order/limit belong in SQL.
+
+Persisted parsed row count on `toll_source_batches` is preferred for immutable FILE import row counts so list rendering requires no source-row count query.
+
+#### Raw-row detail must be bounded
+
+`GET /api/v1/tolls/files/{batch_id}` must not return every raw row for arbitrarily large CSVs.
+
+Use bounded pagination/limit with deterministic `source_row_order` ordering.
+
+The UI should page/load more raw evidence rather than render an entire large CSV at once.
+
+#### Parser provenance
+
+Keep parser provenance on `toll_source_batches`; do not recreate a 1:1 `toll_file_intakes` table.
+
+Persist compact nullable CSV fields such as:
+
+```text
+csv_raw_header_names
+csv_column_keys
+csv_parsed_row_count
+csv_skipped_blank_row_count
+csv_parser_name
+csv_parser_version
+csv_encoding
+csv_delimiter
+```
+
+These apply only to CSV FILE batches.
+
+#### Original source line number
+
+Keep:
+
+```text
+source_row_order
+    = dense imported record order
+```
+
+and add:
+
+```text
+source_line_number
+    = original CSV physical/source line position
+```
+
+Blank-line skipping must not destroy original source position evidence.
+
+#### FILE format constraint
+
+FILE batches must have a file format.
+
+Locked DB rule:
+
+```text
+source_type = FILE
+    -> file_format IS NOT NULL
+
+source_type != FILE
+    -> file_format IS NULL
+```
+
+Current supported FILE formats remain CSV and PDF.
+
+#### Header-only CSV
+
+A CSV containing only headers and zero data rows is not a useful Toll FILE import.
+
+Reject it before storage/persistence with a controlled validation error.
+
+No batch/file object should be created for a header-only CSV.
+
+#### Upload size and row-count safety
+
+The API must not read an arbitrarily large upload fully into memory before enforcing the configured Toll CSV byte limit.
+
+Read only up to the allowed maximum plus one byte or use an equivalent bounded approach.
+
+Also enforce a reasonable maximum parsed row count or chunked persistence strategy so a syntactically valid but extremely dense CSV cannot create unbounded ORM objects in one request.
+
+Keep this simple; do not build a streaming ingestion subsystem unless needed.
+
+#### Public API should not expose internal storage references unnecessarily
+
+`source_storage_ref` is internal storage plumbing.
+
+Do not expose it to the browser/list/detail/upload API unless there is a concrete client need.
+
+A future controlled download endpoint can resolve storage internally.
+
+#### Provider transaction idempotency remains deferred
+
+`provider_transaction_id` remains nullable, indexed, and non-unique at this stage.
+
+Do not add a global uniqueness constraint or denormalize provider identity merely to solve future provider-specific idempotency.
+
+Provider-scoped duplicate protection is deferred until exact PrePass/E-ZPass/provider transaction identity scope is implemented.
+
+#### Test-only production helper
+
+Remove production helpers whose only purpose is to prove that no canonical `TollTransaction` rows were created.
+
+Tests should assert DB state directly.
+
+#### Frontend upload behavior
+
+After successful upload, clear both React file state and the actual file input element.
+
+Multipart `FormData` requests must not force `Content-Type: application/json`; the browser must set the multipart boundary.
+
+#### Sequencing
+
+Complete this hardening before implementing the explicit Toll CSV `file_profile_code` gate.
+
+After hardening:
+
+```text
+generic CSV intake foundation
+    ↓
+explicit file_profile_code gate
+    ↓
+verified provider structure validation
+    ↓
+provider normalization
+    ↓
+canonical toll_transactions
+```
+
