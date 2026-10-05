@@ -1,18 +1,19 @@
-"""Toll FILE/CSV intake API (Segment 2)."""
+"""Toll FILE/CSV intake and FILE import history (unmapped rows; not canonical transactions)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps.auth import CurrentUser, get_current_user
 from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
-from app.schemas.toll import TollCsvIntakeOut
+from app.schemas.toll import TollCsvIntakeOut, TollFileBatchDetailOut, TollFileBatchListItemOut
 from app.services.toll_csv_intake import TollCsvIntakeError, persist_toll_csv_file
+from app.services.toll_file_history import get_toll_file_batch, list_toll_file_batches
 
 router = APIRouter(
     prefix="/tolls",
@@ -46,3 +47,31 @@ async def upload_toll_csv_file(
         detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
         raise HTTPException(status_code=exc.http_status, detail=detail) from exc
     return TollCsvIntakeOut(**result.as_api_dict())
+
+
+@router.get("/files", response_model=list[TollFileBatchListItemOut])
+async def list_toll_csv_files(
+    q: str | None = Query(None),
+    _user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = _user
+    items = await list_toll_file_batches(db, tenant_id=tenant_id, q=q)
+    return [TollFileBatchListItemOut(**item) for item in items]
+
+
+@router.get("/files/{batch_id}", response_model=TollFileBatchDetailOut)
+async def get_toll_csv_file_batch(
+    batch_id: int,
+    _user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    _ = _user
+    try:
+        item = await get_toll_file_batch(db, tenant_id=tenant_id, batch_id=batch_id)
+    except TollCsvIntakeError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return TollFileBatchDetailOut(**item)

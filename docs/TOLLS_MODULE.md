@@ -1547,6 +1547,50 @@ Not implemented:
 - API reload/deploy
 
 ---
+
+## Segment 3 — FILE history/search UI (raw CSV rows)
+
+**Implementation status:** coded in repo; not committed as a SHA in this checkpoint; tenant migrations have not been applied; API image and nginx bundle have not been reloaded. Not live.
+
+Admin FILE import history/search (`/tolls` → File Imports). Expandable unmapped CSV source rows. This is not canonical toll transaction history. No E-ZPass/provider map. Canonical Date/Time | Unit | Toll Agency | Amount | Type | Read By | Identifier columns are not populated from guessed CSV values.
+
+### Files implemented
+
+- `app/services/toll_file_history.py`
+- `app/routers/tolls.py` (`GET /api/v1/tolls/files`, `GET /api/v1/tolls/files/{batch_id}`)
+- `app/schemas/toll.py`
+- `apps/web/src/pages/TollsHistoryPage.tsx`
+- `apps/web/src/pages/TollsHistoryPage.test.tsx`
+- `apps/web/src/routes.ts` (`OPS.TOLLS`)
+- `apps/web/src/App.tsx`
+- `apps/web/src/components/TopNav.tsx`
+- `apps/web/src/api.ts`
+- `tests/test_toll_file_history.py`
+
+### Locked behavior
+
+- List is FILE batches only (`source_type=FILE`), tenant-scoped
+- Search is filename / source hash only
+- Expand shows durable `toll_file_source_rows` cell keys and values
+- Duplicate FILE hashes are listed separately; upload still reports matches without reject/reuse
+- Modest CSV upload remains available so the history list can be populated
+- `admin_sensitive` + AdminRouteGuard
+
+### Explicitly deferred after Segment 3
+
+Not implemented:
+
+- E-ZPass/provider-specific CSV normalization
+- PrePass API
+- PDF Toll profile
+- canonical `toll_transactions` creation from CSV
+- email intake
+- manual-entry UI
+- Driver/O/O/Payroll/Settlement logic
+- tenant migration execution
+- API reload/deploy
+
+---
 # Appendix A — PrePass Source Contract Archive
 
 This appendix preserves the API contract details supplied during research so the TruckERP design does not depend on chat memory.

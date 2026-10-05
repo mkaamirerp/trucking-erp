@@ -128,14 +128,39 @@ class FakeTollSession:
         filters = _eq_filters(stmt)
         tenant_id = filters.get("tenant_id")
         source_hash = filters.get("source_hash")
-        ids = [
-            int(batch.id)
+        batch_id = filters.get("batch_id")
+        object_id = filters.get("id")
+        source_type = filters.get("source_type")
+        descs = list(getattr(stmt, "column_descriptions", []) or [])
+        names = [d.get("name") for d in descs]
+        entity = descs[0].get("entity") if descs else None
+        froms = list(stmt.get_final_froms()) if hasattr(stmt, "get_final_froms") else []
+        from_names = {getattr(item, "name", None) for item in froms}
+        batches = [
+            batch
             for batch in self.batches
             if batch.id is not None
             and (tenant_id is None or batch.tenant_id == tenant_id)
             and (source_hash is None or batch.source_hash == source_hash)
+            and (source_type is None or batch.source_type == source_type)
+            and (object_id is None or entity is TollFileSourceRow or batch.id == object_id)
         ]
-        return FakeResult(ids)
+        if names == ["id"] and entity is not TollFileSourceRow:
+            return FakeResult([int(batch.id) for batch in batches])
+        if entity is TollFileSourceRow or TollFileSourceRow.__tablename__ in from_names:
+            rows = [
+                row
+                for row in self.rows
+                if (tenant_id is None or row.tenant_id == tenant_id)
+                and (batch_id is None or row.batch_id == batch_id)
+            ]
+            rows.sort(key=lambda row: row.source_row_order)
+            return FakeResult(rows)
+        return FakeResult(batches)
+
+    async def scalar(self, stmt: Any) -> Any:
+        items = (await self.execute(stmt)).scalars().all()
+        return items[0] if items else None
 
 
 async def _fake_store(

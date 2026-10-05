@@ -25,6 +25,7 @@ const fleetLinks = [
 
 export const financeLinks = [
   { label: "Fuel", to: OPS.FUEL },
+  { label: "Tolls", to: OPS.TOLLS },
   { label: "Payroll", to: OPS.PAY_RUNS },
   { label: "Cards", to: OPS.PAY_PERIODS },
   { label: "Docs", to: OPS.DOCUMENTS },
@@ -87,6 +88,7 @@ function usePageLabel(): string {
   if (pathname.startsWith("/admin/integrations/fuel")) return "Fuel / Provider Settings";
   if (pathname === OPS.FUEL || pathname === `${OPS.FUEL}/`) return "Fuel";
   if (pathname.startsWith("/fuel")) return "Fuel";
+  if (pathname.startsWith("/tolls")) return "Tolls";
   if (pathname.startsWith("/admin/onboarding")) return "Onboarding Settings";
   if (pathname.startsWith("/admin/documents")) return "Document Rules";
   if (pathname.startsWith("/profile")) return "My Profile";

@@ -4870,3 +4870,63 @@ export async function discardFuelManualEntryStage(stageId: string): Promise<{ ok
   );
   return handle(res);
 }
+
+export type TollFileBatchListItem = {
+  batch_id: number;
+  source_type: string;
+  file_format: string | null;
+  filename: string | null;
+  source_hash: string | null;
+  source_storage_ref: string | null;
+  status: string;
+  row_count: number;
+  imported_at: string | null;
+};
+
+export type TollFileSourceRow = {
+  source_row_order: number;
+  cells: Record<string, string>;
+  values: string[];
+};
+
+export type TollFileBatchDetail = TollFileBatchListItem & {
+  headers: string[];
+  rows: TollFileSourceRow[];
+};
+
+export type TollCsvIntakeResult = {
+  batch_id: number;
+  source_type: string;
+  file_format: string;
+  filename: string;
+  source_hash: string;
+  source_storage_ref: string;
+  row_count: number;
+  headers: string[];
+  duplicate_match_count: number;
+  duplicate_batch_ids: number[];
+  status: string;
+  preview_rows: Record<string, string>[];
+};
+
+export async function listTollFileBatches(q?: string): Promise<TollFileBatchListItem[]> {
+  const url = new URL(`${API_BASE}/tolls/files`, window.location.origin);
+  if (q?.trim()) url.searchParams.set("q", q.trim());
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle(res);
+}
+
+export async function getTollFileBatch(batchId: number): Promise<TollFileBatchDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/tolls/files/${batchId}`);
+  return handle(res);
+}
+
+export async function uploadTollCsvFile(file: File): Promise<TollCsvIntakeResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithTenant(`${API_BASE}/tolls/files/csv`, {
+    method: "POST",
+    body: form,
+  });
+  return handle(res);
+}

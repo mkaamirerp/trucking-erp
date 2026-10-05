@@ -46,6 +46,7 @@ import FuelBvdExtractionReviewPage from "./pages/FuelBvdExtractionReviewPage";
 import FuelBvdHistoryPage from "./pages/FuelBvdHistoryPage";
 import FuelBvdFullDetailPage from "./pages/FuelBvdFullDetailPage";
 import FuelMainPage from "./pages/FuelMainPage";
+import TollsHistoryPage from "./pages/TollsHistoryPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
 import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
@@ -87,6 +88,7 @@ function App() {
     /^\/operations/.test(location.pathname) ||
     /^\/admin/.test(location.pathname) ||
     /^\/fuel/.test(location.pathname) ||
+    /^\/tolls/.test(location.pathname) ||
     /^\/profile/.test(location.pathname);
   const accountSetupPath = "/account-setup";
   const onAccountSetupRoute =
@@ -315,6 +317,16 @@ function App() {
           <Layout>
             <FuelMainPage />
           </Layout>
+        }
+      />
+      <Route
+        path="/tolls"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <TollsHistoryPage />
+            </Layout>
+          </AdminRouteGuard>
         }
       />
       <Route

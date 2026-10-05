@@ -51,6 +51,8 @@ export const OPS = {
   FUEL_BVD_UPLOAD: "/fuel/bvd/upload",
   FUEL_BVD_REVIEW: (importId: string) => `/fuel/bvd/${importId}/review`,
   FUEL_BVD_DETAIL: (importId: string) => `/fuel/bvd/${importId}/detail`,
+  /** Toll FILE intake history/search (unmapped CSV rows). */
+  TOLLS: "/tolls",
 } as const;
 
 /** Apex-only platform control plane (X-Platform-Admin-Key). */
