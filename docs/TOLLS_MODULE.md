@@ -286,6 +286,32 @@ GET https://api.prepass.com/tolltransaction/v1/transactions
 - `pageInfo.totalRecords`.
 - `pageInfo.totalPages`.
 
+
+### 5.1 OpenAPI implementation cautions
+
+The supplied OpenAPI 3.0.1 contract confirms the endpoint and field set above, but it also contains type inconsistencies that the adapter must tolerate.
+
+- `tollId` is declared as a **string** in the schema, while the example payload shows a numeric value.
+- `tollCharge` is declared as a **string** in the schema, while the example payload shows numeric values such as `8.25` and `12`.
+- `accountNumber` and `billToAccountNumber` are declared as integers in the Toll Transaction API, even though the Account API represents account numbers as strings. TruckERP should normalize external account identifiers to strings internally rather than depend on the provider's inconsistent schema typing.
+- `entryDateTimeUtc` and `exitDateTimeUtc` are explicitly nullable.
+- Several fields are marked required by the schema but may contain empty strings in actual examples, including plate and entry-plaza values. "Required" must therefore mean "key present," not "usable business value."
+- `costCenter` is optional and documented as being included only when requesting transactions by cost center.
+- The API documents `204 No Content` in addition to `200`, `400`, `401`, `403`, `404`, and `500`.
+
+**Adapter rule:** ingest the raw payload exactly as returned, then normalize types defensively.
+
+Recommended normalization examples:
+
+```text
+provider_transaction_id = str(tollId)
+account_number          = str(accountNumber)
+bill_to_account_number  = str(billToAccountNumber)
+toll_amount             = Decimal(str(tollCharge))
+```
+
+Do not reject a transaction solely because a provider field is returned with a different JSON primitive type than the OpenAPI schema example implies.
+
 ### Important TruckERP conclusions
 
 This API already gives us most of the data we were hoping to avoid rebuilding from individual toll agencies:
