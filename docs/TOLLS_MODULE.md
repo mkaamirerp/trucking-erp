@@ -2118,3 +2118,60 @@ Before changing Tolls code:
 - Toll canonical records remain vehicle/unit-bound and contain no Driver/O-O/Payroll/Settlement logic.
 - 13 Segment 1 tests passed.
 - At this checkpoint the migration had not been applied and the API had not been reloaded/deployed.
+
+
+### 2026-10-05 — Segment 2 FILE/CSV persistence shape locked
+
+A read-only review of the uncommitted Segment 2 implementation found that the generic CSV parser boundary is correct, but the first draft overbuilt persistence and omitted key intake wiring.
+
+Locked Segment 2 persistence shape:
+
+```text
+toll_source_batches
+    = FILE envelope
+    = source_type / file_format
+    = filename / hash / storage reference
+    = provider/account metadata when known
+
+toll_file_source_rows
+    = durable unmapped CSV source rows
+    = ordered header/value evidence
+    = no canonical Toll assumptions
+
+toll_transactions
+    = unchanged canonical Toll rows
+    = created only after an explicit provider/profile mapping
+```
+
+Do **not** keep a separate 1:1 `toll_file_intakes` table. Parse metadata such as parser name/version, delimiter, encoding, headers, and row counts does not justify a second FILE envelope table in the current small-model design.
+
+The original uploaded CSV bytes must be preserved through the existing TruckERP storage abstraction, with the resulting reference stored in `toll_source_batches.source_storage_ref`.
+
+Duplicate-file behavior remains application/service logic:
+
+- calculate SHA-256
+- tenant-scoped lookup of prior batches with the same hash
+- allow the same hash in multiple batches
+- report duplicate awareness
+- do not enforce hash uniqueness in the database
+- do not expose one tenant's duplicate matches to another tenant
+
+Generic CSV parsing remains intentionally non-semantic:
+
+- preserve strings
+- preserve unknown columns
+- preserve row order
+- no datetime conversion
+- no Decimal conversion
+- no unit resolution
+- no provider auto-detection
+- no `toll_transactions` insert without an explicit profile
+
+Segment 2 is not complete until it also wires:
+
+1. persistence of `toll_source_batches`
+2. persistence of `toll_file_source_rows`
+3. original file storage
+4. tenant-scoped duplicate lookup/reporting
+5. a minimal tenant-scoped Toll CSV intake API
+
