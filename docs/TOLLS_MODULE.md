@@ -638,14 +638,57 @@ GPS payloads contain sensitive vehicle-location history. If TruckERP later enabl
 
 ---
 
+
+## Vehicle-Boundary Lock
+
+**Tolls is a vehicle/unit module first.**
+
+The Tolls module's responsibility is to ingest, normalize, validate, and attach each toll transaction to the correct TruckERP vehicle/unit.
+
+Example:
+
+```text
+PrePass toll
+    ↓
+resolve to unit 1104
+    ↓
+store toll against unit 1104
+    ↓
+STOP
+```
+
+At this stage it does **not matter** whether unit 1104 is:
+
+- a company-owned truck
+- an owner-operator truck
+- driven by a company driver
+- driven by an owner-operator
+- temporarily assigned to another driver
+
+Those are downstream business relationships.
+
+The Tolls module must **not** decide:
+
+- driver deduction
+- owner-operator deduction
+- payroll treatment
+- settlement treatment
+- company-vs-owner expense responsibility
+
+Those rules belong to later downstream modules that can consume the vehicle-linked toll transaction together with effective-dated ownership/engagement/pay rules.
+
+**Locked design rule:** first attach the toll correctly to the vehicle/unit. Ownership, driver, payroll, settlement, and other financial responsibility logic is applied later.
+
+---
+
 ## 8. Design Principles
 
 - Provider data is source data; TruckERP owns the canonical business model.
 - Raw provider values must be retained for audit/reprocessing.
 - Money must reconcile before permanent processing.
-- No silent guessing for vehicle/unit/owner mappings.
+- No silent guessing for vehicle/unit mappings.
 - Processed financial history should be immutable except through controlled correction/adjustment workflows.
-- Asset/unit ownership and assignment must be resolved using historical effective dates, not only the current truck/driver relationship.
+- Tolls must resolve the correct vehicle/unit. Ownership, driver, payroll, settlement, and responsibility logic are downstream concerns.
 - Toll charges, violations, fees, discounts, reversals, and adjustments must remain distinguishable if the source exposes them.
 
 ---
@@ -1512,3 +1555,11 @@ Before changing Tolls code:
 - Confirmed payload can carry device number, VIN, axle count, plate, and GPS track segments.
 - Confirmed GPS points support latitude, longitude, timestamp, timezone, speed, direction, and location accuracy.
 - Classified this API as future toll-validation/ELD integration, not a dependency for initial toll ingestion.
+
+
+### 2026-10-05 — Vehicle-boundary rule locked
+
+- Tolls stops at vehicle/unit attribution.
+- A toll mapped to unit 1104 remains a vehicle toll regardless of whether the truck is company-owned or owner-operator-owned.
+- Company/O-O ownership, driver responsibility, payroll deductions, settlement treatment, and expense responsibility are downstream concerns.
+- Do not couple Tolls normalization to Payroll, Driver, Owner-Operator, or Settlement logic.
