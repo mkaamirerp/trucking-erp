@@ -2852,3 +2852,147 @@ Segment 2 is not complete until it also wires:
 - Backend tests: 39 passed.
 - Frontend Tolls tests: 5 passed.
 - At this checkpoint no migrate/reload/deploy had been performed.
+
+### 2026-10-05 — Toll CSV profile gate locked
+
+A generic CSV that parses successfully is **not** automatically a valid Toll import.
+
+The BVD fuel CSV example demonstrated the issue: Segment 2 correctly accepted syntactically valid CSV and preserved its raw rows, but no explicit Toll CSV profile was selected or validated.
+
+Locked rule:
+
+```text
+generic CSV parse success
+    !=
+valid Toll provider export
+```
+
+Toll FILE/CSV intake now requires an explicit profile boundary before provider-specific normalization.
+
+#### Source/profile model
+
+Keep these concepts separate:
+
+```text
+source_type       = transport/channel       (API / FILE / MANUAL)
+file_format       = byte/file format        (CSV / PDF)
+file_profile_code = declared Toll CSV dialect/profile
+provider_code     = commercial provider/account identity
+```
+
+Do not overload `provider_code` to mean CSV schema/profile.
+
+#### Request selection
+
+`POST /api/v1/tolls/files/csv` should require an explicit `file_profile_code`.
+
+Rules:
+- no default profile
+- no filename sniffing
+- no header sniffing
+- no provider auto-detection
+- caller explicitly selects the Toll CSV profile
+
+#### Initial profile catalog
+
+Use a small in-code catalog/registry first; do not create a provider/profile database table yet.
+
+Conceptual profile codes:
+
+```text
+UNMAPPED
+EZPASS_CSV
+PREPASS_EXPORT
+BESTPASS_CSV
+```
+
+Only `UNMAPPED` is accepted until a provider profile has been implemented from verified provider documentation/sample data.
+
+Unimplemented known profiles should fail closed with a controlled error such as `TOLL_CSV_PROFILE_NOT_IMPLEMENTED`.
+
+Do not invent E-ZPass, PrePass-export, or Bestpass header requirements.
+
+#### Batch profile state
+
+Persist profile identity/state on `toll_source_batches`.
+
+Required conceptual fields:
+
+```text
+file_profile_code
+profile_status
+```
+
+Keep batch `status` separate.
+
+Current meanings:
+
+```text
+status = PARSED
+    means: original file received + generic CSV successfully parsed
+
+profile_status = UNMAPPED
+    means: no provider-specific Toll structure has been validated
+```
+
+Future profile states may include `UNMAPPED`, `VALIDATED`, and `REJECTED_STRUCTURE`.
+
+Do not collapse generic file-processing state and provider-profile validation state into one workflow enum.
+
+#### UNMAPPED behavior
+
+If admin explicitly chooses `UNMAPPED`:
+- preserve original file
+- preserve `toll_file_source_rows`
+- keep generic `PARSED` status when parsing succeeds
+- set profile state to `UNMAPPED`
+- do not create `toll_transactions`
+- do not claim the file is a valid Toll provider export
+
+A non-Toll CSV may still be retained as raw evidence if an admin explicitly chooses UNMAPPED, but the UI must clearly present it as unmapped/unvalidated.
+
+#### Known-profile behavior later
+
+Example future flow:
+
+```text
+file_profile_code = EZPASS_CSV
+    ↓
+generic CSV parse
+    ↓
+verified E-ZPass structure validation
+    ↓
+fail closed if required structure is absent
+    ↓
+provider-specific normalization
+    ↓
+canonical toll_transactions
+```
+
+A BVD fuel CSV submitted under `EZPASS_CSV` must be rejected once the verified E-ZPass structure validator exists.
+
+#### UI rule
+
+Current `/tolls` FILE Imports UI should show profile explicitly.
+
+For unmapped files:
+
+```text
+Profile: Unmapped
+Status: Parsed — generic CSV only
+```
+
+Success messaging should say the file was stored as an unmapped Toll FILE and that no canonical Toll transactions were created.
+
+Do not present unmapped files as canonical Toll history or validated provider exports.
+
+#### Existing FILE batches
+
+Existing generic FILE batches created before this profile gate should be treated/backfilled as:
+
+```text
+file_profile_code = UNMAPPED
+profile_status     = UNMAPPED
+```
+
+They remain visible as historical raw FILE imports but are not reclassified as valid provider exports.
