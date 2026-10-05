@@ -113,6 +113,26 @@ GET https://api.prepass.com/accounts/v1/accounts
 
 **Response content type:** `application/json`
 
+**Security declared by this OpenAPI contract:**
+
+The Account API v1 specification declares an API-management subscription key using either:
+
+```text
+Ocp-Apim-Subscription-Key: <subscription key>
+```
+
+as a request header, **or**:
+
+```text
+?subscription-key=<subscription key>
+```
+
+as a query parameter.
+
+TruckERP should prefer the header form so the subscription key is not placed in URLs/logs.
+
+**Important:** this Account API OpenAPI document declares the subscription-key schemes but does not itself declare a Bearer security scheme. Do not assume the same authentication combination applies uniformly to every PrePass endpoint; follow each API contract.
+
 **200 OK response object:** `GetAccountsResponse`
 
 | Field | Required | Type | Meaning |
@@ -137,6 +157,17 @@ account_name
 cost_center
 account_status
 ```
+
+Minimum PrePass connection secrets/config now known:
+
+```text
+client_id
+client_secret_ref
+subscription_key_ref
+api_base_url = https://api.prepass.com
+```
+
+The subscription key is separate from the client secret and should use the same write-only secret-reference handling.
 
 Important design consequences:
 
@@ -193,7 +224,7 @@ The documented example returns `expires_in: 3599`, so normal token life is appro
 
 The PrePass connection layer can now be treated as confirmed rather than placeholder behavior.
 
-Recommended connection flow:
+Recommended connection/test flow:
 
 ```text
 client_id + client_secret_ref
@@ -201,17 +232,21 @@ client_id + client_secret_ref
 POST /auth/v1/token
         ↓
 Bearer access_token
+
+subscription_key_ref
         ↓
-GET /accounts/v1/accounts
+call Account API using its documented APIM subscription-key security
         ↓
 confirm authorized PrePass accounts
         ↓
 connection test = OK
 ```
 
+The exact combination of Bearer token + subscription key must be implemented per endpoint documentation. The Account API OpenAPI contract explicitly declares the subscription key; the Token API supplies the Bearer token for PrePass API access.
+
 Important rules:
 
-- Store the client secret only through TruckERP's credential/secret reference mechanism.
+- Store both the client secret and the APIM subscription key only through TruckERP's credential/secret reference mechanism.
 - Do not display the client secret after save.
 - Treat the returned Bearer token as sensitive ephemeral authentication material.
 - Prefer memory/Redis/encrypted short-lived cache rather than storing the raw access token permanently in the provider connection row.
@@ -406,6 +441,13 @@ The documented Toll Transaction response does **not** show separate fields for d
 - Confirmed one authenticated integration may return multiple PrePass accounts.
 - Confirmed account states include `Active`, `Inactive`, and `Archived`.
 - TruckERP will preserve provider account identity and historical inactive/archived accounts rather than treating PrePass as a single-account integration.
+
+### 2026-10-05 — PrePass Account API security clarified
+
+- OpenAPI 3.0.1 declares `Ocp-Apim-Subscription-Key` header security or `subscription-key` query security for Account API v1.
+- TruckERP should prefer the header form.
+- The PrePass provider connection therefore needs a separate `subscription_key_ref` in addition to `client_secret_ref`.
+- Do not assume every PrePass endpoint uses an identical security combination; follow each API contract.
 
 ### 2026-10-05 — PrePass Token API v1 documented
 
