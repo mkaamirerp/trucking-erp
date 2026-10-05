@@ -931,6 +931,67 @@ Those rules belong to later downstream modules that can consume the vehicle-link
 
 ---
 
+
+## Current Repository Audit Before Implementation
+
+A read-only repository audit was completed before Toll implementation.
+
+### Confirmed current state
+
+- No `toll_*` database tables or SQLAlchemy models exist.
+- No Toll Alembic migrations exist.
+- No Toll router, API service, schema, provider adapter, upload endpoint, history endpoint, or search endpoint exists.
+- No Toll frontend page, route, navigation item, provider screen, upload screen, or API client exists.
+- No Toll Document Platform profile exists yet.
+- Existing Fuel/Card code can classify a source row as `TOLL`, but the row remains in Fuel.
+- Existing Fuel code does not push those rows into a Toll module.
+- Existing downstream acknowledgement columns in Fuel are unused and do not define the new Toll architecture.
+- Existing Fuel transaction identity already demonstrates the useful pattern that source-row identity and provider transaction identity are separate from the canonical record.
+- Existing Truck/Asset models and unit-number history are reusable for unit resolution.
+- Existing shared Document Platform PDF capabilities are reusable for future Toll PDF intake.
+
+### Existing Fuel behavior that must NOT define Toll
+
+Fuel currently has financial-responsibility logic that may inspect company/O/O context for rows classified as `TOLL`. The new Toll module must not copy or depend on that behavior.
+
+The Toll boundary remains:
+
+```text
+source toll
+    ↓
+resolve correct vehicle/unit
+    ↓
+store toll
+    ↓
+STOP
+```
+
+Ownership, driver, payroll, settlement, and deduction policy remain downstream.
+
+### Implementation consequence
+
+Because no Toll module exists, implementation can begin without legacy Toll-table migration or compatibility work.
+
+The first implementation slice should establish the canonical Toll data boundary before adding provider-specific APIs.
+
+Recommended sequence:
+
+```text
+1. toll_source_batches
+2. toll_transactions
+3. FILE intake foundation
+4. first structured CSV adapter (E-ZPass-style portal export)
+5. simple admin history/search + expand detail
+6. downstream read/query by unit + date range
+7. PrePass connection/API sync
+8. PDF Toll profile
+9. manual entry / email intake as later slices
+```
+
+Provider account/connection must remain optional because FILE intake can exist without any provider account or transponder.
+
+---
+
 # Appendix A — PrePass Source Contract Archive
 
 This appendix preserves the API contract details supplied during research so the TruckERP design does not depend on chat memory.
