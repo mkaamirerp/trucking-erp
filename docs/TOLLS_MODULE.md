@@ -398,7 +398,150 @@ The documented Toll Transaction response does **not** show separate fields for d
 
 ---
 
-## 6. Design Principles
+
+## 6. PrePass Fleet Management API v2 — Confirmed
+
+**Purpose:** Manage vehicles enrolled in bypass and/or tolling services, including vehicle lookup, transponder lookup/assignment/order, vehicle add/update/delete, and lost/stolen transponder reporting.
+
+**Base server:**
+
+```text
+https://api.prepass.com/fleetmanagement/v2
+```
+
+### 6.1 Vehicle lookup
+
+```http
+GET /vehicles
+```
+
+Supports lookup by:
+
+- `vin`
+- `vehicleNumber`
+- `accountNumber`
+- `costCenter`
+
+The response can include:
+
+- `accountNumber`
+- `costCenter`
+- `vin`
+- `vehicleNumber`
+- `tempPlate`
+- `licensePlateNumber`
+- `licensePlateState`
+- `declaredWeight`
+- `irpNumber`, `irpState`
+- `iftaNumber`, `iftaState`
+- `transponderNumber`
+- `vrn`
+- `hazmatHauler`
+- `vehicleImage`
+- `leasedVehicle`
+- `leasingCompany`
+- `leaseExpirationDate`
+
+This is a strong identity bridge between PrePass and TruckERP assets because one response can tie together:
+
+```text
+VIN
+↔ customer vehicle/unit number
+↔ plate + state/province
+↔ transponder number
+↔ PrePass account/cost center
+```
+
+### 6.2 Vehicle lifecycle actions
+
+The API also exposes:
+
+```text
+POST   /vehicle   add vehicle
+PATCH  /vehicle   update vehicle
+DELETE /vehicle   remove vehicle
+```
+
+VIN is the immutable lookup key for updates.
+
+TruckERP should initially treat these write operations as **future capability**, not automatic behavior. The first integration phase should be read/sync only unless a later decision explicitly enables outbound PrePass fleet management.
+
+### 6.3 Transponder lookup
+
+```http
+GET /transponder
+GET /transponders
+```
+
+`GET /transponder` looks up one transponder by `transponderNumber`.
+
+`GET /transponders` lists transponders by PrePass account number or cost center.
+
+Returned transponder records can include:
+
+- `accountNumber`
+- `vin`
+- `vehicleNumber`
+- `vrn`
+- `transponderNumber`
+- `costCenter`
+
+The examples prove that a transponder may exist with blank VIN and vehicle number, so TruckERP must support **unassigned transponders** rather than assuming every device belongs to an asset.
+
+### 6.4 Transponder operations
+
+The API also supports:
+
+```text
+POST /orders               order transponders for specified VINs
+POST /transponders/lost    report lost or stolen transponders
+```
+
+PrePass states that transponders are assigned to vehicles during order fulfillment.
+
+### 6.5 TruckERP implications
+
+The Fleet Management API materially improves toll attribution.
+
+Recommended mapping priority can now be strengthened to:
+
+```text
+1. PrePass vehicleNumber → TruckERP unit number
+2. VIN → TruckERP asset/VIN identity
+3. transponderNumber → current/historical PrePass device assignment
+4. plate number + jurisdiction → historical asset plate identity
+5. otherwise → REVIEW / unmapped
+```
+
+TruckERP should sync PrePass fleet reference data separately from toll transactions so the transaction processor is not forced to rediscover vehicle identity one row at a time.
+
+Suggested provider-side reference caches:
+
+```text
+prepass_vehicle_reference
+prepass_transponder_reference
+```
+
+These are source/reference tables, not replacements for TruckERP's canonical Asset/VIN history.
+
+Important design rules:
+
+- VIN remains the strongest asset identity when present.
+- `vehicleNumber` is customer-assigned and can map naturally to TruckERP unit number, but should not replace VIN identity.
+- Transponder assignments may change over time, so TruckERP should preserve effective-dated assignment history rather than only the current mapping.
+- Unassigned transponders are valid provider state.
+- Plate matching must remain historical because plates can change.
+- PrePass IRP/IFTA/lease fields are useful enrichment but should not overwrite TruckERP canonical compliance/asset records silently.
+- The Fleet Management v2 OpenAPI file does not declare a security scheme. Authentication must therefore remain driven by confirmed PrePass endpoint/security documentation rather than inferred from this file.
+- The older `/fleetmanagement/v2/accounts` endpoint is explicitly deprecated; use Account API v1 instead.
+
+### 6.6 Scope note
+
+PrePass warns not to use this API to update tractors enrolled in the Toll Violation Prevention Program (VPP) or trailer plates. Any future write integration must respect that restriction.
+
+---
+
+## 7. Design Principles
 
 - Provider data is source data; TruckERP owns the canonical business model.
 - Raw provider values must be retained for audit/reprocessing.
@@ -410,18 +553,18 @@ The documented Toll Transaction response does **not** show separate fields for d
 
 ---
 
-## 7. Open Research Items
+## 8. Open Research Items
 
 - Whether disputes can be created/updated through API or are portal-only.
 - Whether consolidated invoice/statement identifiers are available from another PrePass API.
-- Whether PrePass exposes transponder-to-vehicle assignment history through Fleet Management API.
+- Whether PrePass exposes historical transponder assignment events, or only current assignment state.
 - Coverage gaps that would require direct E-ZPass/agency imports.
 - Canada toll coverage and currency behavior.
 - Any PrePass API rate limits not shown in the supplied specifications.
 
 ---
 
-## 8. Decision Log
+## 9. Decision Log
 
 ### 2026-10-04 — Tolls documentation started
 
@@ -457,3 +600,14 @@ The documented Toll Transaction response does **not** show separate fields for d
 - Confirmed documented token lifetime example of 3599 seconds.
 - Connection test should authenticate and then call Account API v1.
 - Raw Bearer tokens should remain ephemeral rather than being stored as normal persistent provider configuration.
+
+
+### 2026-10-05 — PrePass Fleet Management API v2 documented
+
+- Confirmed vehicle lookup by VIN, vehicle number, account number, or cost center.
+- Confirmed vehicle response ties together VIN, unit/vehicle number, plate, transponder, account, IRP, IFTA, lease, weight and other provider metadata.
+- Confirmed direct transponder lookup and list endpoints.
+- Confirmed transponders can exist without assigned VIN/vehicle number.
+- Confirmed vehicle add/update/delete, transponder ordering, and lost/stolen reporting APIs exist.
+- Initial TruckERP integration should remain read/sync-first; provider write actions require a separate later decision.
+- Deprecated Fleet Management `/accounts` endpoint should not be used; Account API v1 is the current source.
