@@ -640,6 +640,85 @@ GPS payloads contain sensitive vehicle-location history. If TruckERP later enabl
 
 
 
+
+## Pull-Based Downstream Consumption Lock
+
+The Tolls module is primarily a **vehicle-linked transaction store and query source**.
+
+Normal business behavior is simple:
+
+```text
+tolls arrive
+    ↓
+store against correct unit
+    ↓
+admin can view if needed
+    ↓
+STOP
+```
+
+Most companies do not review toll transactions one by one before paying/using them. TruckERP should therefore avoid building an unnecessary per-row operational workflow around tolls.
+
+### Admin view
+
+Admin needs a straightforward history/search screen for audit and troubleshooting.
+
+Primary display fields:
+
+```text
+Date/Time
+Unit
+Toll Agency
+Amount
+Type
+Read By
+Identifier
+```
+
+Expanded row shows full provider detail.
+
+### Downstream access model
+
+Downstream modules should **pull/query** tolls when needed rather than Tolls pushing financial actions into other modules.
+
+Example:
+
+```text
+Payroll requests:
+unit = 1104
+from = Monday
+to = Sunday
+
+Tolls returns:
+all toll transactions for unit 1104 in that date range
+```
+
+Then Payroll/Settlement/other downstream logic decides whether those tolls are:
+
+- owner-operator deductions
+- company expenses
+- settlement items
+- ignored for that workflow
+- handled under another rule
+
+The Tolls module does not make that decision.
+
+### Locked API/query principle
+
+Tolls must support efficient queries by at least:
+
+```text
+tenant_id
+unit_id / unit_number
+transaction date/time range
+```
+
+Provider identifiers such as device/transponder/plate remain available for lookup and troubleshooting, but downstream business modules should normally consume tolls by TruckERP unit identity + date range.
+
+**Architecture rule:** downstream modules pull toll data on demand; Tolls does not push payroll/owner/settlement actions.
+
+---
+
 ## Toll Event Ordering and Multiple Tolls per Unit
 
 A single vehicle/unit can legitimately receive multiple toll transactions within the same hour or even within a few minutes.
@@ -1622,3 +1701,14 @@ Before changing Tolls code:
 - PrePass `tollId` is the provider transaction identity.
 - History should retain every event and sort by transaction date/time, then unit, then read source/identifier.
 - Expanded details can show plaza and timing data to distinguish nearby toll events.
+
+
+### 2026-10-05 — Pull-based toll consumption locked
+
+- Tolls is a vehicle-linked transaction store and query source.
+- Most tolls do not require item-by-item operational review.
+- Admin receives a simple history/search view with expandable provider detail.
+- Payroll and other downstream modules query tolls by unit + date range.
+- Example: unit 1104, Monday through Sunday.
+- Tolls does not push owner-operator, payroll, settlement, or expense actions downstream.
+- Downstream modules decide financial responsibility after pulling the relevant vehicle tolls.
