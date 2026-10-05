@@ -187,44 +187,119 @@ Important design consequences:
 
 ---
 
-## 5. PrePass Toll Transaction API Research Checklist
+## 5. PrePass Toll Transaction API v1 — Confirmed
 
-Before coding a PrePass toll adapter, obtain and inspect the official Toll Transaction API documentation / OpenAPI / Swagger / sample response.
+**Purpose:** Retrieve detailed toll transaction records for PrePass accounts.
 
-Confirm:
+**Endpoint:**
 
-- authentication flow
-- client ID / client secret requirements
-- account identifier requirements
-- endpoint URL and HTTP method
-- date-range filtering
-- pagination
-- rate limits
-- transaction identifiers
-- transaction date/time
-- posting date
-- toll authority
-- facility / road
-- plaza / gantry
-- entry / exit location
-- transponder identifier
-- vehicle identifier
-- unit number
-- VIN
-- plate number / plate state
-- axle information
+```http
+GET https://api.prepass.com/tolltransaction/v1/transactions
+```
+
+### Request rules that matter
+
+- `startPostDate` and `endPostDate` are required.
+- Post-date format: `yyyy-mm-dd`.
+- Start date cannot be more than 2 years old.
+- One request may cover at most 31 days.
+- For a one-day pull, PrePass says the end date should be the following day.
+- At least one `accountNumbers` or `costCenters` filter is required.
+- Account numbers and cost centers cannot be mixed in the same request.
+- Multiple account numbers or cost centers can be comma-separated.
+- Supplying a parent account returns associated child-account data.
+- Pagination is supported.
+- `pageSize` defaults to 10,000 and has a maximum of 10,000.
+
+### Response fields worth preserving
+
+**Identity / account**
+- `tollId` — PrePass unique toll transaction ID.
+- `accountNumber`, `accountName`.
+- `billToAccountNumber`, `billToAccountName`.
+- `costCenter`.
+
+**Dates**
+- `postDateTime`.
+- `invoiceDateTime`.
+- `entryDateTime`, `entryDateTimeUtc`.
+- `exitDateTime`, `exitDateTimeUtc`.
+
+**Vehicle / transponder**
+- `deviceNumber` — transponder or sticker number.
+- `ppDeviceId` — PrePass unique main device ID.
+- `vehicleNumber` — customer's unique vehicle identifier.
+- `plateNumber`, `plateState`.
+- `deviceStatus` — Assigned or Unassigned.
+- `readType` — Plate or Device.
+
+**Toll authority / location**
+- `tollAgencyCode`, `tollAgencyName`, `tollAgencyState`.
+- `billingAgencyCode`.
+- `entryPlazaCode`, `entryPlazaName`.
+- `exitPlazaCode`, `exitPlazaName`.
+- `tollClass`.
+
+**Money / business state**
+- `tollCharge` — total charges associated with the toll transaction.
+- `tollCategory` — Normal or Violation.
+- `disputeStatus`.
+- `disputeStatusReason`.
+
+**Pagination**
+- `pageInfo.pageNumber`.
+- `pageInfo.pageSize`.
+- `pageInfo.totalRecords`.
+- `pageInfo.totalPages`.
+
+### Important TruckERP conclusions
+
+This API already gives us most of the data we were hoping to avoid rebuilding from individual toll agencies:
+
+- underlying toll authority
+- billing authority
+- entry/exit plazas
+- local and UTC timestamps
+- vehicle number
+- transponder/sticker identity
+- plate identity
+- toll class
 - toll amount
-- discounts
-- fees
-- violation amount/type
-- total amount
-- currency
-- invoice / statement identifiers
-- dispute information, if exposed
-- voids / reversals / adjustments
-- raw response retention requirements
+- Normal vs Violation
+- dispute state
+- billing account and invoice date
 
-**Do not lock the canonical toll schema until this API contract is reviewed.**
+PrePass therefore fits the role of a **major toll aggregator/source adapter** in TruckERP.
+
+TruckERP should use `tollId` as the provider transaction identity for duplicate protection. The provider payload must still be retained raw.
+
+Vehicle mapping should use a controlled hierarchy rather than guessing:
+
+```text
+PrePass vehicleNumber
+    ↓
+known TruckERP unit mapping
+
+deviceNumber / ppDeviceId
+    ↓
+historical transponder-to-asset assignment
+
+plateNumber + plateState
+    ↓
+historical asset plate identity
+
+otherwise
+    ↓
+REVIEW / unmapped
+```
+
+`readType` matters because a transaction may have been identified by **Plate** rather than **Device**.
+
+Violations must remain distinguishable from normal toll charges, and dispute fields must be retained even if TruckERP initially treats disputes as read-only provider state.
+
+### Confirmed gap
+
+The documented Toll Transaction response does **not** show separate fields for discount amount, administrative fee, violation fee, currency, or invoice number. Do not invent these fields as PrePass-supplied values unless another API or later documentation confirms them.
 
 ---
 
