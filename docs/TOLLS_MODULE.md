@@ -124,41 +124,6 @@ GET https://api.prepass.com/accounts/v1/accounts
 | `accounts[].costCenter` | No | string | Customer-defined organization/location/expense-center code |
 | `accounts[].accountStatus` | Yes | string | Account status: `Active`, `Inactive`, or `Archived` |
 
-**Example response:**
-
-```json
-{
-  "status": "success",
-  "message": "Accounts retrieved successfully.",
-  "accounts": [
-    {
-      "accountNumber": "123123",
-      "accountName": "Location Name 123123",
-      "costCenter": "0202001",
-      "accountStatus": "Active"
-    },
-    {
-      "accountNumber": "123124",
-      "accountName": "Location Name 123124",
-      "costCenter": "0203001",
-      "accountStatus": "Inactive"
-    },
-    {
-      "accountNumber": "123125",
-      "accountName": "Location Name 123125",
-      "costCenter": "0204001",
-      "accountStatus": "Archived"
-    }
-  ]
-}
-```
-
-**Documented error responses:**
-- `400 Bad Request`
-- `403 Forbidden`
-- `404 Not Found`
-- `500 Internal Server Error`
-
 ### 4.2 TruckERP implications from Account API v1
 
 This confirms that one authenticated PrePass integration can expose **multiple PrePass accounts**. Therefore TruckERP must not assume a single PrePass account per tenant.
@@ -183,7 +148,76 @@ Important design consequences:
 - Inactive or archived accounts may still matter for historical transactions and must not be deleted merely because they are not active.
 - PrePass account data is provider metadata, not TruckERP's canonical company/terminal structure. Mapping a PrePass cost center to a TruckERP terminal, division, or expense center should be explicit.
 
-**Source:** PrePass Developer Portal — Account API v1.
+### 4.3 Token API v1
+
+**Purpose:** Obtain a security token for PrePass API access using the client ID and client secret.
+
+**Base server:**
+
+```text
+https://api.prepass.com/auth/v1
+```
+
+**Endpoint:**
+
+```http
+POST https://api.prepass.com/auth/v1/token
+```
+
+**Required request headers:**
+
+```text
+client_id: <PrePass client ID>
+client_secret: <PrePass client secret>
+```
+
+The OpenAPI definition explicitly places both values in request headers. Do not implement this as an assumed generic OAuth form-body request.
+
+**Successful response fields:**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `token_type` | string | Issued token type; example is `Bearer` |
+| `expires_in` | integer | Token lifetime in seconds |
+| `ext_expires_in` | integer | Extended lifetime value |
+| `access_token` | string | API access token |
+
+The documented example returns `expires_in: 3599`, so normal token life is approximately one hour.
+
+**Documented errors:**
+
+- `400` — invalid request / missing required authentication material.
+- `401` — invalid client credentials.
+
+### 4.4 TruckERP implications from Token API v1
+
+The PrePass connection layer can now be treated as confirmed rather than placeholder behavior.
+
+Recommended connection flow:
+
+```text
+client_id + client_secret_ref
+        ↓
+POST /auth/v1/token
+        ↓
+Bearer access_token
+        ↓
+GET /accounts/v1/accounts
+        ↓
+confirm authorized PrePass accounts
+        ↓
+connection test = OK
+```
+
+Important rules:
+
+- Store the client secret only through TruckERP's credential/secret reference mechanism.
+- Do not display the client secret after save.
+- Treat the returned Bearer token as sensitive ephemeral authentication material.
+- Prefer memory/Redis/encrypted short-lived cache rather than storing the raw access token permanently in the provider connection row.
+- Refresh the token when expired or shortly before expiry.
+- A "Test Connection" should obtain a token **and then call Account API v1**, so success proves both authentication and actual account access.
+- Do not automatically enable the provider merely because credentials were saved.
 
 ---
 
@@ -317,15 +351,12 @@ The documented Toll Transaction response does **not** show separate fields for d
 
 ## 7. Open Research Items
 
-- Exact PrePass Toll Transaction API v1 request/response schema.
-- PrePass Token API v1 authentication contract.
-- Whether PrePass API exposes underlying toll authority on every transaction.
-- Whether violations are included in Toll Transaction API or a separate API.
 - Whether disputes can be created/updated through API or are portal-only.
-- Whether consolidated invoice/statement identifiers are returned by API.
-- Whether PrePass exposes transponder-to-vehicle assignment history.
+- Whether consolidated invoice/statement identifiers are available from another PrePass API.
+- Whether PrePass exposes transponder-to-vehicle assignment history through Fleet Management API.
 - Coverage gaps that would require direct E-ZPass/agency imports.
 - Canada toll coverage and currency behavior.
+- Any PrePass API rate limits not shown in the supplied specifications.
 
 ---
 
@@ -347,10 +378,14 @@ The documented Toll Transaction response does **not** show separate fields for d
 
 - Confirmed account discovery endpoint: `GET https://api.prepass.com/accounts/v1/accounts`.
 - Confirmed one authenticated integration may return multiple PrePass accounts.
-- Confirmed returned account fields:
-  - `accountNumber`
-  - `accountName`
-  - `costCenter`
-  - `accountStatus`
 - Confirmed account states include `Active`, `Inactive`, and `Archived`.
 - TruckERP will preserve provider account identity and historical inactive/archived accounts rather than treating PrePass as a single-account integration.
+
+### 2026-10-05 — PrePass Token API v1 documented
+
+- Confirmed token endpoint: `POST https://api.prepass.com/auth/v1/token`.
+- Confirmed `client_id` and `client_secret` are required request headers.
+- Confirmed Bearer token response.
+- Confirmed documented token lifetime example of 3599 seconds.
+- Connection test should authenticate and then call Account API v1.
+- Raw Bearer tokens should remain ephemeral rather than being stored as normal persistent provider configuration.
