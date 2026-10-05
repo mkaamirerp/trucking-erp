@@ -1591,6 +1591,274 @@ Not implemented:
 - API reload/deploy
 
 ---
+
+
+## Segment 2B — Implemented Toll FILE Imports / Raw History UI
+
+**Implementation commit:** `f1999a077ffc744706c54a959bcbff7b33064965`  
+**Commit message:** `feat: add toll file imports history`
+
+**Implementation status:** committed and pushed to `origin/main`. At this checkpoint, no tenant migration, API reload, nginx/frontend rebuild, or deployment has been performed on the running host.
+
+### Purpose
+
+This slice adds an admin-facing Toll module entry for **FILE imports**, not canonical Toll transaction history.
+
+Current UI boundary:
+
+```text
+Tolls
+  └─ File Imports / CSV import history
+       └─ Raw source rows / Unmapped source data
+```
+
+Future canonical Toll history remains separate and will be based on `toll_transactions`.
+
+### API routes
+
+All routes are tenant-scoped and protected by `admin_sensitive`.
+
+```http
+POST /api/v1/tolls/files/csv
+GET  /api/v1/tolls/files?q=
+GET  /api/v1/tolls/files/{batch_id}
+```
+
+#### POST /api/v1/tolls/files/csv
+
+Creates:
+
+- one FILE / CSV `toll_source_batches` row
+- durable unmapped `toll_file_source_rows`
+- original CSV object in existing storage
+
+Returns compact intake metadata including:
+
+- batch ID
+- source type / file format
+- filename
+- source hash
+- source storage reference
+- row count
+- original headers
+- duplicate match count / prior matching batch IDs
+- status
+- small raw-row preview
+
+It does **not** create `toll_transactions`.
+
+#### GET /api/v1/tolls/files?q=
+
+Lists only the current tenant's FILE batches.
+
+Search scope:
+
+- filename
+- source hash
+
+Search is applied only after tenant + FILE filtering.
+
+#### GET /api/v1/tolls/files/{batch_id}
+
+Returns one FILE batch plus durable raw CSV rows.
+
+A request returns `404 TOLL_FILE_NOT_FOUND` if:
+
+- batch does not exist
+- batch is not FILE
+- batch belongs to another tenant
+
+### Frontend
+
+Route:
+
+```text
+/tolls
+```
+
+Finance navigation includes:
+
+```text
+Tolls
+```
+
+The current page is intentionally FILE-intake oriented.
+
+Displayed sections include:
+
+- CSV upload
+- filename/source-hash search
+- File Imports / CSV import history
+- expandable raw source rows
+
+### FILE import columns
+
+The current list uses batch/file fields only:
+
+```text
+Batch
+Filename
+Format
+Source rows
+Status
+Imported
+Hash
+```
+
+The canonical Toll-history columns are **not** populated from unmapped CSV rows:
+
+```text
+Date/Time
+Unit
+Toll Agency
+Amount
+Type
+Read By
+Identifier
+```
+
+Those remain future `toll_transactions` fields after explicit provider/profile normalization.
+
+### Raw row expansion
+
+Expanded rows are labeled as:
+
+```text
+Raw source rows
+Unmapped source data
+```
+
+The UI displays original CSV cell/header values.
+
+It does not infer or fabricate:
+
+- Date
+- Unit
+- Amount
+- Toll Agency
+- Device
+- Plate
+- Transaction Type
+
+### Search and tenant isolation
+
+List/search queries always include tenant filtering.
+
+Batch detail requires:
+
+```text
+tenant_id + batch_id + source_type=FILE
+```
+
+Confirmed isolation behavior:
+
+- tenant B cannot list tenant A's batches
+- tenant B cannot find tenant A data by filename search
+- tenant B cannot find tenant A data by source-hash search
+- tenant B cannot fetch tenant A's batch directly by ID
+
+Duplicate-hash behavior remains tenant-scoped and advisory.
+
+### Upload behavior
+
+After a successful upload:
+
+- File Imports refreshes
+- new batch appears
+- duplicate match information remains visible
+- a duplicate hash still creates a new batch
+- UI message states that the CSV was stored for mapping
+
+The UI does not claim canonical Toll transactions were imported.
+
+### Status meaning
+
+Current `PARSED` FILE status means only:
+
+```text
+file received
++
+generic CSV parsed
+```
+
+It does **not** mean:
+
+```text
+canonical tolls processed
+```
+
+No Fuel-style REVIEW / PROCESSED / RECONCILED meaning is implied.
+
+### Navigation / authorization
+
+Frontend:
+
+- Finance → Tolls
+- `/tolls` protected by the existing admin route guard
+
+Backend:
+
+- Toll FILE API remains protected by `require_entitlement("admin_sensitive")`
+
+Frontend navigation visibility is not treated as authorization.
+
+### Files implemented in this slice
+
+- `app/routers/tolls.py`
+- `app/schemas/toll.py`
+- `app/services/toll_file_history.py`
+- `apps/web/src/pages/TollsHistoryPage.tsx`
+- `apps/web/src/pages/TollsHistoryPage.test.tsx`
+- `apps/web/src/App.tsx`
+- `apps/web/src/api.ts`
+- `apps/web/src/routes.ts`
+- `apps/web/src/components/TopNav.tsx`
+- `apps/web/src/components/TopNav.tollsNav.test.ts`
+- `tests/test_toll_file_history.py`
+- `tests/test_toll_segment_2.py`
+- `docs/TOLLS_MODULE.md`
+
+### Tests
+
+Backend:
+
+```text
+39 passed
+```
+
+Coverage includes Segment 1, Segment 2 CSV intake, and FILE history/search.
+
+Frontend:
+
+```text
+5 passed
+```
+
+Coverage includes:
+
+- File Imports terminology
+- raw row expansion
+- search
+- upload refresh
+- duplicate message behavior
+- Finance → Tolls navigation
+
+### Explicitly still not implemented
+
+- canonical Toll transaction history UI
+- E-ZPass/provider-specific CSV mapping
+- PrePass API
+- PDF parsing
+- canonical `toll_transactions` writes from CSV
+- Driver logic
+- Owner-Operator logic
+- Payroll logic
+- Settlement logic
+- tenant migration execution
+- API image reload
+- frontend/nginx deploy
+
+---
 # Appendix A — PrePass Source Contract Archive
 
 This appendix preserves the API contract details supplied during research so the TruckERP design does not depend on chat memory.
@@ -2569,3 +2837,18 @@ Segment 2 is not complete until it also wires:
 - Segment 2 does not create canonical Toll transactions and does not guess E-ZPass/provider semantics.
 - 20 Segment 2 tests plus 13 Segment 1 regressions passed (33 total).
 - At this checkpoint the tenant migration had not been applied and the API had not been reloaded/deployed.
+
+
+### 2026-10-05 — Toll FILE Imports/history UI implemented
+
+- Final implementation commit: `f1999a077ffc744706c54a959bcbff7b33064965`.
+- Added Finance → Tolls navigation and the `/tolls` admin page.
+- Current page represents FILE imports/raw unmapped evidence, not canonical Toll transaction history.
+- Added tenant-scoped FILE list/search/detail APIs.
+- Search is limited to filename/source hash and remains tenant isolated.
+- Raw CSV rows expand as source evidence without guessing Date/Unit/Agency/Amount/Device/Plate/Type.
+- Upload refreshes FILE history and preserves duplicate-hash warning behavior.
+- No canonical `toll_transactions` are created by the page or history APIs.
+- Backend tests: 39 passed.
+- Frontend Tolls tests: 5 passed.
+- At this checkpoint no migrate/reload/deploy had been performed.
