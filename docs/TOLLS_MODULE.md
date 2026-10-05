@@ -99,9 +99,97 @@ This is an initial architecture direction only. It is not yet a locked database 
 
 ---
 
-## 4. PrePass API Research Checklist
+## 4. PrePass API — Confirmed Contracts
 
-Before coding a PrePass adapter, obtain and inspect the official Toll Transaction API documentation / OpenAPI / Swagger / sample response.
+### 4.1 Account API v1
+
+**Purpose:** Returns all PrePass accounts associated with the authenticated user, including detailed account information.
+
+**Request endpoint:**
+
+```http
+GET https://api.prepass.com/accounts/v1/accounts
+```
+
+**Response content type:** `application/json`
+
+**200 OK response object:** `GetAccountsResponse`
+
+| Field | Required | Type | Meaning |
+|---|---:|---|---|
+| `status` | No | string | API request status |
+| `message` | No | string | API request status message |
+| `accounts[].accountNumber` | Yes | string | PrePass account number tied to API credentials |
+| `accounts[].accountName` | Yes | string | Account name in PrePass systems |
+| `accounts[].costCenter` | No | string | Customer-defined organization/location/expense-center code |
+| `accounts[].accountStatus` | Yes | string | Account status: `Active`, `Inactive`, or `Archived` |
+
+**Example response:**
+
+```json
+{
+  "status": "success",
+  "message": "Accounts retrieved successfully.",
+  "accounts": [
+    {
+      "accountNumber": "123123",
+      "accountName": "Location Name 123123",
+      "costCenter": "0202001",
+      "accountStatus": "Active"
+    },
+    {
+      "accountNumber": "123124",
+      "accountName": "Location Name 123124",
+      "costCenter": "0203001",
+      "accountStatus": "Inactive"
+    },
+    {
+      "accountNumber": "123125",
+      "accountName": "Location Name 123125",
+      "costCenter": "0204001",
+      "accountStatus": "Archived"
+    }
+  ]
+}
+```
+
+**Documented error responses:**
+- `400 Bad Request`
+- `403 Forbidden`
+- `404 Not Found`
+- `500 Internal Server Error`
+
+### 4.2 TruckERP implications from Account API v1
+
+This confirms that one authenticated PrePass integration can expose **multiple PrePass accounts**. Therefore TruckERP must not assume a single PrePass account per tenant.
+
+Minimum source-account identity to preserve:
+
+```text
+provider = PREPASS
+account_number
+account_name
+cost_center
+account_status
+```
+
+Important design consequences:
+
+- `accountNumber` is the external PrePass account identity and should be stored as a string.
+- `costCenter` is optional and may represent the customer's internal location or expense-center organization.
+- `accountStatus` must not be reduced to a boolean because PrePass distinguishes `Active`, `Inactive`, and `Archived`.
+- Toll imports should retain which PrePass account produced each transaction.
+- If the Toll Transaction API requires an account number, TruckERP can populate the selectable accounts directly from this API rather than requiring manual account-number entry.
+- Inactive or archived accounts may still matter for historical transactions and must not be deleted merely because they are not active.
+- PrePass account data is provider metadata, not TruckERP's canonical company/terminal structure. Mapping a PrePass cost center to a TruckERP terminal, division, or expense center should be explicit.
+
+**Source:** PrePass Developer Portal — Account API v1.
+
+---
+
+## 5. PrePass Toll Transaction API Research Checklist
+
+Before coding a PrePass toll adapter, obtain and inspect the official Toll Transaction API documentation / OpenAPI / Swagger / sample response.
 
 Confirm:
 
@@ -140,7 +228,7 @@ Confirm:
 
 ---
 
-## 5. Design Principles
+## 6. Design Principles
 
 - Provider data is source data; TruckERP owns the canonical business model.
 - Raw provider values must be retained for audit/reprocessing.
@@ -152,9 +240,10 @@ Confirm:
 
 ---
 
-## 6. Open Research Items
+## 7. Open Research Items
 
 - Exact PrePass Toll Transaction API v1 request/response schema.
+- PrePass Token API v1 authentication contract.
 - Whether PrePass API exposes underlying toll authority on every transaction.
 - Whether violations are included in Toll Transaction API or a separate API.
 - Whether disputes can be created/updated through API or are portal-only.
@@ -165,7 +254,7 @@ Confirm:
 
 ---
 
-## 7. Decision Log
+## 8. Decision Log
 
 ### 2026-10-04 — Tolls documentation started
 
@@ -178,3 +267,15 @@ Confirm:
   - single-transponder operation
   - consolidated billing
 - No permanent toll schema is locked yet.
+
+### 2026-10-04 — PrePass Account API v1 documented
+
+- Confirmed account discovery endpoint: `GET https://api.prepass.com/accounts/v1/accounts`.
+- Confirmed one authenticated integration may return multiple PrePass accounts.
+- Confirmed returned account fields:
+  - `accountNumber`
+  - `accountName`
+  - `costCenter`
+  - `accountStatus`
+- Confirmed account states include `Active`, `Inactive`, and `Archived`.
+- TruckERP will preserve provider account identity and historical inactive/archived accounts rather than treating PrePass as a single-account integration.
