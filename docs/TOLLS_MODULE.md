@@ -662,22 +662,37 @@ Initial Toll source types:
 
 ```text
 API
-PDF
+FILE
 MANUAL
 ```
 
-Future structured file types may be added only when a real provider requires them.
-
-### PDF flow
+`FILE` includes provider/user-downloaded statement or transaction files such as:
 
 ```text
-Admin uploads toll PDF
+PDF
+CSV
+```
+
+Examples:
+
+- E-ZPass portal CSV download
+- toll-authority PDF bill received by email
+- manually downloaded PDF statement
+- missing toll file uploaded by admin
+
+This mirrors the Fuel design: the business source is a file intake path, while the file format determines the parser/profile behavior.
+
+### File flow
+
+```text
+Admin uploads toll file
         ↓
-explicit TOLL document profile
+detect/validate declared file format within Toll intake
         ↓
-shared Document Platform PDF capabilities
+PDF → explicit TOLL document profile using shared Document Platform
+CSV → Toll CSV adapter/profile
         ↓
-Toll-specific extraction / normalization
+Toll-specific normalization
         ↓
 resolve vehicle/unit
         ↓
@@ -686,11 +701,13 @@ store toll transaction(s)
 admin history/detail
 ```
 
+The Toll module owns the business intake. PDF and CSV are two representations of the same file-source concept.
+
 The calling Toll API selects the Toll profile explicitly. Document Platform must not inspect a PDF and guess that it is a toll document.
 
 ### Account/transponder rule
 
-A PDF toll must **not** require:
+A file-based toll must **not** require:
 
 - provider connection
 - PrePass account
@@ -703,9 +720,9 @@ If the vehicle cannot be resolved confidently, keep the transaction review/unmap
 
 ### Missing-toll / overlap rule
 
-PDF upload must coexist safely with API data.
+File upload must coexist safely with API data.
 
-A PDF may contain:
+A PDF or CSV may contain:
 
 - transactions already received from an API
 - transactions missing from the API
@@ -715,7 +732,7 @@ Do not blindly insert duplicates and do not blindly discard a PDF because some r
 
 Provider/API identity should be used when available. PDF-only rows need a separate source-row/document identity and conservative duplicate detection based on the strongest available source evidence.
 
-The original PDF and extracted raw source data must be retained for audit.
+The original uploaded file and extracted/parsed raw source data must be retained for audit.
 
 ---
 
@@ -1794,9 +1811,18 @@ Before changing Tolls code:
 
 ### 2026-10-05 — PDF/no-account toll intake locked
 
-- PDF is a first-class Toll source alongside API and manual entry.
+- File intake is a first-class Toll source alongside API and manual entry.
+- File intake includes PDF and CSV.
+- E-ZPass portal CSV downloads are explicitly supported as a normal Toll source.
 - A toll can exist without provider credentials, account number, or transponder.
 - Emailed/downloaded toll bills and missing tolls can be uploaded by admin.
-- Toll PDF uses the shared Document Platform with an explicit Toll profile; no document-type guessing.
-- PDF and API sources must coexist without blindly duplicating overlapping transactions.
-- Original PDF/raw evidence must be retained.
+- Toll PDF uses the shared Document Platform with an explicit Toll profile; CSV uses a Toll CSV adapter/profile.
+- File and API sources must coexist without blindly duplicating overlapping transactions.
+- Original uploaded file/raw evidence must be retained.
+
+
+### 2026-10-05 — Toll file-source rule clarified
+
+- PDF and CSV are not separate business-source categories; both are FILE intake.
+- E-ZPass portal CSV is a normal Toll source for fleets that do not use a direct API integration.
+- Source architecture is API / FILE / MANUAL, with file format handled inside FILE intake.
