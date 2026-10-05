@@ -661,6 +661,801 @@ GPS payloads contain sensitive vehicle-location history. If TruckERP later enabl
 
 ---
 
+
+---
+
+# Appendix A — PrePass Source Contract Archive
+
+This appendix preserves the API contract details supplied during research so the TruckERP design does not depend on chat memory.
+
+**Source files supplied:**
+- `get-api-token-v1.json` — Token API v1
+- `prepassapim-account-api-v1.json` — Account API v1
+- `prepass-public-tolls-transactions-api-v1.json` — Toll Transaction API v1
+- `prepassapim-fleetmgmt-v2.json` — Fleet Management API v2
+- `prepassapim-tollsapi-v2.json` — GPS Data API v2
+- Earlier pasted PrePass Toll Transaction API documentation text
+- PrePass Plus capability statement and coverage image reference
+
+No secrets, real credentials, or full sample bearer-token values should ever be copied into this document.
+
+---
+
+## A1. Token API v1 — Complete preserved contract
+
+### Metadata
+
+```text
+OpenAPI: 3.0.1
+Title: Token API
+Version: v1
+Description: Obtain a security token for API access using your client ID and secret.
+Server: https://api.prepass.com/auth/v1
+```
+
+### Endpoint
+
+```http
+POST /token
+```
+
+Full URL:
+
+```text
+https://api.prepass.com/auth/v1/token
+```
+
+### Required request headers
+
+| Name | Location | Required | Description |
+|---|---|---:|---|
+| `client_id` | header | Yes | Client ID provided by PrePass |
+| `client_secret` | header | Yes | Client Secret provided by PrePass |
+
+### 200 response
+
+Content type: `application/json`
+
+| Field | Type | Description |
+|---|---|---|
+| `token_type` | string | Type of token issued |
+| `expires_in` | integer | Token lifetime in seconds |
+| `ext_expires_in` | integer | Extended lifetime |
+| `access_token` | string | Bearer access token |
+
+Documented example values:
+
+```json
+{
+  "token_type": "Bearer",
+  "expires_in": 3599,
+  "ext_expires_in": 3599,
+  "access_token": "<redacted sample bearer token>"
+}
+```
+
+### Errors
+
+**400**
+- Example error: `invalid_request`
+- Example meaning: required client information missing.
+- Provider example references Microsoft/Azure AD error code `900144`.
+
+**401**
+- Example error: `invalid_client`
+- Example meaning: invalid client secret.
+- Provider example references Microsoft/Azure AD error code `7000215`.
+
+### TruckERP preservation rule
+
+Persist:
+- `client_id`
+- `client_secret_ref`
+- token expiry metadata if needed
+
+Do not persist:
+- raw client secret
+- full sample tokens
+- long-lived raw access tokens in ordinary config tables
+
+---
+
+## A2. Account API v1 — Complete preserved contract
+
+### Metadata
+
+```text
+OpenAPI: 3.0.1
+Title: Account API
+Version: v1
+Description: Returns all accounts associated with the authenticated user, including detailed information for each account.
+Server: https://api.prepass.com/accounts/v1
+```
+
+### Endpoint
+
+```http
+GET /accounts
+```
+
+Full URL:
+
+```text
+https://api.prepass.com/accounts/v1/accounts
+```
+
+### Security declared by OpenAPI
+
+Header option:
+
+```text
+Ocp-Apim-Subscription-Key: <subscription key>
+```
+
+Query option:
+
+```text
+?subscription-key=<subscription key>
+```
+
+TruckERP preference: header form.
+
+### 200 response — GetAccountsResponse
+
+| Field | Required | Type | Description |
+|---|---:|---|---|
+| `status` | No | string | API request status |
+| `message` | No | string | API request status message |
+| `accounts[].accountNumber` | Yes | string | PrePass account number tied to API credentials |
+| `accounts[].accountName` | Yes | string | Account name in PrePass systems |
+| `accounts[].costCenter` | No | string | Customer-defined organization/location/expense-center code |
+| `accounts[].accountStatus` | Yes | string | `Active`, `Inactive`, or `Archived` |
+
+Example shape:
+
+```json
+{
+  "status": "success",
+  "message": "Accounts retrieved successfully.",
+  "accounts": [
+    {
+      "accountNumber": "123123",
+      "accountName": "Location Name 123123",
+      "costCenter": "0202001",
+      "accountStatus": "Active"
+    },
+    {
+      "accountNumber": "123124",
+      "accountName": "Location Name 123124",
+      "costCenter": "0203001",
+      "accountStatus": "Inactive"
+    },
+    {
+      "accountNumber": "123125",
+      "accountName": "Location Name 123125",
+      "costCenter": "0204001",
+      "accountStatus": "Archived"
+    }
+  ]
+}
+```
+
+### Other responses
+
+- `400 Bad Request`
+- `403 Forbidden`
+- `404 Not Found`
+- `500 Internal Server Error`
+
+### Important account rules
+
+- One authenticated user/credential set may see multiple accounts.
+- `costCenter` is optional.
+- Historical inactive/archived accounts must remain addressable for old toll records.
+- Do not equate PrePass account or cost center directly with TruckERP tenant/company/terminal without an explicit mapping.
+
+---
+
+## A3. Toll Transaction API v1 — Complete preserved contract
+
+### Metadata
+
+```text
+OpenAPI: 3.0.1
+Title: Toll Transaction API
+Version: v1
+Description: Get Toll Transaction Details
+Server: https://api.prepass.com/tolltransaction/v1
+```
+
+### Endpoint
+
+```http
+GET /transactions
+```
+
+Full URL:
+
+```text
+https://api.prepass.com/tolltransaction/v1/transactions
+```
+
+### Request parameters
+
+| Name | Location | Required | Provider type | Description / constraint |
+|---|---|---:|---|---|
+| `startPostDate` | query | Yes | DateTime | `yyyy-mm-dd`; cannot be more than 2 years old; starts at 12:00 AM |
+| `endPostDate` | query | Yes | DateTime | `yyyy-mm-dd`; range cannot exceed 31 days; for one day use following day as end date |
+| `accountNumbers` | query | Conditional | Integer in this API | One or multiple account numbers, comma-separated; parent account includes child account data |
+| `costCenters` | query | Conditional | String | One or multiple cost-center codes, comma-separated |
+| `pageNumber` | query | No | Integer | Default 1; max 2147483647 |
+| `pageSize` | query | No | Integer | Default 10000; max 10000 |
+
+Filter rule:
+- At least one of `accountNumbers` or `costCenters` is required.
+- Do not send both in the same request.
+
+Example URL pattern:
+
+```text
+/transactions?startPostDate={startPostDate}&endPostDate={endPostDate}&accountNumbers=...&pageNumber=1&pageSize=10000
+```
+
+or:
+
+```text
+/transactions?startPostDate={startPostDate}&endPostDate={endPostDate}&costCenters=...&pageNumber=1&pageSize=10000
+```
+
+### 200 response top-level fields
+
+| Field | Required | Type | Description |
+|---|---:|---|---|
+| `statusCode` | Yes | integer | HTTP status code |
+| `statusMessage` | Yes | string | Status message |
+| `pageInfo.pageNumber` | Yes | integer | Current page number |
+| `pageInfo.pageSize` | Yes | integer | Records per page |
+| `pageInfo.totalRecords` | Yes | integer | Total matching records |
+| `pageInfo.totalPages` | Yes | integer | Total pages |
+| `transactions` | No at top schema level | array | List of toll transactions |
+
+### Transaction fields
+
+| Field | Required by schema | Type declared | Meaning |
+|---|---:|---|---|
+| `tollId` | Yes | string | PrePass unique toll transaction identifier |
+| `accountNumber` | Yes | integer | Customer account number |
+| `accountName` | Yes | string | Customer account name |
+| `billToAccountNumber` | Yes | integer | Billing account number |
+| `billToAccountName` | Yes | string | Billing account name |
+| `postDateTime` | Yes | string | Transaction posted date/time |
+| `invoiceDateTime` | Yes | string | Date/time of PrePass invoice when billed |
+| `deviceNumber` | Yes | string | Transponder or sticker number |
+| `vehicleNumber` | Yes | string | Customer unique vehicle identifier |
+| `plateNumber` | Yes | string | License plate number |
+| `plateState` | Yes | string | Plate state/jurisdiction |
+| `ppDeviceId` | Yes | string | PrePass unique main device ID |
+| `tollAgencyCode` | Yes | string | Toll authority abbreviation, e.g. NYSTA |
+| `tollAgencyName` | Yes | string | Toll authority full name |
+| `tollAgencyState` | No | string | Toll authority state |
+| `billingAgencyCode` | Yes | string | Billing authority abbreviation |
+| `entryDateTime` | Yes | string | Entry-point date/time for point-to-point toll |
+| `entryDateTimeUtc` | No | string nullable | UTC version of entry date/time |
+| `entryPlazaCode` | Yes | string | Entry plaza short description/code |
+| `entryPlazaName` | Yes | string | Entry plaza full description |
+| `readType` | Yes | string | Plate or Device |
+| `exitDateTime` | Yes | string | Toll transaction local date/time |
+| `exitDateTimeUtc` | No | string nullable | UTC version of exit date/time |
+| `exitPlazaCode` | Yes | string | Exit plaza short description/code |
+| `exitPlazaName` | Yes | string | Exit plaza full description |
+| `tollClass` | Yes | string | Toll-agency pricing class |
+| `tollCharge` | Yes | string declared | Total charges for transaction |
+| `tollCategory` | Yes | string | `Normal` or `Violation` |
+| `disputeStatus` | Yes | string | Dispute status, e.g. In Dispute, Closed/Complete |
+| `disputeStatusReason` | Yes | string | Reason for dispute status |
+| `deviceStatus` | Yes | string | Assigned or Unassigned |
+| `costCenter` | No | string | Returned only when requesting by cost center |
+
+### Provider example characteristics
+
+Example transaction 1 shows:
+- account `123456`
+- vehicle `2000`
+- device `00409740958`
+- agency `OTC` / Ohio Turnpike Commission
+- billing agency `EZPass`
+- read type `DEVICE`
+- exit plaza `239` / Eastgate
+- toll class `5`
+- toll charge `8.25`
+- toll category `Normal`
+- device status `assigned`
+- cost center `1111`
+
+Example transaction 2 shows:
+- same vehicle/device
+- entry plaza `161` / Strongsville-Cleveland
+- exit plaza `211`
+- toll charge `12`
+
+### Schema inconsistencies that must be preserved as adapter knowledge
+
+- `tollId` is declared **string** but examples show numeric JSON values.
+- `tollCharge` is declared **string** but examples show numeric JSON values.
+- Account API models `accountNumber` as string; Toll Transaction API models it as integer.
+- Several required keys may have empty-string values.
+- `entryDateTimeUtc` and `exitDateTimeUtc` may be null.
+- `costCenter` is optional and only included when querying by cost center.
+
+### Response codes
+
+- `200` success
+- `204` no content
+- `400` bad request / validation error
+- `401` unauthorized
+- `403` forbidden
+- `404` not found
+- `500` server error
+
+Example 400 validation:
+
+```json
+{
+  "statusCode": 400,
+  "statusMessage": "BadRequest",
+  "validationErrors": [
+    {
+      "message": "StartPostDate must precede EndPostDate.",
+      "members": ["StartPostDate", "EndPostDate"]
+    }
+  ]
+}
+```
+
+### Canonical normalization rule
+
+```text
+provider_transaction_id = str(tollId)
+account_number          = str(accountNumber)
+bill_to_account_number  = str(billToAccountNumber)
+toll_amount             = Decimal(str(tollCharge))
+```
+
+Always preserve full raw payload before normalization.
+
+---
+
+## A4. Fleet Management API v2 — Complete preserved contract
+
+### Metadata
+
+```text
+OpenAPI: 3.0.1
+Title: Fleet Management API
+Version: v2
+Description: Manage vehicles enrolled in bypass and/or tolling services. Add, update or delete vehicles. Assign or request transponders.
+Server: https://api.prepass.com/fleetmanagement/v2
+```
+
+Provider restriction:
+- Do not use this API to update tractors enrolled in Toll Violation Prevention Program (VPP).
+- Do not use this API for trailer plates.
+
+### A4.1 GET /vehicles
+
+Purpose: query one vehicle by VIN or vehicle number, or multiple vehicles by account number/cost center.
+
+Parameters:
+
+| Name | Required | Type | Notes |
+|---|---:|---|---|
+| `costCenter` | Conditional | String | Either account number or cost center required |
+| `accountNumber` | Conditional | String | Either account number or cost center required |
+| `vin` | No | String | VIN lookup |
+| `vehicleNumber` | No | String | Customer vehicle number; max length 8 |
+
+Response fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `accountNumber` | string | Assigned PrePass account |
+| `costCenter` | string | Assigned customer organization/expense-center code |
+| `vin` | string | VIN |
+| `vehicleNumber` | string | Customer vehicle number, max 8 |
+| `tempPlate` | boolean | Temporary plate flag |
+| `licensePlateNumber` | string | Plate number |
+| `licensePlateState` | string | State/province |
+| `declaredWeight` | integer | 0–600,000 lb |
+| `irpNumber` | string | IRP number |
+| `irpState` | string | IRP jurisdiction |
+| `iftaNumber` | string | IFTA number |
+| `iftaState` | string | IFTA jurisdiction |
+| `transponderNumber` | string | Assigned transponder |
+| `vrn` | string | Vehicle Reference Number |
+| `hazmatHauler` | boolean | Hazmat indicator |
+| `vehicleImage` | string | Make/color/account text |
+| `leasedVehicle` | boolean | Lease indicator |
+| `leasingCompany` | string | Leasing company |
+| `leaseExpirationDate` | string/date | Lease expiration |
+
+### A4.2 POST /vehicle
+
+Purpose: add vehicle.
+
+Query:
+- `accountNumber` or `costCenter`
+
+Required request fields:
+- `vin`
+- `vehicleNumber`
+- `declaredWeight`
+- `licensePlate`
+- `irp`
+- `ifta`
+
+Optional/conditional fields include:
+- `vehicleColor`
+- `transponderNumber`
+- `vrn`
+- `hazmatHauler`
+- `leasedVehicle`
+
+Important constraints:
+- VIN length 16–19, alphanumeric.
+- vehicle number length 1–8; pattern allows letters, digits, hyphen.
+- permanent plate number length 5–9; uppercase alphanumeric/hyphen.
+- plate state is 2-letter jurisdiction.
+- declaredWeight integer.
+- IRP account number length up to 10.
+- IFTA account can be numeric with optional trailing letters per provider pattern.
+- transponder number length 9–12 digits.
+- vehicle color enum includes BLACK, BLUE, BROWN, GOLD, GRAY, GREEN, MAROON, ORANGE, PURPLE, RED, SILVER, TAN, YELLOW, WHITE.
+- if leased vehicle object is passed, company + expiration are paired.
+- known leasing-company enum includes Penske, Ryder, Budget, Other, Idealease, Enterprise, United, Paclease, NationaLease, TEC, Velocity.
+
+The provider jurisdiction enums include U.S. states, Canadian provinces/territories, and additional Mexican/other jurisdiction codes.
+
+### A4.3 PATCH /vehicle
+
+Purpose: update vehicle.
+
+Required query:
+- `vin`
+
+VIN cannot be changed.
+
+Also requires current/target:
+- `accountNumber` or `costCenter`
+
+Provider notes:
+- passing a different account/cost center can reassign the VIN to that account/cost center.
+
+Updatable body can include:
+- vehicle number
+- plate
+- declared weight
+- IRP
+- IFTA
+- vehicle color
+- transponder number
+- VRN
+- hazmat flag
+- lease information
+
+### A4.4 DELETE /vehicle
+
+Purpose: remove a vehicle.
+
+Required:
+- `vin`
+- account number or cost center
+
+### A4.5 POST /orders
+
+Purpose: order transponders for specified vehicles.
+
+Provider behavior:
+- PrePass assigns transponders to vehicles during fulfillment.
+- UPS Ground is default.
+- expedited shipping requires contacting PrePass.
+
+Required request fields:
+- `vehicles` — list of VINs
+- `shippingContactName`
+- `shippingContactEmail`
+- `shippingStreet1`
+- `shippingCity`
+- `shippingState`
+- `shippingPostalCode`
+
+Other fields:
+- `vrn`
+- `shippingInstructions`
+- `shippingStreet2`
+
+Important:
+- VINs must belong to requested account/cost center.
+- VINs already having a device are excluded.
+- VRN is required for PrePass Plus or tolling-only vehicles.
+
+### A4.6 GET /transponder
+
+Purpose: lookup one transponder.
+
+Required:
+- `transponderNumber`
+
+Also account number or cost center.
+
+Response:
+- `accountNumber`
+- `vin`
+- `vehicleNumber`
+- `vrn`
+- `transponderNumber`
+- `costCenter`
+
+Responses include:
+- 200
+- 204
+- 400
+- 403
+- 500
+
+### A4.7 GET /transponders
+
+Purpose: list transponders by account or cost center.
+
+Response records contain:
+- account number
+- VIN
+- vehicle number
+- VRN
+- transponder number
+- cost center
+
+Provider example explicitly includes an unassigned transponder with blank VIN and vehicle number.
+
+### A4.8 POST /transponders/lost
+
+Purpose: report lost or stolen transponders.
+
+Request fields:
+- `transponders[]` — required list of transponder numbers
+- `reportedBy` — required reporter name
+
+### A4.9 GET /health
+
+Purpose: check Fleet Management supporting services.
+
+Responses:
+- `200` Healthy or Degraded
+- `503` unavailable
+
+### A4.10 Deprecated GET /accounts
+
+Fleet Management v2 includes an old `/accounts` endpoint, but PrePass explicitly marks it deprecated and directs integrations to Account API v1.
+
+Do not build against the deprecated Fleet Management accounts endpoint.
+
+### TruckERP fleet-reference rule
+
+Use Fleet Management as provider reference data:
+
+```text
+VIN
+vehicleNumber
+plate + jurisdiction
+transponderNumber
+accountNumber
+costCenter
+```
+
+Do not silently overwrite TruckERP canonical asset/compliance records with PrePass values.
+
+---
+
+## A5. GPS Data API v2 — Complete preserved contract
+
+### Metadata
+
+```text
+OpenAPI: 3.0.1
+Title: GPS Data API
+Version: v2
+Description: Allows carriers to share truck-trip GPS data with PrePass for tolls validation.
+Server: https://api.prepass.com/api/tolls/gps/v2
+```
+
+### Endpoint
+
+```http
+POST /gpsevents
+```
+
+Required query:
+
+| Name | Required | Type | Description |
+|---|---:|---|---|
+| `accountNumber` | Yes | Integer | PrePass account number |
+
+Full URL pattern:
+
+```text
+https://api.prepass.com/api/tolls/gps/v2/gpsevents?accountNumber={accountNumber}
+```
+
+### Request body — TollValidationRequest
+
+Top-level:
+
+| Field | Type | Nullable |
+|---|---|---:|
+| `postedTime` | int64 | Yes |
+| `vehicles` | array | Yes |
+
+Each `CustomerVehicle`:
+
+| Field | Type | Nullable |
+|---|---|---:|
+| `deviceNumber` | string | Yes |
+| `vin` | string | Yes |
+| `totalAxleCount` | int32 | Yes |
+| `plateNumber` | string | Yes |
+| `plateState` | string | Yes |
+| `trackSegment` | array of GpsLocation | Yes |
+
+Each `GpsLocation`:
+
+| Field | Type | Nullable |
+|---|---|---:|
+| `latitude` | double | Yes |
+| `longitude` | double | Yes |
+| `timestamp` | int64 | Yes |
+| `timezone` | int32 | Yes |
+| `speed` | float | Yes |
+| `direction` | float | Yes |
+| `locationAccuracy` | float | Yes |
+
+Representative shape:
+
+```json
+{
+  "postedTime": 0,
+  "vehicles": [
+    {
+      "deviceNumber": "string",
+      "vin": "string",
+      "totalAxleCount": 0,
+      "plateNumber": "string",
+      "plateState": "string",
+      "trackSegment": [
+        {
+          "latitude": 0,
+          "longitude": 0,
+          "timestamp": 0,
+          "timezone": 0,
+          "speed": 0,
+          "direction": 0,
+          "locationAccuracy": 0
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Responses
+
+**200**
+- Content type `text/plain`
+- Example: `GPS Data processed successfully`
+
+**400**
+- Content type `application/json`
+- Can include:
+  - `errorMessages[]`
+  - `invalidEntries[]`
+  - each invalid entry identifies a vehicle index
+  - each invalid vehicle entry can contain `invalidGpsLocationEntries[]`
+  - each invalid GPS entry identifies `gpsEntry` index and its errors
+
+**401**
+- unauthorized
+
+**500**
+- server error
+
+### TruckERP GPS rule
+
+This remains optional/future:
+- toll import must work without GPS API
+- GPS submission may later support toll validation, dispute investigation, axle-class checks, and identity confirmation
+- minimize GPS retention/logging because this is sensitive location history
+
+---
+
+## A6. PrePass Plus capability statement preserved
+
+Provider statement supplied during research:
+
+> **In addition to weigh station bypassing, PrePass Plus takes the hassle out of tolls by enabling fleets to pay tolls, handle violations and toll disputes through a single transponder, and receive a consolidated bill from one service provider.**
+
+Coverage image reference supplied:
+
+```text
+https://enrollment.prepass.com/images/Expanded_Legend.png
+```
+
+Confirmed business capabilities to preserve in design:
+- toll payment
+- violations
+- toll disputes
+- single-transponder operation
+- consolidated billing
+- weigh-station bypass is a separate PrePass capability but is not part of the initial TruckERP Tolls accounting workflow
+
+---
+
+## A7. Integration facts now considered locked from supplied documentation
+
+1. PrePass has separate Token, Account, Fleet Management, Toll Transaction, and GPS Data APIs.
+2. Token API uses `client_id` and `client_secret` headers and returns a Bearer token.
+3. Account API v1 declares an APIM subscription key security scheme.
+4. Account API can return multiple accounts for one authenticated integration.
+5. Toll Transaction API supports account-number or cost-center filtering and pagination.
+6. Toll Transaction query windows are max 31 days; start date max age is 2 years.
+7. Toll Transaction max page size is 10,000.
+8. `tollId` is the provider transaction identity.
+9. Transactions expose underlying toll agency and separate billing-agency code.
+10. Transactions expose vehicle number, plate, device number, PrePass device ID, device status, and read type.
+11. Transactions expose Normal vs Violation and dispute status/reason.
+12. Fleet Management gives direct VIN ↔ vehicle number ↔ plate ↔ transponder relationships.
+13. Fleet Management supports unassigned transponders.
+14. Fleet Management can add/update/delete vehicles, order transponders, and report lost/stolen transponders.
+15. Fleet Management writes should remain disabled in TruckERP initial implementation.
+16. GPS Data API is outbound carrier-to-PrePass data for toll validation.
+17. Initial TruckERP Tolls implementation must not depend on GPS.
+18. Raw provider JSON should be retained before normalization.
+19. Provider type inconsistencies must be normalized defensively.
+20. PrePass provider reference data must not silently replace TruckERP canonical asset/compliance history.
+
+---
+
+## A8. Items still not confirmed by supplied documentation
+
+Keep these as research/open items rather than assumptions:
+
+- exact security combination required by every non-Account PrePass API call
+- rate limits
+- whether dispute creation/update is available by API
+- whether a separate invoice/statement API exists
+- whether historical transponder assignment events are available, versus only current state
+- separate discount amount
+- separate admin fee
+- separate violation fee
+- transaction currency
+- explicit invoice number/statement number
+- complete Canada toll-network coverage
+- how PrePass represents reversals/voids/adjustments, if exposed separately
+
+---
+
+## A9. Implementation reminder for future sessions
+
+Before changing Tolls code:
+
+1. Read this entire MD.
+2. Treat the Appendix source contract as authoritative for the PrePass details supplied so far.
+3. Do not recreate provider field names from memory.
+4. Do not assume a missing field exists.
+5. Preserve raw provider payloads.
+6. Normalize provider IDs to strings internally where schemas disagree.
+7. Use Decimal for monetary normalization.
+8. Keep processed toll history auditable and immutable.
+9. Never silently remap an ambiguous toll transaction to a truck/owner.
+10. Add new provider documentation here before implementing behavior that depends on it.
+
 ## 10. Decision Log
 
 ### 2026-10-04 — Tolls documentation started
