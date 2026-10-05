@@ -639,6 +639,56 @@ GPS payloads contain sensitive vehicle-location history. If TruckERP later enabl
 ---
 
 
+
+## Toll Event Ordering and Multiple Tolls per Unit
+
+A single vehicle/unit can legitimately receive multiple toll transactions within the same hour or even within a few minutes.
+
+Example:
+
+```text
+Unit 1104
+10:05  Niagara bridge toll      $5.25
+10:42  I-90 toll transaction    $12.00
+```
+
+These are two separate toll events and must remain two separate records.
+
+**Locked rule:** never deduplicate or collapse tolls by date + unit, date + device, or hour.
+
+Provider uniqueness comes from the provider transaction identity:
+
+```text
+provider = PREPASS
+provider_transaction_id = tollId
+```
+
+The normal Toll History view should be ordered/grouped primarily by:
+
+```text
+transaction date/time
+    ↓
+unit number
+    ↓
+read source / identifier
+```
+
+Where the identifier is:
+
+```text
+readType = DEVICE
+→ deviceNumber / transponder number
+
+readType = PLATE
+→ plateNumber + plateState
+```
+
+For display, multiple rows for the same unit on the same date/hour are expected and correct.
+
+The expanded row can show the provider details that distinguish the events, including entry/exit plaza and timestamps.
+
+---
+
 ## Vehicle-Boundary Lock
 
 **Tolls is a vehicle/unit module first.**
@@ -1563,3 +1613,12 @@ Before changing Tolls code:
 - A toll mapped to unit 1104 remains a vehicle toll regardless of whether the truck is company-owned or owner-operator-owned.
 - Company/O-O ownership, driver responsibility, payroll deductions, settlement treatment, and expense responsibility are downstream concerns.
 - Do not couple Tolls normalization to Payroll, Driver, Owner-Operator, or Settlement logic.
+
+
+### 2026-10-05 — Multiple-toll event rule locked
+
+- One unit/device may have multiple valid tolls within the same hour.
+- Date + unit/device is a display/grouping key, not a deduplication key.
+- PrePass `tollId` is the provider transaction identity.
+- History should retain every event and sort by transaction date/time, then unit, then read source/identifier.
+- Expanded details can show plaza and timing data to distinguish nearby toll events.
