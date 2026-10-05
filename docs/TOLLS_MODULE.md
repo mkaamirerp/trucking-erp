@@ -996,7 +996,7 @@ Provider account/connection must remain optional because FILE intake can exist w
 
 ## Segment 1 — Implemented Canonical Schema Foundation
 
-**Implementation commit:** `f05016754853599e02a925e9b45212aff376d4ca`  
+**Implementation commit:** `a5a2f13`  
 **Commit message:** `feat: add toll canonical schema foundation`
 
 **Implementation status:** coded and committed on local `main`; no tenant migration was run, no API image was reloaded, and nothing was deployed/live at the time of this checkpoint.
@@ -2111,7 +2111,7 @@ Before changing Tolls code:
 
 ### 2026-10-05 — Tolls Segment 1 canonical schema implemented
 
-- Local-main implementation commit: `f05016754853599e02a925e9b45212aff376d4ca`.
+- Local-main implementation commit: `a5a2f13`.
 - Added `toll_source_batches` and `toll_transactions`.
 - Migration revision `t1a2b3c4d5e6` revises `m7n8o9p0q1r2` and leaves one tenant Alembic head.
 - Source hash and source import reference are indexed but deliberately not unique.
