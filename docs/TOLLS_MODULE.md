@@ -541,7 +541,104 @@ PrePass warns not to use this API to update tractors enrolled in the Toll Violat
 
 ---
 
-## 7. Design Principles
+
+## 7. PrePass GPS Data API v2 — Confirmed
+
+**Purpose:** Allows carriers to send truck-trip GPS data to PrePass for toll validation.
+
+**Base server:**
+
+```text
+https://api.prepass.com/api/tolls/gps/v2
+```
+
+**Endpoint:**
+
+```http
+POST /gpsevents?accountNumber=<PrePass account>
+```
+
+The account number is required as a query parameter.
+
+### 7.1 Payload structure
+
+Top-level request fields:
+
+- `postedTime`
+- `vehicles[]`
+
+Each vehicle can include:
+
+- `deviceNumber`
+- `vin`
+- `totalAxleCount`
+- `plateNumber`
+- `plateState`
+- `trackSegment[]`
+
+Each GPS point can include:
+
+- `latitude`
+- `longitude`
+- `timestamp`
+- `timezone`
+- `speed`
+- `direction`
+- `locationAccuracy`
+
+The schema marks these vehicle/GPS fields nullable, so TruckERP must not assume every GPS submission contains every identifier or telemetry value.
+
+### 7.2 Responses
+
+- `200` — GPS data processed successfully.
+- `400` — validation failure; response can identify invalid vehicles and individual invalid GPS entries.
+- `401` — unauthorized.
+- `500` — server error.
+
+The validation-error response is detailed enough to identify both the vehicle index and GPS-entry index that failed, which is useful for batch diagnostics.
+
+### 7.3 TruckERP implications
+
+This API is **not part of the core toll-transaction import path**. It is a future validation/enrichment integration.
+
+Potential architecture:
+
+```text
+TruckERP ELD / GPS source
+        ↓
+normalized trip GPS
+        ↓
+PrePass GPS Data API
+        ↓
+PrePass toll validation
+        ↓
+PrePass Toll Transaction API
+        ↓
+TruckERP toll transaction reconciliation
+```
+
+Potential value:
+
+- help validate whether a truck actually traveled through a toll location
+- support investigation of questionable tolls/violations
+- strengthen device/plate/VIN attribution
+- provide axle-count context for toll-class validation
+- improve future dispute workflows
+
+Initial Tolls implementation should **not depend on GPS submission**. Build toll ingestion so it works without this API; add GPS validation later when TruckERP has a stable ELD/GPS source.
+
+### 7.4 Privacy and retention rule
+
+GPS payloads contain sensitive vehicle-location history. If TruckERP later enables this integration:
+
+- send only the minimum GPS window required for the PrePass use case
+- do not duplicate long-term GPS retention merely because PrePass accepts the data
+- log batch/result metadata without logging complete raw location traces
+- keep tenant authorization and audit boundaries strict
+
+---
+
+## 8. Design Principles
 
 - Provider data is source data; TruckERP owns the canonical business model.
 - Raw provider values must be retained for audit/reprocessing.
@@ -553,7 +650,7 @@ PrePass warns not to use this API to update tractors enrolled in the Toll Violat
 
 ---
 
-## 8. Open Research Items
+## 9. Open Research Items
 
 - Whether disputes can be created/updated through API or are portal-only.
 - Whether consolidated invoice/statement identifiers are available from another PrePass API.
@@ -564,7 +661,7 @@ PrePass warns not to use this API to update tractors enrolled in the Toll Violat
 
 ---
 
-## 9. Decision Log
+## 10. Decision Log
 
 ### 2026-10-04 — Tolls documentation started
 
@@ -611,3 +708,12 @@ PrePass warns not to use this API to update tractors enrolled in the Toll Violat
 - Confirmed vehicle add/update/delete, transponder ordering, and lost/stolen reporting APIs exist.
 - Initial TruckERP integration should remain read/sync-first; provider write actions require a separate later decision.
 - Deprecated Fleet Management `/accounts` endpoint should not be used; Account API v1 is the current source.
+
+
+### 2026-10-05 — PrePass GPS Data API v2 documented
+
+- Confirmed GPS submission endpoint: `POST https://api.prepass.com/api/tolls/gps/v2/gpsevents`.
+- Confirmed required PrePass account-number query parameter.
+- Confirmed payload can carry device number, VIN, axle count, plate, and GPS track segments.
+- Confirmed GPS points support latitude, longitude, timestamp, timezone, speed, direction, and location accuracy.
+- Classified this API as future toll-validation/ELD integration, not a dependency for initial toll ingestion.
