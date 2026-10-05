@@ -1212,6 +1212,341 @@ Not implemented in Segment 1:
 
 ---
 
+
+
+## Segment 2 — Implemented CSV FILE Intake Foundation
+
+**Implementation commit:** `d837983df1e971aa525b93a3e14e200ba5ecc9a6`  
+**Commit message:** `feat: add toll CSV file intake foundation`
+
+**Implementation status:** committed and pushed to `origin/main`. At this checkpoint, the tenant migration has not been applied, the API image has not been reloaded, and nothing has been deployed/live.
+
+### Files implemented
+
+- `app/models/toll.py`
+- `app/models/__init__.py`
+- `app/services/toll_csv_intake.py`
+- `app/core/storage.py`
+- `app/routers/tolls.py`
+- `app/schemas/toll.py`
+- `app/main.py`
+- `alembic_tenant/versions/u2v3w4x5y6z7_toll_file_csv_intake.py`
+- `tests/test_toll_segment_2.py`
+
+### Final Segment 2 persistence shape
+
+```text
+toll_source_batches
+    = FILE envelope
+
+toll_file_source_rows
+    = durable unmapped CSV source rows
+
+toll_transactions
+    = unchanged canonical Toll rows
+    = Segment 2 does not insert
+```
+
+There is **no** `TollFileIntake` model and no `toll_file_intakes` table.
+
+### Implemented table: toll_file_source_rows
+
+Purpose: preserve durable raw/unmapped CSV source rows before explicit provider/profile normalization.
+
+Implemented fields:
+
+```text
+id
+tenant_id
+batch_id
+source_row_order
+source_row_id nullable
+cells JSONB object
+values JSONB array
+created_at
+updated_at
+```
+
+Constraints and relationships:
+
+- unique `(tenant_id, batch_id, source_row_order)`
+- tenant-safe FK `(tenant_id, batch_id) -> toll_source_batches(tenant_id, id)`
+- JSONB shape checks keep `cells` as object and `values` as array
+- no canonical Toll business fields such as amount, truck, transaction type, datetime, agency, Driver, O/O, Payroll, or Settlement data
+
+### CSV FILE intake flow
+
+```text
+receive CSV bytes
+    ↓
+validate
+    ↓
+calculate SHA-256
+    ↓
+tenant-scoped duplicate lookup
+    ↓
+store original CSV bytes through existing storage abstraction
+    ↓
+persist TollSourceBatch + TollFileSourceRow[] in one DB transaction
+    ↓
+commit
+    ↓
+STOP
+```
+
+No provider/profile mapping and no `toll_transactions` insert occur in Segment 2.
+
+### Original file storage
+
+Segment 2 reuses the existing TruckERP storage abstraction:
+
+```text
+app.core.storage.get_storage().save_bytes
+```
+
+A thin Toll helper was added:
+
+```text
+save_toll_csv_file_bytes
+```
+
+Storage metadata:
+
+```text
+module       = toll
+entity_type  = csv
+content_type = text/csv
+```
+
+Storage key pattern:
+
+```text
+<tenant_slug>/toll/csv/<intake_token>/<uuid>.csv
+```
+
+The resulting pointer is saved in:
+
+```text
+toll_source_batches.source_storage_ref
+```
+
+Original CSV bytes are stored outside normal SQL row payloads.
+
+### Storage/DB failure behavior
+
+The existing storage abstraction supports:
+
+```text
+save_bytes
+read_bytes
+exists
+delete
+```
+
+Local storage deletes by unlinking the file. S3 storage uses `delete_object`.
+
+Locked failure behavior:
+
+```text
+validation failure
+    → no file stored
+
+storage save failure
+    → no DB batch/source rows committed
+
+storage succeeds
+DB persistence later fails
+    → rollback DB
+    → best-effort delete only the object created by this intake attempt
+```
+
+The stored object is unique to the intake attempt through its generated intake token/key.
+
+Cleanup never deletes an older duplicate-hash object.
+
+If cleanup itself fails:
+
+- preserve/re-raise the original DB error
+- log the cleanup failure safely
+- do not expose storage credentials
+
+### Duplicate-file behavior
+
+Duplicate detection is application/service logic, not DB uniqueness.
+
+Lookup key:
+
+```text
+tenant_id + source_hash
+```
+
+Behavior:
+
+- same SHA-256 may exist in multiple batches
+- second upload is allowed
+- prior matching batch IDs/count are reported
+- no automatic rejection
+- no automatic reuse
+- no automatic deletion
+- tenant A cannot see tenant B duplicate matches
+- every accepted upload receives its own storage object and source batch
+
+`source_hash` remains non-unique.
+
+### Generic CSV parsing boundary
+
+Generic CSV intake is intentionally non-semantic.
+
+Example input:
+
+```csv
+Date,Unit,Amount,Unknown
+10/01/2026,1104,5.25,ABC
+```
+
+Generic source evidence remains:
+
+```json
+{
+  "Date": "10/01/2026",
+  "Unit": "1104",
+  "Amount": "5.25",
+  "Unknown": "ABC"
+}
+```
+
+Segment 2 performs:
+
+- UTF-8/BOM handling
+- quoted CSV handling
+- ordered source rows
+- raw header/value preservation
+- duplicate-header-safe handling
+- unknown-column preservation
+- raw values kept as strings
+
+Segment 2 deliberately does **not** perform:
+
+- datetime conversion
+- Decimal conversion
+- unit/truck resolution
+- provider auto-detection
+- E-ZPass mapping
+- PrePass mapping
+- canonical Toll transaction creation
+
+### API added
+
+```http
+POST /api/v1/tolls/files/csv
+```
+
+Behavior:
+
+- tenant scoped
+- protected by admin-sensitive entitlement/RBAC
+- multipart CSV upload
+- stores original file
+- persists source batch + raw source rows
+- returns compact intake metadata
+- does not create canonical Toll transactions
+
+Response includes the equivalent of:
+
+```text
+batch_id
+source_type = FILE
+file_format = CSV
+filename
+source_hash
+source_storage_ref
+row_count
+headers
+duplicate_match_count
+duplicate_batch_ids
+status
+preview_rows
+```
+
+Preview rows are limited; the full file body is not returned.
+
+### Migration
+
+```text
+revision:      u2v3w4x5y6z7
+down_revision: t1a2b3c4d5e6
+```
+
+The migration creates only:
+
+```text
+toll_file_source_rows
+```
+
+It does not create:
+
+```text
+toll_file_intakes
+```
+
+Tenant Alembic graph remained at exactly one head after Segment 2.
+
+### Segment 2 tests
+
+`tests/test_toll_segment_2.py`:
+
+**20 passed**
+
+Coverage includes:
+
+- no TollFileIntake table
+- durable source-row model
+- FILE + CSV source semantics
+- source batch + rows persistence
+- original file storage
+- saved `source_storage_ref`
+- UTF-8 BOM
+- quoted commas
+- duplicate headers
+- string preservation
+- no datetime/Decimal conversion
+- unknown-column preservation
+- no provider guessing
+- no unit resolution
+- same hash allowed in multiple batches
+- duplicate-match reporting
+- tenant-isolated duplicate lookup
+- nullable provider/account/connection
+- rollback behavior
+- best-effort storage cleanup after DB failure
+- invalid PDF/empty/binary/XLSX handling
+- API 201 path and tenant isolation
+- no `TollTransaction` writes
+
+Segment 1 regression:
+
+**13 passed**
+
+Combined Toll Segment 1 + Segment 2:
+
+**33 passed**
+
+### Explicitly deferred after Segment 2
+
+Not implemented:
+
+- E-ZPass/provider-specific CSV normalization
+- PrePass API
+- PDF Toll profile
+- canonical `toll_transactions` creation from CSV
+- Toll frontend/history UI
+- email intake
+- manual-entry UI
+- Driver/O/O/Payroll/Settlement logic
+- tenant migration execution
+- API reload/deploy
+
+---
 # Appendix A — PrePass Source Contract Archive
 
 This appendix preserves the API contract details supplied during research so the TruckERP design does not depend on chat memory.
@@ -2175,3 +2510,18 @@ Segment 2 is not complete until it also wires:
 4. tenant-scoped duplicate lookup/reporting
 5. a minimal tenant-scoped Toll CSV intake API
 
+
+
+### 2026-10-05 — Tolls Segment 2 CSV FILE intake implemented
+
+- Final implementation commit: `d837983df1e971aa525b93a3e14e200ba5ecc9a6`.
+- Added durable `toll_file_source_rows` and kept `toll_source_batches` as the only FILE envelope.
+- Explicitly rejected a separate `toll_file_intakes` table.
+- Added generic tenant-scoped CSV intake API at `POST /api/v1/tolls/files/csv`.
+- Original CSV bytes are preserved through the existing TruckERP storage abstraction and referenced by `source_storage_ref`.
+- Duplicate-file detection is tenant-scoped and advisory; identical hashes remain allowed across batches.
+- Generic CSV rows remain strings/raw evidence until an explicit provider/profile mapping exists.
+- DB failure after storage save performs best-effort cleanup of only the object created by that intake attempt.
+- Segment 2 does not create canonical Toll transactions and does not guess E-ZPass/provider semantics.
+- 20 Segment 2 tests plus 13 Segment 1 regressions passed (33 total).
+- At this checkpoint the tenant migration had not been applied and the API had not been reloaded/deployed.
