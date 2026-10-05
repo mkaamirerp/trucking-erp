@@ -992,6 +992,226 @@ Provider account/connection must remain optional because FILE intake can exist w
 
 ---
 
+
+
+## Segment 1 — Implemented Canonical Schema Foundation
+
+**Implementation commit:** `f05016754853599e02a925e9b45212aff376d4ca`  
+**Commit message:** `feat: add toll canonical schema foundation`
+
+**Implementation status:** coded and committed on local `main`; no tenant migration was run, no API image was reloaded, and nothing was deployed/live at the time of this checkpoint.
+
+### Files implemented
+
+- `app/models/toll.py`
+- `app/models/__init__.py`
+- `alembic_tenant/versions/t1a2b3c4d5e6_toll_source_batches_transactions.py`
+- `tests/test_toll_segment_1.py`
+
+### Migration
+
+```text
+revision: t1a2b3c4d5e6
+revises:  m7n8o9p0q1r2
+tenant Alembic heads after implementation: exactly one
+```
+
+### Implemented table: toll_source_batches
+
+Purpose: one incoming Toll source batch.
+
+Implemented source model:
+
+```text
+source_type:
+  API
+  FILE
+  MANUAL
+
+file_format:
+  PDF
+  CSV
+  NULL for non-FILE sources
+```
+
+Important implementation rules:
+
+- PDF and CSV are file formats, not separate business source types.
+- `file_format` must be NULL unless `source_type = FILE`.
+- `provider_code`, `provider_connection_id`, and `account_reference` are nullable.
+- FILE intake therefore does not require a provider account, API connection, or transponder.
+- `provider_connection_id` has no FK yet because no Toll provider-connections table exists in Segment 1.
+- `source_hash` is indexed by tenant but is **not unique**.
+- `source_import_ref` is indexed by tenant but is **not unique**.
+- Duplicate file detection/reprocessing policy belongs to later FILE intake logic, not a permanent database uniqueness rule.
+- Default batch status is `RECEIVED`.
+
+### Implemented table: toll_transactions
+
+Canonical Toll rows intentionally remain small.
+
+Identity model:
+
+```text
+TruckERP canonical identity:
+  tenant_id + id
+
+provider identity:
+  provider_transaction_id
+  nullable
+  not PK
+  not globally unique
+
+source-row identity:
+  tenant_id + batch_id + source_row_order
+  optional source_row_id
+```
+
+The schema deliberately does **not** make any of the following unique:
+
+```text
+date + unit
+datetime + unit
+date + device
+hour + unit
+```
+
+Multiple legitimate Toll events for the same unit within minutes are structurally allowed.
+
+### Vehicle/unit fields
+
+Implemented:
+
+- nullable `truck_id`
+- `unit_number_snapshot`
+- tenant-safe FK `(tenant_id, truck_id) -> trucks(tenant_id, id)`
+- FK delete behavior: `RESTRICT`
+
+No Driver, Owner Operator, payee, payroll, settlement, or financial-responsibility linkage exists in Toll Segment 1.
+
+### Canonical transaction fields
+
+Segment 1 includes the small working Toll record needed by TruckERP, including:
+
+- provider transaction identity
+- source-row identity
+- source transaction datetime text/provenance
+- transaction date/datetime
+- vehicle/unit link and unit snapshot
+- toll agency code/name
+- amount
+- currency
+- transaction type
+- read type
+- device/transponder identifier field
+- plate number/state
+- dispute status
+- full `provider_raw` JSONB source evidence
+- audit timestamps
+
+The complete provider/file row remains in `provider_raw`; provider-specific fields such as plaza detail, toll class, billing authority, PrePass device ID, account names, dispute reason, etc. are not all promoted to canonical columns.
+
+### Money
+
+`amount` is:
+
+```text
+NUMERIC(14,4)
+NOT NULL
+```
+
+No float money semantics are used.
+
+Fuel-specific quantity/unit-price/tax/O-O pricing/settlement fields are absent.
+
+### Transaction and read types
+
+Initial canonical transaction type is limited to:
+
+```text
+NORMAL
+VIOLATION
+```
+
+No unconfirmed refund/reversal/void enum was invented.
+
+`read_type` is nullable and supports:
+
+```text
+DEVICE
+PLATE
+```
+
+A separate display `identifier` column was intentionally **not stored**.
+
+Future UI derives it:
+
+```text
+DEVICE -> device_number
+PLATE  -> plate_number + plate_state
+```
+
+### Pull-query indexes
+
+Segment 1 includes indexes supporting the future downstream pull model, including queries around:
+
+- tenant + transaction date
+- tenant + truck + transaction datetime
+- tenant + unit-number snapshot + transaction datetime
+- tenant + batch
+- tenant + source hash
+- tenant + source import reference
+
+This supports the locked downstream use case:
+
+```text
+give me all tolls for unit 1104
+from Monday through Sunday
+```
+
+without adding Payroll/O-O/Settlement responsibility to the Toll schema.
+
+### Segment 1 tests
+
+`tests/test_toll_segment_1.py`:
+
+**13 passed**
+
+The tests lock:
+
+- canonical/provider/source-row identity separation
+- date/unit/device are not uniqueness keys
+- downstream pull indexes
+- API / FILE / MANUAL source types
+- PDF / CSV as FILE formats
+- non-unique indexed source hash
+- non-unique indexed source import reference
+- `NUMERIC(14,4)` amount
+- NORMAL / VIOLATION
+- nullable DEVICE / PLATE
+- no stored display identifier
+- tenant-safe Truck FK
+- required JSONB object source evidence
+- absence of Driver/O-O/Payroll/Settlement fields
+- no Toll provider-connection FK in Segment 1
+
+### Explicitly deferred
+
+Not implemented in Segment 1:
+
+- CSV parsing
+- PDF parsing
+- PrePass API
+- Toll provider connections
+- frontend/history UI
+- email intake
+- manual-entry UI
+- scheduler
+- payroll/settlement
+- Fuel-to-Toll copy/push
+
+---
+
 # Appendix A — PrePass Source Contract Archive
 
 This appendix preserves the API contract details supplied during research so the TruckERP design does not depend on chat memory.
@@ -1887,3 +2107,14 @@ Before changing Tolls code:
 - PDF and CSV are not separate business-source categories; both are FILE intake.
 - E-ZPass portal CSV is a normal Toll source for fleets that do not use a direct API integration.
 - Source architecture is API / FILE / MANUAL, with file format handled inside FILE intake.
+
+
+### 2026-10-05 — Tolls Segment 1 canonical schema implemented
+
+- Local-main implementation commit: `f05016754853599e02a925e9b45212aff376d4ca`.
+- Added `toll_source_batches` and `toll_transactions`.
+- Migration revision `t1a2b3c4d5e6` revises `m7n8o9p0q1r2` and leaves one tenant Alembic head.
+- Source hash and source import reference are indexed but deliberately not unique.
+- Toll canonical records remain vehicle/unit-bound and contain no Driver/O-O/Payroll/Settlement logic.
+- 13 Segment 1 tests passed.
+- At this checkpoint the migration had not been applied and the API had not been reloaded/deployed.
