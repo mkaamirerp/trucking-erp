@@ -157,7 +157,12 @@ async def test_smoke_login_success_baseline():
     assert lr.status_code == 200, lr.text
     body = lr.json()
     assert body.get("ok") is True
-    assert body.get("workspace_url") or body.get("access_token")
+    assert body.get("workspace_url")
+    assert "access_token" not in body
+    assert "refresh_token" not in body
+    from tests.support.auth_cookies import cookie_value_from_response
+
+    assert cookie_value_from_response(lr, "access_token")
 
 
 @pytest.mark.asyncio

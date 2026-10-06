@@ -37,6 +37,7 @@ from app.models.platform import (
 )
 from app.utils.otp import get_otp_expiration, hash_otp
 from app.utils.password import hash_password
+from tests.support.auth_cookies import access_token_from_login_response
 
 # Skip when DATABASE_URL is not set (e.g. CI without Postgres)
 SKIP_NO_DB = not os.environ.get("DATABASE_URL")
@@ -195,9 +196,9 @@ def test_verify_otp_then_dashboard(client, app):
     assert me_response.json().get("email") == email
 
 
-@pytest.mark.skipif(SKIP_NO_DB, reason="DATABASE_URL required for Bearer /me test")
-def test_login_then_me_with_bearer_token(client):
-    """Login returns access_token in JSON; GET /api/v1/me with Authorization: Bearer <token> succeeds."""
+@pytest.mark.skipif(SKIP_NO_DB, reason="DATABASE_URL required for cookie /me test")
+def test_login_then_me_with_httponly_cookies(client):
+    """Login sets HttpOnly cookies and does not put JWTs in JSON; GET /auth/me succeeds with cookies."""
     slug_suffix = uuid.uuid4().hex[:8]
     workspace_slug = f"beartest_{slug_suffix}"
     email = f"beartest_{slug_suffix}@example.com"
@@ -233,7 +234,6 @@ def test_login_then_me_with_bearer_token(client):
     tenant_slug = signup_resp.json().get("tenant_slug")
     assert tenant_slug
 
-    # Login to get access_token in response body (no cookies used for the next request)
     login_resp = client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": password},
@@ -241,18 +241,25 @@ def test_login_then_me_with_bearer_token(client):
     )
     assert login_resp.status_code == 200, login_resp.text
     login_data = login_resp.json()
-    access_token = login_data.get("access_token")
-    assert access_token, "login must return access_token for API/Bearer clients"
+    assert "access_token" not in login_data
+    assert "refresh_token" not in login_data
+    assert login_data.get("ok") is True
+    access_token = access_token_from_login_response(login_resp)
 
-    # GET /api/v1/me with Bearer token only (no cookies)
-    me_resp = client.get(
+    me_cookie = client.get(
+        "/api/v1/auth/me",
+        headers={"host": f"{tenant_slug}.truckerp.me"},
+    )
+    assert me_cookie.status_code == 200, me_cookie.text
+    assert me_cookie.json().get("tenant_slug") == tenant_slug
+
+    # Cookie value remains a valid JWT if presented as Bearer, but login JSON no longer exposes it.
+    me_bearer = client.get(
         "/api/v1/me",
         headers={
             "Authorization": f"Bearer {access_token}",
             "host": f"{tenant_slug}.truckerp.me",
         },
     )
-    assert me_resp.status_code == 200, me_resp.text
-    me_data = me_resp.json()
-    assert me_data.get("tenant_slug") == tenant_slug
-    assert me_data.get("tenant_id") is not None
+    assert me_bearer.status_code == 200, me_bearer.text
+    assert me_bearer.json().get("tenant_id") is not None

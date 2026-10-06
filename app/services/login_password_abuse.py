@@ -8,11 +8,12 @@ Persists via AsyncSessionLocal + commit (same pattern as login_failure_audit); g
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,22 +76,51 @@ async def login_password_otp_step_up_armed(tenant_id: int, email_norm: str) -> b
     return await _login_password_fail_streak_count(tenant_id, email_norm) >= LOGIN_PASSWORD_OTP_STEP_UP_THRESHOLD
 
 
+def _turnstile_token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _request_already_verified_turnstile(request: Request | None, token: str) -> bool:
+    if request is None or not token:
+        return False
+    prev = getattr(request.state, "login_turnstile_verified_fp", None)
+    return prev == _turnstile_token_fingerprint(token)
+
+
+def _mark_request_turnstile_verified(request: Request | None, token: str) -> None:
+    if request is None or not token:
+        return
+    request.state.login_turnstile_verified_fp = _turnstile_token_fingerprint(token)
+
+
 async def assert_login_human_verification_if_armed(
     tenant_id: int,
     email_norm: str,
     turnstile_token: str | None,
+    *,
+    request: Request | None = None,
+    already_satisfied: bool = False,
 ) -> None:
     """
     If Turnstile is configured and the streak is armed, require a passing siteverify before password check.
     Raises HTTP 403 with a static message (does not reveal password or email validity).
+
+    Cloudflare Turnstile tokens are single-use. Callers must not siteverify the same token twice:
+    pass the same Request so a successful verify is remembered for this attempt, and/or
+    already_satisfied=True when a live login step-up challenge already proved this attempt
+    passed human verification (password gate after Turnstile).
     """
     if not (settings.turnstile_secret_key or "").strip():
         return
     if not await login_password_turnstile_armed(tenant_id, email_norm):
         return
+    if already_satisfied:
+        return
 
     site_cfg = (getattr(settings, "turnstile_site_key", None) or "").strip()
     token = (turnstile_token or "").strip()
+    if _request_already_verified_turnstile(request, token):
+        return
 
     if not token:
         logger.info(
@@ -117,6 +147,7 @@ async def assert_login_human_verification_if_armed(
 
     ok = await verify_turnstile_token(turnstile_token)
     if ok:
+        _mark_request_turnstile_verified(request, token)
         return
 
     logger.warning(

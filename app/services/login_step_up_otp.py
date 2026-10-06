@@ -139,6 +139,44 @@ async def validate_challenge_ready_for_session(
     return True
 
 
+async def challenge_carries_prior_human_verification(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    email_norm: str,
+    login_challenge_id: str | None,
+) -> bool:
+    """
+    True when this login_challenge_id is a live password-verified step-up for this tenant+email.
+
+    The challenge is only created after password verification, which itself requires Turnstile
+    when armed. Completing OTP must not replay the already-consumed Turnstile token.
+    """
+    lc = (login_challenge_id or "").strip()
+    if not lc:
+        return False
+    row = await db.scalar(select(PlatformLoginOtpChallenge).where(PlatformLoginOtpChallenge.id == lc))
+    if row is None:
+        return False
+    if int(row.tenant_id) != int(tenant_id):
+        return False
+    if (row.email_norm or "") != email_norm:
+        return False
+    now = datetime.now(timezone.utc)
+    exp = row.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if now > exp:
+        return False
+    if row.session_issued_at is not None:
+        return False
+    if row.password_verified_at is None:
+        return False
+    if row.otp_verified_at is None:
+        return False
+    return True
+
+
 async def mark_challenge_session_issued(db: AsyncSession, challenge_id: str) -> bool:
     """Single-use: returns True if this call transitioned session_issued from null to set."""
     now = datetime.now(timezone.utc)

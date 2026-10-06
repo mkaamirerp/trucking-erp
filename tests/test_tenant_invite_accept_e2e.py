@@ -40,6 +40,7 @@ from app.models.platform import (
 )
 from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspaceMember
 from app.utils.auth_identity import normalize_auth_email
+from tests.support.auth_cookies import access_token_from_login_response
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ async def test_invite_accept_platform_auth_mode_end_to_end():
                 headers={"host": host},
             )
             assert lr.status_code == 200, lr.text
-            token = lr.json()["access_token"]
+            token = access_token_from_login_response(lr)
 
             with patch("app.routers.tenant_admin.secrets.token_urlsafe", return_value=fixed):
                 inv = await ac.post(
@@ -205,7 +206,9 @@ async def test_invite_accept_platform_auth_mode_end_to_end():
             assert li.status_code == 200, li.text
             from app.utils.jwt_auth import TokenType, decode_token
 
-            sub = decode_token(li.json()["access_token"], expected_type=TokenType.ACCESS).get("sub")
+            sub = decode_token(
+                access_token_from_login_response(li), expected_type=TokenType.ACCESS
+            ).get("sub")
             assert sub and "-" in str(sub), "platform mode login should use platform user id (UUID) as sub"
 
         async with AsyncSessionLocal() as pdb:
@@ -259,7 +262,7 @@ async def test_invite_accept_tenant_auth_mode_end_to_end():
                 headers={"host": host},
             )
             assert lr.status_code == 200, lr.text
-            token = lr.json()["access_token"]
+            token = access_token_from_login_response(lr)
 
             with patch("app.routers.tenant_admin.secrets.token_urlsafe", return_value=fixed):
                 inv = await ac.post(
@@ -286,11 +289,10 @@ async def test_invite_accept_tenant_auth_mode_end_to_end():
                 headers={"host": host},
             )
             assert li.status_code == 200, li.text
-            pl = li.json()
-            assert pl.get("access_token")
+            token = access_token_from_login_response(li)
             me = await ac.get(
                 "/api/v1/auth/me",
-                headers={"host": host, "Authorization": f"Bearer {pl['access_token']}"},
+                headers={"host": host, "Authorization": f"Bearer {token}"},
             )
             assert me.status_code == 200, me.text
             assert me.json().get("tenant_local_user_id") is not None

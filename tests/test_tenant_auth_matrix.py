@@ -23,6 +23,7 @@ from app.utils.auth_identity import normalize_auth_email
 from app.utils.jwt_auth import create_access_token, decode_token, TokenType
 from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.services.tenant_auth_cutover_verify import collect_tenant_auth_cutover_errors
+from tests.support.auth_cookies import access_token_from_login_response
 
 SKIP_NO_DB = not os.environ.get("DATABASE_URL")
 
@@ -104,8 +105,7 @@ async def test_platform_mode_signup_login_me_refresh_cycle():
         headers={"host": _host(tenant_slug)},
     )
     assert login.status_code == 200, login.text
-    access = login.json().get("access_token")
-    assert access
+    access = access_token_from_login_response(login)
     payload = decode_token(access, expected_type=TokenType.ACCESS)
     assert payload.get("sub")
     assert int(payload.get("sv", 0)) >= 1
@@ -174,7 +174,7 @@ async def test_platform_mode_reset_password_invalidates_access_and_refresh():
         headers={"host": _host(tenant_slug)},
     )
     assert login.status_code == 200
-    access_old = login.json()["access_token"]
+    access_old = access_token_from_login_response(login)
     assert c.get("/api/v1/auth/me", headers={"host": _host(tenant_slug), "Authorization": f"Bearer {access_old}"}).status_code == 200
 
     fixed_raw = "fixed_token_urlsafe_test_xxxxxxxxxxxxxxxx"
@@ -262,7 +262,7 @@ async def test_tenant_auth_mode_flip_login_me_refresh_rollback_relogin():
                 headers={"host": host},
             )
             assert lr.status_code == 200, lr.text
-            access = lr.json().get("access_token")
+            access = access_token_from_login_response(lr)
             pl = decode_token(access, expected_type=TokenType.ACCESS)
             assert str(pl.get("sub")).isdigit()
             mr = await ac.get("/api/v1/auth/me", headers={"host": host, "Authorization": f"Bearer {access}"})
@@ -293,7 +293,7 @@ async def test_tenant_auth_mode_flip_login_me_refresh_rollback_relogin():
                 headers={"host": host},
             )
             assert lr2.status_code == 200, lr2.text
-            pl2 = decode_token(lr2.json()["access_token"], expected_type=TokenType.ACCESS)
+            pl2 = decode_token(access_token_from_login_response(lr2), expected_type=TokenType.ACCESS)
             assert not str(pl2.get("sub")).isdigit()
     finally:
         async with AsyncSessionLocal() as pdb:
@@ -342,7 +342,7 @@ async def test_tenant_mode_sub_wrong_tenant_id_in_claim_returns_403():
                 headers={"host": host},
             )
             assert lr.status_code == 200, lr.text
-            pl = decode_token(lr.json()["access_token"], expected_type=TokenType.ACCESS)
+            pl = decode_token(access_token_from_login_response(lr), expected_type=TokenType.ACCESS)
             tu_sub = pl["sub"]
             sv = pl["sv"]
             bad = create_access_token(

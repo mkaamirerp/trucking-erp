@@ -35,6 +35,7 @@ from tests.test_login_hardening_smoke import (
     _signup_workspace,
 )
 from tests.test_tenant_auth_matrix import _host
+from tests.support.auth_cookies import access_token_from_login_response
 
 SKIP_NO_DB = not os.environ.get("DATABASE_URL")
 
@@ -75,8 +76,7 @@ async def test_smoke_sign_in_security_panel_status_contract_locked_unlock_verifi
                 json={"email": email, "password": password, "trust_this_device": False},
             )
             assert login_ok.status_code == 200, login_ok.text
-            access_token = login_ok.json().get("access_token")
-            assert access_token
+            access_token = access_token_from_login_response(login_ok)
 
             clear_panel = await admin_ac.get(f"/api/v1/admin/users/{user_id}/sign-in-security")
             assert clear_panel.status_code == 200, clear_panel.text
@@ -163,7 +163,7 @@ async def test_smoke_post_unlock_login_step_up_clears_trust_cookie():
         async with AsyncClient(transport=ASGITransport(app=app), base_url=origin) as ac:
             lr2 = await ac.post("/api/v1/auth/login", json={"email": email, "password": password})
             assert lr2.status_code == 200, lr2.text
-            token = lr2.json()["access_token"]
+            token = access_token_from_login_response(lr2)
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -216,8 +216,7 @@ async def test_smoke_unlock_when_already_clear_does_not_mandate_step_up():
                 json={"email": email, "password": password, "trust_this_device": False},
             )
             assert login_ok.status_code == 200, login_ok.text
-            access_token = login_ok.json().get("access_token")
-            assert access_token
+            access_token = access_token_from_login_response(login_ok)
 
             unlock = await admin_ac.post(
                 "/api/v1/admin/users/{}/unlock-sign-in".format(user_id),

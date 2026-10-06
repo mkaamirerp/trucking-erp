@@ -28,10 +28,11 @@ from app.models.tenant_auth import TenantUser, TenantUserInvite, TenantWorkspace
 from app.routers.me import _account_setup_missing
 from app.core.database import get_db
 from app.utils.auth_identity import normalize_auth_email
-from app.utils.password import verify_password, hash_password
+from app.utils.password import verify_password
 from app.deps.tenant import require_tenant
 from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.services.tenant_auth_dual_write import (
+    apply_apex_password_reset_sync_mapped_tenants,
     apply_password_and_session_version_platform_primary,
     apply_password_and_session_version_tenant_primary,
     mirror_reset_tokens_to_platform,
@@ -69,6 +70,7 @@ from app.services.login_password_abuse import (
     record_login_password_verify_failure,
 )
 from app.services.login_step_up_otp import (
+    challenge_carries_prior_human_verification,
     issue_login_step_up_otp_for_challenge,
     login_step_up_challenge_gate_after_password,
     verify_login_step_up_otp_for_challenge,
@@ -509,11 +511,12 @@ async def reset_password(payload: ResetPasswordRequest, request: Request, db=Dep
                 )
                 break
         else:
-            user.password_hash = hash_password(payload.new_password)
-            user.session_version = int(getattr(user, "session_version", 1)) + 1
-            user.password_reset_token_hash = None
-            user.password_reset_expires_at = None
-            await db.commit()
+            await apply_apex_password_reset_sync_mapped_tenants(
+                platform_db=db,
+                platform_user=user,
+                new_password_plain=payload.new_password,
+                open_tenant_session=open_tenant_session_by_id,
+            )
         return {"ok": True, "message": "Your password has been reset. You can now sign in."}
     except HTTPException:
         raise
@@ -766,7 +769,9 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Password not set for this account. Use 'Forgot password' to set one.",
                 )
-            await assert_login_human_verification_if_armed(tid, email_norm, payload.turnstile_token)
+            await assert_login_human_verification_if_armed(
+                tid, email_norm, payload.turnstile_token, request=request
+            )
             if not verify_password(payload.password, tu.password_hash):
                 await record_login_password_verify_failure(tid, email_norm)
                 pt_row = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tid))
@@ -813,7 +818,9 @@ async def _resolve_tenant_id_for_apex_login(request: Request, db, payload: Login
             detail="Password not set for this account. Use 'Forgot password' to set one.",
         )
     tid_pf = platform_tenant_ids[0]
-    await assert_login_human_verification_if_armed(tid_pf, email_norm, payload.turnstile_token)
+    await assert_login_human_verification_if_armed(
+        tid_pf, email_norm, payload.turnstile_token, request=request
+    )
     if not verify_password(payload.password, user.password_hash):
         await record_login_password_verify_failure(tid_pf, email_norm)
         pt = await db.scalar(select(PlatformTenant).where(PlatformTenant.id == tid_pf))
@@ -868,6 +875,12 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant not ready")
 
     familiar_device = verify_login_trust_cookie(request, int(tenant_id))
+    human_verification_already_satisfied = await challenge_carries_prior_human_verification(
+        db,
+        tenant_id=int(tenant_id),
+        email_norm=email_norm,
+        login_challenge_id=payload.login_challenge_id,
+    )
 
     if tenant_uses_tenant_db_auth(getattr(tenant, "tenant_auth_mode", None)):
         sub: int | None = None
@@ -917,7 +930,13 @@ async def login(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Password not set for this account. Use 'Forgot password' to set one.",
                 )
-            await assert_login_human_verification_if_armed(tenant_id, email_norm, payload.turnstile_token)
+            await assert_login_human_verification_if_armed(
+                tenant_id,
+                email_norm,
+                payload.turnstile_token,
+                request=request,
+                already_satisfied=human_verification_already_satisfied,
+            )
             if not verify_password(payload.password, tu.password_hash):
                 await record_login_password_verify_failure(tenant_id, email_norm)
                 await log_and_persist_login_failure(
@@ -998,8 +1017,6 @@ async def login(
         return {
             "ok": True,
             "workspace_url": workspace_url,
-            "access_token": access,
-            "refresh_token": refresh,
             "familiar_device": familiar_device,
         }
 
@@ -1054,7 +1071,13 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Password not set for this account. Use 'Forgot password' to set one.",
         )
-    await assert_login_human_verification_if_armed(tenant_id, email_norm, payload.turnstile_token)
+    await assert_login_human_verification_if_armed(
+        tenant_id,
+        email_norm,
+        payload.turnstile_token,
+        request=request,
+        already_satisfied=human_verification_already_satisfied,
+    )
     if not verify_password(payload.password, user.password_hash):
         await record_login_password_verify_failure(tenant_id, email_norm)
         await log_and_persist_login_failure(
@@ -1091,8 +1114,6 @@ async def login(
     return {
         "ok": True,
         "workspace_url": workspace_url,
-        "access_token": access,
-        "refresh_token": refresh,
         "familiar_device": familiar_device,
     }
 
