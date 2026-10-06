@@ -898,7 +898,7 @@ Work in this order unless new evidence changes severity:
 - No migration.
 - No deploy.
 - No Load remediation commit.
-- Cursor whole-module audit received and reviewed. Next action: **Cursor read-only audit of ISSUE 0A — executable legacy writer freeze only. No code changes yet.**
+- ISSUE 0A read-only audit received and independently reviewed. Next action: **implement ISSUE 0A only using §14 refined atomic freeze contract. No migration, no deploy, no 0B work yet.**
 
 
 # 11. Cursor whole-module audit amendment — 2026-10-06
@@ -1356,4 +1356,287 @@ Required report sections:
 ```
 
 No code, no migration, no deploy, no commit in that first pass.
+
+
+
+# 14. ISSUE 0A audit result — accepted with implementation corrections
+
+**Source:** Cursor ISSUE 0A read-only legacy-writer audit, reviewed against current repository code on 2026-10-06.  
+**Status:** **AUDIT ACCEPTED. IMPLEMENTATION PLAN REFINED.**
+
+## 14.1 What Cursor proved correctly
+
+Cursor's writer inventory is materially correct.
+
+### Production-reachable legacy writers confirmed
+
+1. **`POST /loads` / `create_load`**
+   - Can create a Load with legacy operational status because the create schema still accepts the broad status vocabulary.
+   - Can accept Load-level driver/truck/trailer assignment.
+   - Does **not** itself mint `dispatch_trips`.
+
+2. **`PATCH /loads/{id}` / `update_load(source="ui")`**
+   - Blocks only a **new** transition into `dispatched`.
+   - Still allows other operational Load statuses such as `assigned`, `in_transit`, etc.
+   - Still writes Load-level driver/truck/trailer assignment.
+
+3. **LoadWorkspace general Save**
+   - Uses `buildLoadPersistPayload`.
+   - Current payload design includes status and assignment values, so ordinary commercial Save can participate in the legacy operational write model.
+
+4. **Legacy dispatch assignment UI**
+   - `DispatchAssignmentStrip`
+   - `onDispatchAssign`
+   - `?dispatchAssign=1`
+   - `DeprecatedDispatchPage` Assign navigation
+   are still live product paths into Load-level assignment.
+
+5. **Legacy cancel-via-Load-status**
+   - Existing legacy dispatched rows can still use the Load status path to cancel the old active dispatch trip/read model.
+   - This still mutates legacy `dispatch_trips` and can propagate legacy status into canonical Trip state.
+
+### Non-HTTP executable writers confirmed
+
+- `app/scripts/seed_demo_operational_loads.py` explicitly calls `update_load(..., source="seed")`.
+- `seed_dispatch.py` can seed operational Load states directly.
+- Test helpers directly create legacy dispatch state.
+
+### Read-only dependencies confirmed
+
+Historical readers still consume:
+
+- `Load.trip_number`
+- `Load.active_dispatch_trip_id`
+- Load assignment snapshots
+- legacy board/status display
+- pay-run tracing metadata
+- some dashboard/driver/truck hints
+
+These are **not a reason to keep producing new legacy writes**.
+
+## 14.2 Important correction to Cursor's proposed freeze sequence
+
+Cursor suggested:
+
+```text
+restrict LoadCreate/LoadUpdate status
+then reject assignment
+then hide UI
+```
+
+The direction is right, but implementation must be **coordinated**, because the current LoadWorkspace general Save still sends status and assignment fields.
+
+If backend rejection is deployed before the frontend payload is narrowed, normal commercial Load edits can start failing even when the user did not intentionally perform an operational action.
+
+Therefore ISSUE 0A must be implemented as **one atomic compatibility slice**:
+
+```text
+frontend stops sending legacy operational fields
+        +
+backend stops accepting new legacy operational writes
+        +
+seed bypass removed
+        +
+legacy cancel hook disconnected
+```
+
+Do not deploy only half of this slice.
+
+## 14.3 Refined 0A write contract
+
+### New Load create
+
+Normal product Load creation should create **commercial draft state only**.
+
+For ISSUE 0A:
+
+```text
+POST /loads
+→ new Load.status = draft
+→ no operational driver/truck/trailer assignment
+```
+
+Do not allow create to manufacture:
+
+```text
+unassigned
+assigned
+dispatched
+arrived_pickup
+in_transit
+arrived_delivery
+delivered
+issue_hold
+```
+
+`ready` should also not be created by generic create because the explicit Mark Ready gate already exists and will be hardened in Original Issue 3.
+
+### Generic Load update
+
+General commercial Save must no longer be an execution-status writer.
+
+For ordinary PATCH:
+
+- do not permit transition into a legacy operational status
+- do not permit new Load-level driver/truck/trailer assignment
+- do not invoke legacy trip mint
+- do not invoke legacy dispatch-trip cancellation
+
+### Historical rows
+
+Old rows must remain readable and commercially editable.
+
+Important compatibility rule:
+
+> A historical row whose stored status is `dispatched`, `assigned`, `in_transit`, etc. must still be able to save an unrelated commercial field **without requiring the client to rewrite or revalidate that legacy status**.
+
+Therefore the general Save payload should **omit status when the user is not performing a dedicated status action**, rather than resubmitting the historical value on every edit.
+
+Likewise, the general commercial Save should omit Load-level assignment fields once those fields become read-only compatibility snapshots.
+
+This is safer than relying on "stay on same legacy status" as an ongoing generic write behavior.
+
+## 14.4 Source=seed rule
+
+The `source="seed"` exception must no longer bypass the product status guard.
+
+After 0A:
+
+```text
+source metadata
+!= permission to invoke obsolete business rules
+```
+
+Seed/demo scripts that need historical fixtures must use isolated test/demo fixture construction, not a production service backdoor.
+
+Do not leave a callable production-domain service path where setting `source="seed"` changes authorization/business semantics.
+
+## 14.5 Legacy mint helpers
+
+After the seed bypass and Load-status hooks are removed:
+
+- `ensure_active_trip_for_freight_load()`
+- `_upsert_trip_and_membership()`
+- `cancel_active_trip_for_load()`
+
+must have **no normal product caller**.
+
+For 0A:
+
+- they may remain physically in the tree for tests/0B historical migration analysis
+- mark/document them as legacy/internal if needed
+- do not delete them yet
+- prove with search/tests that product routers/UI cannot reach them
+
+Deletion is deferred until Issue 0B/0D has rewritten historical migration tests and data conversion rules.
+
+## 14.6 Legacy UI freeze
+
+The following should stop creating new Load operational truth in the same 0A slice:
+
+- LoadWorkspace operational assignment controls
+- `DispatchAssignmentStrip`
+- `?dispatchAssign=1`
+- Assign action from `DeprecatedDispatchPage`
+- broad operational `Load.status` editing
+
+Historical values may remain visible as read-only text until 0C retires the legacy board/read model.
+
+## 14.7 Tests required for 0A implementation
+
+Minimum backend tests:
+
+1. POST Load with `status=assigned` cannot create assigned Load.
+2. POST Load with `status=dispatched` cannot create dispatched Load.
+3. POST Load with `status=in_transit` cannot create in_transit Load.
+4. POST Load with driver/truck/trailer operational assignment is rejected or stripped according to the chosen explicit API contract.
+5. Generic PATCH draft → assigned is blocked.
+6. Generic PATCH draft → in_transit is blocked.
+7. Generic PATCH draft → dispatched remains blocked.
+8. Generic PATCH cannot change Load driver/truck/trailer as operational assignment.
+9. `source="seed"` cannot bypass dispatched/status guard.
+10. Ordinary commercial edit of a historical `dispatched` Load succeeds when status/assignment are omitted.
+11. Ordinary commercial edit does not call `ensure_active_trip_for_freight_load`.
+12. Ordinary commercial edit does not call `cancel_active_trip_for_load`.
+13. No new `dispatch_trips` row is created by Load POST/PATCH.
+14. No new canonical `Trip.status=active` can be created through normal Load POST/PATCH.
+15. Existing historical `trip_number` / `active_dispatch_trip_id` remain readable.
+16. canonical `POST /trips` planned Trip creation remains unaffected.
+17. Mark Ready endpoint is not accidentally removed; Issue 3 will separately make it authoritative.
+
+Minimum frontend tests:
+
+18. General Load Save payload omits operational Load status when not performing a dedicated action.
+19. General Load Save payload omits driver/truck/trailer operational assignment.
+20. Legacy assignment strip/action is no longer reachable for new work.
+21. A historical Load with legacy status can still edit a commercial field without frontend attempting a legacy state rewrite.
+22. Create Load submits commercial draft semantics only.
+
+## 14.8 Do not fold other issues into 0A
+
+0A does **not** fix:
+
+- planned Trip visibility
+- Trip status data migration
+- 75 `active` / 1 `open` live rows
+- TripLoad current-row lookup
+- readiness requirement before Trip membership
+- Mark Ready bypass in its final authoritative form
+- stop history
+- delete/cancel commercial policy
+- dashboard/read-model migration
+- pay-run migration
+- parser issues
+- tenant contamination
+- composite tenant FKs
+
+Those remain later numbered issues.
+
+## 14.9 ISSUE 0A accepted implementation sequence
+
+Implement as one narrow slice:
+
+```text
+A. Narrow frontend Load commercial Save payload
+   - no operational status rewrite
+   - no Load assignment write
+
+B. Remove legacy assignment UI entry points
+   - strip
+   - dispatchAssign path
+   - legacy Assign navigation
+
+C. Harden backend create
+   - commercial draft only
+   - no Load operational assignment
+
+D. Harden generic backend update
+   - no new legacy operational status writes
+   - no Load assignment writes
+
+E. Remove source="seed" business bypass
+
+F. Disconnect legacy mint/cancel hooks from generic Load update
+
+G. Rewrite legacy-writer tests into freeze-regression tests
+
+H. Prove canonical Trip APIs are unchanged
+```
+
+**No migration is required for 0A.**
+
+## 14.10 Gate to proceed
+
+ISSUE 0A audit is complete and accepted.
+
+The next action may be **ISSUE 0A implementation only**, using the refined contract above.
+
+After implementation:
+
+- run targeted Load/Trip tests
+- run frontend Load workspace tests
+- run grep/call-site proof that no normal product caller reaches legacy mint/cancel helpers
+- do not migrate live legacy rows
+- do not deploy
+- do not start 0B until ChatGPT reviews the implementation report/diff
 
