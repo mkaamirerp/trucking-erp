@@ -43,6 +43,43 @@ fetch_path () {
     | jq -r '.Parameters[] | "\(.Name | split("/") | last)=\(.Value)"'
 }
 
+fatal_if_required_secrets_missing() {
+  local secrets_file="$1"
+  local required_vars=(
+    DATABASE_URL POSTGRES_ADMIN_URL POSTGRES_PASSWORD
+    LOGIN_TRUST_COOKIE_SECRET ENVIRONMENT JWT_SECRET
+  )
+  local missing=0
+  local v val jwt_secret_lc
+  for v in "${required_vars[@]}"; do
+    if ! grep -q "^${v}=" "$secrets_file"; then
+      echo "FATAL: ${v} missing in $secrets_file. Refusing to start."
+      missing=1
+    else
+      val="$(grep "^${v}=" "$secrets_file" | head -n1 | cut -d= -f2-)"
+      if [ -z "$val" ]; then
+        echo "FATAL: ${v} is EMPTY in $secrets_file. Refusing to start."
+        missing=1
+      elif [ "$v" = "JWT_SECRET" ]; then
+        jwt_secret_lc="$(printf '%s' "$val" | tr '[:upper:]' '[:lower:]')"
+        if [ "$jwt_secret_lc" = "dev-change-me" ]; then
+          echo "FATAL: JWT_SECRET is unsafe. Refusing to start."
+          missing=1
+        fi
+      fi
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+if [[ "${1:-}" == "--check-secrets-file" ]]; then
+  fatal_if_required_secrets_missing "${2:?usage: --check-secrets-file PATH}"
+  exit $?
+fi
+
 # Fetch SSM → truckerp.env (single prod namespace)
 if {
   fetch_path "/truckerp/${SSM_ENV}/platform/"
@@ -50,25 +87,7 @@ if {
 } 2>/dev/null | awk -F= 'NF>=2 { a[$1]=$0 } END { for (k in a) print a[k] }' | sort > "$SECRETS_FILE" 2>/dev/null; then
   
   # ---- FAIL-CLOSED: required secrets must be present and non-empty ----
-  required_vars=(
-    DATABASE_URL POSTGRES_ADMIN_URL POSTGRES_PASSWORD
-    LOGIN_TRUST_COOKIE_SECRET ENVIRONMENT
-  )
-  missing=0
-  for v in "${required_vars[@]}"; do
-    if ! grep -q "^${v}=" "$SECRETS_FILE"; then
-      echo "FATAL: ${v} missing in $SECRETS_FILE. Refusing to start."
-      missing=1
-    else
-      # Extract value after first '='
-      val="$(grep "^${v}=" "$SECRETS_FILE" | head -n1 | cut -d= -f2-)"
-      if [ -z "$val" ]; then
-        echo "FATAL: ${v} is EMPTY in $SECRETS_FILE. Refusing to start."
-        missing=1
-      fi
-    fi
-  done
-  if [ "$missing" -ne 0 ]; then
+  if ! fatal_if_required_secrets_missing "$SECRETS_FILE"; then
     exit 1
   fi
   # ----------------------------------------------------------------

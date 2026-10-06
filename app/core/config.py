@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return (self.environment or "").lower() in ("production", "prod", "prd")
 
+    def is_production_or_staging(self) -> bool:
+        if self.is_production():
+            return True
+        e = (self.environment or "").lower().strip()
+        return e in ("staging", "stage", "stg", "preprod")
+
     def allows_tenant_resolution_shortcuts(self) -> bool:
         """
         Explicit allow flag AND environment allowlist only. Never implicit “not prod”.
@@ -60,8 +66,8 @@ class Settings(BaseSettings):
     tenant_db_app_password: str | None = None
     # Tenant alembic target revision for provisioning; use "head" to always run current migrations
     tenant_alembic_target_rev: str = "head"
-    # Auth
-    jwt_secret: str = "dev-change-me"
+    # Auth. No hardcoded JWT default — production/staging fail closed in enforce_jwt_secret_policy().
+    jwt_secret: str | None = None
     jwt_algorithm: str = "HS256"
     jwt_access_minutes: int = 30
     jwt_refresh_days: int = 14
@@ -69,6 +75,8 @@ class Settings(BaseSettings):
     secure_cookies: bool = False
     jwt_same_site: str = "lax"
     base_domain: str = "truckerp.me"
+    # Dev/test-only origin for emailed password-reset links. Ignored in production/staging.
+    password_reset_public_origin: str | None = None
 
     # Cloudflare Turnstile (optional). When unset, login human-verification step is skipped (dev).
     # When set, POST /auth/login may require a valid site token after repeated password failures.
@@ -142,6 +150,40 @@ settings = Settings()
 _validate_database_url(settings.database_url, "DATABASE_URL")
 if getattr(settings, "postgres_admin_url", None):
     _validate_database_url(settings.postgres_admin_url, "POSTGRES_ADMIN_URL")
+
+JWT_SECRET_UNSAFE_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "dev-change-me",
+        "changeme",
+        "change-me",
+        "secret",
+    }
+)
+JWT_SECRET_MIN_BYTES_PRODUCTION = 32
+
+
+def enforce_jwt_secret_policy(cfg: Settings | None = None) -> None:
+    """
+    Fail closed if JWT signing secret is missing or unsafe.
+    Production/staging: required, not a known placeholder, and at least 32 bytes.
+    Test/dev: required and non-empty so encode/decode never uses a hidden default.
+    Never logs the secret value.
+    """
+    s = cfg or settings
+    secret = (s.jwt_secret or "").strip()
+    if s.is_production_or_staging():
+        if not secret:
+            raise RuntimeError("JWT_SECRET is required in this environment.")
+        if secret.lower() in JWT_SECRET_UNSAFE_PLACEHOLDERS:
+            raise RuntimeError("JWT_SECRET is unsafe in this environment.")
+        if len(secret.encode("utf-8")) < JWT_SECRET_MIN_BYTES_PRODUCTION:
+            raise RuntimeError("JWT_SECRET is too short in this environment.")
+        return
+    if not secret:
+        raise RuntimeError("JWT_SECRET is required.")
+
+
+enforce_jwt_secret_policy(settings)
 
 
 def enforce_test_bypass_auth_policy(cfg: Settings | None = None) -> None:

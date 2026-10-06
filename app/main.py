@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.routers.fleet import router as fleet_router
 
-from app.core.config import enforce_test_bypass_auth_policy, settings
+from app.core.config import enforce_jwt_secret_policy, enforce_test_bypass_auth_policy, settings
 from app.routers.health import router as health_router
 from app.routers.drivers import router as drivers_router
 from app.routers.driver_person_extension import router as driver_person_extension_router
@@ -89,6 +89,7 @@ logger = logging.getLogger("trucking_erp")
 
 @app.on_event("startup")
 def _log_startup():
+    enforce_jwt_secret_policy()
     enforce_test_bypass_auth_policy()
     _guard_environment_from_ssm_secrets()
     _startup_banner()

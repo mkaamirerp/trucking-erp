@@ -717,7 +717,7 @@ export async function loginStepUpVerify(payload: { login_challenge_id: string; o
 }
 
 /** Request password reset email (no tenant required). */
-export async function forgotPassword(payload: { email: string; reset_base_url?: string }) {
+export async function forgotPassword(payload: { email: string }) {
   const res = await fetchPublic(`${API_BASE}/auth/forgot-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

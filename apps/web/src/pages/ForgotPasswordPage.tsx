@@ -15,7 +15,6 @@ function ForgotPasswordPage() {
     try {
       const data = await forgotPassword({
         email: email.trim(),
-        reset_base_url: window.location.origin,
       });
       if (data.sent) {
         setSent(true);

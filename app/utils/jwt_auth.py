@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
@@ -19,8 +18,11 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _default_secret() -> str:
-    return settings.jwt_secret or os.getenv("JWT_SECRET") or "dev-change-me"
+def _jwt_secret() -> str:
+    secret = (settings.jwt_secret or "").strip()
+    if not secret:
+        raise RuntimeError("JWT_SECRET is not configured")
+    return secret
 
 
 def _encode_token(
@@ -43,7 +45,7 @@ def _encode_token(
         "iat": int(_utcnow().timestamp()),
         "exp": int((_utcnow() + expires_in).timestamp()),
     }
-    return jwt.encode(payload, _default_secret(), algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _jwt_secret(), algorithm=settings.jwt_algorithm)
 
 
 def create_access_token(
@@ -96,7 +98,7 @@ def decode_token(token: str, *, expected_type: str | None = None) -> dict:
     if not _looks_like_jwt(token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format")
     try:
-        payload = jwt.decode(token, _default_secret(), algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(token, _jwt_secret(), algorithms=[settings.jwt_algorithm])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:

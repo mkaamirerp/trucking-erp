@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.utils.jwt_auth import TokenType, create_access_token, create_refresh_token, decode_token, extract_sv
 from app.core.config import settings
+from app.services.password_reset_links import build_password_reset_link
 from app.deps.auth import get_current_user, CurrentUser, get_current_platform_user
 from app.deps.tenant_db import open_tenant_session_by_id
 from app.models.platform import (
@@ -304,7 +305,6 @@ RESET_TOKEN_EXPIRY_MINUTES = 60
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
-    reset_base_url: str | None = None
 
 
 @router.post("/forgot-password")
@@ -419,12 +419,8 @@ async def forgot_password(payload: ForgotPasswordRequest, request: Request, db=D
         if not user:
             return ok_msg
 
-        base = (payload.reset_base_url or "").strip().rstrip("/")
-        if not base and settings.base_domain:
-            base = f"https://{settings.base_domain}"
-        if not base:
-            base = "https://truckerp.me"
-        reset_link = f"{base}/reset-password?token={raw_token}"
+        tenant_slug = getattr(request.state, "tenant_slug", None)
+        reset_link = build_password_reset_link(raw_token=raw_token, tenant_slug=tenant_slug)
         if not bool(settings.secure_cookies):
             logger.warning("DEV_PASSWORD_RESET_LINK email=%s link=%s", user.email, reset_link)
         try:

@@ -11,6 +11,8 @@ os.environ["ALLOW_TENANT_RESOLUTION_SHORTCUTS"] = "true"
 # Settings() validates DATABASE_URL at import; many unit tests import app modules without a real DB.
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "postgresql://test:test@db.example.invalid:5432/test"
+if not os.environ.get("JWT_SECRET"):
+    os.environ["JWT_SECRET"] = "test-only-jwt-secret-not-for-production"
 
 import pytest
 
