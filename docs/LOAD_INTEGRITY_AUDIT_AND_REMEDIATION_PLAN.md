@@ -1866,3 +1866,89 @@ Then independent review will inspect that exact commit and either:
 - accept 0A and record the SHA, or
 - send focused corrections back to Cursor.
 
+
+
+# 16. ISSUE 0A independent code review — ACCEPTED
+
+**Reviewed commit:** `26621fe2e0c9c843f18f5b820c0cfc663c178c23` on `review/load-issue0a`  
+**Review date:** 2026-10-06  
+**Status:** **ISSUE 0A CODE ACCEPTED. NOT YET DEPLOYED.**
+
+Independent review inspected the actual commit diff and review-branch file contents, not only Cursor's report.
+
+## 16.1 Accepted behavior
+
+The accepted implementation now proves:
+
+- normal Load create persists `status = draft`
+- create rejects legacy operational Load statuses
+- create rejects Load-level driver/truck/trailer assignment
+- normal Load Save payload omits `status`
+- normal Load Save payload omits `driver_id`, `truck_id`, and `trailer_id`
+- legacy assignment UI/action path is removed
+- `source="seed"` is no longer a business-rule bypass
+- generic Load update no longer calls legacy trip mint/cancel helpers
+- normal Load POST/PATCH cannot create new `dispatch_trips`
+- normal Load POST/PATCH cannot create new canonical `Trip.status = active`
+- historical legacy Load rows remain readable
+- historical legacy rows remain commercially editable when status/assignment are omitted
+- canonical Trip services were not modified by Issue 0A
+- no migration was added or executed
+- no deploy was performed
+
+## 16.2 Final correction verified
+
+Independent review found one status-boundary hole in the first review commit:
+
+```json
+{"status": null}
+```
+
+could pass the first legacy-status check and reach a NOT NULL database write attempt.
+
+The amended commit fixes this by requiring every explicitly supplied PATCH status to belong to:
+
+```text
+draft
+ready
+```
+
+using `LOAD_WRITABLE_STATUSES`.
+
+Explicit `status: null` now returns controlled `409 LOAD_STATUS_NOT_WRITABLE`, with row status and concurrency version unchanged.
+
+### Precision note
+
+The rejection occurs before any **database mutation/update**. `update_load()` still performs its normal initial `get_load()` read before applying the payload guard. Therefore documentation/tests should not describe this as "before any database access" in the literal sense.
+
+## 16.3 Verification accepted
+
+Cursor reported after the amended commit:
+
+```text
+targeted backend Load/dispatch suite: 102 passed
+frontend loadWorkspace suite: 72 passed
+git diff --check: clean
+working tree: only ?? tolls_implemented_code.zip
+```
+
+Independent diff review confirmed the null-status guard and regression tests are present in the amended commit.
+
+## 16.4 Remaining items are intentionally outside 0A
+
+The following are not 0A defects and remain in the issue register:
+
+- generic draft/ready PATCH authority — Original Issue 3
+- historical legacy status/data migration — Issue 0B
+- planned Trip visibility — Issue 13
+- stop full replacement/history loss — Original Issue 2
+- money/audit atomicity — Issue 26
+- legacy board/read-model retirement — 0C / Issue 25
+- parser/intake concerns — later parser issues
+
+## 16.5 Merge/deploy state
+
+The accepted code currently exists on the review branch and is not yet deployed.
+
+Do not begin Issue 0B until the accepted 0A code is integrated into the intended mainline and the repository state is rechecked.
+
