@@ -830,6 +830,34 @@ def delete_toll_csv_file(
     get_storage().delete(storage_key, module="toll", tenant_slug=tenant_slug)
 
 
+async def save_toll_pdf_file_bytes(
+    tenant_slug: str,
+    intake_token: str,
+    body: bytes,
+    *,
+    filename_hint: str,
+) -> StoredFile:
+    """Store original Toll PDF FILE bytes. Pointer stays on toll_source_batches.source_storage_ref."""
+    return await get_storage().save_bytes(
+        tenant_slug,
+        "toll",
+        "pdf",
+        intake_token,
+        body,
+        filename_hint=filename_hint,
+        content_type="application/pdf",
+    )
+
+
+def delete_toll_pdf_file(
+    storage_key: str,
+    *,
+    tenant_slug: str | None = None,
+) -> None:
+    """Remove one Toll PDF object previously saved by save_toll_pdf_file_bytes."""
+    get_storage().delete(storage_key, module="toll", tenant_slug=tenant_slug)
+
+
 async def save_fuel_manual_entry_stage_bytes(
     tenant_slug: str,
     stage_id: str,

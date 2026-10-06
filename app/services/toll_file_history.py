@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.toll import SOURCE_TYPE_FILE, TollFileSourceRow, TollSourceBatch
+from app.models.toll import FILE_FORMAT_CSV, SOURCE_TYPE_FILE, TollFileSourceRow, TollSourceBatch
 
 FILE_HISTORY_LIMIT = 100
 FILE_DETAIL_DEFAULT_LIMIT = 100
@@ -94,6 +94,7 @@ async def list_toll_file_batches(
         .where(
             TollSourceBatch.tenant_id == tenant_id,
             TollSourceBatch.source_type == SOURCE_TYPE_FILE,
+            TollSourceBatch.file_format == FILE_FORMAT_CSV,
         )
         .order_by(TollSourceBatch.id.desc())
         .limit(capped)
@@ -124,6 +125,7 @@ async def get_toll_file_batch(
             TollSourceBatch.tenant_id == tenant_id,
             TollSourceBatch.id == batch_id,
             TollSourceBatch.source_type == SOURCE_TYPE_FILE,
+            TollSourceBatch.file_format == FILE_FORMAT_CSV,
         )
     )
     if batch is None:

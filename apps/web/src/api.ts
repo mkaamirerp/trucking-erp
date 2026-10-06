@@ -4942,3 +4942,213 @@ export async function uploadTollCsvFile(file: File): Promise<TollCsvIntakeResult
   });
   return handle(res);
 }
+
+export type TollPdfReviewListItem = {
+  batch_id: number;
+  source_type: string;
+  file_format: string | null;
+  profile_code: string;
+  filename: string | null;
+  source_hash: string | null;
+  status: string;
+  review_status: string;
+  imported_at: string | null;
+  statement_date: string | null;
+  account_number: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  source_total_trip_count: number | null;
+  source_total_trip_charge: string | null;
+  parsed_trip_count: number;
+  parsed_total_trip_charge: string | null;
+  trip_count_matches: boolean;
+  trip_total_matches: boolean;
+  reconciliation_ok: boolean;
+};
+
+export type TollPdfReviewRow = {
+  source_row_order: number;
+  source_page_number?: number | null;
+  post_date?: string | null;
+  entry_date?: string | null;
+  entry_time?: string | null;
+  exit_date?: string | null;
+  exit_time?: string | null;
+  agency_raw?: string | null;
+  entry_location?: string | null;
+  entry_lane?: string | null;
+  exit_location?: string | null;
+  exit_lane?: string | null;
+  transponder_number?: string | null;
+  plate_number?: string | null;
+  trip_charge: string;
+  trip_charge_raw?: string | null;
+  source_group_transponder?: string | null;
+  source_group_plate?: string | null;
+  provider_raw?: Record<string, unknown>;
+};
+
+export type TollPdfReviewDetail = TollPdfReviewListItem & {
+  start_balance?: string | null;
+  end_balance?: string | null;
+  total_payment_amount?: string | null;
+  total_payment_count?: number | null;
+  source_page_count?: number | null;
+  source_metadata?: Record<string, unknown>;
+  total_row_count: number;
+  row_offset: number;
+  row_limit: number;
+  rows: TollPdfReviewRow[];
+};
+
+export type TollPdfIntakeResult = {
+  batch_id: number;
+  source_type: string;
+  file_format: string;
+  profile_code: string;
+  filename: string;
+  source_hash: string;
+  status: string;
+  review_status: string;
+  duplicate_match_count: number;
+  duplicate_batch_ids: number[];
+  statement_date?: string | null;
+  account_number?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  source_total_trip_count?: number | null;
+  source_total_trip_charge?: string | null;
+  parsed_trip_count: number;
+  parsed_total_trip_charge: string;
+  trip_count_matches: boolean;
+  trip_total_matches: boolean;
+  reconciliation_ok: boolean;
+};
+
+export async function listTollPdfReviews(q?: string): Promise<TollPdfReviewListItem[]> {
+  const url = new URL(`${API_BASE}/tolls/pdf-reviews`, window.location.origin);
+  if (q?.trim()) url.searchParams.set("q", q.trim());
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle(res);
+}
+
+export async function getTollPdfReview(
+  batchId: number,
+  opts?: { rowOffset?: number; rowLimit?: number },
+): Promise<TollPdfReviewDetail> {
+  const url = new URL(`${API_BASE}/tolls/pdf-reviews/${batchId}`, window.location.origin);
+  if (opts?.rowOffset != null) url.searchParams.set("row_offset", String(opts.rowOffset));
+  if (opts?.rowLimit != null) url.searchParams.set("row_limit", String(opts.rowLimit));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle(res);
+}
+
+export const TOLL_PDF_PROFILE_EZPASS_WVPA_MONTHLY = "EZPASS_WVPA_MONTHLY_STATEMENT_PDF";
+
+export async function uploadTollPdfFile(
+  file: File,
+  profileCode: string,
+): Promise<TollPdfIntakeResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("profile_code", profileCode);
+  const res = await fetchWithTenant(`${API_BASE}/tolls/files/pdf`, {
+    method: "POST",
+    body: form,
+  });
+  return handle(res);
+}
+
+export type TollManualStage = {
+  stage_id: number;
+  source_type: string;
+  file_format: string | null;
+  status: string;
+  post_date?: string | null;
+  event_date?: string | null;
+  event_time?: string | null;
+  agency_raw?: string | null;
+  entry_location?: string | null;
+  entry_lane?: string | null;
+  exit_location?: string | null;
+  exit_lane?: string | null;
+  transponder_number?: string | null;
+  plate_number?: string | null;
+  plate_state?: string | null;
+  trip_charge?: string | null;
+  currency?: string | null;
+  notes?: string | null;
+  unresolved_vehicle_identity: boolean;
+  vehicle_identity_status?: string | null;
+  source_evidence_json?: Record<string, unknown>;
+};
+
+export type TollManualStagePatch = {
+  post_date?: string | null;
+  event_date?: string | null;
+  event_time?: string | null;
+  agency_raw?: string | null;
+  entry_location?: string | null;
+  entry_lane?: string | null;
+  exit_location?: string | null;
+  exit_lane?: string | null;
+  transponder_number?: string | null;
+  plate_number?: string | null;
+  plate_state?: string | null;
+  trip_charge?: string | null;
+  notes?: string | null;
+  unresolved_vehicle_identity?: boolean;
+};
+
+export type TollManualValidateResult = {
+  ok: boolean;
+  errors: { code: string; message: string }[];
+  stage: TollManualStage;
+};
+
+export async function listTollManualStages(): Promise<TollManualStage[]> {
+  const res = await fetchWithTenant(`${API_BASE}/tolls/manual-entry/stages`);
+  return handle(res);
+}
+
+export async function createTollManualStage(payload?: TollManualStagePatch): Promise<TollManualStage> {
+  const res = await fetchWithTenant(`${API_BASE}/tolls/manual-entry/stages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+  });
+  return handle(res);
+}
+
+export async function getTollManualStage(stageId: number): Promise<TollManualStage> {
+  const res = await fetchWithTenant(`${API_BASE}/tolls/manual-entry/stages/${encodeURIComponent(stageId)}`);
+  return handle(res);
+}
+
+export async function patchTollManualStage(
+  stageId: number,
+  payload: TollManualStagePatch,
+): Promise<TollManualStage> {
+  const res = await fetchWithTenant(`${API_BASE}/tolls/manual-entry/stages/${encodeURIComponent(stageId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function validateTollManualStage(stageId: number): Promise<TollManualValidateResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/tolls/manual-entry/stages/${encodeURIComponent(stageId)}/validate`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
+export async function discardTollManualStage(stageId: number): Promise<{ ok: boolean }> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/tolls/manual-entry/stages/${encodeURIComponent(stageId)}/discard`,
+    { method: "POST" },
+  );
+  return handle(res);
+}

@@ -47,6 +47,8 @@ import FuelBvdHistoryPage from "./pages/FuelBvdHistoryPage";
 import FuelBvdFullDetailPage from "./pages/FuelBvdFullDetailPage";
 import FuelMainPage from "./pages/FuelMainPage";
 import TollsHistoryPage from "./pages/TollsHistoryPage";
+import TollsManualEntryPage from "./pages/TollsManualEntryPage";
+import TollsPdfReviewsPage from "./pages/TollsPdfReviewsPage";
 import AdminEmailConfigPage from "./pages/AdminEmailConfigPage";
 import AdminDispatchNumberingPage from "./pages/AdminDispatchNumberingPage";
 import AdminBrokerIntakePage from "./pages/AdminBrokerIntakePage";
@@ -325,6 +327,26 @@ function App() {
           <AdminRouteGuard>
             <Layout>
               <TollsHistoryPage />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
+      <Route
+        path="/tolls/pdf-reviews"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <TollsPdfReviewsPage />
+            </Layout>
+          </AdminRouteGuard>
+        }
+      />
+      <Route
+        path="/tolls/manual-entry"
+        element={
+          <AdminRouteGuard>
+            <Layout>
+              <TollsManualEntryPage />
             </Layout>
           </AdminRouteGuard>
         }

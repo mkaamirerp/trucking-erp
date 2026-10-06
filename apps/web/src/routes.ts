@@ -53,6 +53,10 @@ export const OPS = {
   FUEL_BVD_DETAIL: (importId: string) => `/fuel/bvd/${importId}/detail`,
   /** Toll FILE intake history/search (unmapped CSV rows). */
   TOLLS: "/tolls",
+  /** Toll PDF review staging (not canonical transactions). */
+  TOLLS_PDF_REVIEWS: "/tolls/pdf-reviews",
+  /** Toll MANUAL review-stage drafts (not canonical transactions). */
+  TOLLS_MANUAL_ENTRY: "/tolls/manual-entry",
 } as const;
 
 /** Apex-only platform control plane (X-Platform-Admin-Key). */

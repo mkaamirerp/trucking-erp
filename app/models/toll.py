@@ -55,6 +55,28 @@ READ_TYPES: Final[frozenset[str]] = frozenset({READ_TYPE_DEVICE, READ_TYPE_PLATE
 BATCH_STATUS_RECEIVED: Final[str] = "RECEIVED"
 BATCH_STATUS_PARSED: Final[str] = "PARSED"
 
+PDF_PROFILE_EZPASS_WVPA_MONTHLY: Final[str] = "EZPASS_WVPA_MONTHLY_STATEMENT_PDF"
+PDF_PROFILES: Final[frozenset[str]] = frozenset({PDF_PROFILE_EZPASS_WVPA_MONTHLY})
+
+MANUAL_STAGE_DRAFT: Final[str] = "DRAFT"
+MANUAL_STAGE_NEEDS_REVIEW: Final[str] = "NEEDS_REVIEW"
+MANUAL_STAGE_DISCARDED: Final[str] = "DISCARDED"
+MANUAL_STAGE_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        MANUAL_STAGE_DRAFT,
+        MANUAL_STAGE_NEEDS_REVIEW,
+        MANUAL_STAGE_DISCARDED,
+    }
+)
+VEHICLE_IDENTITY_PRESENT: Final[str] = "PRESENT"
+VEHICLE_IDENTITY_UNRESOLVED: Final[str] = "UNRESOLVED"
+
+REVIEW_STATUS_NEEDS_REVIEW: Final[str] = "NEEDS_REVIEW"
+REVIEW_STATUS_RECONCILIATION_FAILED: Final[str] = "RECONCILIATION_FAILED"
+PDF_REVIEW_STATUSES: Final[frozenset[str]] = frozenset(
+    {REVIEW_STATUS_NEEDS_REVIEW, REVIEW_STATUS_RECONCILIATION_FAILED}
+)
+
 # Canonical amount: NUMERIC(14, 4). Never IEEE float.
 TOLL_AMOUNT_PRECISION: Final[tuple[int, int]] = (14, 4)
 
@@ -199,6 +221,201 @@ class TollFileSourceRow(Base):
     source_row_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     cells: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     values: Mapped[list[Any]] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TollPdfStatementReview(Base):
+    """Parsed FILE/PDF statement metadata + review-stage reconciliation.
+
+    Temporary machine interpretation. Not a canonical TollTransaction.
+    profile_code names the explicit FILE profile (not a Toll source type).
+    """
+
+    __tablename__ = "toll_pdf_statement_review"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_toll_pdf_statement_review_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "batch_id",
+            name="uq_toll_pdf_statement_review_tenant_batch",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "batch_id"],
+            ["toll_source_batches.tenant_id", "toll_source_batches.id"],
+            name="fk_toll_pdf_statement_review_batch_tenant",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "profile_code IN ('EZPASS_WVPA_MONTHLY_STATEMENT_PDF')",
+            name="ck_toll_pdf_statement_review_profile_code",
+        ),
+        CheckConstraint(
+            "review_status IN ('NEEDS_REVIEW', 'RECONCILIATION_FAILED')",
+            name="ck_toll_pdf_statement_review_status",
+        ),
+        CheckConstraint(
+            "source_metadata IS NULL OR jsonb_typeof(source_metadata) = 'object'",
+            name="ck_toll_pdf_statement_review_source_metadata_object",
+        ),
+        Index("ix_toll_pdf_statement_review_tenant_id", "tenant_id"),
+        Index("ix_toll_pdf_statement_review_tenant_batch", "tenant_id", "batch_id"),
+        Index("ix_toll_pdf_statement_review_tenant_status", "tenant_id", "review_status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    batch_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    profile_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    statement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    account_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    start_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    end_balance: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    total_payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    total_payment_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_total_trip_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_total_trip_charge: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    parsed_trip_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    parsed_total_trip_charge: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    trip_count_matches: Mapped[bool] = mapped_column(nullable=False)
+    trip_total_matches: Mapped[bool] = mapped_column(nullable=False)
+    reconciliation_ok: Mapped[bool] = mapped_column(nullable=False)
+    review_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TollPdfReviewRow(Base):
+    """One parsed Toll PDF review row. Source evidence only; no unit/driver/payroll."""
+
+    __tablename__ = "toll_pdf_review_rows"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_toll_pdf_review_rows_tenant_id_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "batch_id",
+            "source_row_order",
+            name="uq_toll_pdf_review_rows_tenant_batch_source_row_order",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "batch_id"],
+            ["toll_source_batches.tenant_id", "toll_source_batches.id"],
+            name="fk_toll_pdf_review_rows_batch_tenant",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(provider_raw) = 'object'",
+            name="ck_toll_pdf_review_rows_provider_raw_object",
+        ),
+        Index("ix_toll_pdf_review_rows_tenant_id", "tenant_id"),
+        Index("ix_toll_pdf_review_rows_tenant_batch", "tenant_id", "batch_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    batch_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    source_row_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    post_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    entry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    entry_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    exit_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    exit_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    agency_raw: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entry_lane: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    exit_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    exit_lane: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    transponder_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    trip_charge: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
+    trip_charge_raw: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    source_group_transponder: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_group_plate: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    provider_raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TollManualEntryStage(Base):
+    """Temporary MANUAL Toll review draft. Not a FILE batch. Not a TollTransaction."""
+
+    __tablename__ = "toll_manual_entry_stages"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_toll_manual_entry_stages_tenant_id_id"),
+        CheckConstraint(
+            "source_type = 'MANUAL'",
+            name="ck_toll_manual_entry_stages_source_type",
+        ),
+        CheckConstraint(
+            "file_format IS NULL",
+            name="ck_toll_manual_entry_stages_file_format_null",
+        ),
+        CheckConstraint(
+            "status IN ('DRAFT', 'NEEDS_REVIEW', 'DISCARDED')",
+            name="ck_toll_manual_entry_stages_status",
+        ),
+        CheckConstraint(
+            "source_evidence_json IS NULL OR jsonb_typeof(source_evidence_json) = 'object'",
+            name="ck_toll_manual_entry_stages_source_evidence_object",
+        ),
+        Index("ix_toll_manual_entry_stages_tenant_id", "tenant_id"),
+        Index("ix_toll_manual_entry_stages_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False, default=SOURCE_TYPE_MANUAL)
+    file_format: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default=MANUAL_STAGE_DRAFT)
+
+    post_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    event_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    event_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    agency_raw: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entry_lane: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    exit_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    exit_lane: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    transponder_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    plate_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    trip_charge: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unresolved_vehicle_identity: Mapped[bool] = mapped_column(nullable=False, default=False)
+    vehicle_identity_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

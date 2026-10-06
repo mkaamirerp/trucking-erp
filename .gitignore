@@ -104,6 +104,10 @@ runtime/
 .cursor/hooks/
 .cursor/context/
 
+# Local customer Toll evidence — never commit
+tests/fixtures/1104Toll.jpg
+tests/fixtures/359238_AccountMonthlyStatement_20230403165823557.PDF
+
 # Alembic backups
 alembic_tenant/versions.BAK.*/
 

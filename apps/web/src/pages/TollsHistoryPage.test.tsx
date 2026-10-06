@@ -110,6 +110,9 @@ describe("TollsHistoryPage", () => {
   it("presents File Imports, not canonical toll transaction history", async () => {
     await renderPage();
     expect(host?.textContent).toContain("File Imports");
+    expect(host?.textContent).toContain("CSV File Imports");
+    expect(host?.textContent).toContain("PDF Reviews");
+    expect(host?.textContent).toContain("Manual Entry");
     expect(host?.textContent).toContain("CSV import history");
     expect(host?.textContent).toContain("not canonical toll transaction history");
     expect(host?.textContent).toContain("PARSED");
