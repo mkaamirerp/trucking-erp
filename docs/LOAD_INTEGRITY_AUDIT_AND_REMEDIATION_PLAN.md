@@ -898,4 +898,462 @@ Work in this order unless new evidence changes severity:
 - No migration.
 - No deploy.
 - No Load remediation commit.
-- Next action: **Cursor read-only audit of ISSUE 0 — complete legacy footprint inventory and scrub plan. No code changes yet.**
+- Cursor whole-module audit received and reviewed. Next action: **Cursor read-only audit of ISSUE 0A — executable legacy writer freeze only. No code changes yet.**
+
+
+# 11. Cursor whole-module audit amendment — 2026-10-06
+
+**Source:** Cursor report-only audit of the Load / Dispatch / Trip stack plus live `tenant_demo` inspection.  
+**ChatGPT review status:** code claims below were independently cross-checked against current repository code where possible. Live tenant counts are recorded as **Cursor-reported live evidence** and must be re-run before any migration/data-fix commit.
+
+## 11.1 Executive conclusion
+
+Cursor's report materially **confirms and expands** this audit.
+
+The most important correction to the previous plan is that the problem is broader than isolated Load bugs. The repository is still operating as **two overlapping operational products**:
+
+```text
+TARGET / NEW WORLD
+Load = commercial/readiness
+Trip = operational execution
+TripLoad = membership
+Custody = continuity
+
+STILL-LIVE LEGACY WORLD
+Load.status = operational lane
+Load.driver/truck/trailer = assignment truth
+dispatch_trips = dispatch identity/state
+legacy /dispatch board = mature operator surface
+```
+
+The first job is therefore not merely to block one bad status. It is to **remove the executable legacy operational world in a controlled order while preserving historical read compatibility until data is migrated**.
+
+## 11.2 Cursor-reported live tenant_demo evidence
+
+These figures came from Cursor's live `tenant_demo` inspection and are preserved here as audit evidence. ChatGPT has **not independently rerun the tenant database query**.
+
+Cursor reported:
+
+| Evidence | Reported value | Meaning |
+|---|---:|---|
+| `Trip.status = active` | 75 | Illegal under current five-state Trip lifecycle; legacy `dispatch_trips` vocabulary leaked into canonical Trip rows |
+| `Trip.status = open` | 1 | Also outside current five-state lifecycle |
+| `Trip.status = in_progress` | 92 | Current legal execution state |
+| in_progress trips with no open ACTIVE TripLoad | 92 / 92 | Execution can exist without active Load membership/custody |
+| trips with no `trip_loads` at all | 214 | Container rows can exist disconnected from Load membership |
+| assigned trips with no OPEN membership | 368 | Assignment does not imply usable Load membership |
+| in_progress trips with no OPEN membership | 91 | Execution path is disconnected from membership |
+| cancelled trips with `cancelled_at IS NULL` | 15 | Legacy cancellation history/state inconsistency |
+| open planned memberships | 4 | Planned membership exists but Load read model does not surface it |
+| open membership driver mismatches | 23 | Load-level and Trip-level assignment worlds disagree |
+| email-linked Loads with zero stops | 4 / 4 | Inbox → Load handoff creates sparse stubs, not hydrated commercial Loads |
+
+Cursor also reported that all 49 `Load.status = dispatched` rows point at Trips whose status is `active`.
+
+**Rule:** before any data remediation is executed, Cursor must rerun and save the exact SQL/query results in the issue report. Do not write migration logic from these numbers alone.
+
+## 11.3 Code findings independently verified after Cursor's report
+
+### CONFIRMED — legacy dispatch mirror can write illegal Trip statuses
+
+`app/services/dispatch_trips.py::_upsert_trip_and_membership()` currently copies:
+
+```python
+Trip.status = d_trip.status
+```
+
+and on updates:
+
+```python
+container.status = d_trip.status
+```
+
+`dispatch_trips` uses legacy values including `active` / `cancelled`; the canonical Trip lifecycle uses:
+
+```text
+planned
+assigned
+in_progress
+completed
+cancelled
+```
+
+Therefore the legacy mirror writer can create canonical Trip rows with an invalid `active` state. This is a confirmed code defect, not merely stale documentation.
+
+### CONFIRMED — planned membership intentionally does not set `loads.active_trip_id`
+
+`app/services/trips.py::_insert_trip_load_row()` only syncs `active_trip_id` for ACTIVE membership and explicitly leaves PLANNED membership without that pointer.
+
+That backend rule is correct.
+
+The UI/read model must therefore discover **open planned TripLoad membership**, not misuse `active_trip_id` as "any trip exists."
+
+### CONFIRMED — Load page gating still depends on `active_trip_id`
+
+Current LoadWorkspace logic still gates planned-trip affordances using `load.active_trip_id`. Existing docs also describe "Create Planned Trip when active_trip_id is null."
+
+This is a UI/read-model mismatch with the correct membership model.
+
+### CONFIRMED — backend Trip completion exists, but product wiring is incomplete
+
+`complete_trip_container()` exists and correctly requires:
+
+```text
+Trip.status = in_progress
+AND zero OPEN TripLoads
+```
+
+Custody transition APIs also exist in the backend architecture.
+
+The product problem is therefore not "backend has no completion." The problem is **frontend/operator workflow incompleteness**: the current Trip surfaces do not provide the complete custody → close path operators need.
+
+This distinction matters for remediation: do not rewrite backend completion before first proving the missing frontend/action wiring.
+
+### CONFIRMED — assignment service is too permissive for in-progress Trip mutation
+
+`update_trip_assignment()` blocks cancelled/completed Trips but does not block `in_progress`. It directly rewrites:
+
+```text
+trip.driver_id
+trip.truck_id
+trip.trailer_id
+```
+
+and only changes status when current state is planned/assigned.
+
+Therefore an API client can silently swap assignment on an in-progress Trip even though the UI may hide that editor. This conflicts with the locked recovery/repower rule that an operational recovery requires auditable continuity rather than an invisible in-place swap.
+
+### CONFIRMED — Decision 10 overlap guard is not present in assignment service
+
+Current `update_trip_assignment()` validates target existence but does not perform the documented future-assignment overlap check against other in-progress Trips.
+
+This should be tracked separately from the legacy Load assignment scrub because it is a defect in the new Trip path.
+
+### CONFIRMED — TripLoad lookup is history-row unsafe
+
+`_get_trip_load_row()` queries only:
+
+```text
+tenant_id
+trip_id
+load_id
+```
+
+without restricting to an OPEN membership or deterministically choosing the current row.
+
+Because uniqueness is on OPEN rows, a remove + re-add history can produce multiple historical rows for the same Trip/Load pair. A scalar lookup may return a stale removed/completed row.
+
+This is a real correctness bug for activation/completion/custody transitions.
+
+### CONFIRMED — planned membership insert does not require Load.status = ready
+
+`_insert_trip_load_row()` locks the Load but does not enforce commercial readiness.
+
+This means the Trip API can attach a `draft` Load to a planned Trip unless another caller gate prevents it.
+
+That contradicts the locked Decision 9 meaning of Ready as the planning queue boundary.
+
+### CONFIRMED — legacy board is still runtime
+
+`app/routers/dispatch.py` still exposes:
+
+```text
+GET /api/v1/dispatch/board
+```
+
+backed by `loads_service.list_loads_for_board()`, which groups by `Load.status`.
+
+This is not documentation archaeology; it is a live runtime read model.
+
+### CONFIRMED — legacy Load assignment is still runtime
+
+The prior audit already identified the LoadWorkspace assignment path. Cursor's report reinforces that this dual assignment world is still visible to operators/read models.
+
+### CONFIRMED — tenant identity exclusion fails open
+
+RateCon parser exclusion lookup catches platform/exclusion lookup errors and returns an empty exclusion object.
+
+That protects availability, but it can weaken broker-vs-carrier identity separation. It is now promoted from a challenge item to a confirmed parser integrity concern.
+
+### CONFIRMED — old mirror catch-up has a tenant-join weakness
+
+`app/services/trip_mirror_catchup.py::SQL_UPDATE_LOADS_ACTIVE_TRIP_ID` currently joins:
+
+```sql
+t.legacy_dispatch_trip_id = l.active_dispatch_trip_id
+```
+
+without also requiring:
+
+```sql
+t.tenant_id = l.tenant_id
+```
+
+Because tenant DBs also carry `tenant_id`, this is unsafe if contaminated/mixed-tenant rows exist.
+
+This script must be classified as migration/backfill-only and must not be run again until tenant matching is corrected.
+
+## 11.4 Cursor findings accepted but needing direct reproduction before repair
+
+The following are plausible and consistent with code/docs, but each must be reproduced in its own issue before repair:
+
+- Load page shows "Create Planned Trip" after a planned membership because it cannot see planned membership.
+- header shows no trip number for planned Trip because Load read-model `trip_number` is legacy-oriented.
+- current frontend cannot complete the real custody/Trip closure workflow.
+- dashboard/driver stats/pay-run readers still trust legacy Load assignment/status or `active_dispatch_trip_id`.
+- Inbox → draft Load preserves too little parsed commercial content, forcing operator re-upload/reparse.
+- parser `stop_type="other"` falls through to DELIVERY in frontend hydration.
+- parser values like country `USA` or over-length equipment strings can hydrate state that later fails persistence validation.
+- name-only broker extraction may remain unlinked when MC/DOT is absent.
+- mixed digital/scanned PDFs remain deliberately blocked while image-only PDFs use OCR; stale docs need correction.
+- tenant_demo contains leftover rows for unexpected tenant IDs; cleanup must follow a verified tenant-isolation/data-provenance plan, not ad hoc deletion.
+
+## 11.5 Corrections to Cursor's wording
+
+Cursor's diagnosis is strong, but these distinctions are now locked into the plan:
+
+1. **"A trip cannot be finished from the product"** means the **operator workflow is incomplete**, not that the backend lacks completion. Backend `POST /trips/{id}/complete` exists.
+2. **92 in_progress trips with no active TripLoad** is live-data evidence of a workflow/data problem, but it does not by itself prove the Start Execution endpoint is wrong. We must trace how those rows were created before changing the endpoint.
+3. **Tenant isolation** is mostly enforced at service/query level today, but schema-level composite tenant FKs are incomplete. This is architectural hardening plus contamination cleanup, not a proven cross-tenant HTTP exploit.
+4. **Parser engine remains a separate concern from product handoff.** Do not reopen the gold parser core merely because downstream hydration/intake is wrong.
+5. **Do not "scrub" historical migrations.** Alembic history and archived docs remain evidence. Remove or disable runtime legacy behavior, then migrate data, then remove compatibility reads only when proven safe.
+
+---
+
+# 12. Revised remediation order after Cursor audit
+
+The earlier 0→11 list is retained as the issue register, but the execution order is refined below so the live dual-world split is dismantled safely.
+
+## PHASE 0 — Legacy world containment and inventory
+
+### ISSUE 0A — Freeze every executable legacy writer
+
+Audit and then disable/remove all **new writes** through:
+
+- load-status-driven dispatch mint
+- `source="seed"` bypasses that can invoke old mint behavior
+- legacy Load assignment writer
+- any runtime writer to `dispatch_trips` used for new freight execution
+- any writer that copies legacy `dispatch_trips.status` directly into canonical `trips.status`
+
+**Goal:** stop creating more bad dual-world data before migrating existing rows.
+
+### ISSUE 0B — Canonical Trip status contamination plan
+
+Deal specifically with:
+
+```text
+Trip.status = active
+Trip.status = open
+legacy dispatch mirrors
+cancelled rows missing cancelled_at
+```
+
+First audit exact source and state mapping. Then design deterministic conversion to the five-state Trip vocabulary.
+
+No data migration until mapping rules are approved.
+
+### ISSUE 0C — Legacy operator surface retirement map
+
+Audit and remove/replace:
+
+- `/dispatch` legacy board as operational authority
+- `DeprecatedDispatchPage`
+- `DispatchAssignmentStrip`
+- `?dispatchAssign=1`
+- broad Load operational status dropdowns
+- dashboard/driver/pay readers that infer execution from Load status/assignment
+
+Historical read support may remain separately.
+
+### ISSUE 0D — Legacy mirror/backfill safety
+
+Classify:
+
+- `active_dispatch_trip_id`
+- legacy `loads.trip_number`
+- `legacy_dispatch_trip_id`
+- `dispatch_trips`
+- `trip_mirror_catchup.py`
+
+Fix any backfill query that lacks tenant-safe joins before it can ever be run again.
+
+Define when each mirror can become read-only and when it can later be removed.
+
+**Only after 0A–0D are understood do we begin original Issue 1 remediation.**
+
+---
+
+## PHASE 1 — Correct commercial readiness and Load integrity
+
+1. **Original Issue 1 — new-write Load.status boundary**
+2. **Original Issue 3 — Mark Ready bypass**
+3. **NEW Issue 12 — TripLoad readiness gate:** planned membership requires a truthful `Load.status = ready` unless an explicitly approved exception exists.
+4. **Original Issue 2 — stop replacement / history destruction**
+5. **Original Issue 5 — hard DELETE / cancellation policy**
+6. **Original Issue 9 — Load audit completeness**
+7. **Original Issue 10 — unknown status → Ready fallback**
+
+Reason for moving readiness ahead of stop/parser cleanup: until Ready is authoritative, the new Trip world can still accept commercial drafts and recreate state drift.
+
+---
+
+## PHASE 2 — Make the Trip-first product actually operable
+
+### NEW Issue 13 — Planned Trip discoverability from Load
+
+The Load Page must discover current OPEN PLANNED membership from TripLoad/read API rather than `active_trip_id`.
+
+Acceptance:
+
+- after Create Planned Trip, Load page shows the planned Trip
+- no second Create Planned Trip affordance
+- correct Trip number visible from canonical Trip
+- active_trip_id remains ACTIVE-only
+
+### NEW Issue 14 — Complete custody → Trip close operator workflow
+
+Audit existing backend transitions and wire the minimum correct product workflow for:
+
+```text
+planned membership
+→ accept custody / ACTIVE membership
+→ execution
+→ yard/final handoff as applicable
+→ no OPEN memberships
+→ complete Trip
+```
+
+Do not create a fake "Complete" shortcut that bypasses custody.
+
+### NEW Issue 15 — In-progress assignment immutability / recovery boundary
+
+Block silent driver/truck/trailer replacement on `in_progress` Trips.
+
+Recovery/repower must follow the locked exception model and preserve original Trip evidence.
+
+### NEW Issue 16 — Decision 10 assignment overlap guard
+
+Implement/test the documented future assignment conflict check separately from Issue 15.
+
+### NEW Issue 17 — Current TripLoad row selection
+
+Replace history-unsafe TripLoad scalar lookups with an explicit current/open-row contract where operational transitions require current membership.
+
+Tests must cover:
+
+```text
+add
+remove
+re-add
+activate
+handoff/complete
+```
+
+and prove stale removed membership is never selected as current.
+
+---
+
+## PHASE 3 — Intake/parser-to-Load integrity
+
+6. **Original Issue 6 — Rate Confirmation evidence/classification gate**
+7. **Original Issue 7 — raw PDF evidence vs Internal Notes**
+8. **Original Issue 11 — parse context contract drift**
+
+Additional confirmed/new intake issues:
+
+### NEW Issue 18 — Parser hydration stale/hybrid state
+
+Parsing document B after document A must not leave omitted A-values mixed into B's Load draft.
+
+### NEW Issue 19 — Parsed stop-type coercion
+
+Unknown/`other` stop type must not silently become DELIVERY.
+
+### NEW Issue 20 — Parser-to-persistence field-contract length/format safety
+
+Hydrated values must already satisfy Load persistence contracts or surface field-level review errors before Save.
+
+Examples to test:
+
+- country code length
+- equipment/trailer string lengths
+- postal/state formatting
+- date/time representation
+
+### NEW Issue 21 — Tenant identity exclusion fail-open
+
+Decide explicit behavior when tenant identity exclusion cannot be loaded.
+
+Do not silently treat empty exclusion as equally trustworthy to a successful exclusion lookup.
+
+### NEW Issue 22 — Inbox → Load commercial hydration
+
+Email intake draft creation must be audited against the intended product flow.
+
+Do not make email intake create operational Trip state. The question is only whether the commercial draft should carry the parsed RateCon fields/stops/evidence so the operator does not need to re-upload the same document.
+
+---
+
+## PHASE 4 — Money, isolation, and read-model hardening
+
+8. **Original Issue 8 — Decimal-safe Load money**
+
+### NEW Issue 23 — Tenant schema/foreign-key hardening
+
+Audit the Load/Trip/Custody graph for tenant-safe composite uniqueness/FKs where required.
+
+This is not permission for a broad schema rewrite. Produce the exact constraint map first.
+
+### NEW Issue 24 — tenant_demo contamination cleanup
+
+Only after Issue 23 and source provenance are understood:
+
+- identify why rows for unexpected tenant IDs exist in this tenant DB
+- classify test/seed/old migration contamination
+- create reversible cleanup plan
+- verify no legitimate rows are deleted
+
+### NEW Issue 25 — Operational read models must become Trip-first
+
+Dashboard, driver stats, dispatch planning views, and later pay tracing must stop treating:
+
+```text
+Load.status
+Load.driver_id
+active_dispatch_trip_id
+```
+
+as current execution authority.
+
+This is separate from UI retirement because read-model consumers may remain even after old controls disappear.
+
+---
+
+# 13. Immediate next step
+
+**Do not start coding the broad list.**
+
+The next Cursor task is **ISSUE 0A only: executable legacy writer freeze audit**.
+
+Cursor must return exact writers and dependencies before removing anything.
+
+Required report sections:
+
+```text
+## ISSUE 0A
+## Every executable legacy writer
+## Every caller
+## What new data each writer can still create
+## Read-only dependencies
+## Historical/migration dependencies
+## What can be disabled immediately
+## What requires data migration first
+## Tests currently preserving the old writer
+## Smallest safe freeze plan
+## Files that would change
+## STOP
+```
+
+No code, no migration, no deploy, no commit in that first pass.
+
