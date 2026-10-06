@@ -176,14 +176,14 @@ describe("TollsPdfReviewsPage", () => {
     await act(async () => {
       expand!.click();
     });
-    expect(apiMocks.getTollPdfReview).toHaveBeenCalledWith(9, { rowOffset: 0, rowLimit: 100 });
+    expect(apiMocks.getTollPdfReview).toHaveBeenCalledWith(9, { rowOffset: 0, rowLimit: 500 });
     expect(host?.textContent).toContain("ILTOLL");
     expect(host?.textContent).toContain("2023-03-01");
     expect(host?.textContent).toContain("2023-02-13");
     expect(host?.textContent).toContain("02400000001");
     expect(host?.textContent).toContain("10.00");
-    expect(host?.textContent).toContain("not canonical Date/Unit/Amount history");
-    expect(host?.textContent).toContain("reconciliation OK");
+    expect(host?.querySelector('[data-testid="toll-review-summary"]')?.textContent).toMatch(/Reconciliation OK/i);
+    expect(host?.querySelector('[data-testid="toll-review-sort-agency"]')).toBeTruthy();
     const process = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Process");
     expect(process).toBeTruthy();
     expect((process as HTMLButtonElement).disabled).toBe(false);
@@ -242,5 +242,93 @@ describe("TollsPdfReviewsPage", () => {
     expect(host?.textContent).toContain("E-ZPass file stored for review.");
     expect(host?.textContent).not.toContain("Tolls imported successfully");
     expect((host!.querySelector('input[type="file"]') as HTMLInputElement).value).toBe("");
+  });
+
+  it("sorts review rows when a column header is clicked", async () => {
+    apiMocks.getTollPdfReview.mockResolvedValue({
+      ...listItem,
+      source_page_count: 7,
+      total_row_count: 2,
+      row_offset: 0,
+      row_limit: 500,
+      effective_trip_count: 2,
+      effective_total_trip_charge: "17.65",
+      effective_reconciliation_ok: true,
+      rows: [
+        {
+          row_id: 1,
+          source_row_order: 1,
+          source_page_number: 2,
+          post_date: "2023-03-01",
+          entry_date: "2023-03-01",
+          entry_time: "03:01:29 PM",
+          agency_raw: "WVPA",
+          entry_location: "83rd St.",
+          entry_lane: "54",
+          transponder_number: "02400454986",
+          trip_charge: "14.65",
+          trip_charge_raw: "(14.65)",
+        },
+        {
+          row_id: 2,
+          source_row_order: 2,
+          source_page_number: 2,
+          post_date: "2023-03-01",
+          entry_date: "2023-03-01",
+          entry_time: "03:53:06 PM",
+          agency_raw: "ILTOLL",
+          entry_location: "Elgin Rd.",
+          entry_lane: "53",
+          transponder_number: "02400454986",
+          trip_charge: "7.35",
+          trip_charge_raw: "(7.35)",
+        },
+      ],
+    });
+    await renderPage();
+    const expand = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "#9");
+    await act(async () => {
+      expand!.click();
+    });
+    const agency = host!.querySelector('[data-testid="toll-review-sort-agency"]') as HTMLButtonElement;
+    await act(async () => {
+      agency.click();
+    });
+    const orders = Array.from(host!.querySelectorAll("[data-testid^='toll-review-row-']")).map(
+      (row) => row.getAttribute("data-testid"),
+    );
+    expect(orders).toEqual(["toll-review-row-2", "toll-review-row-1"]);
+    expect(agency.getAttribute("aria-sort")).toBe("ascending");
+    await act(async () => {
+      agency.click();
+    });
+    expect(agency.getAttribute("aria-sort")).toBe("descending");
+  });
+
+  it("uses a processed statement workspace after Process", async () => {
+    apiMocks.getTollPdfReview.mockResolvedValue({
+      ...listItem,
+      status: "PROCESSED",
+      review_status: "PROCESSED",
+      source_page_count: 7,
+      total_row_count: 1,
+      rows: [
+        {
+          row_id: 1,
+          source_row_order: 1,
+          agency_raw: "ILTOLL",
+          trip_charge: "7.35",
+        },
+      ],
+    });
+    await renderPage();
+    const expand = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "#9");
+    await act(async () => {
+      expand!.click();
+    });
+    expect(host?.textContent).toContain("Processed statement");
+    expect(host?.textContent).toContain("Processed · read-only");
+    expect(host?.textContent).not.toContain("Correct");
+    expect(host?.querySelector('[data-testid="tolls-upload"]')?.className).toContain("trk-page--dense");
   });
 });

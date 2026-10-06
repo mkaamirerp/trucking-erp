@@ -1,0 +1,85 @@
+.toll-review-workspace {
+  min-width: 0;
+}
+
+.toll-review-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: baseline;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--trk-border);
+  border-radius: 0.5rem;
+  background: var(--trk-surface);
+}
+
+.toll-review-summary__stat {
+  font-size: 0.8125rem;
+  color: var(--trk-text);
+}
+
+.toll-review-summary__stat strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.toll-review-rows {
+  overflow-x: auto;
+  border: 1px solid var(--trk-border);
+  border-radius: 0.5rem;
+  background: var(--trk-surface);
+}
+
+.toll-review-rows__table {
+  width: 100%;
+  min-width: 72rem;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.toll-review-rows__table th,
+.toll-review-rows__table td {
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--trk-border);
+  font-size: 0.8125rem;
+}
+
+.toll-review-rows__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--trk-surface-2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--trk-text-muted);
+}
+
+.toll-review-rows__sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toll-review-rows__sort-btn:hover {
+  color: var(--trk-text);
+}
+
+.toll-review-rows__sort-hint,
+.toll-review-rows__sort-indicator {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
