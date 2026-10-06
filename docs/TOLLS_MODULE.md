@@ -3297,3 +3297,94 @@ This decision applies to PDF Toll FILE intake.
 
 It does not change CSV FILE intake semantics or the separate CSV profile-gate decision.
 
+
+
+### 2026-10-05 — Toll foundation anchored on E-ZPass-style statements; multi-provider and manual intake locked
+
+The first real PDF evidence is an E-ZPass-network monthly statement (WVPA-issued statement containing multiple toll agencies). This becomes the **anchor implementation profile** for the Toll foundation, not the final/only provider.
+
+Locked architecture:
+
+```text
+Tolls
+  ├─ API
+  ├─ FILE
+  │   ├─ CSV
+  │   └─ PDF
+  └─ MANUAL
+```
+
+The business module remains provider-neutral. E-ZPass/WVPA is the first implementation anchor because it is common and gives us real statement evidence, but later adapters/profiles may include SunPass, regional toll agencies, and other portal/file/API sources.
+
+#### E-ZPass/WVPA anchor
+
+Use the supplied E-ZPass/WVPA-style statement to establish the first PDF review workflow:
+
+```text
+upload PDF
+→ store original
+→ extract/preserve all source data
+→ parsed review rows
+→ human review
+→ Process later
+→ canonical toll_transactions
+```
+
+Do not hard-code the Toll domain itself around WVPA fields. The anchor profile maps provider/source data into a provider-neutral Toll review/canonical model.
+
+#### Multi-network/provider reality
+
+One fleet may encounter toll systems that are not covered by the same transponder/account workflow.
+
+Therefore Toll intake must support multiple source/provider adapters over time rather than assume one national toll source.
+
+SunPass is a future source/profile candidate. Current official SunPass information indicates SunPass Mini and SunPass PRO have broad interoperability, including Texas, and SunPass PRO works anywhere E-ZPass is accepted. This reinforces the architecture point: interoperability changes and provider coverage must not be embedded as permanent TruckERP business assumptions.
+
+#### Manual Toll entry is required
+
+Manual entry is a first-class Toll source, analogous to Fuel manual entry.
+
+Use cases include:
+
+- toll charge received without a usable API/file integration
+- mailed/emailed plate invoice
+- regional/local toll operator outside configured provider integrations
+- missing transaction discovered after statement/API import
+- operational correction/addition supported by source evidence
+
+Manual Toll entry must use:
+
+```text
+source_type = MANUAL
+file_format = NULL
+```
+
+Manual entry is not a shortcut around auditability.
+
+The manual workflow must retain source/evidence metadata and create reviewable Toll data before canonical posting when required by the Toll review policy.
+
+#### Foundation rule
+
+Do not design the module as:
+
+```text
+E-ZPass module
+SunPass module
+Texas module
+Florida module
+```
+
+Design one Toll domain with source adapters/profiles:
+
+```text
+Toll domain
+    ↑
+E-ZPass/WVPA PDF profile
+E-ZPass CSV profile
+PrePass API
+SunPass profile/API/file
+other regional provider
+MANUAL
+```
+
+Provider/network differences belong in adapters and source evidence. Canonical Toll business data stays small and vehicle/unit-centered.
