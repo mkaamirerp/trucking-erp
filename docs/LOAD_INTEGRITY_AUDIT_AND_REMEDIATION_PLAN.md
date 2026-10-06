@@ -376,6 +376,105 @@ Trip cancellation never means deleting the historical Trip. A commercial Load th
 
 # 3. Numbered issue register — one issue at a time
 
+
+## ISSUE 0 — Legacy Load/Dispatch footprint inventory and scrub gate
+
+**Priority:** FIRST, before Issue 1.  
+**Purpose:** Identify every legacy Load/dispatch writer, UI path, compatibility mirror, status surface, parser branch, board path, constant, test, script, and stale configuration so we know what must be removed, what must remain read-only for historical compatibility, and what must be archived rather than executed.
+
+**Important:** "Scrub legacy" does **not** mean blindly deleting anything containing the word `legacy`. Some migrations, historical docs, read-side compatibility, and backfill/archaeology tools may still be required to understand or safely read old data. The target is:
+
+```text
+remove executable legacy business logic
+remove legacy writers
+remove legacy UI actions
+remove dead feature flags / dead runtime paths
+remove misleading compatibility fallbacks
+
+but preserve only what is genuinely required for:
+historical reads
+database migration history
+safe backfill/transition evidence
+archived documentation
+```
+
+### Known live/runtime legacy footprints already visible
+
+The initial repository scan has already found concrete runtime footprints that must be audited:
+
+- `app/services/loads.py` still imports and uses legacy dispatch constants including `LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED`, `PRE_DISPATCH_TRIP_CANCEL_STATUSES`, and `TRIP_ALLOCATED_AT_LOAD_STATUS`.
+- `app/constants/trip_dispatch.py` still carries the old load-status-driven dispatch vocabulary and compatibility constants.
+- `apps/web/src/loadWorkspace/LoadWorkspaceForm.tsx` still renders the broad legacy Load status list and special-cases `dispatched`.
+- `apps/web/src/loadWorkspace/DispatchAssignmentStrip.tsx` is explicitly documented as a **Legacy dispatch context panel** and still patches Load driver/truck/trailer + status.
+- `apps/web/src/pages/LoadWorkspacePage.tsx` still contains the legacy Load assignment writer.
+- `app/routers/dispatch.py` + `loads_service.list_loads_for_board()` still expose the legacy load-status dispatch board.
+- `DeprecatedDispatchPage` remains part of the legacy board path.
+- `app/core/config.py` still contains an old `load_parse_document_semantic_adapter_enabled` flag/comment describing a legacy regex-vs-semantic cutover even though the current product parser path has moved on.
+- `app/routers/load_lab.py` / Load Lab UI still expose `truckerjson` as a legacy parse contract for lab comparison. This may be intentionally lab-only and must be classified before removal.
+- `app/services/trip_mirror_catchup.py` and historical Trip/dispatch mirror fields exist for migration/backfill compatibility and must not be deleted blindly.
+- older Alembic migrations and archived docs contain legacy terminology; migration history must not be rewritten merely to make grep clean.
+
+### ISSUE 0 audit questions
+
+1. Search the entire repo, not only `app/services/loads.py`, for executable legacy Load/dispatch behavior.
+2. Classify every result into exactly one bucket:
+   - **REMOVE NOW — executable legacy writer/path**
+   - **REPLACE NOW — live path with a Trip-first equivalent**
+   - **READ-ONLY COMPATIBILITY — required to display old rows**
+   - **MIGRATION/BACKFILL — required temporarily for historical data transition**
+   - **LAB/TEST ONLY — intentionally isolated proving path**
+   - **ARCHIVE/DOC ONLY — non-runtime**
+   - **FALSE POSITIVE — word legacy but unrelated to Load**
+3. Enumerate every writer to:
+   - `Load.status`
+   - `Load.driver_id`
+   - `Load.truck_id`
+   - `Load.trailer_id`
+   - `Load.trip_number`
+   - `Load.active_dispatch_trip_id`
+   - `Load.active_trip_id`
+4. Enumerate every caller of `dispatch_trips` and prove whether it is still required.
+5. Enumerate every frontend route/action that opens the legacy board or legacy assignment strip.
+6. Find all status dropdowns/filters/API allowlists that still expose operational Load statuses.
+7. Find dead feature flags and old parser/runtime branches that are no longer authoritative.
+8. Find compatibility mirrors and determine whether any current writer still treats them as authority.
+9. Find tests that preserve legacy behavior and classify whether they should become historical read tests or be removed/replaced.
+10. Find scripts/backfills that could still be run accidentally in production; identify which should be moved/guarded/archived.
+11. Do not delete Alembic migration history.
+12. Do not remove the ability to read old production rows until a deliberate data migration proves they are gone or converted.
+13. Do not change code during the first audit pass.
+
+### ISSUE 0 output
+
+Cursor must return a table:
+
+| Path / symbol | Current runtime? | Writes state? | Legacy purpose | Classification | Safe action | Dependency/blocker |
+|---|---:|---:|---|---|---|---|
+
+Then return a proposed **legacy removal sequence**, smallest and safest first.
+
+### ISSUE 0 acceptance concept
+
+Before Issue 1 begins, we have a complete map of the legacy footprint and a signed-off removal order.
+
+The end state should be:
+
+```text
+Load runtime
+  = commercial/readiness only
+
+Trip runtime
+  = assignment/execution only
+
+Legacy Load execution
+  = no live writer
+  = no live UI action
+  = no silent fallback
+  = historical read compatibility only until data migration closes it
+```
+
+---
+
 **Rule:** Do not fix several of these together. Cursor audits one numbered issue, returns evidence, then ChatGPT independently reviews that evidence. If anything is unclear, Cursor is sent back for a second focused audit. Only after the issue is understood do we authorize the smallest repair.
 
 ## ISSUE 1 — New-write Load.status can violate the Trip-first architecture
@@ -772,6 +871,7 @@ When the numbered issues are closed and the integrated acceptance scenario passe
 
 Work in this order unless new evidence changes severity:
 
+0. **Legacy Load/Dispatch footprint inventory and scrub gate**
 1. **New-write Load.status boundary**
 2. **Stop replacement / history destruction**
 3. **Mark Ready bypass**
@@ -785,7 +885,7 @@ Work in this order unless new evidence changes severity:
 11. **Parse context contract drift**
 12+. **Any additional confirmed issue discovered by the adversarial audit**
 
-**Do not start Issue 2 until Issue 1 has an accepted report and game plan.**
+**Do not start Issue 1 remediation until Issue 0 has an accepted legacy-footprint report and removal game plan. Do not start Issue 2 until Issue 1 has an accepted report and game plan.**
 
 ---
 
@@ -798,4 +898,4 @@ Work in this order unless new evidence changes severity:
 - No migration.
 - No deploy.
 - No Load remediation commit.
-- Next action: **Cursor read-only audit of ISSUE 1 only.**
+- Next action: **Cursor read-only audit of ISSUE 0 — complete legacy footprint inventory and scrub plan. No code changes yet.**
