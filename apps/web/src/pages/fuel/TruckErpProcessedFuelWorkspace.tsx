@@ -63,6 +63,8 @@ export default function TruckErpProcessedFuelWorkspace({
     }
     setLoading(true);
     setError(null);
+    setSourceRows([]);
+    setManualOperationalTransaction(null);
     void getFuelProcessedBatch(batchId)
       .then(async (detail) => {
         setCanonical(detail.canonical_transactions);

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import { fuelReviewBatchDocumentUrl, type FuelProcessedSummary } from "../../api";
 import { OPS } from "../../routes";
 import { fuelActivityRowFromProcessed, type FuelActivityRow } from "./fuelActivityRow";
@@ -14,12 +14,18 @@ import {
   resolveFuelCurrencyFinancialSummaries,
   type FuelCurrencyFinancialLine,
 } from "./fuelActivityCurrencyFinancial";
+import ManualEntryCollectionWorkspace from "./ManualEntryCollectionWorkspace";
 import ProcessedFuelStatementShell from "./ProcessedFuelStatementShell";
+import { fuelProviderTableLabel } from "./fuelProviderDisplay";
+import {
+  MANUAL_ENTRY_ACTIVITY_GROUP_BATCH_ID,
+  type FuelRecentActivityItem,
+} from "./fuelRecentActivityDisplay";
 import "../fuelBvdReview/bvd-parsed-statement.css";
 import "./fuel-home.css";
 
 type Props = {
-  activity: FuelProcessedSummary[];
+  activityItems: FuelRecentActivityItem[];
   loading: boolean;
   heading?: string;
   showViewAllLink?: boolean;
@@ -28,12 +34,6 @@ type Props = {
   onOpenProcessed?: (batchId: number, providerCode: string, sourceImportRef: string | null) => void;
   highlightBatchId?: number | null;
 };
-
-function providerTableLabel(code: string): string {
-  if (code === "NATIONWIDE") return "Nationwide";
-  if (code === "MANUAL_ENTRY") return "MANUAL_ENTRY";
-  return code;
-}
 
 function InvoiceTotalStack({ lines }: { lines: FuelCurrencyFinancialLine[] }) {
   if (lines.length === 0) {
@@ -110,24 +110,26 @@ function FuelActivityInvoiceBand({
           className="fuel-activity-invoice-band__identity cursor-pointer py-1.5 pr-3 align-middle"
           onClick={onToggle}
         >
-          {providerTableLabel(summary.provider_code)}
+          {fuelProviderTableLabel(summary.provider_code)}
         </td>
         <td rowSpan={bandSize} className="fuel-activity-invoice-band__identity py-1.5 pr-3 font-medium align-middle">
-          {onOpenProcessed ? (
-            <button
-              type="button"
-              className="text-left font-medium text-[var(--trk-accent)] hover:underline"
-              data-testid={`fuel-activity-invoice-link-${summary.batch_id}`}
-              onClick={(e) => {
-                e.stopPropagation();
+          <button
+            type="button"
+            className="text-left font-medium text-[var(--trk-accent)] hover:underline"
+            data-testid={`fuel-activity-invoice-link-${summary.batch_id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (summary.provider_code === "MANUAL_ENTRY") {
+                onToggle();
+                return;
+              }
+              if (onOpenProcessed) {
                 onOpenProcessed(summary.batch_id, summary.provider_code, summary.source_import_ref);
-              }}
-            >
-              {row.invoice_number}
-            </button>
-          ) : (
-            <span>{row.invoice_number}</span>
-          )}
+              }
+            }}
+          >
+            {row.invoice_number}
+          </button>
         </td>
         <td
           rowSpan={bandSize}
@@ -174,7 +176,25 @@ function FuelActivityInvoiceBand({
           <InvoiceTotalStack lines={lines} />
         </td>
         <td rowSpan={bandSize} className="fuel-activity-invoice-band__identity py-1.5 text-right align-middle">
-          {onOpenProcessed ? (
+          {summary.provider_code === "MANUAL_ENTRY" ? (
+            summary.source_storage_ref ? (
+              <button
+                type="button"
+                className="font-medium text-[var(--trk-accent)] hover:underline"
+                data-testid={`fuel-activity-open-${summary.batch_id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(
+                    fuelReviewBatchDocumentUrl(summary.batch_id),
+                    "_blank",
+                    "noopener,noreferrer",
+                  );
+                }}
+              >
+                Open source
+              </button>
+            ) : null
+          ) : onOpenProcessed ? (
             <button
               type="button"
               className="font-medium text-[var(--trk-accent)] hover:underline"
@@ -241,8 +261,12 @@ function FuelActivityInvoiceBand({
   );
 }
 
+function manualGroupContainsBatch(item: FuelRecentActivityItem, batchId: number): boolean {
+  return item.kind === "manual_group" && item.batches.some((b) => b.batch_id === batchId);
+}
+
 export default function FuelRecentActivitySection({
-  activity,
+  activityItems,
   loading,
   heading = "Recent activity",
   showViewAllLink = true,
@@ -253,7 +277,15 @@ export default function FuelRecentActivitySection({
 }: Props) {
   const [expandedBatchId, setExpandedBatchId] = useState<number | null>(null);
 
-  const rows: FuelActivityRow[] = activity.map(fuelActivityRowFromProcessed);
+  const rows: FuelActivityRow[] = activityItems.map((item) => fuelActivityRowFromProcessed(item.summary));
+
+  useEffect(() => {
+    if (highlightBatchId == null) return;
+    const inGroup = activityItems.some((item) => manualGroupContainsBatch(item, highlightBatchId));
+    if (inGroup) {
+      setExpandedBatchId(MANUAL_ENTRY_ACTIVITY_GROUP_BATCH_ID);
+    }
+  }, [activityItems, highlightBatchId]);
 
   const toggleInvoice = useCallback((batchId: number) => {
     setExpandedBatchId((prev) => (prev === batchId ? null : batchId));
@@ -286,7 +318,7 @@ export default function FuelRecentActivitySection({
       </div>
       {loading ? (
         <p className="text-xs text-[var(--trk-text-muted)]">Loading…</p>
-      ) : activity.length === 0 ? (
+      ) : activityItems.length === 0 ? (
         <p className="text-xs text-[var(--trk-text-muted)]">{emptyMessage}</p>
       ) : (
         <div className="trk-scroll-x fuel-recent-activity__scroll">
@@ -308,51 +340,54 @@ export default function FuelRecentActivitySection({
               </tr>
             </thead>
             <tbody>
-              {activity.map((summary, index) => {
+              {activityItems.map((item, index) => {
+                const summary = item.summary;
                 const row = rows[index]!;
                 const isExpanded = expandedBatchId === summary.batch_id;
+                const highlighted =
+                  highlightBatchId === summary.batch_id ||
+                  (highlightBatchId != null && manualGroupContainsBatch(item, highlightBatchId));
+                const rowKey =
+                  item.kind === "manual_group" ? "manual-entry-group" : String(summary.batch_id);
                 return (
-                  <Fragment key={summary.batch_id}>
+                  <Fragment key={rowKey}>
                     <FuelActivityInvoiceBand
                       summary={summary}
                       row={row}
                       isExpanded={isExpanded}
-                      highlighted={highlightBatchId === summary.batch_id}
+                      highlighted={highlighted}
                       onToggle={() => toggleInvoice(summary.batch_id)}
                       onOpenProcessed={onOpenProcessed}
                     />
                     {isExpanded ? (
                       <tr
-                        key={`${summary.batch_id}-detail`}
+                        key={`${rowKey}-detail`}
                         className="border-t border-[var(--trk-border)] fuel-activity-invoice-band__detail"
                       >
                         <td colSpan={12} className="fuel-recent-activity__detail-cell bg-[var(--trk-bg)] px-2 py-2">
                           <div
                             className="fuel-activity-txn-contained min-w-0 max-w-full w-full overflow-x-auto"
-                            data-testid={`fuel-activity-detail-${summary.batch_id}`}
+                            data-testid={
+                              item.kind === "manual_group"
+                                ? "fuel-activity-detail-manual-entry-group"
+                                : `fuel-activity-detail-${summary.batch_id}`
+                            }
                           >
-                            <ProcessedFuelStatementShell
-                              batchId={summary.batch_id}
-                              providerCode={summary.provider_code}
-                              providerLabel={providerTableLabel(summary.provider_code)}
-                              invoiceNumber={summary.invoice_number}
-                              transactionCount={summary.transaction_count}
-                              controlCount={summary.control_count}
-                              sourceImportRef={summary.source_import_ref}
-                              currencyFinancialSummaries={summary.currency_financial_summaries}
-                              providerControlTotals={summary.provider_control_totals}
-                              onOpenSource={
-                                summary.provider_code === "MANUAL_ENTRY"
-                                  ? summary.source_storage_ref
-                                    ? () => {
-                                        window.open(
-                                          fuelReviewBatchDocumentUrl(summary.batch_id),
-                                          "_blank",
-                                          "noopener,noreferrer",
-                                        );
-                                      }
-                                    : undefined
-                                  : onOpenProcessed
+                            {item.kind === "manual_group" ? (
+                              <ManualEntryCollectionWorkspace batches={item.batches} />
+                            ) : (
+                              <ProcessedFuelStatementShell
+                                batchId={summary.batch_id}
+                                providerCode={summary.provider_code}
+                                providerLabel={fuelProviderTableLabel(summary.provider_code)}
+                                invoiceNumber={summary.invoice_number}
+                                transactionCount={summary.transaction_count}
+                                controlCount={summary.control_count}
+                                sourceImportRef={summary.source_import_ref}
+                                currencyFinancialSummaries={summary.currency_financial_summaries}
+                                providerControlTotals={summary.provider_control_totals}
+                                onOpenSource={
+                                  onOpenProcessed
                                     ? () =>
                                         onOpenProcessed(
                                           summary.batch_id,
@@ -360,8 +395,9 @@ export default function FuelRecentActivitySection({
                                           summary.source_import_ref,
                                         )
                                     : undefined
-                              }
-                            />
+                                }
+                              />
+                            )}
                           </div>
                         </td>
                       </tr>

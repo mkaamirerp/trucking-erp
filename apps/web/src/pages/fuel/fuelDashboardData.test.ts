@@ -33,10 +33,11 @@ function sampleProcessed(batchId: number, finalizedAt: string): FuelProcessedSum
 }
 
 describe("fuelDashboardData", () => {
-  it("returns up to five recent processed batches", () => {
-    const rows = Array.from({ length: 8 }, (_, i) =>
+  it("returns up to ten recent processed batches by default", () => {
+    const rows = Array.from({ length: 12 }, (_, i) =>
       sampleProcessed(i, new Date(2026, 0, i + 1).toISOString()),
     );
+    expect(recentFuelProcessedActivity(rows)).toHaveLength(10);
     expect(recentFuelProcessedActivity(rows, 5)).toHaveLength(5);
   });
 

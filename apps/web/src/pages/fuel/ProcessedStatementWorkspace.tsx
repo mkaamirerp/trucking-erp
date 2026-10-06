@@ -48,6 +48,8 @@ type Props = {
   canonicalTransactions?: FuelCanonicalTransaction[];
   currencyFinancialSummaries?: FuelProcessedCurrencyFinancial[];
   providerControlTotals?: FuelProcessedCurrencyTotal[];
+  /** All manual entries in one grid — no per-batch source panel at top. */
+  manualCollectionMode?: boolean;
 };
 
 export default function ProcessedStatementWorkspace({
@@ -62,6 +64,7 @@ export default function ProcessedStatementWorkspace({
   canonicalTransactions,
   currencyFinancialSummaries,
   providerControlTotals = [],
+  manualCollectionMode = false,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
   const [datePeriod, setDatePeriod] = useState<DatePeriodSelection>({ kind: "all" });
@@ -73,8 +76,12 @@ export default function ProcessedStatementWorkspace({
   useEffect(() => {
     setSearchQuery("");
     setDatePeriod({ kind: "all" });
-    if (canonicalTransactions) {
+    if (canonicalTransactions !== undefined) {
       setCanonical(canonicalTransactions);
+      return;
+    }
+    if (importId === "manual-entry-collection") {
+      setCanonical([]);
       return;
     }
     let cancelled = false;
@@ -137,11 +144,11 @@ export default function ProcessedStatementWorkspace({
       data-provider={providerLabel}
     >
       <div data-testid={`fuel-processed-statement-${importId}`}>
-      {providerLabel === "MANUAL_ENTRY" ? (
+      {!manualCollectionMode && manualOperationalTransaction ? (
         <ManualProcessedSourceDetails
           operational={manualOperationalTransaction}
           invoiceNumber={invoiceNumber}
-          providerRaw={manualOperationalTransaction?.provider_raw}
+          providerRaw={manualOperationalTransaction.provider_raw}
         />
       ) : null}
       <div data-testid="processed-statement-summary">

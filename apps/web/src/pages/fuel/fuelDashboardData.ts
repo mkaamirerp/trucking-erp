@@ -2,6 +2,11 @@ import type { FuelProcessedSummary } from "../../api";
 
 export const FUEL_QUICK_PROVIDER_CODES = ["BVD", "LOVES", "PILOT", "WEX"] as const;
 
+/** Recent activity rows on Fuel home (collapsed). */
+export const FUEL_RECENT_ACTIVITY_PREVIEW_LIMIT = 10;
+/** Max rows when user clicks View all (avoids loading entire history). */
+export const FUEL_RECENT_ACTIVITY_VIEW_ALL_LIMIT = 50;
+
 export type FuelDashboardStats = {
   needsReviewCount: number;
   processedLast7DaysCount: number;
@@ -19,7 +24,7 @@ export function mapFuelDashboardStatsFromApi(stats: {
 
 export function recentFuelProcessedActivity(
   completed: FuelProcessedSummary[],
-  limit = 5,
+  limit = FUEL_RECENT_ACTIVITY_PREVIEW_LIMIT,
 ): FuelProcessedSummary[] {
   const sorted = [...completed].sort((a, b) => {
     const ta = a.finalized_at ? Date.parse(a.finalized_at) : 0;

@@ -16,10 +16,12 @@ import {
 import FuelConfigureApiModal from "./fuel/FuelConfigureApiModal";
 import FuelProviderCombobox from "./fuel/FuelProviderCombobox";
 import {
+  FUEL_RECENT_ACTIVITY_PREVIEW_LIMIT,
+  FUEL_RECENT_ACTIVITY_VIEW_ALL_LIMIT,
   mapFuelDashboardStatsFromApi,
-  recentFuelProcessedActivity,
   type FuelDashboardStats,
 } from "./fuel/fuelDashboardData";
+import { buildFuelRecentActivityDisplay } from "./fuel/fuelRecentActivityDisplay";
 import { readLastFuelProviderCode, writeLastFuelProviderCode } from "./fuel/fuelLastProvider";
 import { parseFuelBvdDuplicateDetail } from "./fuelBvdReview/bvdUploadDuplicate";
 import { readFuelProcessedReturn } from "./fuelBvdReview/bvdUploadCompletion";
@@ -27,7 +29,6 @@ import FuelRecentActivitySection from "./fuel/FuelRecentActivitySection";
 import FuelBvdProcessingWorkspace from "./fuelBvdReview/FuelBvdProcessingWorkspace";
 import FuelNationwideProcessingWorkspace from "./fuelNationwideReview/FuelNationwideProcessingWorkspace";
 import FuelManualEntryModal from "./fuel/FuelManualEntryModal";
-import FuelManualProcessedBatchOverlay from "./fuel/FuelManualProcessedBatchOverlay";
 import { getProcessedFuelRecordOverlay } from "./fuel/processedFuelProviderRenderers";
 import "./fuel/fuel-home.css";
 
@@ -46,6 +47,7 @@ export default function FuelMainPage() {
   const [apiModalOpen, setApiModalOpen] = useState(false);
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [showAllActivity, setShowAllActivity] = useState(false);
+  const [hasMoreCompleted, setHasMoreCompleted] = useState(false);
   const [processNotice, setProcessNotice] = useState<string | null>(null);
   const [processingImportId, setProcessingImportId] = useState<string | null>(null);
   const [processingProvider, setProcessingProvider] = useState<"BVD" | "NATIONWIDE">("BVD");
@@ -56,13 +58,19 @@ export default function FuelMainPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const refresh = useCallback(async () => {
+    const processedLimit = showAllActivity
+      ? FUEL_RECENT_ACTIVITY_VIEW_ALL_LIMIT
+      : FUEL_RECENT_ACTIVITY_PREVIEW_LIMIT + 1;
     const [providers, processedHistory, dashboardStats] = await Promise.all([
       listFuelProviders(),
-      listFuelProcessed(),
+      listFuelProcessed({ limit: processedLimit }),
       getFuelDashboardStats(),
     ]);
     setCatalog(providers);
     setCompleted(processedHistory);
+    setHasMoreCompleted(
+      !showAllActivity && processedHistory.length > FUEL_RECENT_ACTIVITY_PREVIEW_LIMIT,
+    );
     setStats(mapFuelDashboardStatsFromApi(dashboardStats));
 
     const last = readLastFuelProviderCode();
@@ -71,7 +79,7 @@ export default function FuelMainPage() {
     else if (codes.includes("BVD")) setProviderCode("BVD");
     else if (providers[0]) setProviderCode(providers[0].provider_code);
     return processedHistory;
-  }, []);
+  }, [showAllActivity]);
 
   useEffect(() => {
     setLoading(true);
@@ -98,8 +106,12 @@ export default function FuelMainPage() {
     writeLastFuelProviderCode(code);
   };
 
-  const activity = useMemo(
-    () => recentFuelProcessedActivity(completed, showAllActivity ? 40 : 5),
+  const activityItems = useMemo(
+    () =>
+      buildFuelRecentActivityDisplay(
+        completed,
+        showAllActivity ? FUEL_RECENT_ACTIVITY_VIEW_ALL_LIMIT : FUEL_RECENT_ACTIVITY_PREVIEW_LIMIT,
+      ),
     [completed, showAllActivity],
   );
 
@@ -270,10 +282,10 @@ export default function FuelMainPage() {
       </div>
 
       <FuelRecentActivitySection
-        activity={activity}
+        activityItems={activityItems}
         loading={loading}
         heading={showAllActivity ? "Completed invoices" : "Recent activity"}
-        showViewAllLink={!showAllActivity && completed.length > 5}
+        showViewAllLink={!showAllActivity && hasMoreCompleted}
         onViewAllClick={() => setShowAllActivity(true)}
         emptyMessage="No completed imports yet."
         highlightBatchId={highlightBatchId}
@@ -326,18 +338,7 @@ export default function FuelMainPage() {
         />
       ) : null}
 
-      {processedBatchId && processedProvider === "MANUAL_ENTRY" ? (
-        <FuelManualProcessedBatchOverlay
-          batchId={processedBatchId}
-          onClose={() => {
-            setProcessedBatchId(null);
-            setProcessedSourceImportRef(null);
-          }}
-        />
-      ) : null}
-
       {processedBatchId &&
-      processedProvider !== "MANUAL_ENTRY" &&
       ProcessedRecordOverlay &&
       processedSourceImportRef ? (
         <ProcessedRecordOverlay

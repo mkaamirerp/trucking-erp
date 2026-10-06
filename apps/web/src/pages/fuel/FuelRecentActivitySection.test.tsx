@@ -36,6 +36,10 @@ vi.mock("./processedFuelProviderRenderers", () => ({
 }));
 
 import FuelRecentActivitySection from "./FuelRecentActivitySection";
+import {
+  MANUAL_ENTRY_ACTIVITY_GROUP_BATCH_ID,
+  buildFuelRecentActivityDisplay,
+} from "./fuelRecentActivityDisplay";
 import { getProcessedFuelRecordOverlay } from "./processedFuelProviderRenderers";
 
 const bvdTxn = {
@@ -141,12 +145,17 @@ describe("FuelRecentActivitySection", () => {
     activity: FuelProcessedSummary[],
     onOpenProcessed?: (batchId: number, provider: string, ref: string | null) => void,
   ) {
+    const activityItems = buildFuelRecentActivityDisplay(activity, 50);
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
       root.render(
-        <FuelRecentActivitySection activity={activity} loading={false} onOpenProcessed={onOpenProcessed} />,
+        <FuelRecentActivitySection
+          activityItems={activityItems}
+          loading={false}
+          onOpenProcessed={onOpenProcessed}
+        />,
       );
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -253,10 +262,20 @@ describe("FuelRecentActivitySection", () => {
       currency: "USD",
     }));
     await renderSection([receiptManual, directManual], vi.fn());
-    await expandBatch(12);
-    expect(container.querySelector('[data-testid="fuel-open-source-12"]')).toBeTruthy();
-    await expandBatch(13);
-    expect(container.querySelector('[data-testid="fuel-open-source-13"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="fuel-activity-invoice-12"]').length).toBe(0);
+    expect(
+      container.querySelector(
+        `[data-testid="fuel-activity-invoice-${MANUAL_ENTRY_ACTIVITY_GROUP_BATCH_ID}"]`,
+      ),
+    ).toBeTruthy();
+    await expandBatch(MANUAL_ENTRY_ACTIVITY_GROUP_BATCH_ID);
+    expect(container.querySelector('[data-testid="fuel-activity-detail-manual-entry-group"]')).toBeTruthy();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 120));
+    });
+    expect(container.querySelector('[data-testid="manual-entry-collection-workspace"]')).toBeTruthy();
+    expect(container.querySelectorAll('[data-testid="truckerp-processed-fuel-workspace"]').length).toBe(1);
+    expect(container.querySelectorAll('[data-testid^="fuel-processed-shell-"]').length).toBe(0);
   });
 
   it("Nationwide Open source overlay mounts via record overlay registry", async () => {
