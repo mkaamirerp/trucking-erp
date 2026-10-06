@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getTollPdfReview,
   listTollPdfReviews,
@@ -16,6 +16,13 @@ import {
 import EmptyState from "../components/EmptyState";
 import { Table } from "../components/Table";
 import TollsModuleNav from "./TollsModuleNav";
+import {
+  nextTollReviewSort,
+  sortTollReviewRows,
+  type TollReviewSortColumn,
+  type TollReviewSortState,
+} from "./tolls/tollReviewRowSort";
+import "./tolls/tolls-review.css";
 
 function apiErrorMessage(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
@@ -102,7 +109,7 @@ export default function TollsPdfReviewsPage() {
     let cancelled = false;
     setDetailLoading(true);
     setDetailError(null);
-    getTollPdfReview(expandedId, { rowOffset: 0, rowLimit: 100 })
+    getTollPdfReview(expandedId, { rowOffset: 0, rowLimit: 500 })
       .then((row) => {
         if (!cancelled) setDetail(row);
       })
@@ -155,7 +162,7 @@ export default function TollsPdfReviewsPage() {
   }
 
   return (
-    <div className="trk-page trk-page--constrained space-y-6">
+    <div className="trk-page trk-page--dense space-y-4" data-testid="tolls-upload">
       <div>
         <h1 className="text-lg font-semibold text-[var(--trk-text)]">Tolls</h1>
         <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
@@ -302,7 +309,7 @@ export default function TollsPdfReviewsPage() {
                           onRefresh={async () => {
                             const next = await getTollPdfReview(item.batch_id, {
                               rowOffset: 0,
-                              rowLimit: Math.max(detail.rows.length, 100),
+                              rowLimit: 500,
                             });
                             setDetail(next);
                             await loadList(appliedQuery, item.batch_id);
@@ -391,6 +398,22 @@ function PdfReviewRows({
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [sort, setSort] = useState<TollReviewSortState | null>(null);
+  const displayRows = useMemo(() => sortTollReviewRows(detail.rows, sort), [detail.rows, sort]);
+
+  const sortHeaders: { key: TollReviewSortColumn; label: string }[] = [
+    { key: "order", label: "#" },
+    { key: "page", label: "Page" },
+    { key: "agency", label: "Agency" },
+    { key: "post_date", label: "Post date" },
+    { key: "entry", label: "Entry" },
+    { key: "exit", label: "Exit" },
+    { key: "entry_loc", label: "Entry loc/lane" },
+    { key: "exit_loc", label: "Exit loc/lane" },
+    { key: "transponder", label: "Transponder" },
+    { key: "plate", label: "Plate" },
+    { key: "charge", label: "Trip charge" },
+  ];
 
   async function onSaveCorrection() {
     if (editingId == null) return;
@@ -429,18 +452,26 @@ function PdfReviewRows({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="toll-review-workspace space-y-3" data-testid="toll-review-workspace">
       <p className="text-xs font-medium uppercase tracking-wide text-[var(--trk-text-muted)]">
-        Parsed review rows
+        {processed ? "Processed statement" : "Parsed review rows"}
       </p>
+      <div className="toll-review-summary" data-testid="toll-review-summary">
+        <span className="toll-review-summary__stat">
+          <strong>{detail.effective_trip_count ?? detail.parsed_trip_count}</strong> /{" "}
+          {detail.source_total_trip_count ?? "—"} trips
+        </span>
+        <span className="toll-review-summary__stat">
+          <strong>{detail.effective_total_trip_charge ?? detail.parsed_total_trip_charge}</strong> /{" "}
+          {detail.source_total_trip_charge ?? "—"}
+        </span>
+        <span className="toll-review-summary__stat">
+          {reconOk ? "Reconciliation OK" : "Reconciliation failed"}
+        </span>
+        {processed ? <span className="toll-review-summary__stat">Processed · read-only</span> : null}
+      </div>
       <p className="text-xs text-[var(--trk-text-muted)]">
-        Account {detail.account_number || "—"} · pages {detail.source_page_count ?? "—"} · profile{" "}
-        {detail.profile_code}. Unmapped source data — not canonical Date/Unit/Amount history.
-      </p>
-      <p className="text-sm text-[var(--trk-text)]">
-        Effective {detail.effective_trip_count ?? detail.parsed_trip_count} / {detail.source_total_trip_count ?? "—"}{" "}
-        trips · {detail.effective_total_trip_charge ?? detail.parsed_total_trip_charge} /{" "}
-        {detail.source_total_trip_charge ?? "—"} · {reconOk ? "reconciliation OK" : "reconciliation failed"}
+        Account {detail.account_number || "—"} · pages {detail.source_page_count ?? "—"} · {detail.filename || "statement"}
       </p>
       <div className="flex flex-wrap gap-2">
         <button
@@ -453,74 +484,91 @@ function PdfReviewRows({
         </button>
       </div>
       {note ? <p className="text-sm text-[var(--trk-text-muted)]">{note}</p> : null}
-      {processed ? (
-        <p className="text-xs text-[var(--trk-text-muted)]">Processed PDF review is read-only.</p>
-      ) : null}
       <p className="text-xs text-[var(--trk-text-muted)]">
-        Showing {detail.rows.length} of {total}
+        Showing {detail.rows.length} of {total}. Click a column header to sort.
       </p>
-      <Table
-        headers={[
-          "#",
-          "Page",
-          "Agency",
-          "Post date",
-          "Entry",
-          "Exit",
-          "Entry loc/lane",
-          "Exit loc/lane",
-          "Transponder",
-          "Plate",
-          "Trip charge",
-          "Edit",
-        ]}
-      >
-        {detail.rows.map((row) => (
-          <tr key={row.source_row_order}>
-            <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">{row.source_row_order}</td>
-            <td className="px-4 py-2 text-xs text-[var(--trk-text-muted)]">{row.source_page_number ?? "—"}</td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">{displayField(row, "agency_raw", row.agency_raw)}</td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">{displayField(row, "post_date", row.post_date)}</td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
-              {displayField(row, "entry_date", row.entry_date)} {displayField(row, "entry_time", row.entry_time)}
-            </td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
-              {displayField(row, "exit_date", row.exit_date)} {displayField(row, "exit_time", row.exit_time)}
-            </td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
-              {displayField(row, "entry_location", row.entry_location)} / {displayField(row, "entry_lane", row.entry_lane)}
-            </td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
-              {displayField(row, "exit_location", row.exit_location)} / {displayField(row, "exit_lane", row.exit_lane)}
-            </td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
-              {displayField(row, "transponder_number", row.transponder_number)}
-            </td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">{displayField(row, "plate_number", row.plate_number)}</td>
-            <td className="px-4 py-2 text-sm text-[var(--trk-text)]">
-              {displayField(row, "trip_charge", row.trip_charge)}
-              {row.trip_charge_raw ? ` (${row.trip_charge_raw})` : ""}
-            </td>
-            <td className="px-4 py-2 text-sm">
-              <button
-                type="button"
-                disabled={processed || row.row_id == null}
-                onClick={() => {
-                  setEditingId(row.row_id ?? null);
-                  const next: Record<string, string> = {};
-                  for (const field of EDITABLE_FIELDS) {
-                    next[field.key] = fieldValue(row, field.key);
-                  }
-                  setDraft(next);
-                }}
-                className="text-[var(--trk-accent)] underline-offset-2 hover:underline disabled:opacity-50"
-              >
-                Correct
-              </button>
-            </td>
-          </tr>
-        ))}
-      </Table>
+      <div className="toll-review-rows">
+        <table className="toll-review-rows__table">
+          <thead>
+            <tr>
+              {sortHeaders.map((header) => {
+                const active = sort?.column === header.key;
+                const ariaSort = active ? (sort.direction === "asc" ? "ascending" : "descending") : "none";
+                return (
+                  <th key={header.key} scope="col">
+                    <button
+                      type="button"
+                      className="toll-review-rows__sort-btn"
+                      data-testid={`toll-review-sort-${header.key}`}
+                      aria-sort={ariaSort}
+                      onClick={() => setSort((prev) => nextTollReviewSort(prev, header.key))}
+                    >
+                      <span>{header.label}</span>
+                      {active ? (
+                        <span className="toll-review-rows__sort-indicator" aria-hidden="true">
+                          {sort.direction === "asc" ? " ↑" : " ↓"}
+                        </span>
+                      ) : (
+                        <span className="toll-review-rows__sort-hint" aria-hidden="true">
+                          ↕
+                        </span>
+                      )}
+                    </button>
+                  </th>
+                );
+              })}
+              {!processed ? <th scope="col">Edit</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map((row) => (
+              <tr key={row.source_row_order} data-testid={`toll-review-row-${row.source_row_order}`}>
+                <td>{row.source_row_order}</td>
+                <td>{row.source_page_number ?? "—"}</td>
+                <td>{displayField(row, "agency_raw", row.agency_raw)}</td>
+                <td>{displayField(row, "post_date", row.post_date)}</td>
+                <td>
+                  {displayField(row, "entry_date", row.entry_date)} {displayField(row, "entry_time", row.entry_time)}
+                </td>
+                <td>
+                  {displayField(row, "exit_date", row.exit_date)} {displayField(row, "exit_time", row.exit_time)}
+                </td>
+                <td>
+                  {displayField(row, "entry_location", row.entry_location)} / {displayField(row, "entry_lane", row.entry_lane)}
+                </td>
+                <td>
+                  {displayField(row, "exit_location", row.exit_location)} / {displayField(row, "exit_lane", row.exit_lane)}
+                </td>
+                <td>{displayField(row, "transponder_number", row.transponder_number)}</td>
+                <td>{displayField(row, "plate_number", row.plate_number)}</td>
+                <td>
+                  {displayField(row, "trip_charge", row.trip_charge)}
+                  {row.trip_charge_raw ? ` (${row.trip_charge_raw})` : ""}
+                </td>
+                {!processed ? (
+                  <td>
+                    <button
+                      type="button"
+                      disabled={row.row_id == null}
+                      onClick={() => {
+                        setEditingId(row.row_id ?? null);
+                        const next: Record<string, string> = {};
+                        for (const field of EDITABLE_FIELDS) {
+                          next[field.key] = fieldValue(row, field.key);
+                        }
+                        setDraft(next);
+                      }}
+                      className="text-[var(--trk-accent)] underline-offset-2 hover:underline disabled:opacity-50"
+                    >
+                      Correct
+                    </button>
+                  </td>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {editingId != null && !processed ? (
         <form
           className="grid gap-2 rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] p-3 sm:grid-cols-3"

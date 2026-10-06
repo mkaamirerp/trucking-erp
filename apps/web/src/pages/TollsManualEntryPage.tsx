@@ -216,7 +216,7 @@ export default function TollsManualEntryPage() {
   const canProcess = status === "NEEDS_REVIEW" && stageId != null && !busy;
 
   return (
-    <div className="trk-page trk-page--constrained space-y-6">
+    <div className="trk-page trk-page--dense space-y-4">
       <div>
         <h1 className="text-lg font-semibold text-[var(--trk-text)]">Tolls</h1>
         <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
