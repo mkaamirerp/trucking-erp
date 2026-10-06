@@ -1640,3 +1640,229 @@ After implementation:
 - do not deploy
 - do not start 0B until ChatGPT reviews the implementation report/diff
 
+
+
+# 15. ISSUE 0A implementation report — pending independent diff verification
+
+**Source:** Cursor implementation report received 2026-10-06.  
+**Repository state:** implementation is reported as present only in the working tree. **No commit, no deploy, no migration.**  
+**Review status:** **REPORT REVIEWED; CODE DIFF NOT YET INDEPENDENTLY VERIFIED** because the changes are not committed/pushed to a ref visible to the independent reviewer.
+
+## 15.1 Reported implementation
+
+Cursor reports that ISSUE 0A was implemented as the required coordinated frontend + backend freeze:
+
+- normal Load create is draft-only
+- normal Load Save no longer sends operational status
+- normal Load Save no longer sends `driver_id` / `truck_id` / `trailer_id`
+- legacy assignment strip and `?dispatchAssign=1` path removed
+- legacy board Assign navigation removed
+- backend rejects operational Load create/update state
+- `source="seed"` no longer changes business-state authority
+- generic Load update no longer invokes legacy mint/cancel helpers
+- historical legacy rows remain readable and commercially editable when status/assignment are omitted
+- canonical Trip APIs were not intentionally changed
+
+Reported touched files:
+
+### Backend
+- `app/services/loads.py`
+- `app/constants/trip_dispatch.py`
+
+### Scripts
+- `app/scripts/seed_demo_operational_loads.py`
+- `seed_dispatch.py`
+
+### Frontend
+- `apps/web/src/loadWorkspace/loadWorkspaceShared.ts`
+- `apps/web/src/loadWorkspace/LoadWorkspaceForm.tsx`
+- `apps/web/src/pages/LoadWorkspacePage.tsx`
+- `apps/web/src/pages/LoadLabPage.tsx`
+- `apps/web/src/pages/DeprecatedDispatchPage.tsx`
+- `apps/web/src/routes.ts`
+- deleted `apps/web/src/loadWorkspace/DispatchAssignmentStrip.tsx`
+
+### Tests
+- new `tests/test_load_writer_freeze_issue0a.py`
+- new `apps/web/src/loadWorkspace/loadWriterFreeze.test.ts`
+- rewrites in legacy Load/dispatch tests to enforce the freeze
+
+## 15.2 Reported verification
+
+Cursor reports:
+
+```text
+Load/dispatch backend:
+99 passed
+0 skipped
+
+loadWorkspace frontend:
+72 passed
+
+adjacent Trip/custody/intake/customs:
+82 passed
+50 skipped
+5 failed
+```
+
+The five adjacent failures were reported to reproduce on an unmodified HEAD worktree and therefore are **not yet attributed to ISSUE 0A**.
+
+Cursor also reports:
+
+```text
+full vitest:
+367 passed
+1 failed
+```
+
+with the one failure in `FuelRecentActivityInvoiceRow.test.tsx`, reproducible in isolation and unrelated to the Load changes.
+
+Typecheck report:
+
+```text
+tsc:
+128 existing errors
+0 in touched files
+```
+
+A production frontend build into a temporary directory reportedly succeeded.
+
+## 15.3 Implementation decisions accepted in principle
+
+The following design choices are accepted **subject to diff verification**:
+
+### Create contract
+
+Rejecting rather than silently dropping legacy operational fields is the safer API behavior.
+
+Reported behavior:
+
+- operational create status → controlled 409
+- `ready` on create → controlled 409
+- any Load assignment field → controlled 409
+- persisted create status → `draft`
+
+### Historical edit compatibility
+
+A historical Load may retain:
+
+```text
+assigned
+dispatched
+in_transit
+...
+```
+
+and still accept unrelated commercial edits **when status and Load assignment are omitted**.
+
+This matches the accepted 0A contract.
+
+### Legacy state transitions frozen
+
+Cursor reports that a legacy-status row cannot be moved back to draft/ready through generic PATCH.
+
+That is acceptable for 0A because performing only the Load status change would leave legacy `dispatch_trips` / TripLoad state inconsistent.
+
+The migration/transition policy belongs to Issue 0B.
+
+### Legacy mint/cancel helpers retained but unreachable
+
+Cursor reports:
+
+- definitions remain
+- normal Load service no longer imports/calls them
+- remaining caller is isolated legacy test support
+
+This is the intended 0A state.
+
+## 15.4 Important newly discovered bug — promote to a numbered issue
+
+Cursor reproduced an existing commercial money/audit defect:
+
+> A PATCH that changes `rate` can commit the Load row and then fail in the audit writer because Decimal is not JSON serializable.
+
+This is **not** a harmless test nuisance.
+
+Potential behavior:
+
+```text
+client PATCHes rate
+        ↓
+Load row COMMIT succeeds
+        ↓
+audit serialization fails
+        ↓
+request returns error
+        ↓
+client believes update failed
+        ↓
+database value may already be changed
+```
+
+That creates an **ambiguous money mutation**: API failure after durable commercial revenue change.
+
+This violates the TruckERP rule:
+
+> no silent money edits / money changes must have truthful, atomic observable behavior.
+
+### NEW ISSUE 26 — Money mutation commits before audit failure
+
+**Severity:** HIGH
+
+Audit before fixing:
+
+1. Reproduce on unmodified HEAD with a controlled Load and exact rate change.
+2. Record HTTP result, DB rate before/after, audit row before/after.
+3. Find the exact transaction boundary in `update_load()` and audit writer.
+4. Determine whether this affects only Decimal rate/customer_rate or any non-JSON-native values.
+5. Check create, notes, customs snapshot, Mark Ready, and other Load audit calls for the same "commit then audit" pattern.
+6. Decide whether Load money mutation + required audit event must be one transaction.
+7. Do not broaden into the full accounting module.
+8. Add regression proving a failed audit cannot leave an ambiguous committed money change.
+
+**Ordering:** Issue 26 should be handled **before broad 0B data migration work**, because 0B should not proceed while normal commercial money edits can return failure after committing.
+
+## 15.5 Remaining 0A verification requirements before commit
+
+Before ISSUE 0A can be accepted as code-complete, independent review still needs the actual diff or a commit SHA.
+
+Specifically verify:
+
+1. `LoadCreate` / service guard does not accidentally reject legitimate non-operational commercial fields.
+2. explicit `None` assignment fields return the intended controlled error and no first-party caller still sends them.
+3. historical Load Save truly omits legacy status/assignment rather than sending unchanged values.
+4. Mark Ready still functions through its explicit endpoint.
+5. generic PATCH can still edit ordinary commercial fields on historical rows.
+6. no normal runtime caller reaches `ensure_active_trip_for_freight_load`.
+7. no normal runtime caller reaches `cancel_active_trip_for_load`.
+8. `seed_demo_operational_loads.py` cannot recreate an equivalent hidden legacy path.
+9. `seed_dispatch.py` no longer inserts operational statuses/equipment, while preserving any safe demo purpose.
+10. removing `DispatchAssignmentStrip` did not leave dead imports/routes/query parsing.
+11. `DeprecatedDispatchPage` no longer routes into Load assignment mutation.
+12. canonical Trip create/assignment/execution services were not changed.
+13. no Toll/Fuel/Auth changes are mixed into the Load slice.
+
+## 15.6 Do not deploy yet
+
+No deploy until:
+
+```text
+Cursor produces a reviewable diff / commit
+→ independent code review
+→ 0A tests rechecked
+→ MD updated with accepted commit SHA
+```
+
+Running containers serving the old path is expected until deployment is explicitly authorized.
+
+## 15.7 Current next action
+
+**Do not begin Issue 0B yet.**
+
+First produce a clean, reviewable ISSUE 0A commit only, without deployment.
+
+Then independent review will inspect that exact commit and either:
+
+- accept 0A and record the SHA, or
+- send focused corrections back to Cursor.
+
