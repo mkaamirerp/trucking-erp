@@ -14,10 +14,8 @@ import {
   createPlannedTrip,
   getEmailThread,
   getEmailThreadMessages,
-  getDriverAssignmentHints,
   getLoad,
   getLoadNotes,
-  getTruckSuggestedTrailer,
   listBrokers,
   listBrokerContacts,
   listCustomsBrokers,
@@ -45,12 +43,13 @@ import {
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
 import { sortedStops as sortStops } from "@/utils/loadStops";
-import { DispatchAssignmentStrip } from "@/loadWorkspace/DispatchAssignmentStrip";
 import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
   baselineSignatureFromLoad,
+  buildLoadCreatePayload,
   buildLoadPersistPayload,
   buildVerificationTabIndexMap,
+  type LoadPersistParams,
   emptyIntakeProposed,
   initialManualCreateStops,
   newDraftStop,
@@ -319,10 +318,6 @@ export default function LoadWorkspacePage() {
 
   const sectionConfig = SECTION_CONFIG[workspaceMode];
 
-  const dispatchAssignRaw = searchParams.get(OPS.LOAD_DISPATCH_ASSIGN_QUERY);
-  const dispatchAssignContext =
-    dispatchAssignRaw !== null && dispatchAssignRaw !== "0" && dispatchAssignRaw !== "false";
-
   const [customsBrokers, setCustomsBrokers] = useState<CustomsBroker[]>([]);
   const [freightBrokers, setFreightBrokers] = useState<Broker[]>([]);
   const [brokerContacts, setBrokerContacts] = useState<BrokerContact[]>([]);
@@ -330,14 +325,6 @@ export default function LoadWorkspacePage() {
   const [trucks, setTrucks] = useState<Truck[]>([]);
   const [trailers, setTrailers] = useState<Trailer[]>([]);
   const [load, setLoad] = useState<Load | null>(null);
-
-  const showDispatchAssignmentStrip =
-    workspaceMode === "detail" &&
-    !isManual &&
-    load != null &&
-    load.active_trip_id == null &&
-    (load.status || "").toLowerCase() === "unassigned" &&
-    dispatchAssignContext;
 
   const [loadNotes, setLoadNotes] = useState<LoadNote[]>([]);
   const [newNoteBody, setNewNoteBody] = useState("");
@@ -531,7 +518,6 @@ export default function LoadWorkspacePage() {
     () =>
       JSON.stringify(
         buildLoadPersistPayload({
-          status,
           loadNumber,
           brokerId,
           brokerContactId,
@@ -554,16 +540,12 @@ export default function LoadWorkspacePage() {
           rate,
           customerRate,
           miles,
-          driverId,
-          truckId,
-          trailerId,
           customsBrokerId,
           internalNotes,
           draftStops,
         }),
       ),
     [
-      status,
       loadNumber,
       brokerId,
       brokerContactId,
@@ -586,9 +568,6 @@ export default function LoadWorkspacePage() {
       rate,
       customerRate,
       miles,
-      driverId,
-      truckId,
-      trailerId,
       customsBrokerId,
       internalNotes,
       draftStops,
@@ -845,38 +824,35 @@ export default function LoadWorkspacePage() {
     [sortedDraftStops],
   );
 
-  const buildWorkspacePersistPayload = () =>
-    buildLoadPersistPayload({
-      status,
-      loadNumber,
-      brokerId,
-      brokerContactId,
-      brokerNameSnapshot,
-      brokerContactNameSnapshot,
-      brokerContactPhoneSnapshot,
-      brokerContactExtensionSnapshot,
-      brokerContactEmailSnapshot,
-      brokerLoadReference,
-      loadReferences,
-      mode: freightMode,
-      equipmentType,
-      trailerType,
-      trailerSize,
-      commodity,
-      estimatedWeight,
-      hazmat,
-      temperatureRequirement,
-      palletCaseCount,
-      rate,
-      customerRate,
-      miles,
-      driverId,
-      truckId,
-      trailerId,
-      customsBrokerId,
-      internalNotes,
-      draftStops,
-    });
+  const workspacePersistParams = (): LoadPersistParams => ({
+    loadNumber,
+    brokerId,
+    brokerContactId,
+    brokerNameSnapshot,
+    brokerContactNameSnapshot,
+    brokerContactPhoneSnapshot,
+    brokerContactExtensionSnapshot,
+    brokerContactEmailSnapshot,
+    brokerLoadReference,
+    loadReferences,
+    mode: freightMode,
+    equipmentType,
+    trailerType,
+    trailerSize,
+    commodity,
+    estimatedWeight,
+    hazmat,
+    temperatureRequirement,
+    palletCaseCount,
+    rate,
+    customerRate,
+    miles,
+    customsBrokerId,
+    internalNotes,
+    draftStops,
+  });
+
+  const buildWorkspacePersistPayload = () => buildLoadPersistPayload(workspacePersistParams());
 
   const showMarkReadyAction =
     load != null &&
@@ -887,7 +863,7 @@ export default function LoadWorkspacePage() {
     setSaving(true);
     setToolbarMessage(null);
     try {
-      const created = await createLoad(buildWorkspacePersistPayload());
+      const created = await createLoad(buildLoadCreatePayload(workspacePersistParams()));
       navigate(OPS.LOAD_DETAIL(created.id), { replace: true });
     } catch (e: unknown) {
       setToolbarMessage({ text: (e as Error)?.message || "Could not create load", tone: "error" });
@@ -1011,92 +987,6 @@ export default function LoadWorkspacePage() {
       setMarkReadyBusy(false);
     }
   }
-
-  const applyDriverAssignmentHints = useCallback(async (did: number) => {
-    try {
-      const h = await getDriverAssignmentHints(did);
-      setTruckId(h.truck_id ?? null);
-      let nextTrailer = h.trailer_id ?? null;
-      if (h.truck_id != null && nextTrailer == null) {
-        const t = await getTruckSuggestedTrailer(h.truck_id);
-        nextTrailer = t.trailer_id ?? null;
-      }
-      setTrailerId(nextTrailer);
-    } catch {
-      /* hints are optional */
-    }
-  }, []);
-
-  const onDispatchStripDriverSelect = useCallback(
-    (id: number | null) => {
-      setDriverId(id);
-      if (id != null) void applyDriverAssignmentHints(id);
-      else {
-        setTruckId(null);
-        setTrailerId(null);
-      }
-    },
-    [applyDriverAssignmentHints],
-  );
-
-  const onDispatchStripTruckSelect = useCallback((id: number | null) => {
-    setTruckId(id);
-    if (id == null) return;
-    getTruckSuggestedTrailer(id)
-      .then((t) => {
-        if (t.trailer_id != null) setTrailerId(t.trailer_id);
-      })
-      .catch(() => {});
-  }, []);
-
-  const onDispatchStripTrailerSelect = useCallback((id: number | null) => {
-    setTrailerId(id);
-  }, []);
-
-  const onDispatchAssign = useCallback(async () => {
-    if (!load || driverId == null) return;
-    const expectedVersion = load.concurrency_version ?? 1;
-    setSaving(true);
-    setToolbarMessage(null);
-    setError(null);
-    try {
-      const updated = await updateLoad(load.id, {
-        expected_concurrency_version: expectedVersion,
-        status: "assigned",
-        driver_id: driverId,
-        truck_id: truckId,
-        trailer_id: trailerId,
-      });
-      setLoad(updated);
-      hydrateFromLoad(updated);
-      setToolbarMessage({
-        text:
-          "Load record updated (legacy path). For new work, create a planned trip and assign driver/truck/trailer on the trip workspace.",
-        tone: "success",
-      });
-      setServerConflict(null);
-      const sp = new URLSearchParams(searchParams);
-      sp.delete(OPS.LOAD_DISPATCH_ASSIGN_QUERY);
-      const next = sp.toString() ? `?${sp.toString()}` : "";
-      navigate({ pathname: location.pathname, search: next }, { replace: true });
-    } catch (e: unknown) {
-      const c = parseLoadVersionConflict(e);
-      if (c) {
-        setServerConflict({
-          serverVersion: c.server_version,
-          serverSnapshot: c.server_snapshot,
-        });
-        setToolbarMessage({
-          text: "Load was modified elsewhere — see conflict details above.",
-          tone: "warning",
-        });
-      } else {
-        setToolbarMessage({ text: (e as Error)?.message || "Assignment failed", tone: "error" });
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [load, driverId, truckId, trailerId, hydrateFromLoad, searchParams, navigate, location.pathname]);
 
   async function onCustomsBrokerSelect(ev: React.ChangeEvent<HTMLSelectElement>) {
     if (!load || load.document_snapshot_confirmed_at) return;
@@ -1275,17 +1165,7 @@ export default function LoadWorkspacePage() {
 
   /** Compare the server snapshot against the current form state; return human-readable diffs. */
   function getConflictDiffs(snap: Load): Array<{ label: string; server: string; yours: string }> {
-    const form = buildLoadPersistPayload({
-      status, loadNumber, brokerId, brokerContactId,
-      brokerNameSnapshot, brokerContactNameSnapshot, brokerContactPhoneSnapshot,
-      brokerContactExtensionSnapshot, brokerContactEmailSnapshot, brokerLoadReference,
-      loadReferences,
-      mode: freightMode, equipmentType, trailerType, trailerSize,
-      commodity, estimatedWeight, hazmat, temperatureRequirement, palletCaseCount,
-      rate, customerRate, miles,
-      driverId, truckId, trailerId, customsBrokerId, internalNotes, draftStops,
-    });
-    const f = form as Record<string, unknown>;
+    const f = buildWorkspacePersistPayload() as Record<string, unknown>;
 
     const fmt = (v: unknown, money = false): string => {
       if (v == null || v === "") return "—";
@@ -1293,16 +1173,12 @@ export default function LoadWorkspacePage() {
     };
 
     const checks: Array<{ label: string; snapKey: keyof Load; formKey: string; money?: boolean }> = [
-      { label: "Status",        snapKey: "status",                 formKey: "status" },
       { label: "TruckERP ID",   snapKey: "load_number",            formKey: "load_number" },
       { label: "Broker",        snapKey: "broker_name_snapshot",   formKey: "broker_name_snapshot" },
       { label: "Load Number",   snapKey: "broker_load_reference",  formKey: "broker_load_reference" },
       { label: "Rate",          snapKey: "rate",                   formKey: "rate",          money: true },
       { label: "Customer rate", snapKey: "customer_rate",          formKey: "customer_rate", money: true },
       { label: "Miles",         snapKey: "miles",                  formKey: "miles" },
-      { label: "Driver",        snapKey: "driver_id",              formKey: "driver_id" },
-      { label: "Truck",         snapKey: "truck_id",               formKey: "truck_id" },
-      { label: "Trailer",       snapKey: "trailer_id",             formKey: "trailer_id" },
       { label: "Equipment",     snapKey: "equipment_type",         formKey: "equipment_type" },
       { label: "Trailer type",  snapKey: "trailer_type",           formKey: "trailer_type" },
       { label: "Commodity",     snapKey: "commodity",              formKey: "commodity" },
@@ -1361,11 +1237,6 @@ export default function LoadWorkspacePage() {
               {workspaceMode === "intake" ? (
                 <span className="rounded border border-sky-800 bg-sky-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
                   Intake
-                </span>
-              ) : null}
-              {showDispatchAssignmentStrip ? (
-                <span className="rounded border border-[var(--trk-heading)]/40 bg-[var(--trk-heading)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-heading)]">
-                  Legacy load assign
                 </span>
               ) : null}
             </div>
@@ -1531,22 +1402,6 @@ export default function LoadWorkspacePage() {
           </div>
         ) : null}
       </header>
-
-      {showDispatchAssignmentStrip ? (
-        <DispatchAssignmentStrip
-          drivers={drivers}
-          trucks={trucks}
-          trailers={trailers}
-          driverId={driverId}
-          truckId={truckId}
-          trailerId={trailerId}
-          onDriverSelect={onDispatchStripDriverSelect}
-          onTruckSelect={onDispatchStripTruckSelect}
-          onTrailerSelect={onDispatchStripTrailerSelect}
-          onAssign={() => void onDispatchAssign()}
-          saving={saving || markReadyBusy}
-        />
-      ) : null}
 
       {parseWarnings.length > 0 || (lastParseAppliedLabels && lastParseAppliedLabels.length > 0) ? (
       <div className="shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
@@ -1766,7 +1621,6 @@ export default function LoadWorkspacePage() {
             focusDoc={focusDoc}
             verificationTabIndex={verificationTabIndex}
             status={status}
-            setStatus={setStatus}
             loadNumber={loadNumber}
             setLoadNumber={setLoadNumber}
             brokerId={brokerId}
@@ -1811,11 +1665,8 @@ export default function LoadWorkspacePage() {
             miles={miles}
             setMiles={setMiles}
             driverId={driverId}
-            setDriverId={setDriverId}
             truckId={truckId}
-            setTruckId={setTruckId}
             trailerAssetId={trailerId}
-            setTrailerAssetId={setTrailerId}
             activeTripId={workspaceMode === "detail" && load ? load.active_trip_id ?? null : null}
             customsBrokerId={customsBrokerId}
             internalNotes={internalNotes}

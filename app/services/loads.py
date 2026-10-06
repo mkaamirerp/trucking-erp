@@ -11,20 +11,20 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.trip_dispatch import (
-    DISPATCH_RESOURCES_REQUIRED,
+    LEGACY_LOAD_ASSIGNMENT_DEPRECATED,
+    LEGACY_LOAD_OPERATIONAL_STATUSES,
     LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
-    PRE_DISPATCH_TRIP_CANCEL_STATUSES,
-    TRIP_ALLOCATED_AT_LOAD_STATUS,
+    LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
+    LOAD_ASSIGNMENT_FIELDS,
+    LOAD_CREATE_STATUS_MUST_BE_DRAFT,
+    LOAD_STATUS_NOT_WRITABLE,
+    LOAD_WRITABLE_STATUSES,
 )
 from app.models.broker import Broker, BrokerContact
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
-from app.models.driver import Driver
 from app.models.load import Load, LoadNote, LoadStop
-from app.models.truck import Truck
-from app.models.trailer import Trailer
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
-from app.services import dispatch_trips as dispatch_trips_service
 from app.services.load_operational_references import sanitize_load_operational_references
 from app.utils.pagination import paginate
 
@@ -75,11 +75,6 @@ async def _write_load_audit(
         pass
 
 
-async def _get_driver(db: AsyncSession, tenant_id: int, driver_id: int) -> Driver | None:
-    result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
-    return result.scalar_one_or_none()
-
-
 async def _get_broker(db: AsyncSession, tenant_id: int, broker_id: int) -> Broker | None:
     result = await db.execute(select(Broker).where(Broker.id == broker_id, Broker.tenant_id == tenant_id))
     return result.scalar_one_or_none()
@@ -105,20 +100,58 @@ async def _get_customs_broker(db: AsyncSession, tenant_id: int, customs_broker_i
     return result.scalar_one_or_none()
 
 
-async def _get_truck(db: AsyncSession, tenant_id: int, truck_id: int) -> Truck | None:
-    result = await db.execute(select(Truck).where(Truck.id == truck_id, Truck.tenant_id == tenant_id))
-    return result.scalar_one_or_none()
+def _legacy_write_conflict(code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"detail": message, "code": code})
 
 
-async def _get_trailer(db: AsyncSession, tenant_id: int, trailer_id: int) -> Trailer | None:
-    result = await db.execute(select(Trailer).where(Trailer.id == trailer_id, Trailer.tenant_id == tenant_id))
-    return result.scalar_one_or_none()
+def _reject_load_assignment_fields(payload: LoadCreate | LoadUpdate) -> None:
+    """Driver/truck/trailer are Trip equipment; Load create/PATCH must not carry them (even as null)."""
+    sent = [f for f in LOAD_ASSIGNMENT_FIELDS if f in payload.model_fields_set]
+    if sent:
+        raise _legacy_write_conflict(
+            LEGACY_LOAD_ASSIGNMENT_DEPRECATED,
+            f"Load {', '.join(sent)} is not writable. Assign driver/truck/trailer on the Trip.",
+        )
 
 
-def _merged_scalar(load: Load, data: dict, key: str):
-    if key in data:
-        return data[key]
-    return getattr(load, key)
+def _reject_legacy_status_target(new_status: str) -> None:
+    if new_status in LEGACY_LOAD_OPERATIONAL_STATUSES:
+        raise _legacy_write_conflict(
+            LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
+            f"Load.status = {new_status} is legacy operational vocabulary and cannot be written. "
+            "Use Trip assignment and Trip lifecycle actions.",
+        )
+
+
+def _guard_create_payload(payload: LoadCreate) -> None:
+    _reject_load_assignment_fields(payload)
+    new_status = (payload.status or "draft").strip().lower()
+    _reject_legacy_status_target(new_status)
+    if new_status != "draft":
+        raise _legacy_write_conflict(
+            LOAD_CREATE_STATUS_MUST_BE_DRAFT,
+            "New loads are created as draft. Use Mark ready after required fields are complete.",
+        )
+
+
+def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
+    _reject_load_assignment_fields(payload)
+    if "status" not in payload.model_fields_set:
+        return
+    new_status = (payload.status or "").strip().lower()
+    _reject_legacy_status_target(new_status)
+    if new_status not in LOAD_WRITABLE_STATUSES:
+        raise _legacy_write_conflict(
+            LOAD_STATUS_NOT_WRITABLE,
+            "Load status must be draft or ready when provided. Omit status to keep the current value.",
+        )
+    old_status = (load.status or "").strip().lower()
+    if old_status in LEGACY_LOAD_OPERATIONAL_STATUSES:
+        raise _legacy_write_conflict(
+            LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
+            f"This load holds legacy status {old_status}; its status cannot be changed from the Load page. "
+            "Commercial fields remain editable when status is omitted.",
+        )
 
 
 def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
@@ -153,8 +186,7 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
 
 
 async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> Load:
-    if payload.driver_id is not None and not await _get_driver(db, tenant_id, payload.driver_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Driver not found")
+    _guard_create_payload(payload)
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
     if payload.broker_contact_id is not None:
@@ -166,10 +198,6 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Broker contact must belong to the selected broker",
             )
-    if payload.truck_id is not None and not await _get_truck(db, tenant_id, payload.truck_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Truck not found")
-    if payload.trailer_id is not None and not await _get_trailer(db, tenant_id, payload.trailer_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trailer not found")
     if payload.customs_broker_id is not None and not await _get_customs_broker(db, tenant_id, payload.customs_broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
 
@@ -178,8 +206,7 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
 
     data = _load_data_from_payload(payload)
     data["load_number"] = load_number
-    if "status" not in data:
-        data["status"] = "draft"
+    data["status"] = "draft"
 
     load = Load(**data, tenant_id=tenant_id)
     db.add(load)
@@ -315,25 +342,14 @@ async def update_load(
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
+    _guard_update_payload(load, payload)
+
     expected = payload.expected_concurrency_version
     old_status = (load.status or "").strip().lower()
     old_driver_id = load.driver_id
     old_customs_broker_id = load.customs_broker_id
     data = _load_data_from_payload(payload)
     before_snapshot: dict[str, object] = {str(k): getattr(load, k, None) for k in data.keys()}
-
-    if "driver_id" in data:
-        driver_id = data["driver_id"]
-        if driver_id is not None and not await _get_driver(db, tenant_id, driver_id):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Driver not found")
-    if "truck_id" in data:
-        truck_id = data["truck_id"]
-        if truck_id is not None and not await _get_truck(db, tenant_id, truck_id):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Truck not found")
-    if "trailer_id" in data:
-        trailer_id = data["trailer_id"]
-        if trailer_id is not None and not await _get_trailer(db, tenant_id, trailer_id):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trailer not found")
 
     if "broker_id" in data:
         broker_id = data["broker_id"]
@@ -367,52 +383,8 @@ async def update_load(
     if "load_number" in data and data["load_number"]:
         await _ensure_unique_load_number(db, tenant_id, data["load_number"], exclude_id=load.id)
 
-    new_status = (_merged_scalar(load, data, "status") or load.status or "").strip().lower()
-    merged_driver_id = _merged_scalar(load, data, "driver_id")
-    merged_truck_id = _merged_scalar(load, data, "truck_id")
-
-    next_aid, next_tnum, next_atid = load.active_dispatch_trip_id, load.trip_number, load.active_trip_id
-
-    # Slice 1: generic Load PATCH (source=ui) cannot create new transitions into legacy "dispatched".
-    # Internal seed/migration may pass source="seed" to allocate mirrors (legacy demo data scripts only).
-    if (
-        new_status == TRIP_ALLOCATED_AT_LOAD_STATUS
-        and old_status != TRIP_ALLOCATED_AT_LOAD_STATUS
-    ):
-        if source != "seed":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "detail": (
-                        "Load.status = dispatched is deprecated for new trip execution. "
-                        "Use explicit Trip assignment / Assign & Send flow."
-                    ),
-                    "code": LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
-                },
-            )
-        if not merged_driver_id or not merged_truck_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "detail": "Driver and truck are required before dispatching",
-                    "code": DISPATCH_RESOURCES_REQUIRED,
-                },
-            )
-        dres = await dispatch_trips_service.ensure_active_trip_for_freight_load(db, tenant_id, load.id)
-        next_aid, next_tnum = dres.dispatch_trip.id, dres.dispatch_trip.trip_number
-        next_atid = dres.container_trip_id
-    elif (
-        old_status == TRIP_ALLOCATED_AT_LOAD_STATUS
-        and new_status != TRIP_ALLOCATED_AT_LOAD_STATUS
-        and new_status in PRE_DISPATCH_TRIP_CANCEL_STATUSES
-    ):
-        await dispatch_trips_service.cancel_active_trip_for_load(db, tenant_id, load.id, load=None)
-        next_aid, next_tnum, next_atid = None, None, None
-
+    # Trip read-model pointers (trip_number, active_dispatch_trip_id, active_trip_id) are never written here.
     values = {**data}
-    values["active_dispatch_trip_id"] = next_aid
-    values["trip_number"] = next_tnum
-    values["active_trip_id"] = next_atid
     values["updated_at"] = func.now()
     values["concurrency_version"] = Load.concurrency_version + 1
 

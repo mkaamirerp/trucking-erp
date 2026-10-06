@@ -1,10 +1,9 @@
-"""Trip number lifecycle: legacy dispatched path blocked on generic PATCH (Slice 1), prefix lock,
-cancel rules, schema guards.
+"""Trip number lifecycle: legacy Load status/assignment writes frozen on generic PATCH (Slice 1 + Issue 0A),
+prefix lock, historical trip pointers preserved, schema guards.
 
 Requires DATABASE_URL (integration), tenant migrations through dispatch_trips / numbering.
 Tests that need pre-dispatched state use TENANT_DATABASE_URL + seed_load_dispatched_legacy_state.
 
-- Fleet: skips if no driver+truck rows.
 - Admin double-PUT 409: idempotent across repeat runs on a shared DB.
 
 Integration pytest is typically run inside the API image with the same code as /app; if the container
@@ -25,7 +24,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.constants.trip_dispatch import LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED, TRIP_NUMERIC_WIDTH
+from app.constants.trip_dispatch import (
+    LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED,
+    LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
+    TRIP_NUMERIC_WIDTH,
+)
 from app.core.db_url import to_async_pg_url
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
@@ -121,25 +124,9 @@ class TestTripNumberSchema:
 class TestTripNumber01Early409:
     """Slice 1: generic PATCH to dispatched is rejected before any numbering/mint."""
 
-    async def _first_driver_truck(self, client) -> tuple[int, int] | None:
-        dr = await client.get("/api/v1/drivers?limit=5", headers=AUTH_HEADERS)
-        tr = await client.get("/api/v1/trucks?page=1&size=5", headers=AUTH_HEADERS)
-        if dr.status_code != 200 or tr.status_code != 200:
-            return None
-        dlist = dr.json()
-        titems = tr.json().get("items") or []
-        if not dlist or not titems:
-            return None
-        return int(dlist[0]["id"]), int(titems[0]["id"])
-
     async def test_patch_to_dispatched_returns_deprecated_before_numbering_gate(
         self, client, override_auth_tenant
     ) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
         cr = await client.post(
             "/api/v1/loads",
             headers=AUTH_HEADERS,
@@ -151,12 +138,7 @@ class TestTripNumber01Early409:
         patch = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "dispatched",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
+            json={"status": "dispatched", "expected_concurrency_version": _cv(cr.json())},
         )
         assert patch.status_code == 409
         assert _detail_code(patch.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
@@ -205,16 +187,14 @@ class TestTripNumberDispatchLifecycle:
         assert r1.status_code == 200, r1.text
         return prefix
 
-    async def _first_driver_truck(self, client) -> tuple[int, int] | None:
-        dr = await client.get("/api/v1/drivers?limit=5", headers=AUTH_HEADERS)
-        tr = await client.get("/api/v1/trucks?page=1&size=5", headers=AUTH_HEADERS)
-        if dr.status_code != 200 or tr.status_code != 200:
-            return None
-        dlist = dr.json()
-        titems = tr.json().get("items") or []
-        if not dlist or not titems:
-            return None
-        return int(dlist[0]["id"]), int(titems[0]["id"])
+    async def _new_draft(self, client, tag: str) -> dict:
+        cr = await client.post(
+            "/api/v1/loads",
+            headers=AUTH_HEADERS,
+            json={"status": "draft", "load_number": f"{tag}-{uuid.uuid4().hex[:8]}"},
+        )
+        assert cr.status_code == 201, cr.text
+        return cr.json()
 
     async def _seed_legacy_dispatched(self, load_id: int) -> None:
         url = _tenant_async_url()
@@ -231,62 +211,33 @@ class TestTripNumberDispatchLifecycle:
         finally:
             await engine.dispose()
 
-    async def test_assigned_alone_does_not_mint_trip(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
-        cr = await client.post(
-            "/api/v1/loads",
-            headers=AUTH_HEADERS,
-            json={"status": "draft", "load_number": f"TRIPAS-{uuid.uuid4().hex[:8]}"},
-        )
-        assert cr.status_code == 201
-        load_id = cr.json()["id"]
-
+    async def test_patch_to_assigned_is_rejected_and_mints_nothing(
+        self, client, override_auth_tenant, locked_prefix
+    ) -> None:
+        created = await self._new_draft(client, "TRIPAS")
         up = await client.patch(
-            f"/api/v1/loads/{load_id}",
+            f"/api/v1/loads/{created['id']}",
             headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
+            json={"status": "assigned", "expected_concurrency_version": _cv(created)},
         )
-        assert up.status_code == 200
-        data = up.json()
-        assert data["status"] == "assigned"
-        assert data.get("trip_number") in (None, "")
-        assert data.get("active_dispatch_trip_id") in (None,)
+        assert up.status_code == 409, up.text
+        assert _detail_code(up.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
+        row = (await client.get(f"/api/v1/loads/{created['id']}", headers=AUTH_HEADERS)).json()
+        assert row["status"] == "draft"
+        assert row.get("trip_number") in (None, "")
+        assert row.get("active_dispatch_trip_id") in (None,)
 
     async def test_patch_to_dispatched_deprecated_seed_mirrors_trip_numbers(
         self, client, override_auth_tenant, locked_prefix
     ) -> None:
         """Generic PATCH cannot transition to dispatched; service seed matches historical mirrors."""
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
-        cr = await client.post(
-            "/api/v1/loads",
-            headers=AUTH_HEADERS,
-            json={"status": "draft", "load_number": f"TRIP1-{uuid.uuid4().hex[:8]}"},
-        )
-        assert cr.status_code == 201
-        load_id = cr.json()["id"]
+        created = await self._new_draft(client, "TRIP1")
+        load_id = created["id"]
 
         d1 = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "dispatched",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
+            json={"status": "dispatched", "expected_concurrency_version": _cv(created)},
         )
         assert d1.status_code == 409
         assert _detail_code(d1.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
@@ -320,111 +271,56 @@ class TestTripNumberDispatchLifecycle:
             headers=AUTH_HEADERS,
             json={"status": "dispatched", "expected_concurrency_version": _cv(d2.json())},
         )
-        assert d3.status_code == 200, d3.text
-        assert d3.json().get("trip_number") == tn
-        assert d3.json().get("active_dispatch_trip_id") == tid
+        assert d3.status_code == 409, d3.text
+        assert _detail_code(d3.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
+        after = (await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)).json()
+        assert after.get("trip_number") == tn
+        assert after.get("active_dispatch_trip_id") == tid
 
-    async def test_forward_in_transit_does_not_clear_trip(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
-        cr = await client.post(
-            "/api/v1/loads",
-            headers=AUTH_HEADERS,
-            json={"status": "draft", "load_number": f"TRIPFW-{uuid.uuid4().hex[:8]}"},
-        )
-        assert cr.status_code == 201
-        load_id = cr.json()["id"]
-        asg = await client.patch(
-            f"/api/v1/loads/{load_id}",
-            headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
-        )
-        assert asg.status_code == 200, asg.text
+    async def test_legacy_row_forward_status_patch_rejected_keeps_trip(
+        self, client, override_auth_tenant, locked_prefix
+    ) -> None:
+        load_id = (await self._new_draft(client, "TRIPFW"))["id"]
         await self._seed_legacy_dispatched(load_id)
-        r0 = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
-        tn = r0.json().get("trip_number")
+        r0 = (await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)).json()
+        tn = r0.get("trip_number")
         assert tn
 
         r1 = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"status": "in_transit", "expected_concurrency_version": _cv(r0.json())},
+            json={"status": "in_transit", "expected_concurrency_version": _cv(r0)},
         )
-        assert r1.status_code == 200, r1.text
-        assert r1.json().get("trip_number") == tn
-        assert r1.json().get("active_dispatch_trip_id") is not None
+        assert r1.status_code == 409, r1.text
+        assert _detail_code(r1.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
+        after = (await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)).json()
+        assert after["status"] == "dispatched"
+        assert after.get("trip_number") == tn
+        assert after.get("active_dispatch_trip_id") == r0.get("active_dispatch_trip_id")
 
-    async def test_back_to_ready_cancels_and_clears_read_model(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
-        cr = await client.post(
-            "/api/v1/loads",
-            headers=AUTH_HEADERS,
-            json={"status": "draft", "load_number": f"TRIPCN-{uuid.uuid4().hex[:8]}"},
-        )
-        assert cr.status_code == 201
-        load_id = cr.json()["id"]
-        asg = await client.patch(
-            f"/api/v1/loads/{load_id}",
-            headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
-        )
-        assert asg.status_code == 200, asg.text
+    async def test_legacy_row_back_to_ready_blocked_no_cancel(
+        self, client, override_auth_tenant, locked_prefix
+    ) -> None:
+        """Load PATCH no longer cancels the legacy dispatch trip; leaving dispatched is Issue 0B migration work."""
+        load_id = (await self._new_draft(client, "TRIPCN"))["id"]
         await self._seed_legacy_dispatched(load_id)
-        snap = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
-        assert snap.json().get("active_trip_id") is not None
+        snap = (await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)).json()
+        assert snap.get("active_trip_id") is not None
         r_back = await client.patch(
             f"/api/v1/loads/{load_id}",
             headers=AUTH_HEADERS,
-            json={"status": "ready", "expected_concurrency_version": _cv(snap.json())},
+            json={"status": "ready", "expected_concurrency_version": _cv(snap)},
         )
-        assert r_back.status_code == 200, r_back.text
-        body = r_back.json()
-        assert body["status"] == "ready"
-        assert body.get("trip_number") in (None, "")
-        assert body.get("active_dispatch_trip_id") in (None,)
-        assert body.get("active_trip_id") in (None,)
+        assert r_back.status_code == 409, r_back.text
+        assert _detail_code(r_back.json()) == LEGACY_LOAD_STATUS_TRANSITION_BLOCKED
+        after = (await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)).json()
+        assert after["status"] == "dispatched"
+        assert after.get("trip_number") == snap.get("trip_number")
+        assert after.get("active_dispatch_trip_id") == snap.get("active_dispatch_trip_id")
+        assert after.get("active_trip_id") == snap.get("active_trip_id")
 
     async def test_search_finds_load_by_trip_number(self, client, override_auth_tenant, locked_prefix) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
-        cr = await client.post(
-            "/api/v1/loads",
-            headers=AUTH_HEADERS,
-            json={"status": "draft", "load_number": f"TRIPSCH-{uuid.uuid4().hex[:8]}"},
-        )
-        assert cr.status_code == 201
-        load_id = cr.json()["id"]
-        asg = await client.patch(
-            f"/api/v1/loads/{load_id}",
-            headers=AUTH_HEADERS,
-            json={
-                "driver_id": driver_id,
-                "truck_id": truck_id,
-                "status": "assigned",
-                "expected_concurrency_version": _cv(cr.json()),
-            },
-        )
-        assert asg.status_code == 200
+        load_id = (await self._new_draft(client, "TRIPSCH"))["id"]
         await self._seed_legacy_dispatched(load_id)
         snap = await client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
         tn = snap.json().get("trip_number")

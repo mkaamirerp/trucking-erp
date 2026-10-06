@@ -13,7 +13,6 @@ import type {
   Truck,
 } from "@/api";
 import {
-  LOAD_STATUSES,
   docFocusForStopAddress,
   docFocusForStopAppointment,
   docFocusForStopReference,
@@ -68,8 +67,8 @@ export type LoadWorkspaceFormProps = {
   onAddNote: () => void;
   focusDoc: (opts: { tokens: string[]; fallbackToken?: string }) => void;
   verificationTabIndex: Map<string, number>;
+  /** Stored Load.status — displayed only; readiness changes go through Mark ready. */
   status: string;
-  setStatus: (v: string) => void;
   loadNumber: string;
   setLoadNumber: (v: string) => void;
   brokerId: number | null;
@@ -113,12 +112,10 @@ export type LoadWorkspaceFormProps = {
   setCustomerRate: (v: string) => void;
   miles: string;
   setMiles: (v: string) => void;
+  /** Historical Load equipment — displayed only; equipment is assigned on the Trip. */
   driverId: number | null;
-  setDriverId: (v: number | null) => void;
   truckId: number | null;
-  setTruckId: (v: number | null) => void;
   trailerAssetId: number | null;
-  setTrailerAssetId: (v: number | null) => void;
   /** When set, operational movement assignment is owned on the trip workspace (Slice 15A). */
   activeTripId?: number | null;
   customsBrokerId: number | null;
@@ -157,6 +154,19 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   }
 
   const compactReferences = compactLoadReferencesForDisplay(p.loadReferences ?? [], p.sortedDraftStops);
+
+  const driver = p.driverId != null ? p.drivers.find((d) => d.id === p.driverId) : undefined;
+  const driverLabel =
+    p.driverId == null ? "— Unassigned —" : driver ? `${driver.first_name} ${driver.last_name}` : `Driver #${p.driverId}`;
+  const truck = p.truckId != null ? p.trucks.find((t) => t.id === p.truckId) : undefined;
+  const truckLabel = p.truckId == null ? "— None —" : truck ? truck.unit_number : `Truck #${p.truckId}`;
+  const trailer = p.trailerAssetId != null ? p.trailers.find((t) => t.id === p.trailerAssetId) : undefined;
+  const trailerLabel =
+    p.trailerAssetId == null
+      ? "— None —"
+      : trailer
+        ? `${trailer.unit_number}${trailer.trailer_type ? ` · ${trailer.trailer_type}` : ""}`
+        : `Trailer #${p.trailerAssetId}`;
 
   return (
     <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
@@ -343,85 +353,31 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
       {/* Assignment — WorkspaceSection: Assignment */}
       {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
         <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Assignment &amp; status</span>
+          <span className={wsSectionTitle}>Status &amp; assignment</span>
+          <span className={wsSectionMeta}>Read-only</span>
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
           <div>
             <label className={L}>Status</label>
-            <select
-              className={I}
-              value={p.status}
-              onChange={(e) => p.setStatus(e.target.value)}
-            >
-              {LOAD_STATUSES.map((s) => {
-                const legacyDispatchedBlocked = s === "dispatched" && p.status !== "dispatched";
-                return (
-                  <option key={s} value={s} disabled={legacyDispatchedBlocked}>
-                    {legacyDispatchedBlocked ? "dispatched (legacy — use Trip workspace)" : s}
-                  </option>
-                );
-              })}
-            </select>
+            <input className={I} value={p.status || "draft"} readOnly disabled data-testid="load-status-readonly" />
           </div>
           <div>
             <label className={L}>Driver</label>
-            <select
-              className={I}
-              value={p.driverId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setDriverId(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">— Unassigned —</option>
-              {p.drivers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.first_name} {d.last_name}
-                </option>
-              ))}
-            </select>
+            <input className={I} value={driverLabel} readOnly disabled data-testid="load-driver-readonly" />
           </div>
           <div>
             <label className={L}>Truck</label>
-            <select
-              className={I}
-              value={p.truckId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setTruckId(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">— None —</option>
-              {p.trucks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.unit_number}
-                </option>
-              ))}
-            </select>
+            <input className={I} value={truckLabel} readOnly disabled data-testid="load-truck-readonly" />
           </div>
           <div>
             <label className={L}>Trailer</label>
-            <select
-              className={I}
-              value={p.trailerAssetId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setTrailerAssetId(v === "" ? null : Number(v));
-              }}
-            >
-              <option value="">— None —</option>
-              {p.trailers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.unit_number}{t.trailer_type ? ` · ${t.trailer_type}` : ""}
-                </option>
-              ))}
-            </select>
+            <input className={I} value={trailerLabel} readOnly disabled data-testid="load-trailer-readonly" />
           </div>
         </div>
         <p className="mt-2 text-[11px] leading-snug text-[var(--trk-text-muted)]">
-          Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> for draft → ready. Driver/truck/trailer
-          commitment lives on the trip workspace.
+          Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> for draft → ready. Driver, truck,
+          trailer, and trip status are set on the Trip, not on the Load.
         </p>
         {p.activeTripId != null && p.activeTripId > 0 ? (
           <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">

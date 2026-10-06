@@ -7,11 +7,10 @@ import {
   newDraftStop,
   selectDraftStopsForPersist,
 } from "./loadWorkspaceShared";
-import type { DraftStop } from "./loadWorkspaceShared";
+import type { DraftStop, LoadPersistParams } from "./loadWorkspaceShared";
 
-function minimalPersist(over: Partial<Parameters<typeof buildLoadPersistPayload>[0]> = {}) {
+function minimalPersist(over: Partial<LoadPersistParams> = {}): LoadPersistParams {
   return {
-    status: "unassigned",
     loadNumber: "",
     brokerId: null,
     brokerContactId: null,
@@ -34,9 +33,6 @@ function minimalPersist(over: Partial<Parameters<typeof buildLoadPersistPayload>
     rate: "",
     customerRate: "",
     miles: "",
-    driverId: null,
-    truckId: null,
-    trailerId: null,
     customsBrokerId: null,
     internalNotes: "",
     draftStops: initialManualCreateStops(),

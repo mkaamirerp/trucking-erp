@@ -151,19 +151,6 @@ export function workspaceFieldsFromLoad(l: Load): WorkspaceDraftFields {
   };
 }
 
-export const LOAD_STATUSES = [
-  "draft",
-  "ready",
-  "unassigned",
-  "assigned",
-  "dispatched",
-  "arrived_pickup",
-  "in_transit",
-  "arrived_delivery",
-  "delivered",
-  "issue_hold",
-] as const;
-
 export type DraftStop = LoadStop & { _key: string };
 
 /** Proposed values sourced from the intake pipeline for a given email thread.
@@ -424,9 +411,7 @@ export function selectDraftStopsForPersist(draftStops: DraftStop[]): DraftStop[]
   });
 }
 
-/** Body for PATCH (edit) or POST (create) — matches LoadWorkspacePage save shape. */
-export function buildLoadPersistPayload(params: {
-  status: string;
+export type LoadPersistParams = {
   loadNumber: string;
   brokerId: number | null;
   brokerContactId: number | null;
@@ -449,13 +434,16 @@ export function buildLoadPersistPayload(params: {
   rate: string;
   customerRate: string;
   miles: string;
-  driverId: number | null;
-  truckId: number | null;
-  trailerId: number | null;
   customsBrokerId: number | null;
   internalNotes: string;
   draftStops: DraftStop[];
-}): LoadWritePayload {
+};
+
+/**
+ * Commercial Save body for PATCH. Never carries `status` or Load `driver_id` / `truck_id` / `trailer_id`:
+ * readiness moves only via Mark ready, and equipment / lifecycle belong to the Trip.
+ */
+export function buildLoadPersistPayload(params: LoadPersistParams): LoadWritePayload {
   const sorted = selectDraftStopsForPersist(params.draftStops);
   const stopsPayload = sorted.map((s, i) => stopToPayload(s, i));
   const estW = params.estimatedWeight.trim();
@@ -464,7 +452,6 @@ export function buildLoadPersistPayload(params: {
   const milesN = params.miles.trim();
 
   return {
-    status: params.status as Load["status"],
     load_number: params.loadNumber.trim() || null,
     broker_id: params.brokerId,
     broker_contact_id: params.brokerContactId,
@@ -487,13 +474,15 @@ export function buildLoadPersistPayload(params: {
     rate: rateN === "" ? null : Math.max(0, parseFloat(rateN)),
     customer_rate: crN === "" ? null : Math.max(0, parseFloat(crN)),
     miles: milesN === "" ? null : Math.max(0, parseInt(milesN, 10) || 0),
-    driver_id: params.driverId,
-    truck_id: params.truckId,
-    trailer_id: params.trailerId,
     customs_broker_id: params.customsBrokerId,
     internal_notes: params.internalNotes.trim() || null,
     stops: stopsPayload,
   };
+}
+
+/** POST body for a new Load: commercial fields plus `status: "draft"` (the only status create accepts). */
+export function buildLoadCreatePayload(params: LoadPersistParams): LoadWritePayload {
+  return { ...buildLoadPersistPayload(params), status: "draft" };
 }
 
 /**
@@ -505,7 +494,6 @@ export function baselineSignatureFromLoad(l: Load): string {
   if (l.hazmat_flag === true) hazmat = "yes";
   else if (l.hazmat_flag === false) hazmat = "no";
   const payload = buildLoadPersistPayload({
-    status: l.status ?? "",
     loadNumber: l.load_number || "",
     brokerId: l.broker_id ?? null,
     brokerContactId: l.broker_contact_id ?? null,
@@ -528,9 +516,6 @@ export function baselineSignatureFromLoad(l: Load): string {
     rate: l.rate != null ? String(l.rate) : "",
     customerRate: l.customer_rate != null ? String(l.customer_rate) : "",
     miles: l.miles != null ? String(l.miles) : "",
-    driverId: l.driver_id ?? null,
-    truckId: l.truck_id ?? null,
-    trailerId: l.trailer_id ?? null,
     customsBrokerId: l.customs_broker_id ?? null,
     internalNotes: l.internal_notes ?? "",
     draftStops: stopsToDraft(l.stops),
@@ -541,7 +526,6 @@ export function baselineSignatureFromLoad(l: Load): string {
 /** Maps `WorkspaceDraftFields` into the existing persist payload shape (single call site for saves). */
 export function buildLoadPersistPayloadFromWorkspaceFields(f: WorkspaceDraftFields): LoadWritePayload {
   return buildLoadPersistPayload({
-    status: f.status,
     loadNumber: f.loadNumber,
     brokerId: f.brokerId,
     brokerContactId: f.brokerContactId,
@@ -564,9 +548,6 @@ export function buildLoadPersistPayloadFromWorkspaceFields(f: WorkspaceDraftFiel
     rate: f.rate,
     customerRate: f.customerRate,
     miles: f.miles,
-    driverId: f.driverId,
-    truckId: f.truckId,
-    trailerId: f.trailerAssetId,
     customsBrokerId: f.customsBrokerId,
     internalNotes: f.internalNotes,
     draftStops: f.draftStops,
