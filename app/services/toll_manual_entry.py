@@ -14,6 +14,7 @@ from app.models.toll import (
     MANUAL_STAGE_DISCARDED,
     MANUAL_STAGE_DRAFT,
     MANUAL_STAGE_NEEDS_REVIEW,
+    MANUAL_STAGE_PROCESSED,
     SOURCE_TYPE_MANUAL,
     VEHICLE_IDENTITY_PRESENT,
     VEHICLE_IDENTITY_UNRESOLVED,
@@ -149,6 +150,11 @@ async def _get_open_stage(
     return stage
 
 
+def _require_editable(stage: TollManualEntryStage) -> None:
+    if stage.status == MANUAL_STAGE_PROCESSED:
+        raise TollManualEntryError("TOLL_MANUAL_PROCESSED_READONLY", "Processed manual stage is read-only")
+
+
 def _apply_patch(stage: TollManualEntryStage, patch: dict[str, Any]) -> None:
     if "post_date" in patch:
         stage.post_date = parse_optional_date(patch.get("post_date"), field="post_date")
@@ -269,6 +275,7 @@ async def patch_manual_stage(
     updated_by: str | None = None,
 ) -> TollManualEntryStage:
     stage = await _get_open_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    _require_editable(stage)
     _apply_patch(stage, patch)
     stage.status = MANUAL_STAGE_DRAFT
     stage.updated_by = updated_by
@@ -285,6 +292,7 @@ async def validate_manual_stage(
     updated_by: str | None = None,
 ) -> tuple[TollManualEntryStage, list[dict[str, str]]]:
     stage = await _get_open_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    _require_editable(stage)
     errors = validate_stage_fields(stage)
     if errors:
         stage.status = MANUAL_STAGE_DRAFT
@@ -311,6 +319,7 @@ async def discard_manual_stage(
     stage_id: int,
 ) -> None:
     stage = await _get_open_stage(db, tenant_id=tenant_id, stage_id=stage_id)
+    _require_editable(stage)
     stage.status = MANUAL_STAGE_DISCARDED
     await db.commit()
 

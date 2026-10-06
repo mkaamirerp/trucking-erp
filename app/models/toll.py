@@ -54,17 +54,20 @@ READ_TYPES: Final[frozenset[str]] = frozenset({READ_TYPE_DEVICE, READ_TYPE_PLATE
 
 BATCH_STATUS_RECEIVED: Final[str] = "RECEIVED"
 BATCH_STATUS_PARSED: Final[str] = "PARSED"
+BATCH_STATUS_PROCESSED: Final[str] = "PROCESSED"
 
 PDF_PROFILE_EZPASS_WVPA_MONTHLY: Final[str] = "EZPASS_WVPA_MONTHLY_STATEMENT_PDF"
 PDF_PROFILES: Final[frozenset[str]] = frozenset({PDF_PROFILE_EZPASS_WVPA_MONTHLY})
 
 MANUAL_STAGE_DRAFT: Final[str] = "DRAFT"
 MANUAL_STAGE_NEEDS_REVIEW: Final[str] = "NEEDS_REVIEW"
+MANUAL_STAGE_PROCESSED: Final[str] = "PROCESSED"
 MANUAL_STAGE_DISCARDED: Final[str] = "DISCARDED"
 MANUAL_STAGE_STATUSES: Final[frozenset[str]] = frozenset(
     {
         MANUAL_STAGE_DRAFT,
         MANUAL_STAGE_NEEDS_REVIEW,
+        MANUAL_STAGE_PROCESSED,
         MANUAL_STAGE_DISCARDED,
     }
 )
@@ -73,8 +76,27 @@ VEHICLE_IDENTITY_UNRESOLVED: Final[str] = "UNRESOLVED"
 
 REVIEW_STATUS_NEEDS_REVIEW: Final[str] = "NEEDS_REVIEW"
 REVIEW_STATUS_RECONCILIATION_FAILED: Final[str] = "RECONCILIATION_FAILED"
+REVIEW_STATUS_PROCESSED: Final[str] = "PROCESSED"
 PDF_REVIEW_STATUSES: Final[frozenset[str]] = frozenset(
-    {REVIEW_STATUS_NEEDS_REVIEW, REVIEW_STATUS_RECONCILIATION_FAILED}
+    {REVIEW_STATUS_NEEDS_REVIEW, REVIEW_STATUS_RECONCILIATION_FAILED, REVIEW_STATUS_PROCESSED}
+)
+
+TOLL_PDF_EDITABLE_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "post_date",
+        "entry_date",
+        "entry_time",
+        "exit_date",
+        "exit_time",
+        "agency_raw",
+        "entry_location",
+        "entry_lane",
+        "exit_location",
+        "exit_lane",
+        "transponder_number",
+        "plate_number",
+        "trip_charge",
+    }
 )
 
 # Canonical amount: NUMERIC(14, 4). Never IEEE float.
@@ -256,7 +278,7 @@ class TollPdfStatementReview(Base):
             name="ck_toll_pdf_statement_review_profile_code",
         ),
         CheckConstraint(
-            "review_status IN ('NEEDS_REVIEW', 'RECONCILIATION_FAILED')",
+            "review_status IN ('NEEDS_REVIEW', 'RECONCILIATION_FAILED', 'PROCESSED')",
             name="ck_toll_pdf_statement_review_status",
         ),
         CheckConstraint(
@@ -365,6 +387,47 @@ class TollPdfReviewRow(Base):
     )
 
 
+class TollPdfReviewFieldCorrection(Base):
+    """Append-only human overlay on a PDF review row. Latest id per field wins."""
+
+    __tablename__ = "toll_pdf_review_field_corrections"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_toll_pdf_review_field_corrections_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "review_row_id"],
+            ["toll_pdf_review_rows.tenant_id", "toll_pdf_review_rows.id"],
+            name="fk_toll_pdf_review_field_corrections_row_tenant",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "field_name IN ('post_date','entry_date','entry_time','exit_date','exit_time',"
+            "'agency_raw','entry_location','entry_lane','exit_location','exit_lane',"
+            "'transponder_number','plate_number','trip_charge')",
+            name="ck_toll_pdf_review_field_corrections_field_name",
+        ),
+        Index("ix_toll_pdf_review_field_corrections_tenant_id", "tenant_id"),
+        Index(
+            "ix_toll_pdf_review_field_corrections_tenant_row_field",
+            "tenant_id",
+            "review_row_id",
+            "field_name",
+            "id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    review_row_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    field_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    corrected_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    changed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class TollManualEntryStage(Base):
     """Temporary MANUAL Toll review draft. Not a FILE batch. Not a TollTransaction."""
 
@@ -380,7 +443,7 @@ class TollManualEntryStage(Base):
             name="ck_toll_manual_entry_stages_file_format_null",
         ),
         CheckConstraint(
-            "status IN ('DRAFT', 'NEEDS_REVIEW', 'DISCARDED')",
+            "status IN ('DRAFT', 'NEEDS_REVIEW', 'PROCESSED', 'DISCARDED')",
             name="ck_toll_manual_entry_stages_status",
         ),
         CheckConstraint(
@@ -458,9 +521,35 @@ class TollTransaction(Base):
             name="fk_toll_transactions_truck_tenant",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "pdf_review_row_id"],
+            ["toll_pdf_review_rows.tenant_id", "toll_pdf_review_rows.id"],
+            name="fk_toll_transactions_pdf_review_row_tenant",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "manual_stage_id"],
+            ["toll_manual_entry_stages.tenant_id", "toll_manual_entry_stages.id"],
+            name="fk_toll_transactions_manual_stage_tenant",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "pdf_review_row_id",
+            name="uq_toll_transactions_tenant_pdf_review_row",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "manual_stage_id",
+            name="uq_toll_transactions_tenant_manual_stage",
+        ),
         CheckConstraint(
             "jsonb_typeof(provider_raw) = 'object'",
             name="ck_toll_transactions_provider_raw_object",
+        ),
+        CheckConstraint(
+            "accepted_effective_json IS NULL OR jsonb_typeof(accepted_effective_json) = 'object'",
+            name="ck_toll_transactions_accepted_effective_object",
         ),
         CheckConstraint(
             "transaction_type IN ('NORMAL', 'VIOLATION')",
@@ -499,6 +588,10 @@ class TollTransaction(Base):
     provider_transaction_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_row_order: Mapped[int] = mapped_column(Integer, nullable=False)
     source_row_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    pdf_review_row_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manual_stage_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    accepted_effective_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    post_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     transaction_datetime_source: Mapped[str] = mapped_column(Text, nullable=False)
     transaction_date: Mapped[date | None] = mapped_column(Date, nullable=True)

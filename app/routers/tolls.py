@@ -21,6 +21,10 @@ from app.schemas.toll import (
     TollPdfIntakeOut,
     TollPdfReviewDetailOut,
     TollPdfReviewListItemOut,
+    TollPdfRowCorrectionIn,
+    TollPdfRowCorrectionOut,
+    TollProcessOut,
+    TollProviderCatalogOut,
 )
 from app.services.toll_csv_intake import TollCsvIntakeError, persist_toll_csv_file, read_toll_csv_upload_bounded
 from app.services.toll_file_history import (
@@ -48,6 +52,10 @@ from app.services.toll_manual_entry import (
     stage_to_dict,
     validate_manual_stage,
 )
+from app.services.toll_pdf_corrections import TollPdfCorrectionError, apply_pdf_review_corrections
+from app.services.toll_process import TollProcessError, process_toll_manual_stage, process_toll_pdf_review
+from app.services.toll_file_upload import TollFileUploadError, ingest_toll_upload
+from app.services.toll_provider_catalog import list_upload_providers
 from app.services.toll_wvpa_pdf import MAX_TOLL_PDF_BYTES, TollPdfIntakeError
 
 router = APIRouter(
@@ -55,6 +63,43 @@ router = APIRouter(
     tags=["Tolls"],
     dependencies=[Depends(require_entitlement("admin_sensitive"))],
 )
+
+
+@router.get("/providers", response_model=list[TollProviderCatalogOut])
+async def list_toll_providers():
+    return [TollProviderCatalogOut(**row.as_api_dict()) for row in list_upload_providers()]
+
+
+@router.post("/files/upload", response_model=TollPdfIntakeOut, status_code=status.HTTP_201_CREATED)
+async def upload_toll_file(
+    file: UploadFile = File(...),
+    provider_code: str | None = Form(None),
+    user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    filename = file.filename or "tolls-upload"
+    created_by = str(user.user_id)
+    try:
+        body = await read_toll_csv_upload_bounded(file, max_bytes=MAX_TOLL_PDF_BYTES)
+        result = await ingest_toll_upload(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            filename=filename,
+            body=body,
+            content_type=file.content_type,
+            provider_code=provider_code,
+            created_by=created_by,
+        )
+    except TollCsvIntakeError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    except TollFileUploadError as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return TollPdfIntakeOut(**result)
 
 
 @router.post("/files/csv", response_model=TollCsvIntakeOut, status_code=status.HTTP_201_CREATED)
@@ -185,6 +230,57 @@ async def get_toll_pdf_review_batch(
     return TollPdfReviewDetailOut(**item)
 
 
+@router.patch("/pdf-reviews/{batch_id}/rows/{row_id}", response_model=TollPdfRowCorrectionOut)
+async def patch_toll_pdf_review_row(
+    batch_id: int,
+    row_id: int,
+    payload: TollPdfRowCorrectionIn,
+    user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    reason = fields.pop("reason", None)
+    try:
+        row, recon = await apply_pdf_review_corrections(
+            db,
+            tenant_id=tenant_id,
+            batch_id=batch_id,
+            row_id=row_id,
+            fields=fields,
+            reason=reason,
+            changed_by=str(user.user_id),
+        )
+    except (TollPdfCorrectionError, TollPdfReviewError) as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return TollPdfRowCorrectionOut(
+        row_id=int(row.id),
+        batch_id=batch_id,
+        reconciliation_ok=bool(recon["reconciliation_ok"]),
+        effective_trip_count=int(recon["effective_trip_count"]),
+        effective_total_trip_charge=str(recon["effective_total_trip_charge"]),
+        review_status="NEEDS_REVIEW" if recon["reconciliation_ok"] else "RECONCILIATION_FAILED",
+    )
+
+
+@router.post("/pdf-reviews/{batch_id}/process", response_model=TollProcessOut)
+async def process_toll_pdf_review_batch(
+    batch_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    try:
+        result = await process_toll_pdf_review(
+            db, tenant_id=tenant_id, batch_id=batch_id, processed_by=str(user.user_id)
+        )
+    except (TollProcessError, TollPdfReviewError) as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return TollProcessOut(**result)
+
+
 def _manual_http(exc: TollManualEntryError) -> HTTPException:
     return HTTPException(
         status_code=exc.http_status,
@@ -291,3 +387,20 @@ async def discard_toll_manual_stage(
     except TollManualEntryError as exc:
         raise _manual_http(exc) from exc
     return {"ok": True}
+
+
+@router.post("/manual-entry/stages/{stage_id}/process", response_model=TollProcessOut)
+async def process_toll_manual_stage_endpoint(
+    stage_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    try:
+        result = await process_toll_manual_stage(
+            db, tenant_id=tenant_id, stage_id=stage_id, processed_by=str(user.user_id)
+        )
+    except (TollProcessError, TollManualEntryError) as exc:
+        detail: dict[str, Any] = {"code": exc.code, "message": exc.message}
+        raise HTTPException(status_code=exc.http_status, detail=detail) from exc
+    return TollProcessOut(**result)

@@ -110,8 +110,7 @@ describe("TollsHistoryPage", () => {
   it("presents File Imports, not canonical toll transaction history", async () => {
     await renderPage();
     expect(host?.textContent).toContain("File Imports");
-    expect(host?.textContent).toContain("CSV File Imports");
-    expect(host?.textContent).toContain("PDF Reviews");
+    expect(host?.textContent).toContain("Upload");
     expect(host?.textContent).toContain("Manual Entry");
     expect(host?.textContent).toContain("CSV import history");
     expect(host?.textContent).toContain("not canonical toll transaction history");
@@ -151,6 +150,14 @@ describe("TollsHistoryPage", () => {
     expect(rawHeaders).not.toContain("Toll Agency");
     expect(rawHeaders).not.toContain("Read By");
     expect(rawHeaders).not.toContain("Identifier");
+  });
+
+  it("shows nothing instead of Internal server error when the list is empty or failed", async () => {
+    apiMocks.listTollFileBatches.mockReset();
+    apiMocks.listTollFileBatches.mockRejectedValue(new Error('{"detail":"Internal server error"}'));
+    await renderPage();
+    expect(host?.textContent).not.toContain("Internal server error");
+    expect(host?.textContent).toContain("No CSV imports");
   });
 
   it("searches by filename/hash", async () => {

@@ -5,14 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMocks = vi.hoisted(() => ({
   listTollPdfReviews: vi.fn(),
+  listTollProviders: vi.fn(),
   getTollPdfReview: vi.fn(),
-  uploadTollPdfFile: vi.fn(),
+  uploadTollFile: vi.fn(),
+  patchTollPdfReviewRow: vi.fn(),
+  processTollPdfReview: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
   listTollPdfReviews: apiMocks.listTollPdfReviews,
+  listTollProviders: apiMocks.listTollProviders,
   getTollPdfReview: apiMocks.getTollPdfReview,
-  uploadTollPdfFile: apiMocks.uploadTollPdfFile,
+  uploadTollFile: apiMocks.uploadTollFile,
+  patchTollPdfReviewRow: apiMocks.patchTollPdfReviewRow,
+  processTollPdfReview: apiMocks.processTollPdfReview,
 }));
 
 import TollsPdfReviewsPage from "./TollsPdfReviewsPage";
@@ -60,8 +66,30 @@ describe("TollsPdfReviewsPage", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     apiMocks.listTollPdfReviews.mockReset();
+    apiMocks.listTollProviders.mockReset();
     apiMocks.getTollPdfReview.mockReset();
-    apiMocks.uploadTollPdfFile.mockReset();
+    apiMocks.uploadTollFile.mockReset();
+    apiMocks.patchTollPdfReviewRow.mockReset();
+    apiMocks.processTollPdfReview.mockReset();
+    apiMocks.listTollProviders.mockResolvedValue([
+      { provider_code: "EZPASS", provider_name: "E-ZPass", home_state: null, upload_choice: true },
+      { provider_code: "PREPASS", provider_name: "PrePass", home_state: null, upload_choice: true },
+      { provider_code: "TOLLTAG", provider_name: "TollTag", home_state: "TX", upload_choice: true },
+      { provider_code: "EZ_TAG", provider_name: "EZ TAG", home_state: "TX", upload_choice: true },
+      { provider_code: "TXTAG", provider_name: "TxTag", home_state: "TX", upload_choice: true },
+      { provider_code: "PIKEPASS", provider_name: "PIKEPASS", home_state: "OK", upload_choice: true },
+      { provider_code: "IPASS", provider_name: "I-PASS", home_state: "IL", upload_choice: true },
+      { provider_code: "SUNPASS", provider_name: "SunPass", home_state: "FL", upload_choice: true },
+      { provider_code: "EPASS", provider_name: "E-PASS", home_state: "FL", upload_choice: true },
+      { provider_code: "PEACH_PASS", provider_name: "Peach Pass", home_state: "GA", upload_choice: true },
+      { provider_code: "NC_QUICK_PASS", provider_name: "NC Quick Pass", home_state: "NC", upload_choice: true },
+      { provider_code: "KTAG", provider_name: "K-TAG", home_state: "KS", upload_choice: true },
+      { provider_code: "FASTRAK", provider_name: "FasTrak", home_state: "CA", upload_choice: true },
+      { provider_code: "GOOD_TO_GO", provider_name: "Good To Go!", home_state: "WA", upload_choice: true },
+      { provider_code: "EZPASS_NY", provider_name: "E-ZPass NY", home_state: "NY", upload_choice: true },
+      { provider_code: "EZPASS_NJ", provider_name: "E-ZPass NJ", home_state: "NJ", upload_choice: true },
+      { provider_code: "EZPASS_PA", provider_name: "E-ZPass PA", home_state: "PA", upload_choice: true },
+    ]);
     apiMocks.listTollPdfReviews.mockResolvedValue([listItem]);
     apiMocks.getTollPdfReview.mockResolvedValue({
       ...listItem,
@@ -69,8 +97,12 @@ describe("TollsPdfReviewsPage", () => {
       total_row_count: 74,
       row_offset: 0,
       row_limit: 100,
+      effective_trip_count: 74,
+      effective_total_trip_charge: "854.47",
+      effective_reconciliation_ok: true,
       rows: [
         {
+          row_id: 1,
           source_row_order: 1,
           source_page_number: 1,
           post_date: "2023-03-01",
@@ -103,10 +135,32 @@ describe("TollsPdfReviewsPage", () => {
 
   it("presents PDF reviews without canonical Date/Unit history", async () => {
     await renderPage();
-    expect(host?.textContent).toContain("PDF Reviews");
-    expect(host?.textContent).toContain("CSV File Imports");
+    expect(host?.textContent).toContain("Upload");
     expect(host?.textContent).toContain("Manual Entry");
-    expect(host?.textContent).toContain("not created from this screen");
+    expect(host?.textContent).toContain("E-ZPass");
+    expect(host?.textContent).toContain("PrePass");
+    expect(host?.textContent).toContain("TollTag");
+    expect(host?.textContent).toContain("EZ TAG");
+    expect(host?.textContent).toContain("TxTag");
+    expect(host?.textContent).toContain("PIKEPASS");
+    expect(host?.textContent).toContain("I-PASS");
+    expect(host?.textContent).toContain("SunPass");
+    expect(host?.textContent).toContain("E-PASS");
+    expect(host?.textContent).toContain("Peach Pass");
+    expect(host?.textContent).toContain("NC Quick Pass");
+    expect(host?.textContent).toContain("K-TAG");
+    expect(host?.textContent).toContain("FasTrak");
+    expect(host?.textContent).toContain("Good To Go!");
+    expect(host?.textContent).toContain("E-ZPass NY");
+    expect(host?.textContent).toContain("E-ZPass NJ");
+    expect(host?.textContent).toContain("E-ZPass PA");
+    const optionValues = Array.from(host!.querySelectorAll("select option")).map(
+      (opt) => (opt as HTMLOptionElement).value,
+    );
+    expect(optionValues).toContain("TOLLTAG");
+    expect(optionValues).toContain("SUNPASS");
+    expect(optionValues).not.toContain("WVPA");
+    expect(host?.textContent).toContain("detects PDF, image, or CSV");
     expect(host?.textContent).toContain("NEEDS_REVIEW");
     expect(host?.textContent).toContain("74");
     expect(host?.textContent).toContain("854.47");
@@ -129,34 +183,63 @@ describe("TollsPdfReviewsPage", () => {
     expect(host?.textContent).toContain("02400000001");
     expect(host?.textContent).toContain("10.00");
     expect(host?.textContent).toContain("not canonical Date/Unit/Amount history");
+    expect(host?.textContent).toContain("reconciliation OK");
+    const process = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Process");
+    expect(process).toBeTruthy();
+    expect((process as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables Process when effective reconciliation fails", async () => {
+    apiMocks.getTollPdfReview.mockResolvedValue({
+      ...listItem,
+      reconciliation_ok: false,
+      effective_reconciliation_ok: false,
+      effective_trip_count: 74,
+      effective_total_trip_charge: "1.00",
+      source_page_count: 7,
+      total_row_count: 74,
+      row_offset: 0,
+      row_limit: 100,
+      rows: [],
+    });
+    await renderPage();
+    const expand = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "#9");
+    await act(async () => {
+      expand!.click();
+    });
+    const process = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Process");
+    expect(process).toBeTruthy();
+    expect((process as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("clears the PDF file input after a successful upload", async () => {
     apiMocks.listTollPdfReviews.mockReset();
     apiMocks.listTollPdfReviews.mockResolvedValueOnce([]).mockResolvedValueOnce([listItem]);
-    apiMocks.uploadTollPdfFile.mockResolvedValue({
+    apiMocks.uploadTollFile.mockResolvedValue({
       ...listItem,
       source_hash: "abc123",
       duplicate_match_count: 0,
       duplicate_batch_ids: [],
     });
     await renderPage();
+    const select = host!.querySelector("select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "EZPASS";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     const fileInput = host!.querySelector('input[type="file"]') as HTMLInputElement;
     const pdf = new File(["%PDF-1.4"], "wvpa.pdf", { type: "application/pdf" });
     await act(async () => {
       Object.defineProperty(fileInput, "files", { configurable: true, value: [pdf] });
       fileInput.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    const upload = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Upload PDF");
+    const upload = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Upload");
     await act(async () => {
       upload!.click();
     });
-    expect(apiMocks.uploadTollPdfFile).toHaveBeenCalled();
-    expect(apiMocks.uploadTollPdfFile).toHaveBeenCalledWith(
-      expect.any(File),
-      "EZPASS_WVPA_MONTHLY_STATEMENT_PDF",
-    );
-    expect(host?.textContent).toContain("E-ZPass/WVPA PDF stored for review.");
+    expect(apiMocks.uploadTollFile).toHaveBeenCalled();
+    expect(apiMocks.uploadTollFile).toHaveBeenCalledWith(expect.any(File), "EZPASS");
+    expect(host?.textContent).toContain("E-ZPass file stored for review.");
     expect(host?.textContent).not.toContain("Tolls imported successfully");
     expect((host!.querySelector('input[type="file"]') as HTMLInputElement).value).toBe("");
   });

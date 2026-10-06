@@ -140,6 +140,7 @@ async def persist_toll_pdf_file(
     content_type: str | None = None,
     created_by: str | None = None,
     profile_code: str,
+    provider_code: str | None = None,
     store_bytes: TollPdfStoreBytes | None = None,
     delete_stored: TollPdfDeleteStored | None = None,
 ) -> TollPdfPersistResult:
@@ -186,6 +187,7 @@ async def persist_toll_pdf_file(
             source_storage_ref=stored.storage_key,
             source_hash=source_hash,
             source_filename=filename,
+            provider_code=provider_code,
             statement_start=parsed.period_start,
             statement_end=parsed.period_end,
             invoice_date=parsed.statement_date,
@@ -328,6 +330,7 @@ def _clamp_detail_page(row_offset: int, row_limit: int) -> tuple[int, int]:
 
 def review_row_to_dict(row: TollPdfReviewRow) -> dict[str, Any]:
     return {
+        "row_id": int(row.id) if row.id is not None else 0,
         "source_row_order": row.source_row_order,
         "source_page_number": row.source_page_number,
         "post_date": _iso(row.post_date),
@@ -461,8 +464,42 @@ async def get_toll_pdf_review(
     item["total_payment_count"] = review.total_payment_count
     item["source_page_count"] = review.source_page_count
     item["source_metadata"] = dict(review.source_metadata or {})
+    page_rows = list(row_result.scalars().all())
+    all_rows = list(
+        (
+            await db.execute(
+                select(TollPdfReviewRow)
+                .where(TollPdfReviewRow.tenant_id == tenant_id, TollPdfReviewRow.batch_id == batch_id)
+                .order_by(TollPdfReviewRow.source_row_order)
+            )
+        ).scalars().all()
+    )
+    from app.services.toll_pdf_corrections import load_latest_corrections
+    from app.services.toll_pdf_effective import build_effective_toll_pdf_rows, reconcile_effective_pdf_rows
+
+    overlays = await load_latest_corrections(
+        db, tenant_id=tenant_id, review_row_ids=[int(row.id) for row in all_rows if row.id is not None]
+    )
+    effective_all = build_effective_toll_pdf_rows(all_rows, overlays)
+    recon = reconcile_effective_pdf_rows(
+        effective_all,
+        source_total_trip_count=review.source_total_trip_count,
+        source_total_trip_charge=review.source_total_trip_charge,
+    )
+    effective_by_id = {int(row["row_id"]): row for row in effective_all}
     item["total_row_count"] = review.parsed_trip_count
     item["row_offset"] = offset
     item["row_limit"] = limit
-    item["rows"] = [review_row_to_dict(row) for row in row_result.scalars().all()]
+    item["effective_trip_count"] = recon["effective_trip_count"]
+    item["effective_total_trip_charge"] = recon["effective_total_trip_charge"]
+    item["effective_reconciliation_ok"] = recon["reconciliation_ok"]
+    item["trip_count_matches"] = recon["trip_count_matches"]
+    item["trip_total_matches"] = recon["trip_total_matches"]
+    item["reconciliation_ok"] = recon["reconciliation_ok"]
+    item["rows"] = []
+    for row in page_rows:
+        payload = review_row_to_dict(row)
+        payload["effective"] = effective_by_id.get(int(row.id) if row.id is not None else 0, {})
+        payload["changed_fields"] = list((payload["effective"] or {}).get("changed_fields") or [])
+        item["rows"].append(payload)
     return item

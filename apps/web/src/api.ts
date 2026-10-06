@@ -4967,6 +4967,7 @@ export type TollPdfReviewListItem = {
 };
 
 export type TollPdfReviewRow = {
+  row_id?: number;
   source_row_order: number;
   source_page_number?: number | null;
   post_date?: string | null;
@@ -4986,6 +4987,8 @@ export type TollPdfReviewRow = {
   source_group_transponder?: string | null;
   source_group_plate?: string | null;
   provider_raw?: Record<string, unknown>;
+  effective?: Record<string, unknown>;
+  changed_fields?: string[];
 };
 
 export type TollPdfReviewDetail = TollPdfReviewListItem & {
@@ -4999,6 +5002,44 @@ export type TollPdfReviewDetail = TollPdfReviewListItem & {
   row_offset: number;
   row_limit: number;
   rows: TollPdfReviewRow[];
+  effective_trip_count?: number | null;
+  effective_total_trip_charge?: string | null;
+  effective_reconciliation_ok?: boolean | null;
+};
+
+export type TollPdfRowCorrection = {
+  row_id: number;
+  batch_id: number;
+  reconciliation_ok: boolean;
+  effective_trip_count: number;
+  effective_total_trip_charge: string;
+  review_status: string;
+};
+
+export type TollPdfRowCorrectionPatch = {
+  post_date?: string | null;
+  entry_date?: string | null;
+  entry_time?: string | null;
+  exit_date?: string | null;
+  exit_time?: string | null;
+  agency_raw?: string | null;
+  entry_location?: string | null;
+  entry_lane?: string | null;
+  exit_location?: string | null;
+  exit_lane?: string | null;
+  transponder_number?: string | null;
+  plate_number?: string | null;
+  trip_charge?: string | null;
+  reason?: string | null;
+};
+
+export type TollProcessResult = {
+  source_id: string;
+  processed_transaction_count: number;
+  processed_total: string;
+  reconciliation: Record<string, unknown>;
+  process_status: string;
+  idempotent_replay?: boolean;
 };
 
 export type TollPdfIntakeResult = {
@@ -5044,6 +5085,68 @@ export async function getTollPdfReview(
 }
 
 export const TOLL_PDF_PROFILE_EZPASS_WVPA_MONTHLY = "EZPASS_WVPA_MONTHLY_STATEMENT_PDF";
+
+export async function patchTollPdfReviewRow(
+  batchId: number,
+  rowId: number,
+  payload: TollPdfRowCorrectionPatch,
+): Promise<TollPdfRowCorrection> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/tolls/pdf-reviews/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(rowId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return handle(res);
+}
+
+export async function processTollPdfReview(batchId: number): Promise<TollProcessResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/tolls/pdf-reviews/${encodeURIComponent(batchId)}/process`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
+export type TollUploadProvider = string;
+
+export type TollProviderCatalog = {
+  provider_code: string;
+  provider_name: string;
+  issuer_authority: string | null;
+  home_state: string | null;
+  statement_format: string | null;
+  supports_pdf: boolean;
+  supports_csv: boolean;
+  supports_api: boolean;
+  accepted_networks: string[];
+  transaction_state: string | null;
+  facility_authority: string | null;
+  catalog_kind: string;
+  intake_status: string;
+  upload_choice: boolean;
+};
+
+export async function listTollProviders(): Promise<TollProviderCatalog[]> {
+  const res = await fetchWithTenant(`${API_BASE}/tolls/providers`);
+  return handle(res);
+}
+
+export async function uploadTollFile(
+  file: File,
+  providerCode: TollUploadProvider,
+): Promise<TollPdfIntakeResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("provider_code", providerCode);
+  const res = await fetchWithTenant(`${API_BASE}/tolls/files/upload`, {
+    method: "POST",
+    body: form,
+  });
+  return handle(res);
+}
 
 export async function uploadTollPdfFile(
   file: File,
@@ -5148,6 +5251,14 @@ export async function validateTollManualStage(stageId: number): Promise<TollManu
 export async function discardTollManualStage(stageId: number): Promise<{ ok: boolean }> {
   const res = await fetchWithTenant(
     `${API_BASE}/tolls/manual-entry/stages/${encodeURIComponent(stageId)}/discard`,
+    { method: "POST" },
+  );
+  return handle(res);
+}
+
+export async function processTollManualStage(stageId: number): Promise<TollProcessResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/tolls/manual-entry/stages/${encodeURIComponent(stageId)}/process`,
     { method: "POST" },
   );
   return handle(res);

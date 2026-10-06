@@ -83,6 +83,7 @@ from app.models.truck_history import TruckOwnershipHistory, TruckUnitNumberHisto
 from app.models.toll import (
     TollFileSourceRow,
     TollManualEntryStage,
+    TollPdfReviewFieldCorrection,
     TollPdfReviewRow,
     TollPdfStatementReview,
     TollSourceBatch,

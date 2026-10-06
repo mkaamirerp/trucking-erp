@@ -4,6 +4,7 @@ import {
   discardTollManualStage,
   listTollManualStages,
   patchTollManualStage,
+  processTollManualStage,
   validateTollManualStage,
   type TollManualStage,
 } from "../api";
@@ -38,6 +39,11 @@ const EMPTY_DRAFT: Draft = {
   notes: "",
   unresolved_vehicle_identity: false,
 };
+
+function isQuietTollListFailure(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  return text === "internal server error" || text.includes('"detail":"internal server error"');
+}
 
 function apiErrorMessage(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
@@ -101,8 +107,9 @@ export default function TollsManualEntryPage() {
     try {
       setItems(await listTollManualStages());
     } catch (err) {
-      setError(apiErrorMessage(err));
+      const message = apiErrorMessage(err);
       setItems([]);
+      setError(isQuietTollListFailure(message) ? null : message);
     } finally {
       setLoading(false);
     }
@@ -158,7 +165,7 @@ export default function TollsManualEntryPage() {
       applyStage(result.stage);
       setNote(
         result.ok
-          ? `Validated as ${result.stage.status}. Process is not available yet.`
+          ? `Validated as ${result.stage.status}. Ready to Process.`
           : result.errors.map((item) => item.message).join(" "),
       );
       await loadList();
@@ -187,13 +194,34 @@ export default function TollsManualEntryPage() {
     }
   }
 
+  async function onProcess() {
+    if (stageId == null) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await processTollManualStage(stageId);
+      setStatus(result.process_status);
+      setNote(
+        `Processed ${result.processed_transaction_count} TollTransaction totaling ${result.processed_total}.`,
+      );
+      await loadList();
+    } catch (err) {
+      setNote(apiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const readOnly = status === "PROCESSED";
+  const canProcess = status === "NEEDS_REVIEW" && stageId != null && !busy;
+
   return (
     <div className="trk-page trk-page--constrained space-y-6">
       <div>
         <h1 className="text-lg font-semibold text-[var(--trk-text)]">Tolls</h1>
         <p className="mt-1 text-sm text-[var(--trk-text-muted)]">
-          Manual Entry is a first-class Toll source. Drafts stay in review staging. Canonical
-          TollTransaction rows are not created here.
+          Manual Entry is a first-class Toll source. Validate to NEEDS_REVIEW, then Process to
+          create one canonical TollTransaction.
         </p>
         <div className="mt-3">
           <TollsModuleNav active="manual" />
@@ -214,8 +242,9 @@ export default function TollsManualEntryPage() {
             <input
               type="date"
               value={draft.event_date}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, event_date: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
@@ -223,72 +252,81 @@ export default function TollsManualEntryPage() {
             <input
               type="time"
               value={draft.event_time}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, event_time: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Agency
             <input
               value={draft.agency_raw}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, agency_raw: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Amount
             <input
               value={draft.trip_charge}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, trip_charge: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Transponder
             <input
               value={draft.transponder_number}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, transponder_number: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Plate
             <input
               value={draft.plate_number}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, plate_number: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Plate state
             <input
               value={draft.plate_state}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, plate_state: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Entry location
             <input
               value={draft.entry_location}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, entry_location: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="text-sm font-medium text-[var(--trk-text)]">
             Exit location
             <input
               value={draft.exit_location}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, exit_location: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
           <label className="sm:col-span-2 text-sm font-medium text-[var(--trk-text)]">
             Notes
             <textarea
               value={draft.notes}
+              disabled={readOnly}
               onChange={(ev) => setDraft({ ...draft, notes: ev.target.value })}
-              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm disabled:opacity-60"
               rows={3}
             />
           </label>
@@ -297,6 +335,7 @@ export default function TollsManualEntryPage() {
           <input
             type="checkbox"
             checked={draft.unresolved_vehicle_identity}
+            disabled={readOnly}
             onChange={(ev) => setDraft({ ...draft, unresolved_vehicle_identity: ev.target.checked })}
           />
           Vehicle identity unresolved
@@ -317,7 +356,7 @@ export default function TollsManualEntryPage() {
           </button>
           <button
             type="button"
-            disabled={busy || stageId == null}
+            disabled={busy || stageId == null || readOnly}
             onClick={() => void onSave()}
             className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-4 py-2 text-sm font-medium text-[var(--trk-text)] disabled:opacity-50"
           >
@@ -325,7 +364,7 @@ export default function TollsManualEntryPage() {
           </button>
           <button
             type="button"
-            disabled={busy || stageId == null}
+            disabled={busy || stageId == null || readOnly}
             onClick={() => void onValidate()}
             className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-4 py-2 text-sm font-medium text-[var(--trk-text)] disabled:opacity-50"
           >
@@ -333,7 +372,15 @@ export default function TollsManualEntryPage() {
           </button>
           <button
             type="button"
-            disabled={busy || stageId == null}
+            disabled={!canProcess}
+            onClick={() => void onProcess()}
+            className="rounded-md bg-[var(--trk-btn-primary)] px-4 py-2 text-sm font-semibold text-[var(--trk-btn-text)] disabled:opacity-50"
+          >
+            Process
+          </button>
+          <button
+            type="button"
+            disabled={busy || stageId == null || readOnly}
             onClick={() => void onDiscard()}
             className="rounded-md border border-[var(--trk-border)] px-4 py-2 text-sm font-medium text-[var(--trk-text)] disabled:opacity-50"
           >

@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   patchTollManualStage: vi.fn(),
   validateTollManualStage: vi.fn(),
   discardTollManualStage: vi.fn(),
+  processTollManualStage: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
@@ -17,6 +18,7 @@ vi.mock("../api", () => ({
   patchTollManualStage: apiMocks.patchTollManualStage,
   validateTollManualStage: apiMocks.validateTollManualStage,
   discardTollManualStage: apiMocks.discardTollManualStage,
+  processTollManualStage: apiMocks.processTollManualStage,
 }));
 
 import TollsManualEntryPage from "./TollsManualEntryPage";
@@ -63,6 +65,7 @@ describe("TollsManualEntryPage", () => {
     apiMocks.patchTollManualStage.mockReset();
     apiMocks.validateTollManualStage.mockReset();
     apiMocks.discardTollManualStage.mockReset();
+    apiMocks.processTollManualStage.mockReset();
     apiMocks.listTollManualStages.mockResolvedValue([]);
   });
 
@@ -77,8 +80,7 @@ describe("TollsManualEntryPage", () => {
 
   it("shows Manual Entry beside CSV and PDF without unit or payroll fields", async () => {
     await renderPage();
-    expect(host?.textContent).toContain("CSV File Imports");
-    expect(host?.textContent).toContain("PDF Reviews");
+    expect(host?.textContent).toContain("Upload");
     expect(host?.textContent).toContain("Manual Entry");
     expect(host?.textContent).toContain("Toll date");
     expect(host?.textContent).toContain("Agency");
@@ -90,6 +92,9 @@ describe("TollsManualEntryPage", () => {
     expect(host?.textContent).not.toContain("Payroll");
     expect(host?.textContent).not.toContain("Settlement");
     expect(host?.textContent).not.toContain("Unit number");
+    const process = Array.from(host!.querySelectorAll("button")).find((el) => el.textContent === "Process");
+    expect(process).toBeTruthy();
+    expect((process as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("creates and edits a MANUAL review stage", async () => {

@@ -31,6 +31,11 @@ function shortenHash(hash: string | null): string {
   return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
 }
 
+function isQuietTollListFailure(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  return text === "internal server error" || text.includes('"detail":"internal server error"');
+}
+
 function formatImportedAt(value: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -71,8 +76,9 @@ export default function TollsHistoryPage() {
         setExpandedId(preferBatchId);
       }
     } catch (err) {
-      setError(apiErrorMessage(err));
+      const message = apiErrorMessage(err);
       setItems([]);
+      setError(isQuietTollListFailure(message) ? null : message);
     } finally {
       setLoading(false);
     }
@@ -152,7 +158,7 @@ export default function TollsHistoryPage() {
           a provider mapping exists.
         </p>
         <div className="mt-3">
-          <TollsModuleNav active="csv" />
+          <TollsModuleNav active="upload" />
         </div>
       </div>
 

@@ -25,6 +25,8 @@ from app.models.toll import (
     REVIEW_STATUS_RECONCILIATION_FAILED,
     SOURCE_TYPE_FILE,
     TollFileSourceRow,
+    TollManualEntryStage,
+    TollPdfReviewFieldCorrection,
     TollPdfReviewRow,
     TollPdfStatementReview,
     TollSourceBatch,
@@ -66,49 +68,131 @@ async def _persist_pdf(db: FakePdfSession | FakeTollSession, **kwargs: Any):
     return await persist_toll_pdf_file(db, **kwargs)
 
 
+def _eq_filters_qualified(stmt: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    where = getattr(stmt, "whereclause", None)
+    if where is None:
+        return out
+    clauses = list(getattr(where, "clauses", [where]))
+    for clause in clauses:
+        left = getattr(clause, "left", None)
+        right = getattr(clause, "right", None)
+        if left is None:
+            continue
+        name = getattr(left, "key", None)
+        table = getattr(getattr(left, "table", None), "name", None)
+        value = getattr(right, "value", right)
+        if hasattr(value, "value"):
+            value = value.value
+        if name:
+            out[name] = value
+        if table and name:
+            out[f"{table}.{name}"] = value
+    return out
+
+
 class FakePdfSession(FakeTollSession):
     def __init__(self) -> None:
         super().__init__()
         self.reviews: list[TollPdfStatementReview] = []
         self.review_rows: list[TollPdfReviewRow] = []
+        self.corrections: list[TollPdfReviewFieldCorrection] = []
+        self.stages: list[TollManualEntryStage] = []
+        self.raise_on_commit = False
+        self.fail_after_n_transactions: int | None = None
+        self._committed_batches: list[TollSourceBatch] = []
+        self._committed_rows: list[TollFileSourceRow] = []
+        self._committed_reviews: list[TollPdfStatementReview] = []
+        self._committed_review_rows: list[TollPdfReviewRow] = []
+        self._committed_corrections: list[TollPdfReviewFieldCorrection] = []
+        self._committed_stages: list[TollManualEntryStage] = []
+        self._committed_transactions: list[TollTransaction] = []
+
+    def _capture_committed(self) -> None:
+        self._committed_batches = list(self.batches)
+        self._committed_rows = list(self.rows)
+        self._committed_reviews = list(self.reviews)
+        self._committed_review_rows = list(self.review_rows)
+        self._committed_corrections = list(self.corrections)
+        self._committed_stages = list(self.stages)
+        self._committed_transactions = list(self.transactions)
+
+    def _restore_committed(self) -> None:
+        self.batches = list(self._committed_batches)
+        self.rows = list(self._committed_rows)
+        self.reviews = list(self._committed_reviews)
+        self.review_rows = list(self._committed_review_rows)
+        self.corrections = list(self._committed_corrections)
+        self.stages = list(self._committed_stages)
+        self.transactions = list(self._committed_transactions)
 
     async def flush(self) -> None:
         if self.raise_on_flush:
             raise RuntimeError("flush failed")
+        added_tx = 0
         for obj in self._pending:
             if getattr(obj, "id", None) is None:
                 obj.id = self._next_id
                 self._next_id += 1
             if isinstance(obj, TollSourceBatch):
-                self.batches.append(obj)
+                if obj not in self.batches:
+                    self.batches.append(obj)
             elif isinstance(obj, TollFileSourceRow):
-                self.rows.append(obj)
+                if obj not in self.rows:
+                    self.rows.append(obj)
             elif isinstance(obj, TollPdfStatementReview):
-                self.reviews.append(obj)
+                if obj not in self.reviews:
+                    self.reviews.append(obj)
             elif isinstance(obj, TollPdfReviewRow):
-                self.review_rows.append(obj)
+                if obj not in self.review_rows:
+                    self.review_rows.append(obj)
+            elif isinstance(obj, TollPdfReviewFieldCorrection):
+                if obj not in self.corrections:
+                    self.corrections.append(obj)
+            elif isinstance(obj, TollManualEntryStage):
+                if obj not in self.stages:
+                    self.stages.append(obj)
             elif isinstance(obj, TollTransaction):
-                self.transactions.append(obj)
+                if obj not in self.transactions:
+                    self.transactions.append(obj)
+                added_tx += 1
+                if (
+                    self.fail_after_n_transactions is not None
+                    and added_tx >= self.fail_after_n_transactions
+                ):
+                    self._pending.clear()
+                    raise RuntimeError("flush failed mid-write")
         self._pending.clear()
+
+    async def commit(self) -> None:
+        await self.flush()
+        if self.raise_on_commit:
+            raise RuntimeError("commit failed")
+        self.committed = True
+        self._capture_committed()
+        if self.expire_ids_on_commit:
+            for batch in self.batches:
+                batch.id = None
+            for row in self.rows:
+                row.id = None
 
     async def rollback(self) -> None:
         self.rolled_back = True
         self._pending.clear()
-        if not self.committed:
-            self.batches.clear()
-            self.reviews.clear()
-            self.review_rows.clear()
-            self.transactions.clear()
+        self._restore_committed()
 
     async def execute(self, stmt: Any):
-        from tests.test_toll_segment_2 import FakeResult, _eq_filters, _like_needles, _stmt_limit_offset
+        from tests.test_toll_segment_2 import FakeResult, _like_needles, _stmt_limit_offset
 
         self.execute_calls += 1
-        filters = _eq_filters(stmt)
+        filters = _eq_filters_qualified(stmt)
         tenant_id = filters.get("tenant_id")
         source_hash = filters.get("source_hash")
-        batch_id = filters.get("batch_id")
-        object_id = filters.get("id")
+        batch_id = filters.get("batch_id") or filters.get("toll_source_batches.id")
+        row_id = filters.get("toll_pdf_review_rows.id")
+        object_id = filters.get("toll_source_batches.id") or (
+            filters.get("id") if row_id is None else None
+        )
         source_type = filters.get("source_type")
         file_format = filters.get("file_format")
         needles = _like_needles(stmt)
@@ -116,12 +200,46 @@ class FakePdfSession(FakeTollSession):
         descs = list(getattr(stmt, "column_descriptions", []) or [])
         names = [d.get("name") for d in descs]
         entities = [d.get("entity") for d in descs]
+        compiled = str(stmt).lower()
+        if TollPdfReviewRow in entities and TollPdfStatementReview in entities and TollSourceBatch in entities:
+            triples = []
+            for batch in self.batches:
+                if tenant_id is not None and batch.tenant_id != tenant_id:
+                    continue
+                if object_id is not None and batch.id != object_id:
+                    continue
+                if batch_id is not None and batch.id != batch_id and object_id is None:
+                    continue
+                review = next(
+                    (item for item in self.reviews if item.batch_id == batch.id and item.tenant_id == batch.tenant_id),
+                    None,
+                )
+                if review is None:
+                    continue
+                for row in self.review_rows:
+                    if row.tenant_id != batch.tenant_id or row.batch_id != batch.id:
+                        continue
+                    if row_id is not None and row.id != row_id:
+                        continue
+                    triples.append((batch, review, row))
+            return FakePairResult(triples)
+        if "TollPdfReviewFieldCorrection" in names or any(
+            getattr(entity, "__name__", "") == "TollPdfReviewFieldCorrection" for entity in entities
+        ):
+            items = [
+                item
+                for item in self.corrections
+                if tenant_id is None or item.tenant_id == tenant_id
+            ]
+            items.sort(key=lambda item: int(item.id or 0))
+            return FakeResult(items)
         if TollPdfReviewRow in entities or names == ["TollPdfReviewRow"]:
             rows = [
                 row
                 for row in self.review_rows
                 if (tenant_id is None or row.tenant_id == tenant_id)
                 and (batch_id is None or row.batch_id == batch_id)
+                and (row_id is None or row.id == row_id)
             ]
             rows.sort(key=lambda row: row.source_row_order)
             start = offset or 0
@@ -137,6 +255,8 @@ class FakePdfSession(FakeTollSession):
                 if file_format is not None and batch.file_format != file_format:
                     continue
                 if object_id is not None and batch.id != object_id:
+                    continue
+                if batch_id is not None and batch.id != batch_id and object_id is None:
                     continue
                 review = next(
                     (item for item in self.reviews if item.batch_id == batch.id and item.tenant_id == batch.tenant_id),
@@ -159,6 +279,36 @@ class FakePdfSession(FakeTollSession):
             if limit is not None:
                 pairs = pairs[:limit]
             return FakePairResult(pairs)
+        if TollManualEntryStage in entities or names == ["TollManualEntryStage"]:
+            stage_id = filters.get("id") or filters.get("toll_manual_entry_stages.id")
+            rows = [
+                stage
+                for stage in self.stages
+                if (tenant_id is None or stage.tenant_id == tenant_id)
+                and (stage_id is None or stage.id == stage_id)
+            ]
+            if stage_id is None:
+                rows = [stage for stage in rows if stage.status != "DISCARDED"]
+            rows.sort(key=lambda stage: int(stage.id or 0), reverse=True)
+            if limit is not None:
+                rows = rows[:limit]
+            return FakeResult(rows)
+        if "toll_transaction" in compiled:
+            txs = [
+                tx
+                for tx in self.transactions
+                if (tenant_id is None or tx.tenant_id == tenant_id)
+                and (batch_id is None or tx.batch_id == batch_id)
+                and (filters.get("manual_stage_id") is None or tx.manual_stage_id == filters.get("manual_stage_id"))
+                and (filters.get("pdf_review_row_id") is None or tx.pdf_review_row_id == filters.get("pdf_review_row_id"))
+            ]
+            if "count(" in compiled:
+                return FakeResult([len(txs)])
+            if "sum(" in compiled:
+                total = sum((tx.amount for tx in txs), Decimal("0"))
+                return FakeResult([total])
+            return FakeResult(txs)
+        source_import_ref = filters.get("source_import_ref")
         batches = [
             batch
             for batch in self.batches
@@ -167,10 +317,34 @@ class FakePdfSession(FakeTollSession):
             and (source_hash is None or batch.source_hash == source_hash)
             and (source_type is None or batch.source_type == source_type)
             and (file_format is None or batch.file_format == file_format)
+            and (source_import_ref is None or batch.source_import_ref == source_import_ref)
         ]
         if names == ["id"]:
             return FakeResult([int(batch.id) for batch in batches])
         return FakeResult(batches)
+
+    async def scalar(self, stmt: Any):
+        compiled = str(stmt).lower()
+        filters = _eq_filters_qualified(stmt)
+        tenant_id = filters.get("tenant_id")
+        batch_id = filters.get("batch_id")
+        txs = [
+            tx
+            for tx in self.transactions
+            if (tenant_id is None or tx.tenant_id == tenant_id)
+            and (batch_id is None or tx.batch_id == batch_id)
+            and (filters.get("manual_stage_id") is None or tx.manual_stage_id == filters.get("manual_stage_id"))
+        ]
+        if "count(" in compiled:
+            return len(txs)
+        if "sum(" in compiled:
+            return sum((tx.amount for tx in txs), Decimal("0"))
+        result = await self.execute(stmt)
+        if hasattr(result, "first") and not hasattr(result, "scalars"):
+            row = result.first()
+            return row
+        items = result.scalars().all()
+        return items[0] if items else None
 
 
 class FakePairResult:
