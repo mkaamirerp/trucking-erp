@@ -329,7 +329,7 @@ class TestMarkReadyFlow:
                 "load_number": load_num,
                 "broker_name_snapshot": "TQL",
                 "broker_load_reference": "PO-ND",
-                "status": "ready",
+                "status": "draft",
                 "stops": [
                     {"stop_type": "PICKUP", "sequence": 0, "facility_name": "S"},
                     {"stop_type": "DROP", "sequence": 1, "facility_name": "D"},
@@ -339,7 +339,13 @@ class TestMarkReadyFlow:
         )
         assert cr.status_code == 201
         load_id = cr.json()["id"]
-        cv = cr.json()["concurrency_version"]
+        first = await client.post(
+            f"/api/v1/loads/{load_id}/mark-ready",
+            json={"expected_concurrency_version": cr.json()["concurrency_version"]},
+            headers=AUTH_HEADERS,
+        )
+        assert first.status_code == 200, first.text
+        cv = first.json()["concurrency_version"]
         mr = await client.post(
             f"/api/v1/loads/{load_id}/mark-ready",
             json={"expected_concurrency_version": cv},

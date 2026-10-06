@@ -747,7 +747,6 @@ export default function LoadLabPage() {
                       focusDoc={focusDocNoop}
                       verificationTabIndex={verificationTabIndex}
                       status={status}
-                      setStatus={setStatus}
                       loadNumber={loadNumber}
                       setLoadNumber={setLoadNumber}
                       brokerId={brokerId}
@@ -792,11 +791,8 @@ export default function LoadLabPage() {
                       miles={miles}
                       setMiles={setMiles}
                       driverId={driverId}
-                      setDriverId={setDriverId}
                       truckId={truckId}
-                      setTruckId={setTruckId}
                       trailerAssetId={trailerAssetId}
-                      setTrailerAssetId={setTrailerAssetId}
                       customsBrokerId={customsBrokerId}
                       internalNotes={internalNotes}
                       setInternalNotes={setInternalNotes}

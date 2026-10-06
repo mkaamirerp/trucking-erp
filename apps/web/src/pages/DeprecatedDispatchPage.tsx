@@ -1,8 +1,8 @@
 /**
  * DeprecatedDispatchPage — legacy load-status dispatch board (`GET /dispatch/board`).
  * Layout C (table default) + Layout B (board optional). Trip Container / future Dispatch command center is separate.
- * Ribbon + table/board; unassigned loads open `/loads/:id?dispatchAssign=1` (canonical workspace + assignment strip).
- * Other statuses open the quick summary modal with a link to the full workspace.
+ * Ribbon + table/board; every row opens the read-only quick summary modal with a link to the full workspace.
+ * No assignment action: driver/truck/trailer are assigned on the Trip.
  * Primary fields in rows/cards: Load #, Trip # (read-only), Route, Status.
  * Delivered moved to ribbon tab, not a board column.
  */
@@ -618,16 +618,9 @@ export default function DeprecatedDispatchPage() {
     return statusesInRibbon.map((s) => ({ key: s, label: STATUS_LABELS[s] ?? s }));
   }, [statusesInRibbon]);
 
-  const openLoadWorkspace = useCallback(
-    (load: Load) => {
-      if ((load.status || "").toLowerCase() === "unassigned") {
-        navigate(`${slug}${OPS.LOAD_DETAIL(load.id)}?${OPS.LOAD_DISPATCH_ASSIGN_QUERY}=1`);
-        return;
-      }
-      setSelectedLoad(load);
-    },
-    [navigate, slug],
-  );
+  const openLoadWorkspace = useCallback((load: Load) => {
+    setSelectedLoad(load);
+  }, []);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--trk-bg)] text-[var(--trk-text)]">

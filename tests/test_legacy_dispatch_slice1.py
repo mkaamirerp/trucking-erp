@@ -72,26 +72,10 @@ def override_auth_tenant(test_bypass_env):
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
 class TestSlice1RejectedPatchLeavesNoFreightRows:
-    async def _first_driver_truck(self, client) -> tuple[int, int] | None:
-        dr = await client.get("/api/v1/drivers?limit=5", headers=AUTH_HEADERS)
-        tr = await client.get("/api/v1/trucks?page=1&size=5", headers=AUTH_HEADERS)
-        if dr.status_code != 200 or tr.status_code != 200:
-            return None
-        dlist = dr.json()
-        titems = tr.json().get("items") or []
-        if not dlist or not titems:
-            return None
-        return int(dlist[0]["id"]), int(titems[0]["id"])
-
     @pytest.mark.skipif(REQUIRES_TENANT_DB, reason="TENANT_DATABASE_URL required")
     async def test_rejected_dispatched_transition_does_not_create_rows(
         self, client, override_auth_tenant
     ) -> None:
-        ids = await self._first_driver_truck(client)
-        if ids is None:
-            pytest.skip("No driver/truck in tenant DB")
-        driver_id, truck_id = ids
-
         cr = await client.post(
             "/api/v1/loads",
             headers=AUTH_HEADERS,
@@ -139,12 +123,7 @@ class TestSlice1RejectedPatchLeavesNoFreightRows:
             bad = await client.patch(
                 f"/api/v1/loads/{load_id}",
                 headers=AUTH_HEADERS,
-                json={
-                    "driver_id": driver_id,
-                    "truck_id": truck_id,
-                    "status": "dispatched",
-                    "expected_concurrency_version": _cv(cr.json()),
-                },
+                json={"status": "dispatched", "expected_concurrency_version": _cv(cr.json())},
             )
             assert bad.status_code == 409
             assert _detail_code(bad.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED

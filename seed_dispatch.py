@@ -1,13 +1,13 @@
 """
-Seed realistic dispatch board data for tenant 'demo' (tenant_id=53).
+Seed realistic commercial draft loads for tenant 'demo' (tenant_id=53).
 
 IMPORTANT: Tenant business tables (loads, load_stops, drivers, …) live in the
 per-tenant PostgreSQL database (e.g. tenant_demo), NOT in the platform DATABASE_URL.
 This script must use TENANT_DATABASE_URL or ALEMBIC_TENANT_DATABASE_URL from the
 same secrets the API uses — not DATABASE_URL alone.
 
-This script does not INSERT into `drivers`; it only picks an existing tenant-scoped driver (if any)
-to attach demo loads. Operational drivers come from approved onboarding or explicit admin create.
+Loads are inserted as draft only, with no driver/truck/trailer. Legacy operational Load.status values
+and Load equipment are not written; operational state belongs to Trip (POST /trips + Trip assignment).
 
 Run inside the API container with secrets loaded, e.g.:
   docker exec truckerp-api bash -lc 'set -a && . /run/secrets/truckerp.env && set +a && python /app/seed_dispatch.py'
@@ -96,7 +96,6 @@ engine = create_engine(SYNC_URL)
 TENANT_ID = 53  # demo tenant row id (loads.tenant_id)
 
 LOADS = [
-    # UNASSIGNED
     dict(
         load_number="L-SEED001",
         broker_name_snapshot="TQL Transport",
@@ -104,7 +103,6 @@ LOADS = [
         estimated_weight=42000,
         rate=2450.00,
         miles=476,
-        status="unassigned",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Chicago", state_or_province="IL", facility_name="Chicago DC"),
             dict(stop_type="DROP", sequence=2, city="Atlanta", state_or_province="GA", facility_name="Atlanta Hub"),
@@ -117,7 +115,6 @@ LOADS = [
         estimated_weight=38500,
         rate=1875.00,
         miles=452,
-        status="unassigned",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Dallas", state_or_province="TX", facility_name="Dallas Cold Storage"),
             dict(stop_type="DROP", sequence=2, city="Memphis", state_or_province="TN", facility_name="Memphis Warehouse"),
@@ -130,7 +127,6 @@ LOADS = [
         estimated_weight=44000,
         rate=1340.00,
         miles=371,
-        status="unassigned",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Los Angeles", state_or_province="CA", facility_name="LA Port"),
             dict(stop_type="DROP", sequence=2, city="Phoenix", state_or_province="AZ", facility_name="Phoenix Depot"),
@@ -143,13 +139,11 @@ LOADS = [
         estimated_weight=31000,
         rate=1120.00,
         miles=602,
-        status="unassigned",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Denver", state_or_province="CO", facility_name="Denver Terminal"),
             dict(stop_type="DROP", sequence=2, city="Kansas City", state_or_province="MO", facility_name="KC Distribution"),
         ],
     ),
-    # ASSIGNED (need driver/truck/trailer seeded first)
     dict(
         load_number="L-SEED005",
         broker_name_snapshot="TQL Transport",
@@ -157,7 +151,6 @@ LOADS = [
         estimated_weight=40000,
         rate=1650.00,
         miles=408,
-        status="assigned",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Nashville", state_or_province="TN", facility_name="Nashville DC"),
             dict(stop_type="DROP", sequence=2, city="Charlotte", state_or_province="NC", facility_name="Charlotte Hub"),
@@ -170,13 +163,11 @@ LOADS = [
         estimated_weight=36000,
         rate=1290.00,
         miles=349,
-        status="assigned",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Houston", state_or_province="TX", facility_name="Houston Cold"),
             dict(stop_type="DROP", sequence=2, city="New Orleans", state_or_province="LA", facility_name="NOLA Warehouse"),
         ],
     ),
-    # DISPATCHED
     dict(
         load_number="L-SEED007",
         broker_name_snapshot="CH Robinson",
@@ -184,7 +175,6 @@ LOADS = [
         estimated_weight=33000,
         rate=780.00,
         miles=280,
-        status="dispatched",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Miami", state_or_province="FL", facility_name="Miami Port"),
             dict(stop_type="DROP", sequence=2, city="Tampa", state_or_province="FL", facility_name="Tampa DC"),
@@ -197,7 +187,6 @@ LOADS = [
         estimated_weight=39500,
         rate=620.00,
         miles=174,
-        status="dispatched",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Seattle", state_or_province="WA", facility_name="Seattle Terminal"),
             dict(stop_type="DROP", sequence=2, city="Portland", state_or_province="OR", facility_name="Portland Hub"),
@@ -210,7 +199,6 @@ LOADS = [
         estimated_weight=37000,
         rate=1100.00,
         miles=408,
-        status="dispatched",
         stops=[
             dict(stop_type="PICKUP", sequence=1, city="Minneapolis", state_or_province="MN", facility_name="MSP Terminal"),
             dict(stop_type="DROP", sequence=2, city="Chicago", state_or_province="IL", facility_name="Chicago Hub"),
@@ -237,13 +225,6 @@ def run() -> None:
             print("ERROR: Table public.loads not found. Wrong database URL (platform DB?)", file=sys.stderr)
             sys.exit(1)
 
-        # Check for existing driver/truck/trailer to link assigned/dispatched loads
-        driver_id = session.execute(text("SELECT id FROM drivers WHERE tenant_id = :tid LIMIT 1"), {"tid": TENANT_ID}).scalar()
-        truck_id = session.execute(text("SELECT id FROM trucks WHERE tenant_id = :tid LIMIT 1"), {"tid": TENANT_ID}).scalar()
-        trailer_id = session.execute(text("SELECT id FROM trailers WHERE tenant_id = :tid LIMIT 1"), {"tid": TENANT_ID}).scalar()
-
-        print(f"Found: driver_id={driver_id}, truck_id={truck_id}, trailer_id={trailer_id}")
-
         # Remove previous seed loads to allow re-running (CASCADE removes load_stops)
         session.execute(
             text("DELETE FROM loads WHERE load_number LIKE 'L-SEED%' AND tenant_id = :tid"),
@@ -251,41 +232,26 @@ def run() -> None:
         )
         session.commit()
 
-        n_unassigned = n_assigned = n_dispatched = 0
+        n_inserted = 0
 
         for load_template in LOADS:
             load = copy.deepcopy(load_template)
             stops = load.pop("stops")
-            needs_driver = load["status"] in ("assigned", "dispatched")
-            st = load["status"]
-            if st == "unassigned":
-                n_unassigned += 1
-            elif st == "assigned":
-                n_assigned += 1
-            elif st == "dispatched":
-                n_dispatched += 1
+            n_inserted += 1
 
             row = session.execute(
                 text(
                     """
                 INSERT INTO loads (
                     tenant_id, load_number, broker_name_snapshot,
-                    equipment_type, estimated_weight, rate, miles, status,
-                    driver_id, truck_id, trailer_id
+                    equipment_type, estimated_weight, rate, miles, status
                 ) VALUES (
                     :tenant_id, :load_number, :broker_name_snapshot,
-                    :equipment_type, :estimated_weight, :rate, :miles, :status,
-                    :driver_id, :truck_id, :trailer_id
+                    :equipment_type, :estimated_weight, :rate, :miles, 'draft'
                 ) RETURNING id
             """
                 ),
-                {
-                    **load,
-                    "tenant_id": TENANT_ID,
-                    "driver_id": driver_id if needs_driver else None,
-                    "truck_id": truck_id if needs_driver else None,
-                    "trailer_id": trailer_id if needs_driver else None,
-                },
+                {**load, "tenant_id": TENANT_ID},
             )
             load_id = row.scalar()
 
@@ -305,16 +271,14 @@ def run() -> None:
                     {**stop, "tenant_id": TENANT_ID, "load_id": load_id},
                 )
 
-            print(f"  Inserted {load['load_number']} ({load['status']}) → load_id={load_id}")
+            print(f"  Inserted {load['load_number']} (draft) → load_id={load_id}")
 
         session.commit()
         print("\n--- Summary ---")
         print(f"  database:     {dbname}")
         print(f"  tenant_id:    {TENANT_ID}")
-        print(f"  unassigned:   {n_unassigned}")
-        print(f"  assigned:     {n_assigned}")
-        print(f"  dispatched:   {n_dispatched}")
-        print("\nDone. Refresh the dispatch board.")
+        print(f"  draft loads:  {n_inserted}")
+        print("\nDone. Mark loads ready on the Load page; plan and assign them on a Trip.")
 
 
 if __name__ == "__main__":

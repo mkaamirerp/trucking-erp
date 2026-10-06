@@ -5,8 +5,33 @@
 # Trip assignment, TripLoad membership, and future package / execution endpoints.
 LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED = "LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED"
 
-# V1 legacy: mint path historically keyed off load entering this status (generic PATCH). Slice 1
-# blocks NEW transitions via Load PATCH; service helpers may still use this constant for docs/cancel.
+# Issue 0A writer freeze: Load create/PATCH may only write commercial/readiness statuses.
+# Legacy operational values remain readable on historical rows (LoadResponse) but are never written
+# through Load APIs; operational lifecycle and equipment belong to Trip.
+LOAD_WRITABLE_STATUSES = frozenset({"draft", "ready"})
+LEGACY_LOAD_OPERATIONAL_STATUSES = frozenset(
+    {
+        "unassigned",
+        "assigned",
+        "dispatched",
+        "arrived_pickup",
+        "in_transit",
+        "arrived_delivery",
+        "delivered",
+        "issue_hold",
+    }
+)
+LOAD_ASSIGNMENT_FIELDS = ("driver_id", "truck_id", "trailer_id")
+
+LEGACY_LOAD_ASSIGNMENT_DEPRECATED = "LEGACY_LOAD_ASSIGNMENT_DEPRECATED"
+LOAD_CREATE_STATUS_MUST_BE_DRAFT = "LOAD_CREATE_STATUS_MUST_BE_DRAFT"
+# Explicit Load PATCH status outside LOAD_WRITABLE_STATUSES (e.g. null); loads.status is NOT NULL.
+LOAD_STATUS_NOT_WRITABLE = "LOAD_STATUS_NOT_WRITABLE"
+# Rows still holding a legacy operational status cannot change status via Load PATCH (Issue 0B migrates them).
+LEGACY_LOAD_STATUS_TRANSITION_BLOCKED = "LEGACY_LOAD_STATUS_TRANSITION_BLOCKED"
+
+# V1 legacy: mint path historically keyed off load entering this status (generic PATCH). Load PATCH no
+# longer mints or cancels (Issue 0A); constant kept for legacy readers and dispatch_trips helpers.
 TRIP_ALLOCATED_AT_LOAD_STATUS = "dispatched"
 
 # Active trip is cancelled + load read-model cleared ONLY when leaving `dispatched` for a pre-dispatch
