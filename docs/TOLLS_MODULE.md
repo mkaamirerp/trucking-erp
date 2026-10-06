@@ -3195,3 +3195,105 @@ provider normalization
 canonical toll_transactions
 ```
 
+
+
+### 2026-10-05 — Toll PDF human-review slice locked
+
+Real WVPA toll-statement evidence confirms the Toll PDF flow should follow the same review philosophy used by Fuel.
+
+Locked flow:
+
+```text
+Upload Toll PDF
+    ↓
+Store original document
+    ↓
+Extract and preserve all provider/source data
+    ↓
+Build parsed Toll review rows
+    ↓
+Human review
+    ↓
+Approve / Process
+    ↓
+Create canonical toll_transactions
+```
+
+#### Core rule
+
+PDF parsing does **not** post directly into canonical Toll transactions.
+
+The parser's job is to preserve and present the source evidence for review.
+
+Only after human approval does TruckERP create permanent canonical Toll rows.
+
+#### Preserve all source data
+
+For the uploaded statement, preserve:
+
+- original PDF
+- statement/account metadata
+- statement period
+- statement totals
+- transponder grouping
+- plate data when present
+- toll agency
+- post date
+- entry/exit dates and times
+- entry/exit locations
+- entry/exit lanes
+- transponder number
+- plate number
+- trip charge
+- raw extracted/provider evidence
+- page/source-row provenance where practical
+
+Do not discard source fields merely because they are not canonical Toll columns.
+
+#### Review boundary
+
+The review screen should show parsed toll rows and enough original-document context for a human to verify them before posting.
+
+This is analogous to Fuel:
+
+```text
+source document
+    ↓
+parsed review rows
+    ↓
+human confirms
+    ↓
+Process
+```
+
+No TollTransaction rows are created before approval.
+
+#### Reconciliation
+
+When the source document provides statement controls, use them as review gates.
+
+For the first real WVPA statement sample:
+
+- statement trip count = 74
+- statement toll total = 854.47
+
+The parser/review layer should compare parsed rows against those source totals before Process.
+
+Do not silently force or invent missing rows to make reconciliation pass.
+
+#### Canonical posting
+
+After review approval:
+
+- resolve transponder/plate to TruckERP unit
+- create canonical `toll_transactions`
+- retain linkage back to source batch/document/raw evidence
+- preserve provider/source identity separately from toll agency
+- do not introduce Driver/O/O/Payroll/Settlement logic in Toll
+
+#### Scope
+
+This decision applies to PDF Toll FILE intake.
+
+It does not change CSV FILE intake semantics or the separate CSV profile-gate decision.
+
