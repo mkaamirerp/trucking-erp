@@ -3388,3 +3388,200 @@ MANUAL
 ```
 
 Provider/network differences belong in adapters and source evidence. Canonical Toll business data stays small and vehicle/unit-centered.
+
+
+### 2026-10-05 — Toll upload intake gate: provider-first, file-type auto-detect, evidence-before-review
+
+This section locks the front-door rules for Toll file intake.
+
+#### User interaction
+
+The Toll user should select only the provider/profile family first.
+
+Example:
+
+```text
+Select provider/profile
+        ↓
+Choose file
+        ↓
+TruckERP detects actual file type
+        ↓
+Validate that the uploaded content is a toll document
+        ↓
+Only then create a review intake
+```
+
+The user should not have to separately declare PDF vs CSV vs image.
+
+TruckERP must determine the actual uploaded format from the file/content itself and route it to the appropriate provider adapter.
+
+#### Supported intake formats
+
+The intake layer may encounter:
+
+- PDF
+- CSV
+- image files such as JPG/JPEG/PNG
+
+Format detection and provider/profile selection are separate concepts.
+
+```text
+provider/profile
+!=
+file format
+```
+
+Selecting E-ZPass/WVPA does not mean the file is automatically trusted as a Toll statement.
+
+#### Evidence-first gate
+
+No review-stage record that can later be processed may be created unless the uploaded content contains sufficient Toll evidence for the selected provider/profile.
+
+The adapter must prove, from the uploaded content, that the file is plausibly a Toll document.
+
+Examples of valid Toll evidence may include provider/profile-specific combinations such as:
+
+- recognizable provider/issuer markers
+- Toll/statement language
+- transaction-table headings
+- transponder/device identifiers
+- toll agency values
+- toll transaction dates/times
+- toll locations/lanes
+- trip/toll charge fields
+- statement trip-count or statement toll-total controls
+
+One weak token alone is not sufficient.
+
+The provider adapter must define the minimum evidence combination required to accept the upload.
+
+#### Fail closed
+
+If the selected provider/profile cannot establish that the uploaded content is a Toll document:
+
+- stop intake
+- do not create processable review rows
+- do not expose Process
+- do not create TollTransaction rows
+- return a clear controlled error
+
+Recommended business error:
+
+`TOLL_FILE_NOT_RECOGNIZED`
+
+If the file format itself is unsupported:
+
+`TOLL_FILE_FORMAT_UNSUPPORTED`
+
+If the selected provider/profile is not implemented:
+
+`TOLL_PROFILE_NOT_IMPLEMENTED`
+
+If the file is readable but does not match the selected provider/profile:
+
+`TOLL_PROFILE_MISMATCH`
+
+The user may choose another provider/profile and retry.
+
+#### No Process button before proof
+
+The Process action must not be available merely because a file was uploaded.
+
+Process becomes eligible only after all relevant gates pass:
+
+1. file type detected
+2. selected provider/profile implemented
+3. uploaded content matches that provider/profile
+4. sufficient Toll evidence found
+5. source rows parsed
+6. review data persisted
+7. human review completed
+8. reconciliation passes when the source provides control totals
+9. no blocking validation errors remain
+
+If any of these are false, Process must remain hidden or disabled.
+
+#### Image intake
+
+Image files may be selected as Toll source files, but image acceptance does not automatically imply OCR support is complete.
+
+Until image text extraction/OCR is implemented and validated for the selected profile:
+
+- image files may be detected as image format
+- the system must fail closed with a clear unsupported/not-yet-implemented extraction error
+- no review rows may be fabricated
+- no Process button may appear
+
+Do not silently treat an image as a PDF or manually infer transactions from filename/metadata alone.
+
+#### Provider-first, not format-first
+
+The UI should ask the business question first:
+
+```text
+Which Toll provider/profile is this from?
+```
+
+Then accept the source file.
+
+TruckERP determines whether the file is PDF, CSV, or image.
+
+Do not require the user to choose a separate "PDF / CSV / Image" mode when the system can reliably detect the format itself.
+
+#### Immutable source evidence
+
+Once a file passes the intake evidence gate and is stored:
+
+- preserve the original bytes
+- preserve detected file type
+- preserve selected provider/profile
+- preserve extraction warnings
+- preserve evidence used to accept the profile
+- preserve parser/profile version
+- preserve raw/provider source data
+
+Do not rewrite the original source to make it fit the parser.
+
+#### Upload/review gate matrix
+
+| Gate | Required to create review? | Required to Process? |
+|---|---:|---:|
+| Provider/profile selected | Yes | Yes |
+| Actual file type detected | Yes | Yes |
+| Format supported by selected adapter | Yes | Yes |
+| Toll evidence present | Yes | Yes |
+| Profile match passes | Yes | Yes |
+| Parsed rows available | Yes | Yes |
+| Human review complete | No | Yes |
+| Reconciliation passes when controls exist | No | Yes |
+| Blocking errors cleared | No | Yes |
+
+#### Architecture rule
+
+The intake layer should follow:
+
+```text
+provider/profile selection
+        ↓
+file-type detection
+        ↓
+profile-specific Toll evidence gate
+        ↓
+parse
+        ↓
+review
+        ↓
+Process later
+```
+
+Never:
+
+```text
+upload any file
+→ assume selected provider
+→ create rows
+→ show Process
+```
+
+This gate applies to all future Toll providers and file adapters, including E-ZPass/WVPA, SunPass, PrePass exports, and other regional Toll sources.
