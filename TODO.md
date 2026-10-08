@@ -140,3 +140,13 @@ grep -n -A8 -B8 "possible_labels_examples" \
 ```
 
 Do not delete that backup until this TODO is resolved and committed to `main`.
+
+---
+
+## Load Parser — duplicate load / revised RC modal
+
+**Status:** TODO — design only, not implemented.
+
+**Design:** `docs/LOAD_DUPLICATE_REVISED_RC.md`
+
+On a tenant-scoped broker load number or optional barcode match, pause import and show **Possible Duplicate Load** with **Revised RC** (review differences, explicitly approve changes to existing load, preserve revision/audit history) or **Ignore** (no changes). Do not auto-reject or create a duplicate. Keep the original PDF + JSON AI parsing architecture unchanged.
