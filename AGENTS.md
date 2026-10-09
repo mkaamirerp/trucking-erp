@@ -8,6 +8,15 @@ TruckERP is one proprietary application with a shared core (FastAPI routers/APIs
 2. Record the intended module, allowed files, dependencies, affected APIs/tables, and baseline tests. Inspect callers and consumers, not just the new feature.
 3. Work on `main` only, following the repository's existing change controls. Do not deploy, migrate production, or change production configuration without explicit authorization.
 
+## Load / Trip architecture — read before write
+Before changing code, schema, APIs, UI, migrations, or business rules that touch **Load**, **Trip**, **TripLoad**, **Dispatch**, Trip Container, Load/Trip Workspace, assignment, `Load.status`, `Trip.status`, trip number, `dispatch_trips`, `active_trip_id`, custody, terminal/yard, handoff, recovery/repower, operational board/planning queue, or payroll/read-models that depend on Load/Trip:
+
+1. Read **`docs/LOAD_TRIP_MASTER_ARCHITECTURE.md`** first.
+2. If another document conflicts with that master: **STOP and report**. Do not choose the older or newer file yourself.
+3. Do not implement an architecture change until the master has been **owner-approved and updated**.
+
+That file is the canonical current architecture for those boundaries. Detail decision docs remain useful only where they do not contradict the master.
+
 ## STOP / REPORT / INVESTIGATE / WAIT
 **STOP before making a change** if the task requires, or unexpectedly causes, any of the following outside the approved module scope:
 - Changing an existing table, column, foreign key, relationship, constraint, enum, or migration owned by another module.

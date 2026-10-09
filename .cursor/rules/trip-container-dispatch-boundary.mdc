@@ -33,4 +33,7 @@ alwaysApply: true
 
 ## Reference
 
-- `docs/000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`
+- **Canonical architecture (read first):** `docs/LOAD_TRIP_MASTER_ARCHITECTURE.md`
+- UI / product identity detail: `docs/000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`
+
+If this rule conflicts with the master architecture file: **STOP and report**. Do not choose independently.
