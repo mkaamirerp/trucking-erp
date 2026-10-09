@@ -1,4 +1,13 @@
-# TruckERP – Cursor Rules (AUTHORITATIVE)
+# TruckERP – Cursor operational rule index
+
+## Authority
+
+- **`AGENTS.md` (repo root) = canonical TruckERP engineering/agent charter.**
+- **This file (`.cursor/rules.md`) = Cursor operational rule index** (stack, absolute operational guards, pointers into `.cursor/rules/*`). It is **not** the canonical engineering charter and must not be treated as a second AGENTS.md.
+- Always-on bridge: **`.cursor/rules/agents-charter.mdc`** (`alwaysApply: true`) — short pointer to `AGENTS.md`, not a full charter copy.
+- **Module-specific and safety rules** under `.cursor/rules/*` may add **stricter** requirements for their domain.
+- **No Cursor rule may weaken `AGENTS.md`.**
+- **On conflict** between this index, any `.cursor/rules/*` file, and `AGENTS.md`: **STOP and report**. Do not guess which document wins.
 
 ## ROLE
 You are assisting on a multi-tenant SaaS ERP for trucking companies.
@@ -23,10 +32,12 @@ The system uses strict platform DB vs tenant DB separation.
 - Tenant-safe queries only
 
 ## ALEMBIC RULES
-- Alembic platform uses `alembic/`
-- Alembic tenant uses `alembic_tenant/`
+- Platform: `alembic_platform.ini` → `alembic_platform/versions/`
+- Tenant: `alembic_tenant.ini` → `alembic_tenant/versions/` (requires `ALEMBIC_TENANT_DATABASE_URL`)
+- Do **not** use root `alembic.ini` / `alembic/` for platform schema changes (different `script_location`; not the platform track)
 - Migrations must be idempotent
 - No stamping unless explicitly approved
+- Details: `.cursor/rules/alembic-platform-tenant-config.mdc`, `.cursor/rules/ssm-and-tenant-hard-guards.mdc`, `.cursor/rules/20_alembic.md`
 
 ## EDITING STYLE
 - Small changes only

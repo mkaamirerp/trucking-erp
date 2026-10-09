@@ -1,0 +1,23 @@
+---
+description: Always-on bridge to AGENTS.md — TruckERP engineering/agent charter (canonical at repo root)
+alwaysApply: true
+---
+
+# TruckERP agent charter (enforcement bridge)
+
+## Canonical authority
+
+- **`AGENTS.md` at the repository root is the sole canonical TruckERP engineering/agent charter.**
+- This `.mdc` file is an **always-on Cursor enforcement bridge** to that charter. It is **not** a second independent source of truth.
+- **Do not maintain a full duplicate of `AGENTS.md` here.** Change the charter by editing **`AGENTS.md` on `main`** only.
+
+## Required agent behavior
+
+1. **Read and follow `AGENTS.md` for every task** (new modules, enhancements, bug fixes, refactors, and AI-generated changes alike).
+2. Obey its **scope-first**, **STOP / REPORT / INVESTIGATE / WAIT**, **module-boundary**, **test/release**, and **working-style** gates before editing shared or cross-module surfaces.
+3. **If this bridge text, `.cursor/rules.md`, or any other general Cursor rule conflicts with `AGENTS.md`:** **STOP and report** the conflict. Do not guess which document wins and do not silently weaken `AGENTS.md`.
+4. **Module-specific** `.cursor/rules/*` and module docs may add **stricter** requirements for their domain. They **must not weaken** `AGENTS.md` safety gates.
+
+## Pointer
+
+Canonical charter: [`AGENTS.md`](../../AGENTS.md)
