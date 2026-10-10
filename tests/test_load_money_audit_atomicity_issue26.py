@@ -6,13 +6,16 @@ import os
 import unittest
 import uuid
 from decimal import Decimal
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.db_url import to_async_pg_url
+from app.models.tenant import AuditEvent
 from app.schemas.load import LoadCreate, LoadUpdate, LoadStopCreate
+from app.services import audit_events as audit_events_service
 from app.services import loads as loads_service
 
 
@@ -21,6 +24,40 @@ def _tenant_async_engine():
     if not url:
         raise RuntimeError("ALEMBIC_TENANT_DATABASE_URL is required for this runtime test")
     return create_async_engine(to_async_pg_url(url), pool_pre_ping=True)
+
+
+@contextmanager
+def _flush_fail_on_loads_load_updated_audit():
+    """Fail inside write_audit_event flush for required money load_updated rows only."""
+
+    real_flush = AsyncSession.flush
+
+    async def flush_wrapper(self, *args, **kwargs):
+        for obj in list(self.new):
+            if (
+                isinstance(obj, AuditEvent)
+                and obj.module == "loads"
+                and obj.action == "load_updated"
+            ):
+                raise RuntimeError("issue26 injected required audit flush failure")
+        return await real_flush(self, *args, **kwargs)
+
+    with patch.object(AsyncSession, "flush", flush_wrapper):
+        yield
+
+
+@contextmanager
+def _flush_fail_on_any_audit_event():
+    real_flush = AsyncSession.flush
+
+    async def flush_wrapper(self, *args, **kwargs):
+        for obj in list(self.new):
+            if isinstance(obj, AuditEvent):
+                raise RuntimeError("issue26 injected best-effort audit flush failure")
+        return await real_flush(self, *args, **kwargs)
+
+    with patch.object(AsyncSession, "flush", flush_wrapper):
+        yield
 
 
 class TestLoadMoneyAuditAtomicityIssue26(unittest.TestCase):
@@ -178,6 +215,131 @@ class TestLoadMoneyAuditAtomicityIssue26(unittest.TestCase):
                 assert count == 0
 
                 await _cleanup_load(db, tenant_id, load_id)
+
+            await engine.dispose()
+
+        asyncio.run(run())
+
+    def test_required_audit_flush_failure_rolls_back_through_write_audit_event(self):
+        """Money PATCH fails in real write_audit_event flush (not _write_load_audit stub)."""
+
+        async def run():
+            engine = _tenant_async_engine()
+            Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+            tenant_id = 53
+            suffix = uuid.uuid4().hex[:8]
+            load_number = f"I26FL-{suffix}"
+
+            async with Session() as db:
+                created = await loads_service.create_load(
+                    db,
+                    tenant_id,
+                    LoadCreate(
+                        load_number=load_number,
+                        status="draft",
+                        rate=800.00,
+                        broker_name_snapshot="Issue26",
+                        broker_load_reference=f"REF-{suffix}",
+                        stops=[],
+                    ),
+                )
+                load_id = int(created.id)
+                before_rate = created.rate
+                before_cv = int(created.concurrency_version)
+
+                with _flush_fail_on_loads_load_updated_audit():
+                    with self.assertRaises(RuntimeError) as ctx:
+                        await loads_service.update_load(
+                            db,
+                            tenant_id,
+                            load_id,
+                            LoadUpdate(rate=999.99, expected_concurrency_version=before_cv),
+                            request_id=f"i26-flush-{suffix}",
+                            source="api",
+                        )
+                self.assertIn("issue26 injected required audit flush failure", str(ctx.exception))
+
+                row = (
+                    await db.execute(
+                        text(
+                            "select rate, concurrency_version from loads where tenant_id=:t and id=:id"
+                        ),
+                        {"t": tenant_id, "id": load_id},
+                    )
+                ).one()
+                assert row[0] == before_rate
+                assert int(row[1]) == before_cv
+
+                audit_count = (
+                    await db.execute(
+                        text(
+                            """
+                            select count(*) from audit_events
+                            where tenant_id=:t and entity_type='load' and entity_id=:eid
+                              and action='load_updated'
+                            """
+                        ),
+                        {"t": tenant_id, "eid": str(load_id)},
+                    )
+                ).scalar_one()
+                assert audit_count == 0
+
+                # Session remains usable after write_audit_event rollback (best_effort=False).
+                ping = (await db.execute(text("select 1"))).scalar_one()
+                assert ping == 1
+
+                await _cleanup_load(db, tenant_id, load_id)
+
+            await engine.dispose()
+
+        asyncio.run(run())
+
+    def test_write_audit_event_rollback_only_when_best_effort_false(self):
+        async def run():
+            engine = _tenant_async_engine()
+            Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+            tenant_id = 53
+            rollback_calls: list[int] = []
+            real_rollback = AsyncSession.rollback
+
+            async def counting_rollback(self):
+                rollback_calls.append(1)
+                return await real_rollback(self)
+
+            async with Session() as db:
+                with patch.object(AsyncSession, "rollback", counting_rollback):
+                    with _flush_fail_on_any_audit_event():
+                        row = await audit_events_service.write_audit_event(
+                            db,
+                            tenant_id=tenant_id,
+                            module="loads",
+                            entity_type="load",
+                            entity_id="0",
+                            action="load_updated",
+                            source="api",
+                            changed_fields={"rate": {"before": "1.00", "after": "2.00"}},
+                            best_effort=True,
+                        )
+                        assert row is None
+                        assert rollback_calls == []
+                        assert (await db.execute(text("select 1"))).scalar_one() == 1
+
+                    rollback_calls.clear()
+                    with _flush_fail_on_any_audit_event():
+                        with self.assertRaises(RuntimeError):
+                            await audit_events_service.write_audit_event(
+                                db,
+                                tenant_id=tenant_id,
+                                module="loads",
+                                entity_type="load",
+                                entity_id="0",
+                                action="load_updated",
+                                source="api",
+                                changed_fields={"rate": {"before": "1.00", "after": "2.00"}},
+                                best_effort=False,
+                            )
+                        assert rollback_calls == [1]
+                        assert (await db.execute(text("select 1"))).scalar_one() == 1
 
             await engine.dispose()
 
