@@ -19,6 +19,7 @@ from app.constants.trip_dispatch import (
     LOAD_ASSIGNMENT_FIELDS,
     LOAD_CREATE_STATUS_MUST_BE_DRAFT,
     LOAD_STATUS_NOT_WRITABLE,
+    LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT,
     LOAD_WRITABLE_STATUSES,
 )
 from app.models.broker import Broker, BrokerContact
@@ -187,6 +188,11 @@ def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
             LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
             f"This load holds legacy status {old_status}; its status cannot be changed from the Load page. "
             "Commercial fields remain editable when status is omitted.",
+        )
+    if new_status == "ready" and old_status != "ready":
+        raise _legacy_write_conflict(
+            LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT,
+            "Transitioning a load to ready is only allowed via POST /api/v1/loads/{load_id}/mark-ready.",
         )
 
 

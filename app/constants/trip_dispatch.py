@@ -25,6 +25,8 @@ LOAD_ASSIGNMENT_FIELDS = ("driver_id", "truck_id", "trailer_id")
 
 LEGACY_LOAD_ASSIGNMENT_DEPRECATED = "LEGACY_LOAD_ASSIGNMENT_DEPRECATED"
 LOAD_CREATE_STATUS_MUST_BE_DRAFT = "LOAD_CREATE_STATUS_MUST_BE_DRAFT"
+# Issue 3: draft→ready must use POST /loads/{load_id}/mark-ready (authoritative readiness + CAS).
+LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT = "LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT"
 # Explicit Load PATCH status outside LOAD_WRITABLE_STATUSES (e.g. null); loads.status is NOT NULL.
 LOAD_STATUS_NOT_WRITABLE = "LOAD_STATUS_NOT_WRITABLE"
 # Rows still holding a legacy operational status cannot change status via Load PATCH (Issue 0B migrates them).
