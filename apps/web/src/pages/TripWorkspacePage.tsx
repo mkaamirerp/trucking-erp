@@ -498,7 +498,12 @@ export default function TripWorkspacePage() {
             <button type="button" onClick={() => navigate(OPS.TRIPS)} className={toolBtn}>
               ← Trips
             </button>
-            <button type="button" onClick={() => navigate(OPS.DISPATCH)} className={toolBtn}>
+            <button
+              type="button"
+              className={toolBtn}
+              data-testid="trip-workspace-dispatch-nav"
+              onClick={() => navigate(OPS.TRIP_CONTAINER)}
+            >
               Dispatch
             </button>
             <div className="min-w-0">

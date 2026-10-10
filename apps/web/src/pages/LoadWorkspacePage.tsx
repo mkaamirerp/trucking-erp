@@ -1244,7 +1244,12 @@ export default function LoadWorkspacePage() {
           <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
             Load directory
           </button>
-          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.DISPATCH)}>
+          <button
+            type="button"
+            className={toolBtnSecondary}
+            data-testid="load-workspace-dispatch-nav"
+            onClick={() => navigate(OPS.TRIP_CONTAINER)}
+          >
             Dispatch
           </button>
           {workspaceMode === "intake" ? (

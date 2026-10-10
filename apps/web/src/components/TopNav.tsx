@@ -7,8 +7,9 @@ import { OPS, ADMIN, USER } from "../routes";
 
 // ─── Navigation data ──────────────────────────────────────────────────────────
 
-const dispatchLinks = [
-  { label: "Dispatch", to: OPS.DISPATCH },
+/** Primary "Dispatch" opens Trip Container (Issue 0C Slice 1). Legacy `/dispatch` board remains reachable separately. */
+export const dispatchLinks = [
+  { label: "Dispatch", to: OPS.TRIP_CONTAINER },
   { label: "Trip Container", to: OPS.TRIP_CONTAINER },
   { label: "Loads", to: OPS.LOADS },
   { label: "Trips", to: OPS.TRIPS },
