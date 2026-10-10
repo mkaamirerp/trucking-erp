@@ -742,7 +742,9 @@ class TestLoadMoneyAuditReviewGate(unittest.TestCase):
 
         asyncio.run(run())
 
-    def test_status_patch_still_writes_status_audit_best_effort(self):
+    def test_allowed_status_patch_still_writes_status_audit_best_effort(self):
+        """Issue 3 blocks PATCH draft→ready; ready→draft PATCH still emits status audit when permitted."""
+
         async def run():
             engine, Session = self._session()
             tenant_id = 53
@@ -757,15 +759,24 @@ class TestLoadMoneyAuditReviewGate(unittest.TestCase):
                         status="draft",
                         broker_name_snapshot="x",
                         broker_load_reference=f"r-{suffix}",
-                        stops=[],
+                        stops=[
+                            {"stop_type": "PICKUP", "sequence": 0, "city": "A", "state_or_province": "TX"},
+                            {"stop_type": "DROP", "sequence": 1, "city": "B", "state_or_province": "TX"},
+                        ],
                     ),
                 )
                 lid = int(created.id)
+                ready = await loads_service.mark_load_ready(
+                    db,
+                    tenant_id,
+                    lid,
+                    expected_concurrency_version=int(created.concurrency_version),
+                )
                 await loads_service.update_load(
                     db,
                     tenant_id,
                     lid,
-                    LoadUpdate(status="ready", expected_concurrency_version=int(created.concurrency_version)),
+                    LoadUpdate(status="draft", expected_concurrency_version=int(ready.concurrency_version)),
                     source="api",
                 )
                 actions = (
@@ -777,7 +788,7 @@ class TestLoadMoneyAuditReviewGate(unittest.TestCase):
                     )
                 ).all()
                 acts = [r[0] for r in actions]
-                assert "load_status_changed" in acts or "load_updated" in acts
+                assert "load_status_changed" in acts
                 await _cleanup_load(db, tenant_id, lid)
 
             await engine.dispose()

@@ -40,22 +40,33 @@ class TestLoadAuditEvents(unittest.TestCase):
             status="draft",
             broker_name_snapshot="Test Broker",
             broker_load_reference=f"REF-{suffix}",
-            stops=[],
+            stops=[
+              {"stop_type": "PICKUP", "sequence": 0, "city": "A", "state_or_province": "TX"},
+              {"stop_type": "DROP", "sequence": 1, "city": "B", "state_or_province": "TX"},
+            ],
           ),
         )
         load_id = int(created.id)
 
-        # Update load status and driver assignment (writes multiple audit events)
+        # Commercial PATCH (status omitted) + authoritative mark-ready (Issue 3: no PATCH draft→ready)
         updated = await loads_service.update_load(
           db,
           tenant_id,
           load_id,
-          payload=LoadUpdate(expected_concurrency_version=int(created.concurrency_version), status="ready"),
+          payload=LoadUpdate(
+            expected_concurrency_version=int(created.concurrency_version),
+            internal_notes="audit trail",
+          ),
           actor_user_id=1,
           request_id=f"test-req-{suffix}",
           source="ui",
         )
-        _ = updated
+        await loads_service.mark_load_ready(
+          db,
+          tenant_id,
+          load_id,
+          expected_concurrency_version=int(updated.concurrency_version),
+        )
 
       async with Session() as db:
         rows = (await db.execute(text("""
