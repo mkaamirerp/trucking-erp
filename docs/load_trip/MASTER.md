@@ -38,6 +38,7 @@ Status vocabulary:
 | Mark | Meaning |
 |------|---------|
 | ✅ DONE / SHIPPED | Implemented in code with confirming tests/evidence; no further work for that item |
+| ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | Accepted on `main` with regression tests; production deploy + live verification still pending |
 | ☑ AUDIT / DESIGN COMPLETE | Investigation/design/reconciliation complete; implementation or migration still pending |
 | ⬜ NOT IMPLEMENTED | Approved rule exists; code/work still needed |
 | ⚠ OWNER DECISION REQUIRED | Unsafe to implement until owner decides |
@@ -50,14 +51,14 @@ Status vocabulary:
 | 1 | DOC-1 | One-master Load/Trip documentation consolidation | ✅ DONE / SHIPPED | Sole authority at `docs/load_trip/MASTER.md`; competing Decision/Phase/index/foundation/remediation MDs retired; docs tree reorganized by module | Maintain master + module tree |
 | 2 | DOC-2 | AGENTS.md + Cursor read-before-write enforcement | ✅ DONE / SHIPPED | Already on `main` in `cc1a1f1` (`AGENTS.md` Load/Trip section; `.cursor/rules/load-trip-master-architecture.mdc`). Working-tree pointer refinements (sole-authority wording; trip-container rule retarget) ride with DOC-1 commit | Keep pointers current |
 | 3 | 0A | Freeze legacy Load / Dispatch writers | ✅ DONE / SHIPPED | Independently accepted review commit `26621fe2e0c9c843f18f5b820c0cfc663c178c23` (`review/load-issue0a`; acceptance recorded in former integrity §16 / commit `53e81b0`). Same freeze patch is on `main` as `7fbd69c2eec3fee384676886cd8c675fe7773933` (identical `git patch-id`; 26621fe is not an ancestor of current HEAD). Tests: `tests/test_load_writer_freeze_issue0a.py`; `apps/web/src/loadWorkspace/loadWriterFreeze.test.ts`. Rejects legacy ops status + Load assignment; removes Assign strip / `?dispatchAssign=1`. **Issue 4** (legacy Load assignment executable) closed by same freeze | No further 0A work; do not reopen writers |
-| 4 | 26 | Money mutation vs audit atomicity | ⬜ NOT IMPLEMENTED | Integrity register: rate PATCH can commit then fail JSON-serializing Decimal in audit | Implement Issue 26 **before** 0B data migration |
+| 4 | 26 | Money mutation vs audit atomicity | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | Independent review accepted. Commits `ede7ba80d0154f39db5a4f23813b7eaceae99030` (implementation), `e7ab68ddbea4106aca891455a7b094ebb5277ae3` (flush-path regression). Load `rate`/`customer_rate` PATCH + required `load_updated` audit = **one transaction**; failed required audit rolls back money, `concurrency_version`, and audit work; money audit uses exact **decimal strings**; targeted `await db.refresh(load)` replaces `expire_all()`; non-money best-effort audit unchanged. **11** targeted tests passed (`tests/test_load_money_audit_atomicity_issue26.py` + `tests/test_load_audit_events_unittest.py`). **Production deploy + verification pending** — not marked shipped live | Deploy via `reload_api.sh` + verify money PATCH/audit on running API |
 | 5 | 0B-AUDIT | Trip.status contamination audit (`active` / `open`, mirrors) | ☑ AUDIT / DESIGN COMPLETE | Issue 0B investigation completed; mapping proposal only | Owner approve migration mapping |
-| 6 | 0B-MIG | Historical Trip.status / mirror data migration | ⬜ NOT IMPLEMENTED | No approved migration run | 🚫 until 26 done + owner approves mapping |
-| 7 | 0C-AUDIT | Legacy operator surface retirement map | ☑ AUDIT / DESIGN COMPLETE | Issue 0C map delivered; `/dispatch` still reachable; TopNav still “Dispatch” | Implement retirement per map |
-| 8 | 0C-IMPL | Retire `/dispatch` as ops authority; Trip-first nav/readers | ⬜ NOT IMPLEMENTED | `DeprecatedDispatchPage.tsx` still live; board still groups by `Load.status` | Nav + board pivot + reader cutover |
+| 6 | 0B-MIG | Historical Trip.status / mirror data migration | ⬜ NOT IMPLEMENTED | No approved migration run; historical findings remain open | 🚫 until owner approves 0B mapping (Issue 26 code prerequisite met on `main`) |
+| 7 | 0C-AUDIT | Legacy operator surface retirement map | ☑ AUDIT / DESIGN COMPLETE | Issue 0C map delivered; historical findings remain open for reference | Reference only |
+| 8 | 0C-IMPL | Retire `/dispatch` as ops authority; Trip-first nav/readers | ⬜ NOT IMPLEMENTED | **On hold by owner decision.** Slice 1 (F1/F2 nav → Trip Container) shipped separately; broader 0C UI retirement not active | No further 0C implementation until owner lifts hold |
 | 9 | 0D | Legacy mirror / backfill safety (`dispatch_trips`, Load.trip_number, active_dispatch_trip_id, payroll readers) | ⬜ NOT IMPLEMENTED | Mirrors still consumed (e.g. pay_runs meta); no tenant-safe cleanup approved | Audit readers → read-only → remove only after proof |
 | 10 | I1 | New-write `Load.status` commercial boundary | ✅ DONE / SHIPPED | Covered by accepted 0A (`26621fe…` / mainline `7fbd69c…`): create=`draft`; writable PATCH statuses `draft`/`ready`; legacy ops rejected | Watch for residual holes only |
-| 11 | I3 | Mark Ready bypass / draft→ready authority | ⬜ NOT IMPLEMENTED | Still listed open after 0A; generic draft/ready PATCH authority needs product gates | Define + enforce Mark Ready contract |
+| 11 | I3 | Mark Ready bypass / draft→ready authority | ⬜ NOT IMPLEMENTED | **Proposed next backend integrity finding** for investigation (not started, not implemented). Still listed open after 0A; generic draft/ready PATCH authority needs product gates | Investigate Mark Ready bypass contract before implementation |
 | 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | ⬜ NOT IMPLEMENTED | Integrity Phase 1 item; planned membership insert does not currently require ready | Gate membership create |
 | 13 | I2 | Full stop replacement destroys stop/action/history | ⬜ NOT IMPLEMENTED | Integrity Issue 2 | Safer stop persistence |
 | 14 | I5 | Hard DELETE unsafe for commercial/history Loads | ⬜ NOT IMPLEMENTED | Integrity Issue 5 | Soft-cancel / block policy |
@@ -76,7 +77,7 @@ Status vocabulary:
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Exact next executable item (after this documentation consolidation):** **Issue 26 — money/audit atomicity**, then owner approval for **0B migration mapping**.
+**Exact next executable item:** **Issue 26 production deploy + verification** (code complete on `main`, not deployed). Then owner approval for **0B migration mapping**. **Issue 3 (Mark Ready bypass)** is the proposed next **backend integrity investigation** — do not start without explicit approval. **0C UI retirement** remains on hold by owner decision. **0B** / **0D** historical findings stay open.
 
 ---
 
@@ -1429,11 +1430,11 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 |----|---------|--------|
 | 0A | Freeze legacy writers | ✅ |
 | 0B | Trip.status contamination | ☑ audit / ⬜ migration |
-| 0C | Operator surface retirement | ☑ audit / ⬜ impl |
+| 0C | Operator surface retirement | ☑ audit / ⬜ impl (UI retirement **on hold** by owner) |
 | 0D | Mirror/backfill safety | ⬜ |
 | 1 | New-write Load.status | ✅ via 0A |
 | 2 | Stop replacement history loss | ⬜ |
-| 3 | Mark Ready bypass | ⬜ |
+| 3 | Mark Ready bypass | ⬜ proposed next backend integrity investigation (not started) |
 | 4 | Legacy Load assignment executable | ✅ via 0A |
 | 5 | Hard DELETE | ⬜ |
 | 6 | RC evidence/classification | ☑ audit (Agriculture = model quality) |
@@ -1449,11 +1450,22 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 | 16 | Decision 10 conflict guard | ⬜ |
 | 17 | Current TripLoad row selection | ⬜ |
 | 18–22 | Parser hydration / coercion / contracts / exclusion / inbox | ⬜ |
-| 26 | Commit-then-audit money failure | ⬜ **next executable after DOC-1 commit/push** |
+| 26 | Commit-then-audit money failure | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED |
+
+**Issue 26 closure record (code only — not production deployed):**
+
+1. Load `rate` / `customer_rate` PATCH and required `load_updated` audit share **one database transaction** (`app/services/loads.py` `update_load`).
+2. Failed **required** audit rolls back **money mutation**, **`concurrency_version`**, and pending audit work (`write_audit_event` with `best_effort=False` + `db.rollback()`).
+3. Money audit `changed_fields` use exact **decimal strings** (never floats).
+4. Targeted **`await db.refresh(load)`** after CAS flush replaces session-wide `expire_all()` for accurate before/after diffs.
+5. Non-money Load PATCH **best-effort** audit behavior is unchanged.
+6. **11** targeted regression tests passed (Issue 26 suite + `test_load_audit_events_unittest.py`).
+7. Accepted commits: `ede7ba80d0154f39db5a4f23813b7eaceae99030`, `e7ab68ddbea4106aca891455a7b094ebb5277ae3`.
+8. **Production deployment and live verification remain pending** — do not treat as shipped in runtime until API reload + operator verification.
 
 ### Gates
 
-- No 0B migration without owner-approved mapping + Issue 26 fix.
+- No 0B migration without owner-approved mapping (Issue 26 **code** accepted on `main`; deploy/verify before relying in production).
 - No broad Load.status board rewrite without 0C plan execution.
 - No silent money/history changes.
 - No deploy/migration from documentation alone.
