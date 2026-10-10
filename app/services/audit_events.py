@@ -147,5 +147,6 @@ async def write_audit_event(
     except Exception:
         if best_effort:
             return None
+        await db.rollback()
         raise
 
