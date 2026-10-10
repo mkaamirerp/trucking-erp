@@ -1,0 +1,102 @@
+---
+description: Mandatory incremental GitHub review on gpt-review — develop, test, push, STOP for ChatGPT before next checkpoint (all modules)
+alwaysApply: true
+---
+
+# GPT review gates (mandatory workflow)
+
+Applies to **every** TruckERP module (Auth, People, Payroll, Loads, Trips, Fuel, Tolls, Fleet, Accounting, Compliance, and future modules).
+
+**Complements** `AGENTS.md` and module-specific rules. Does **not** weaken STOP / module-boundary / tenant / migration / deploy gates elsewhere.
+
+---
+
+## Development location and branches
+
+| Item | Value |
+|------|--------|
+| **Cursor development worktree** | `/home/admin/trucking_erp-gpt-review` |
+| **Review branch** | `gpt-review` (push to `origin/gpt-review`) |
+| **Integration branch** | `main` (accepted code only after owner-approved merge) |
+
+- **Do not** use `gpt-review` for production deployment.
+- **Do not** switch, reset, or discard uncommitted work in the **primary** worktree (`/home/admin/trucking_erp`) without explicit owner instruction.
+
+---
+
+## After each logical change (mandatory)
+
+1. Run **relevant** tests for the change.
+2. **Commit** only the actual changed files (no secrets, private PDFs, credentials, env secrets, or unrelated dirty work).
+3. **Push** to `origin/gpt-review`.
+4. **Report** to the owner for ChatGPT review:
+   - Full commit SHA
+   - Changed files
+   - Exact behavior changed
+   - Tests passed / failed
+   - Known limitations
+   - Shared-module dependencies touched or at risk
+5. **STOP.** Do not start the next implementation checkpoint without **explicit owner approval**.
+
+**Passing tests ≠ review approval.**
+
+If a checkpoint is incomplete or tests fail: say so, mark **NOT READY FOR MERGE**, push a reviewable commit only when safe, then **STOP**.
+
+ChatGPT review requires **pushed source on GitHub** — a Cursor summary alone is **not** sufficient evidence.
+
+---
+
+## Layered checkpoints (new modules and substantial refactors)
+
+Use **independent, reviewable commits** per checkpoint. Do not bury mistakes under dependent layers.
+
+| Checkpoint | Review before proceeding |
+|------------|-------------------------|
+| **1 — Schema / architecture** | Tables, relationships, tenant isolation, identity/ownership, model reuse, financial precision, cross-module contracts → **STOP** before business logic |
+| **2 — Business logic** | Domain rules, calculations, validations, edge cases, failure handling → **STOP** before APIs/UI |
+| **3 — Transactions / security** | Atomicity, concurrency, authorization, audit, idempotency, rollback/recovery → **STOP** before integration |
+| **4 — API / integration** | Contracts, existing-module compatibility, dependency impact, regression tests, data ownership → **STOP** before broad UI/downstream |
+| **5 — Final independent review** | Broader tests, Work/Antigravity-style pass, remaining risks, explicit owner merge approval |
+
+Independent final review **supplements** continuous ChatGPT inspection; it does **not** replace checkpoints 1–4.
+
+**Small fixes** may use a **single** checkpoint. **Substantial** changes must be split into logical checkpoints. Avoid trivial one-line commits; avoid mega-commits that mix unrelated layers.
+
+---
+
+## Strict cross-module change rule
+
+If work requires changing another module’s established behavior or shared surfaces:
+
+- Database relationships
+- Shared schemas / models
+- Core services
+- Public APIs
+- Financial posting contracts
+- Authentication / authorization contracts
+
+**STOP before editing.** Report:
+
+1. Why the change is needed
+2. Affected modules
+3. Alternatives that preserve existing contracts
+4. Regression risks
+5. Proposed tests
+
+Wait for **explicit owner approval**. Never make a new module work by **silently** changing an existing module.
+
+---
+
+## Merge and deployment (forbidden without owner)
+
+Cursor must **never** automatically:
+
+- Merge `gpt-review` into `main`
+- Deploy review-branch code to production
+- Run production migrations or modify production data
+- Force-push branches
+- Reset or discard uncommitted work in another worktree
+
+**Merge** requires explicit owner approval. **Deployment** requires **separate** owner approval. Production verification is separate from code review and test completion.
+
+When `main`-bound deploy rules apply (e.g. `reload_api.sh`), they apply only after merge to `main` and explicit deploy authorization — not from `gpt-review` alone.
