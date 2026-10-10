@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 # That convention is convenient for early wiring but must not be treated as the
 # long-term contract: reference_code is a free-form field and will often not be a
 # load id. Future work should resolve loads/trips by explicit linkage or by
-# trip_number / other stable keys where appropriate — see docs/PAYROLL_TRIP_TRACING.md.
+# trip_number / other stable keys where appropriate — see docs/load_trip/MASTER.md.
 #
 # Unconditional behavior: reference_code (when non-empty) is always copied into
 # metadata_json for display and export; load/trip fields are best-effort add-ons.

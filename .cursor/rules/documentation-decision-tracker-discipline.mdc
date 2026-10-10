@@ -17,7 +17,7 @@ Every major feature/change follows this lifecycle:
 
 1. Discuss / decide.
 2. Save decision in markdown.
-3. Link markdown from `docs/DOCUMENTATION_MASTER_INDEX.md` if cross-cutting.
+3. Link markdown from `docs/shared/product/DOCUMENTATION_MASTER_INDEX.md` if cross-cutting.
 4. Implement in small slices.
 5. Update markdown as each slice changes status/scope.
 6. After commit, update or confirm markdown with:

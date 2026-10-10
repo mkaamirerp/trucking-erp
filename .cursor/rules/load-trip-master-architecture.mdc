@@ -1,5 +1,5 @@
 ---
-description: Read docs/LOAD_TRIP_MASTER_ARCHITECTURE.md before Load/Trip/Dispatch/custody work; master wins conflicts.
+description: Read docs/load_trip/MASTER.md before Load/Trip/Dispatch/custody work; master wins conflicts.
 alwaysApply: true
 ---
 
@@ -7,7 +7,7 @@ alwaysApply: true
 
 Before changing code, schema, APIs, UI, migrations, or docs touching **Load**, **Trip**, **TripLoad**, **Dispatch**, Trip Container, Load/Trip Workspace, driver/truck/trailer assignment, `Load.status`, `Trip.status`, trip number, `dispatch_trips`, `active_trip_id`, custody, terminal/yard, handoff, recovery/repower, operational board/planning queue, or related payroll/read-models:
 
-1. Read **`docs/LOAD_TRIP_MASTER_ARCHITECTURE.md`** first.
+1. Read **`docs/load_trip/MASTER.md`** first.
 2. If another document conflicts with that master: **STOP and report**. Do not pick the older/newer or “LOCKED” file yourself.
 3. Do not implement architecture changes until the master is owner-updated.
 

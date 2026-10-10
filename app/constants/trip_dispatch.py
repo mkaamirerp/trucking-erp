@@ -1,4 +1,4 @@
-"""Locked trip-number rules — see docs/DISPATCH_TRIP_NUMBER_RULE.md."""
+"""Locked trip-number rules — see docs/load_trip/MASTER.md."""
 
 # API error code: generic Load PATCH must not create new transitions into dispatched (Slice 1+).
 # Load.status = dispatched is legacy board/mint vocabulary. New trip execution must use explicit
@@ -36,7 +36,7 @@ TRIP_ALLOCATED_AT_LOAD_STATUS = "dispatched"
 
 # Active trip is cancelled + load read-model cleared ONLY when leaving `dispatched` for a pre-dispatch
 # pool status. Forward/lateral ops (in_transit, delivered, issue_hold, assigned, etc.) MUST NOT cancel.
-# Keep in sync with docs/DISPATCH_TRIP_NUMBER_IMPLEMENTATION_PLAN.md §4.3.
+# Keep in sync with docs/load_trip/MASTER.md §6–§7 / Appendix A.
 PRE_DISPATCH_TRIP_CANCEL_STATUSES = frozenset({"draft", "ready", "unassigned"})
 
 DISPATCH_TRIP_STATUS_ACTIVE = "active"

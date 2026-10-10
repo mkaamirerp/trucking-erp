@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Final, Mapping
 
-# Source label → fuel_bvd column (docs/FUEL_BVD_IMPLEMENTATION_1.md).
+# Source label → fuel_bvd column (docs/fuel/FUEL_BVD_IMPLEMENTATION_1.md).
 BVD_SOURCE_LABEL_TO_COLUMN: Final[dict[str, str]] = {
     "Invoice Number": "invoice_number",
     "invoice_number": "invoice_number",

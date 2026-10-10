@@ -1,6 +1,6 @@
 ---
 description: Trip page = Trip Container = Dispatch Control Center (one surface); Load workspace = directory + commercial; DeprecatedDispatchPage legacy board only.
-globs: "app/routers/trips.py,app/services/trips.py,apps/web/src/pages/TripWorkspacePage.tsx,apps/web/src/pages/DeprecatedDispatchPage.tsx,docs/000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md"
+globs: "app/routers/trips.py,app/services/trips.py,apps/web/src/pages/TripWorkspacePage.tsx,apps/web/src/pages/DeprecatedDispatchPage.tsx,docs/load_trip/MASTER.md"
 alwaysApply: true
 ---
 
@@ -33,7 +33,6 @@ alwaysApply: true
 
 ## Reference
 
-- **Canonical architecture (read first):** `docs/LOAD_TRIP_MASTER_ARCHITECTURE.md`
-- UI / product identity detail: `docs/000_TRIP_CONTAINER_IS_DISPATCH_CONTROL_CENTER.md`
+- **Sole authority:** `docs/load_trip/MASTER.md` (architecture + work order + UI identity appendix)
 
-If this rule conflicts with the master architecture file: **STOP and report**. Do not choose independently.
+If this rule conflicts with that master: **STOP and report**. Do not choose independently.

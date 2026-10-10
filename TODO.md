@@ -4,7 +4,7 @@
 
 **Status:** TODO — follow-up only; do not side-track staging rollout.
 
-**Checklist:** `docs/FUEL_BVD_STAGING_HARDENING_TODO.md`
+**Checklist:** `docs/fuel/FUEL_BVD_STAGING_HARDENING_TODO.md`
 
 Covers correction revert chains, malformed payloads, storage orphans, session-safe cleanup, Process retry after partial cleanup, TTL refresh, scheduled expiry purge, duplicate lookup efficiency, and related items.
 
@@ -14,11 +14,11 @@ Covers correction revert chains, malformed payloads, storage orphans, session-sa
 
 **Status:** TODO — future Fuel operationalization; do not pull into the current BVD source-review milestone.
 
-**Design:** `docs/FUEL_CARD_ADJUSTMENTS.md`
+**Design:** `docs/fuel/FUEL_CARD_ADJUSTMENTS.md`
 
-**Implementation checklist:** `docs/FUEL_CARD_ADJUSTMENTS_TODO.md`
+**Implementation checklist:** `docs/fuel/FUEL_CARD_ADJUSTMENTS_TODO.md`
 
-**Architecture reference:** `docs/FUEL_CARD_MODULE_DESIGN.md`
+**Architecture reference:** `docs/fuel/FUEL_CARD_MODULE_DESIGN.md`
 
 Core rule: a provider correction never overwrites the original provider transaction. TruckERP records a linked adjustment so the company can search a disputed invoice/transaction, capture the provider-authorized correction and evidence, and preserve the original → adjustment(s) → effective-cost audit chain.
 
@@ -147,6 +147,6 @@ Do not delete that backup until this TODO is resolved and committed to `main`.
 
 **Status:** TODO — design only, not implemented.
 
-**Design:** `docs/LOAD_DUPLICATE_REVISED_RC.md`
+**Design:** `docs/load_trip/MASTER.md`
 
 On a tenant-scoped broker load number or optional barcode match, pause import and show **Possible Duplicate Load** with **Revised RC** (review differences, explicitly approve changes to existing load, preserve revision/audit history) or **Ignore** (no changes). Do not auto-reject or create a duplicate. Keep the original PDF + JSON AI parsing architecture unchanged.

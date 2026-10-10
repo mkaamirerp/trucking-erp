@@ -3,7 +3,7 @@
 Revision ID: f6a7b8c9d0e1
 Revises: f5a6b7c8d9e0
 
-Created only — not applied. One table per docs/FUEL_BVD_IMPLEMENTATION_1.md.
+Created only — not applied. One table per docs/fuel/FUEL_BVD_IMPLEMENTATION_1.md.
 """
 
 from __future__ import annotations

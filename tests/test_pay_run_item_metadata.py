@@ -1,7 +1,7 @@
 """Tracing metadata on generated pay run items (reference_code + optional load trip read-model).
 
 Tests the helper only. In generate_pay_run, load resolution uses a transitional
-numeric reference_code → load id rule; see docs/PAYROLL_TRIP_TRACING.md.
+numeric reference_code → load id rule; see docs/load_trip/MASTER.md.
 """
 
 from types import SimpleNamespace

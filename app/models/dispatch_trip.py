@@ -1,4 +1,4 @@
-"""Canonical dispatch trip rows (trip_number owner). See docs/DISPATCH_TRIP_NUMBER_RULE.md."""
+"""Canonical dispatch trip rows (trip_number owner). See docs/load_trip/MASTER.md."""
 
 from __future__ import annotations
 

@@ -1,25 +1,28 @@
-# TruckERP — `docs/` overview
+# TruckERP documentation map
 
-Start here for human-readable design and engineering documentation.
+Module layout after classification move. Prefer each module folder; do not reintroduce competing Load/Trip authority files.
 
-**Master tracker:** [`DOCUMENTATION_MASTER_INDEX.md`](DOCUMENTATION_MASTER_INDEX.md) — maps major topics (email/load intake, trips, parser, platform).
+| Module | Path | Notes |
+|---|---|---|
+| Load / Trip | [`load_trip/`](./load_trip/) | Canonical: [`load_trip/MASTER.md`](./load_trip/MASTER.md) |
+| Load Parser | [`load_parser/`](./load_parser/) | contracts/, lab/ |
+| DL Parser | [`dl_parser/`](./dl_parser/) | |
+| Fuel | [`fuel/`](./fuel/) | |
+| Tolls | [`tolls/`](./tolls/) | Canonical: [`tolls/MASTER.md`](./tolls/MASTER.md) |
+| People / Driver | [`people_driver/`](./people_driver/) | onboarding/, troubleshooting/ |
+| Application / Onboarding | [`application_onboarding/`](./application_onboarding/) | |
+| Assets / Fleet | [`assets_fleet/`](./assets_fleet/) | scaffold |
+| Login / Auth | [`auth/`](./auth/) | operations/ |
+| Email Intake | [`email_intake/`](./email_intake/) | legacy_email/, operations/ |
+| Payroll / Settlements | [`payroll_settlements/`](./payroll_settlements/) | settlements/ |
+| Finance / Accounting | [`finance_accounting/`](./finance_accounting/) | scaffold |
+| Compliance | [`compliance/`](./compliance/) | |
+| CA Certificate | [`ca_certificate/`](./ca_certificate/) | scaffold |
+| Integrations | [`integrations/`](./integrations/) | vendors/ |
+| Platform | [`platform/`](./platform/) | database/, migrations/, … |
+| Shared Engineering | [`shared/engineering/`](./shared/engineering/) | |
+| Shared Product | [`shared/product/`](./shared/product/) | includes [`DOCUMENTATION_MASTER_INDEX.md`](./shared/product/DOCUMENTATION_MASTER_INDEX.md) |
+| Archive | [`archive/`](./archive/) | historical only |
+| Review Queue | [`_review/`](./_review/) | unclear / pending split |
 
----
-
-## Email intake (quick link)
-
-| Title | Path |
-|------|------|
-| **Email Intake Filtering and Load Intake Safety** | [`email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md`](email/EMAIL_INTAKE_FILTERING_AND_LOAD_INTAKE_SAFETY.md) |
-
-Cross-provider design/report for filtering email intake before Load Intake — see that file for current behavior, target A/B/C/D/E routing, signals, human review, and safety boundaries.
-
-## Load Page parser (quick link)
-
-| Title | Path |
-|------|------|
-| **Async Load Page Parse Job Design** | [`load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md`](load_parser/ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md) |
-
-Design note for async Load Page PDF parsing (job + poll) without changing `LoadDocumentParseResponse` or hydration — see the file for scope and safety boundaries.
-
-More email- and parser-related docs: [`email/README.md`](email/README.md) and **Load, email intake** in [`DOCUMENTATION_MASTER_INDEX.md`](DOCUMENTATION_MASTER_INDEX.md).
+**Fixtures still at:** [`fixtures/fuel/`](./fixtures/fuel/), [`fixtures/load_lab/`](./fixtures/load_lab/) (module-owned later). Unclassified fixture material under [`_review/fixtures/`](./_review/fixtures/).
