@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
@@ -28,6 +29,36 @@ from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreat
 from app.services.load_operational_references import sanitize_load_operational_references
 from app.utils.pagination import paginate
 
+# Commercial money fields audited on PATCH (Issue 26).
+LOAD_MONEY_AUDIT_FIELDS = frozenset({"rate", "customer_rate"})
+
+
+def _audit_encode_money_value(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, (int, float)):
+        return format(Decimal(str(value)), "f")
+    return value
+
+
+def _encode_load_money_changed_fields(changed: dict) -> dict:
+    encoded: dict = {}
+    for field, diff in changed.items():
+        if field in LOAD_MONEY_AUDIT_FIELDS and isinstance(diff, dict):
+            encoded[field] = {
+                "before": _audit_encode_money_value(diff.get("before")),
+                "after": _audit_encode_money_value(diff.get("after")),
+            }
+        else:
+            encoded[field] = diff
+    return encoded
+
+
+def _residual_includes_money_mutation(residual_changed: dict) -> bool:
+    return bool(LOAD_MONEY_AUDIT_FIELDS & residual_changed.keys())
+
 
 async def _write_load_audit(
     db: AsyncSession,
@@ -41,10 +72,12 @@ async def _write_load_audit(
     source: str,
     changed_fields: dict | None = None,
     context_json: dict | None = None,
+    best_effort: bool = True,
 ) -> None:
-    """Best-effort audit_events writer for Loads (Slice 5).
+    """Write tenant audit_events for Loads.
 
-    Never raises (load mutations must not fail due to audit).
+    Default best-effort (never raises). Issue 26 money PATCH uses best_effort=False so
+    a failed required audit rolls back with the Load mutation in the same transaction.
     """
     try:
         from app.services.audit_events import write_audit_event
@@ -68,11 +101,14 @@ async def _write_load_audit(
             correlation_id=correlation_id,
             changed_fields=changed_fields,
             context_json=ctx,
-            best_effort=True,
+            best_effort=best_effort,
         )
     except Exception:
-        # Avoid failing core load mutations; audit is additive during rollout.
-        pass
+        if best_effort:
+            # Avoid failing core load mutations; audit is additive during rollout.
+            pass
+        else:
+            raise
 
 
 async def _get_broker(db: AsyncSession, tenant_id: int, broker_id: int) -> Broker | None:
@@ -422,13 +458,13 @@ async def update_load(
             stop = LoadStop(tenant_id=tenant_id, load_id=load_id, **stop_data)
             db.add(stop)
 
-    await db.commit()
-    db.expire_all()
-    out = await get_load(db, tenant_id, load_id)
-    if out is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    # Issue 26: keep Load mutation and audit in one transaction (no commit before audit).
+    await db.flush()
+    # CAS uses synchronize_session=False; refresh this row so audit before/after sees DB values.
+    await db.refresh(load)
+    out = load
 
-    # Slice 5 audit writes (best-effort). Correlation defaults to request_id.
+    # Slice 5 audit writes. Correlation defaults to request_id.
     corr = correlation_id or request_id
     changed: dict = {}
     for k, v in data.items():
@@ -445,6 +481,10 @@ async def update_load(
     residual_changed = {k: v for k, v in changed.items() if k not in semantic_keys}
 
     if residual_changed:
+        money_audit_required = _residual_includes_money_mutation(residual_changed)
+        audit_changed = (
+            _encode_load_money_changed_fields(residual_changed) if money_audit_required else residual_changed
+        )
         await _write_load_audit(
             db,
             tenant_id=tenant_id,
@@ -454,7 +494,8 @@ async def update_load(
             request_id=request_id,
             correlation_id=corr,
             source=source,
-            changed_fields=residual_changed,
+            changed_fields=audit_changed,
+            best_effort=not money_audit_required,
         )
 
     if old_status != (out.status or "").strip().lower():
@@ -508,9 +549,9 @@ async def update_load(
             changed_fields={"customs_broker_id": {"before": old_customs_broker_id, "after": out.customs_broker_id}},
         )
 
-    # Persist audit rows (best-effort writes are additive).
     await db.commit()
-    return out
+    await db.refresh(load)
+    return load
 
 
 async def delete_load(
