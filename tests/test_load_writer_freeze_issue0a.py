@@ -35,6 +35,7 @@ from app.constants.trip_dispatch import (
     LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
     LOAD_CREATE_STATUS_MUST_BE_DRAFT,
     LOAD_STATUS_NOT_WRITABLE,
+    LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT,
     TRIP_CONTAINER_STATUS_PLANNED,
 )
 from app.core.db_url import to_async_pg_url
@@ -142,6 +143,21 @@ class TestUpdateFreezeUnit:
                 source=source,
             )
         assert _code(ei.value) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
+
+    async def test_patch_draft_to_ready_rejected(self, stored) -> None:
+        stored.status = "draft"
+        with pytest.raises(HTTPException) as ei:
+            await loads_service.update_load(
+                _UntouchableDb(), 1, 1, LoadUpdate(expected_concurrency_version=1, status="ready")
+            )
+        assert ei.value.status_code == 409
+        assert _code(ei.value) == LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT
+
+    def test_patch_explicit_ready_unchanged_passes_guard(self) -> None:
+        load = SimpleNamespace(status="ready")
+        loads_service._guard_update_payload(
+            load, LoadUpdate(expected_concurrency_version=1, status="ready")
+        )
 
     @pytest.mark.parametrize("stored_status", ["draft", "dispatched"])
     async def test_explicit_null_status_rejected_before_mutation(self, stored, stored_status: str) -> None:
