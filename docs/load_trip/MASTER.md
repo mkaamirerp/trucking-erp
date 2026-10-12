@@ -1519,3 +1519,30 @@ Deleted Load/Trip authority/detail MDs (content reconciled into this master):
 
 **Retained non-master docs (not Load/Trip architecture authority):** parser/AI design (`TruckERP_Load_Rate_Confirmation_*`, `load_parser/*`, Load Lab baselines), email intake filtering, fuel/toll/payroll module docs that are not Load/Trip lifecycle masters, general blueprint pages (must defer here for Load/Trip).
 
+
+---
+
+## Owner decision — temporary Draft workspace and irreversible commercial boundary (2026-10-12)
+
+**Status: APPROVED PRODUCT/ARCHITECTURE DIRECTION — DESIGN ONLY; NOT IMPLEMENTED. Issue 5 remains OPEN.** This section supersedes proposals to treat all saved `Load.status=draft` database rows as disposable. **Do not enforce this new design, modify Load/Trip/Payroll services, migrate schemas, or change DELETE behavior on this decision alone.** Await the in-flight Cursor Issue 5 investigation/report, reconcile it with these rules, and obtain separate implementation authorization. Existing production behavior is not represented as changed.
+
+### Temporary working Draft (pre-commercial)
+
+- Use an **authenticated, tenant-scoped server-side Draft workspace** with a distinct temporary draft identifier, not an official `loads.id`. Store structured draft JSON and the original uploaded PDF in secure temporary server/object storage, with authorization, expiry, and cleanup.
+- Operators may save/resume across devices, correct information, replace a wrong rate confirmation, or **Discard** accidental/unnecessary working drafts. Discard must clean temporary application storage and PDF references; backup/security-log retention remains subject to retention policy. No reliance on browser cookies as the primary record.
+- Temporary drafts must **never** appear as operational Loads in Trip membership, Dispatch, AR, Payroll, settlements, or official Load reports. They are not commercial history.
+- An atomic, idempotent **promotion** creates the official Load from validated draft JSON/PDF context, preventing double-click duplicates. Original evidence and required lineage must be preserved upon promotion. The exact promotion UX boundary (**Save/Create Load** versus **Mark Ready**) is **NOT YET DECIDED**; implementation must not silently choose it or bypass existing Mark Ready validations.
+
+### Official Load — never physically deleted after the commercial boundary
+
+- Once promoted to an official Load and/or ever marked **Ready**, the Load is a retained commercial record, **not hard-deletable**. Track the irreversible crossing of this boundary with durable history; changing status back to `draft` must **not** restore deletion eligibility.
+- Ready and later states retain attributable audit history and original commercial evidence. Erroneous or unwanted official Loads require a controlled **Cancel** operation with actor, timestamp, reason and audit trail, not physical deletion.
+- Cancellation must not create ordinary automatic driver pay, owner-operator compensation/commission, or settlement accruals. **Payroll eligibility must be enforced in the pay-generating service**, not merely hidden in a UI. Already posted financial records must not be erased. Legitimate cancellation-related compensation (e.g. approved TONU) is a separate, explicitly approved payable, never inferred from a cancelled status alone.
+- Maintain existing owner rules: Trip is operational assignment authority, Load is commercial truth, and shared-module relationships must not be changed without impact review and approval.
+
+### Existing database Drafts and Issue 5 transition
+
+- Current code creates permanent `loads` rows with `status=draft`; these are **not** equivalent to temporary workspace drafts. Classify existing Draft rows conservatively until a separately approved transition/migration policy exists. Do not bulk-delete them.
+- The previously approved limited hard-delete eligibility for **unused, history-free database Drafts** is a **transitional question**, not permission to delete any Load merely because `status=draft`. Reconcile it explicitly with the new official-record boundary before implementation.
+- The current unsafe physical Load DELETE requires a separately reviewed **interim guard** while the final design is built. Record its actual code/deployment status only after verification.
+- This is a **design lock only**, not an Issue 5 closure, migration, deployment, production verification, or authorization to amend Payroll/Dispatch.
