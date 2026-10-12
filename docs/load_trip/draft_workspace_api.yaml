@@ -1,0 +1,397 @@
+# TruckERP — Load workspace draft API (design sketch)
+# Status: DESIGN ONLY — not registered in app/main.py
+# Authority: docs/load_trip/DRAFT_WORKSPACE_SPEC.md
+openapi: 3.0.3
+info:
+  title: TruckERP Load Workspace Drafts
+  version: 0.1.0-design
+  description: |
+    Tenant-scoped temporary drafts before commercial Load promotion.
+    Official loads are created only via promote (status=ready).
+servers:
+  - url: /api/v1
+tags:
+  - name: load-workspace-drafts
+    description: Temporary workspace drafts (not loads)
+
+paths:
+  /load-workspace-drafts:
+    get:
+      tags: [load-workspace-drafts]
+      summary: List workspace drafts
+      operationId: listLoadWorkspaceDrafts
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, promoting, promoted, discarded, expired]
+          description: Default active list uses draft only.
+        - name: mine
+          in: query
+          schema:
+            type: boolean
+          description: Filter to drafts created by current user.
+        - name: email_thread_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated drafts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftListResponse'
+    post:
+      tags: [load-workspace-drafts]
+      summary: Create workspace draft
+      operationId: createLoadWorkspaceDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /load-workspace-drafts/{draft_id}:
+    get:
+      tags: [load-workspace-drafts]
+      summary: Retrieve draft (resume)
+      operationId: getLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200':
+          description: Draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [load-workspace-drafts]
+      summary: Save / update draft fields
+      operationId: updateLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '409':
+          $ref: '#/components/responses/VersionConflict'
+
+  /load-workspace-drafts/{draft_id}/pdf:
+    put:
+      tags: [load-workspace-drafts]
+      summary: Replace rate-confirmation PDF
+      operationId: replaceLoadWorkspaceDraftPdf
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: PDF stored on draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '409':
+          description: Draft not editable (promoting or terminal)
+
+  /load-workspace-drafts/{draft_id}/discard:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Discard workspace draft
+      operationId: discardLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expected_concurrency_version:
+                  type: integer
+                  minimum: 1
+                reason:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '204':
+          description: Discarded
+        '409':
+          description: Not in draft state
+
+  /load-workspace-drafts/{draft_id}/promote:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Promote to official Load (ready)
+      operationId: promoteLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftPromoteRequest'
+      responses:
+        '200':
+          description: Promoted (or idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftPromoteResponse'
+        '400':
+          description: Mark-ready validation failed
+        '409':
+          description: Conflict (CAS, promoting, duplicate in flight)
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    DraftId:
+      name: draft_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Size:
+      name: size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDetail'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDetail'
+    VersionConflict:
+      description: Optimistic concurrency conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/VersionConflictDetail'
+
+  schemas:
+    ErrorDetail:
+      type: object
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                code:
+                  type: string
+                message:
+                  type: string
+
+    VersionConflictDetail:
+      type: object
+      properties:
+        detail:
+          type: object
+          properties:
+            code:
+              type: string
+              example: LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT
+            client_version:
+              type: integer
+            server_version:
+              type: integer
+            server_snapshot:
+              $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+
+    LoadWorkspaceDraftCreate:
+      type: object
+      properties:
+        source_channel:
+          type: string
+          enum: [manual, email_intake]
+          default: manual
+        email_thread_id:
+          type: integer
+          nullable: true
+        draft_json:
+          type: object
+          additionalProperties: true
+          description: Partial workspace fields; schema version from server default.
+
+    LoadWorkspaceDraftUpdate:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        draft_json:
+          type: object
+          additionalProperties: true
+          description: Merged per product rules (full replace vs patch documented in spec).
+
+    LoadWorkspaceDraftPromoteRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        load_number:
+          type: string
+          maxLength: 50
+          nullable: true
+          description: Optional override; else server allocates.
+
+    LoadWorkspaceDraftResponse:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - status
+        - concurrency_version
+        - draft_schema_version
+        - draft_json
+        - expires_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: integer
+        status:
+          type: string
+          enum: [draft, promoting, promoted, discarded, expired]
+        concurrency_version:
+          type: integer
+        draft_schema_version:
+          type: integer
+        draft_json:
+          type: object
+          additionalProperties: true
+        source_channel:
+          type: string
+        email_thread_id:
+          type: integer
+          nullable: true
+        pdf_sha256:
+          type: string
+          nullable: true
+        pdf_filename:
+          type: string
+          nullable: true
+        has_pdf:
+          type: boolean
+        accepted_parse_json:
+          type: object
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+        promoted_load_id:
+          type: integer
+          nullable: true
+        promoted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LoadWorkspaceDraftListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    LoadWorkspaceDraftPromoteResponse:
+      type: object
+      required: [load, evidence_id, workspace_draft_id]
+      properties:
+        workspace_draft_id:
+          type: string
+          format: uuid
+        load:
+          type: object
+          description: Same shape as LoadResponse (official load, status=ready).
+          additionalProperties: true
+        evidence_id:
+          type: integer
+          description: load_commercial_evidence.id
