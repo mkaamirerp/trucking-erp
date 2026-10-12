@@ -24,6 +24,7 @@ from tests.support.integration_isolation import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DW1_REVISION = "dw1f2a3b4c5d6"
 DW1B_REVISION = "dw1b_tenant_scope_dw1_foreign_keys"
+DW1C_REVISION = "dw1c_composite_fk_set_null_optional_columns"
 MERGE_REVISION = "dw0_merge_tenant_heads_a1b2_x5"
 
 
@@ -323,12 +324,122 @@ def test_tenant_isolation_promoted_load_fk(tenant_engine) -> None:
         conn.execute(text("DELETE FROM load_workspace_drafts WHERE id = :id"), {"id": draft_id})
 
 
+def test_delete_email_thread_nulls_draft_email_thread_id_only(tenant_engine) -> None:
+    draft_id = uuid.uuid4()
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    thread_id = 0
+    tenant_id = 0
+    with tenant_engine.begin() as conn:
+        tenant_id = _resolve_tenant_id(conn)
+        thread_id = conn.execute(
+            text(
+                """
+                INSERT INTO email_threads (tenant_id, provider, external_thread_id)
+                VALUES (:tenant_id, 'test_dw1', :external_thread_id)
+                RETURNING id
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "external_thread_id": f"dw1-thread-{uuid.uuid4().hex}",
+            },
+        ).scalar_one()
+        conn.execute(
+            text(
+                """
+                INSERT INTO load_workspace_drafts (
+                    id, tenant_id, status, source_channel, expires_at, email_thread_id
+                ) VALUES (
+                    :id, :tenant_id, 'draft', 'manual', :expires_at, :email_thread_id
+                )
+                """
+            ),
+            {
+                "id": draft_id,
+                "tenant_id": tenant_id,
+                "expires_at": expires,
+                "email_thread_id": thread_id,
+            },
+        )
+    with tenant_engine.begin() as conn:
+        conn.execute(text("DELETE FROM email_threads WHERE id = :id"), {"id": thread_id})
+    with tenant_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT tenant_id, email_thread_id FROM load_workspace_drafts WHERE id = :id"
+            ),
+            {"id": draft_id},
+        ).one()
+        assert row.tenant_id == tenant_id
+        assert row.email_thread_id is None
+    with tenant_engine.begin() as conn:
+        conn.execute(text("DELETE FROM load_workspace_drafts WHERE id = :id"), {"id": draft_id})
+
+
+def test_delete_workspace_draft_nulls_thread_workspace_draft_id_only(tenant_engine) -> None:
+    draft_id = uuid.uuid4()
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    thread_id = 0
+    tenant_id = 0
+    with tenant_engine.begin() as conn:
+        tenant_id = _resolve_tenant_id(conn)
+        conn.execute(
+            text(
+                """
+                INSERT INTO load_workspace_drafts (
+                    id, tenant_id, status, source_channel, expires_at
+                ) VALUES (:id, :tenant_id, 'draft', 'manual', :expires_at)
+                """
+            ),
+            {"id": draft_id, "tenant_id": tenant_id, "expires_at": expires},
+        )
+        thread_id = conn.execute(
+            text(
+                """
+                INSERT INTO email_threads (
+                    tenant_id, provider, external_thread_id, workspace_draft_id
+                ) VALUES (:tenant_id, 'test_dw1', :external_thread_id, :workspace_draft_id)
+                RETURNING id
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "external_thread_id": f"dw1-thread-{uuid.uuid4().hex}",
+                "workspace_draft_id": draft_id,
+            },
+        ).scalar_one()
+    with tenant_engine.begin() as conn:
+        conn.execute(
+            text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+            {"id": draft_id},
+        )
+    with tenant_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT tenant_id, workspace_draft_id FROM email_threads WHERE id = :id"
+            ),
+            {"id": thread_id},
+        ).one()
+        assert row.tenant_id == tenant_id
+        assert row.workspace_draft_id is None
+    with tenant_engine.begin() as conn:
+        conn.execute(text("DELETE FROM email_threads WHERE id = :id"), {"id": thread_id})
+
+
+def test_dw1c_downgrade_upgrade_preserves_column_specific_set_null(tenant_engine) -> None:
+    try:
+        _run_alembic("downgrade", DW1B_REVISION)
+        _run_alembic("upgrade", DW1C_REVISION)
+    finally:
+        _run_alembic("upgrade", "head")
+
+
 def test_downgrade_upgrade_dw1_on_isolated_revision(tenant_engine) -> None:
     try:
         _run_alembic("downgrade", MERGE_REVISION)
         insp = inspect(tenant_engine)
         assert not insp.has_table("load_workspace_drafts")
-        _run_alembic("upgrade", DW1B_REVISION)
+        _run_alembic("upgrade", DW1C_REVISION)
     finally:
         _run_alembic("upgrade", "head")
 
@@ -343,7 +454,7 @@ def test_alembic_single_head() -> None:
     assert proc.returncode == 0, proc.stderr
     lines = [ln for ln in proc.stdout.strip().splitlines() if ln.strip()]
     assert len(lines) == 1
-    assert DW1B_REVISION in lines[0]
+    assert DW1C_REVISION in lines[0]
 
 
 def test_integration_db_guard_rejects_demo() -> None:
