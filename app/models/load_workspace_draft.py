@@ -54,6 +54,12 @@ class LoadWorkspaceDraft(Base):
             name="fk_load_workspace_drafts_promoted_load_tenant",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "email_thread_id"],
+            ["email_threads.tenant_id", "email_threads.id"],
+            name="fk_load_workspace_drafts_email_thread_tenant",
+            ondelete="SET NULL",
+        ),
         CheckConstraint(
             "status in ('draft', 'promoted', 'discarded', 'expired')",
             name="ck_load_workspace_drafts_status",
@@ -97,9 +103,7 @@ class LoadWorkspaceDraft(Base):
     source_channel: Mapped[str] = mapped_column(String(32), nullable=False)
     created_by_platform_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by_platform_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    email_thread_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("email_threads.id", ondelete="SET NULL"), nullable=True
-    )
+    email_thread_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pdf_storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     pdf_retention_class: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="workspace_ttl"
