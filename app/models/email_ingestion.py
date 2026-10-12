@@ -35,6 +35,7 @@ class EmailThread(Base):
             "external_thread_id",
             name="uq_email_threads_tenant_provider_external_thread_id",
         ),
+        # DB (PG15): ON DELETE SET NULL (workspace_draft_id) — see dw1c migration.
         ForeignKeyConstraint(
             ["tenant_id", "workspace_draft_id"],
             ["load_workspace_drafts.tenant_id", "load_workspace_drafts.id"],
