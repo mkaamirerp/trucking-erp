@@ -32,6 +32,8 @@ from app.models.payee import (
 from app.models.broker import Broker, BrokerAlias, BrokerContact, BrokerDomain, BrokerKnownSender
 from app.models.customs_broker import CustomsBroker, CustomsBrokerContact, LoadCustomsSnapshot
 from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
+from app.models.load_workspace_draft import LoadWorkspaceDraft
+from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_custody_event import LoadCustodyEvent
 from app.models.terminal import Terminal
 from app.models.load_lab import LoadLabExtractionRun, LoadLabPromoteAudit

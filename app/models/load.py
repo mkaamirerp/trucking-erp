@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, Numeric, String, Text, UniqueConstraint, BigInteger, func, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -30,6 +31,11 @@ class Load(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    promotion_origin_workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("load_workspace_drafts.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     #: Row-level optimistic concurrency; incremented on every successful CAS update to loads.
     #: DB has no server default (migration clears it); ORM must set on INSERT.
     concurrency_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
