@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func, text
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,12 @@ class EmailIntakeQrExtraction(Base):
 
     __tablename__ = "email_intake_qr_extractions"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "workspace_draft_id"],
+            ["load_workspace_drafts.tenant_id", "load_workspace_drafts.id"],
+            name="fk_email_intake_qr_extractions_workspace_draft_tenant",
+            ondelete="SET NULL",
+        ),
         Index("ix_email_intake_qr_extractions_tenant_id", "tenant_id"),
         Index("ix_email_intake_qr_extractions_thread_id", "thread_id"),
         Index("ix_email_intake_qr_extractions_message_id", "message_id"),
@@ -85,11 +91,7 @@ class EmailIntakeQrExtraction(Base):
     linked_broker_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("brokers.id", ondelete="SET NULL"), nullable=True)
     #: Filled when a load is created or linked; may be set in a later intake step.
     linked_load_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("loads.id", ondelete="SET NULL"), nullable=True)
-    workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("load_workspace_drafts.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

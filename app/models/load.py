@@ -27,13 +27,18 @@ class Load(Base):
             "jsonb_typeof(operational_references) = 'array'",
             name="ck_loads_operational_references_is_array",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "promotion_origin_workspace_draft_id"],
+            ["load_workspace_drafts.tenant_id", "load_workspace_drafts.id"],
+            name="fk_loads_promotion_origin_workspace_draft_tenant",
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     promotion_origin_workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("load_workspace_drafts.id", ondelete="RESTRICT"),
         nullable=True,
     )
     #: Row-level optimistic concurrency; incremented on every successful CAS update to loads.

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
@@ -27,11 +28,18 @@ from app.models.base import Base
 class EmailThread(Base):
     __tablename__ = "email_threads"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_email_threads_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
             "provider",
             "external_thread_id",
             name="uq_email_threads_tenant_provider_external_thread_id",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "workspace_draft_id"],
+            ["load_workspace_drafts.tenant_id", "load_workspace_drafts.id"],
+            name="fk_email_threads_workspace_draft_tenant",
+            ondelete="SET NULL",
         ),
         Index("ix_email_threads_tenant_id", "tenant_id"),
     )
@@ -47,11 +55,7 @@ class EmailThread(Base):
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     linked_load_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("loads.id", ondelete="SET NULL"), nullable=True)
-    workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("load_workspace_drafts.id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     intake_bucket: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="needs_review", default="needs_review"
     )
