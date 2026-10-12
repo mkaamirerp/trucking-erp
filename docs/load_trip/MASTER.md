@@ -58,7 +58,7 @@ Status vocabulary:
 | 8 | 0C-IMPL | Retire `/dispatch` as ops authority; Trip-first nav/readers | ⬜ NOT IMPLEMENTED | **On hold by owner decision.** Slice 1 (F1/F2 nav → Trip Container) shipped separately; broader 0C UI retirement not active | No further 0C implementation until owner lifts hold |
 | 9 | 0D | Legacy mirror / backfill safety (`dispatch_trips`, Load.trip_number, active_dispatch_trip_id, payroll readers) | ⬜ NOT IMPLEMENTED | Mirrors still consumed (e.g. pay_runs meta); no tenant-safe cleanup approved | Audit readers → read-only → remove only after proof |
 | 10 | I1 | New-write `Load.status` commercial boundary | ✅ DONE / SHIPPED | Covered by accepted 0A (`26621fe…` / mainline `7fbd69c…`): create=`draft`; writable PATCH statuses `draft`/`ready`; legacy ops rejected | Watch for residual holes only |
-| 11 | I3 | Mark Ready bypass / draft→ready authority | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT MERGED / NOT DEPLOYED | Independent review accepted on `gpt-review`. Commits `d7912962dcb8465d1853a40799b65cb8757e58af` (guard: `_guard_update_payload` rejects generic PATCH into `ready`; `LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT`), `851a7c7282b7297caeef3e08f93836606f87cb14` (HTTP regression + `tenant_pytest` isolation/cleanup). **Dedicated `mark_load_ready()` / POST mark-ready remains sole authority** for draft→ready (validation + CAS unchanged). **Commercial PATCH with `status` omitted** unchanged. **Ready→draft via PATCH** unchanged in this slice. **7** HTTP tests + Issue 0A unit gates passed on isolated DB. **Merge to `main`, production deploy, and live verification pending** | Owner merge `gpt-review` → `main`; then deploy + verify PATCH rejection on running API |
+| 11 | I3 | Mark Ready bypass / draft→ready authority | ✅ CODE COMPLETE / REVIEW ACCEPTED — MERGED TO MAIN / NOT DEPLOYED | Independent review accepted on `gpt-review`; integrated to `main` via cherry-pick (`6c7c4155b744063f3a7400fa02ae4880821791c9` HEAD). **Review commits:** `d7912962dcb8465d1853a40799b65cb8757e58af` (guard: `_guard_update_payload` rejects generic PATCH into `ready`; `LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT`), `851a7c7282b7297caeef3e08f93836606f87cb14` (HTTP regression + `tenant_pytest` isolation/cleanup), `b67455881671598a99437eb35c3637d3e90e794f` (fixture + MASTER). **`main` integration commits:** `f5bbf5d`, `05c9d50`, `6c7c415`. **Dedicated `mark_load_ready()` / POST mark-ready remains sole authority** for draft→ready (validation + CAS unchanged). **Commercial PATCH with `status` omitted** unchanged. **Ready→draft via PATCH** unchanged in this slice. **7** HTTP tests + Issue 0A unit gates passed on isolated DB. **Production deploy and live verification pending** | Deploy via `reload_api.sh` + verify PATCH rejection on running API |
 | 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | ⬜ NOT IMPLEMENTED | Integrity Phase 1 item; planned membership insert does not currently require ready | Gate membership create |
 | 13 | I2 | Full stop replacement destroys stop/action/history | ⬜ NOT IMPLEMENTED | Integrity Issue 2 | Safer stop persistence |
 | 14 | I5 | Hard DELETE unsafe for commercial/history Loads | ⬜ NOT IMPLEMENTED | Integrity Issue 5 | Soft-cancel / block policy |
@@ -77,7 +77,7 @@ Status vocabulary:
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Exact next executable item:** **Issue 26 production deploy + verification** (code complete on `main`, not deployed). **Issue 3** code accepted on `gpt-review` — **merge + deploy + verification pending** (not on `main` yet). Then owner approval for **0B migration mapping**. **0C UI retirement** remains on hold by owner decision. **0B** / **0D** historical findings stay open.
+**Exact next executable item:** **Issue 26 production deploy + verification** (code complete on `main`, not deployed). **Issue 3 production deploy + verification** (merged to `main` at `6c7c415…`, not deployed). Then owner approval for **0B migration mapping**. **0C UI retirement** remains on hold by owner decision. **0B** / **0D** historical findings stay open.
 
 ---
 
@@ -101,7 +101,7 @@ These are **separate but reconcilable** truths.
 ## 2. Load ownership
 
 
-**Implementation state:** ✅ new-write commercial statuses enforced (0A). Legacy ops statuses readable. ✅ I3 Mark Ready gate (code on `gpt-review`, not merged/deployed); ⬜ I10 board unknown bucket.
+**Implementation state:** ✅ new-write commercial statuses enforced (0A). Legacy ops statuses readable. ✅ I3 Mark Ready gate (on `main`, not deployed); ⬜ I10 board unknown bucket.
 ### Load owns
 
 - broker / customer relationship
@@ -1434,7 +1434,7 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 | 0D | Mirror/backfill safety | ⬜ |
 | 1 | New-write Load.status | ✅ via 0A |
 | 2 | Stop replacement history loss | ⬜ |
-| 3 | Mark Ready bypass | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT MERGED / NOT DEPLOYED (`gpt-review`) |
+| 3 | Mark Ready bypass | ✅ CODE COMPLETE / REVIEW ACCEPTED — MERGED TO MAIN / NOT DEPLOYED |
 | 4 | Legacy Load assignment executable | ✅ via 0A |
 | 5 | Hard DELETE | ⬜ |
 | 6 | RC evidence/classification | ☑ audit (Agriculture = model quality) |
@@ -1452,14 +1452,16 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 | 18–22 | Parser hydration / coercion / contracts / exclusion / inbox | ⬜ |
 | 26 | Commit-then-audit money failure | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED |
 
-**Issue 3 closure record (code only — not merged / not production deployed):**
+**Issue 3 closure record (code on `main` — not production deployed):**
 
 1. Generic Load **PATCH cannot transition into `ready`**; `_guard_update_payload` returns **409** with `LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT` directing callers to **POST `/api/v1/loads/{load_id}/mark-ready`** (`app/services/loads.py`).
 2. **Dedicated `mark_load_ready()`** remains the **sole authority** for draft→ready (broker, reference, pickup/delivery stops, CAS on `concurrency_version` + `status == draft` — unchanged).
 3. **Commercial PATCH** with **`status` omitted** remains available; explicit **`status=ready` when already `ready`** is not treated as a transition.
 4. **Ready→draft** PATCH policy is **unchanged** in this slice.
-5. Accepted commits: `d7912962dcb8465d1853a40799b65cb8757e58af`, `851a7c7282b7297caeef3e08f93836606f87cb14`.
-6. **Merge to `main`, production deployment, and live verification remain pending** — do not treat as shipped in runtime until owner merge + API reload + operator verification.
+5. **Review commits (gpt-review):** `d7912962dcb8465d1853a40799b65cb8757e58af`, `851a7c7282b7297caeef3e08f93836606f87cb14`, `b67455881671598a99437eb35c3637d3e90e794f`.
+6. **`main` integration commits (cherry-pick):** `f5bbf5d`, `05c9d50`, `6c7c415` — integration HEAD `6c7c4155b744063f3a7400fa02ae4880821791c9`.
+7. **7** HTTP regression tests + Issue **0A** unit gates passed on isolated `tenant_pytest` (`tests/test_load_mark_ready_gate_issue3.py`, `tests/test_load_writer_freeze_issue0a.py`).
+8. **Production deployment and live verification remain pending** — do not treat as shipped in runtime until API reload + operator verification.
 
 **Issue 26 closure record (code only — not production deployed):**
 
