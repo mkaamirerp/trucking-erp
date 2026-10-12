@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import uuid
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -40,11 +39,6 @@ _VALID_STOPS = [
     {"stop_type": "DROP", "sequence": 1, "city": "Dallas", "state_or_province": "TX"},
 ]
 
-# Populated after host URL patch (for review evidence).
-ISSUE5_LAST_DB_PATCH: dict[str, str] = {}
-_HOST_DB_URLS_PATCHED = False
-
-
 def _detail_code(payload: dict) -> str | None:
     d = payload.get("detail")
     return d.get("code") if isinstance(d, dict) else None
@@ -60,76 +54,6 @@ def _integration_db_configured() -> bool:
 
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 SKIP_ISSUE5_HTTP = _PLACEHOLDER_PLATFORM_DB or not _integration_db_configured()
-
-
-def _docker_postgres_ip() -> str:
-    pg_ip = (os.environ.get("TRUCKERP_POSTGRES_IP") or "").strip()
-    if pg_ip:
-        return pg_ip
-    try:
-        return subprocess.check_output(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
-                "truckerp-postgres",
-            ],
-            text=True,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return ""
-
-
-def _platform_database_url_sync() -> str:
-    """Resolve platform DB URL on the host (map docker service name to container IP when needed)."""
-    raw = (os.environ.get("DATABASE_URL") or "").replace("postgresql+asyncpg", "postgresql")
-    if not raw:
-        return raw
-    pg_ip = _docker_postgres_ip()
-    if pg_ip and "truckerp-postgres" in raw:
-        return raw.replace("truckerp-postgres", pg_ip)
-    return raw
-
-
-def _patch_runtime_database_urls_for_host_pytest() -> None:
-    """Point Settings + env at docker postgres IP when tests run outside the compose network."""
-    global _HOST_DB_URLS_PATCHED
-    if _HOST_DB_URLS_PATCHED:
-        return
-    pg_ip = _docker_postgres_ip()
-    if not pg_ip:
-        return
-    from app.core import config
-    from app.deps import tenant_db as tenant_db_deps
-
-    for key in ("DATABASE_URL", "TENANT_DATABASE_URL", "ALEMBIC_TENANT_DATABASE_URL", "POSTGRES_ADMIN_URL"):
-        raw = os.environ.get(key) or ""
-        if not raw or "truckerp-postgres" not in raw:
-            continue
-        os.environ[key] = raw.replace("truckerp-postgres", pg_ip)
-
-    for attr in ("database_url", "postgres_admin_url"):
-        val = getattr(config.settings, attr, None)
-        if val and "truckerp-postgres" in str(val):
-            patched = str(val).replace("truckerp-postgres", pg_ip)
-            setattr(config.settings, attr, patched)
-
-    plat = _platform_database_url_sync()
-    if plat:
-        async_plat = plat.replace("postgresql://", "postgresql+asyncpg://", 1)
-        os.environ["DATABASE_URL"] = async_plat
-        config.settings.database_url = async_plat
-
-    tenant_db_deps._ENGINE_CACHE.clear()
-    _HOST_DB_URLS_PATCHED = True
-    ISSUE5_LAST_DB_PATCH.update(
-        {
-            "postgres_ip": pg_ip,
-            "database_url_host": (config.settings.database_url or "").split("@")[-1].split("/")[0],
-            "tenant_database_url_host": (os.environ.get("TENANT_DATABASE_URL") or "").split("@")[-1].split("/")[0],
-        }
-    )
 
 
 async def _cleanup_trip_rows(db: AsyncSession, tenant_id: int, trip_id: int) -> None:
@@ -178,6 +102,14 @@ async def _cleanup_load_rows(db: AsyncSession, tenant_id: int, load_id: int) -> 
     await db.commit()
 
 
+async def _assert_load_absent(db: AsyncSession, tenant_id: int, load_id: int) -> None:
+    n = await db.scalar(
+        text("select count(*) from loads where tenant_id=:t and id=:i"),
+        {"t": tenant_id, "i": load_id},
+    )
+    assert int(n or 0) == 0, f"loads row still present after cleanup (tenant_id={tenant_id}, id={load_id})"
+
+
 @pytest.fixture
 def test_bypass_env():
     old = os.environ.get("TEST_BYPASS_AUTH")
@@ -217,7 +149,6 @@ def issue5_integration_gate():
 
 @pytest.fixture
 async def issue5_http(client, override_auth_tenant, issue5_integration_gate):
-    _patch_runtime_database_urls_for_host_pytest()
     gate = issue5_integration_gate
     tenant_id = await platform_tenant_id_for_slug()
     await assert_mutating_integration_allowed(
@@ -261,20 +192,21 @@ async def issue5_http(client, override_auth_tenant, issue5_integration_gate):
     try:
         yield ctx
     finally:
-        if not created_load_ids and not created_trip_ids:
-            return
-        engine = create_async_engine(to_async_pg_url(gate["tenant_database_url"]), pool_pre_ping=True)
-        Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        try:
-            async with Session() as db:
-                for trip_id in reversed(created_trip_ids):
-                    await _cleanup_trip_rows(db, tenant_id, trip_id)
-                for load_id in reversed(created_load_ids):
-                    await _cleanup_load_rows(db, tenant_id, load_id)
-                for trip_id in created_trip_ids:
-                    await _assert_trip_absent(db, tenant_id, trip_id)
-        finally:
-            await engine.dispose()
+        if created_load_ids or created_trip_ids:
+            engine = create_async_engine(to_async_pg_url(gate["tenant_database_url"]), pool_pre_ping=True)
+            Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+            try:
+                async with Session() as db:
+                    for trip_id in reversed(created_trip_ids):
+                        await _cleanup_trip_rows(db, tenant_id, trip_id)
+                    for load_id in reversed(created_load_ids):
+                        await _cleanup_load_rows(db, tenant_id, load_id)
+                    for trip_id in created_trip_ids:
+                        await _assert_trip_absent(db, tenant_id, trip_id)
+                    for load_id in created_load_ids:
+                        await _assert_load_absent(db, tenant_id, load_id)
+            finally:
+                await engine.dispose()
 
 
 async def _delete(client: AsyncClient, load_id: int, cv: int = 1):
@@ -371,7 +303,6 @@ class TestLoadPhysicalDeleteGuardIssue5:
             await engine.dispose()
 
     async def test_unauthenticated_delete_rejected(self, client) -> None:
-        _patch_runtime_database_urls_for_host_pytest()
         install_host_aligned_current_user_and_tenant(app)
         old = os.environ.pop("TEST_BYPASS_AUTH", None)
         try:
@@ -389,7 +320,3 @@ class TestLoadPhysicalDeleteGuardIssue5:
 
 def test_guard_constant_exported() -> None:
     assert LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED == "LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED"
-
-
-if not SKIP_ISSUE5_HTTP:
-    _patch_runtime_database_urls_for_host_pytest()
