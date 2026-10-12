@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import (
@@ -17,6 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -45,6 +47,11 @@ class EmailThread(Base):
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     linked_load_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("loads.id", ondelete="SET NULL"), nullable=True)
+    workspace_draft_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("load_workspace_drafts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     intake_bucket: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="needs_review", default="needs_review"
     )
