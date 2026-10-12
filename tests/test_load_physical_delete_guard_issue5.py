@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import uuid
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -19,12 +21,11 @@ if not os.environ.get("DATABASE_URL"):
 from app.core.db_url import to_async_pg_url
 from app.core.integration_db_guard import IntegrationIsolationError, integration_tenant_db_name
 from app.main import app
-from fastapi import HTTPException
-
 from app.services.loads import LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED, delete_load
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
+    install_mutable_tenant_current_user_and_tenant,
 )
 from tests.support.integration_isolation import (
     AUTH_HEADERS,
@@ -38,6 +39,10 @@ _VALID_STOPS = [
     {"stop_type": "PICKUP", "sequence": 0, "city": "Austin", "state_or_province": "TX"},
     {"stop_type": "DROP", "sequence": 1, "city": "Dallas", "state_or_province": "TX"},
 ]
+
+# Populated after host URL patch (for review evidence).
+ISSUE5_LAST_DB_PATCH: dict[str, str] = {}
+_HOST_DB_URLS_PATCHED = False
 
 
 def _detail_code(payload: dict) -> str | None:
@@ -55,6 +60,101 @@ def _integration_db_configured() -> bool:
 
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 SKIP_ISSUE5_HTTP = _PLACEHOLDER_PLATFORM_DB or not _integration_db_configured()
+
+
+def _docker_postgres_ip() -> str:
+    pg_ip = (os.environ.get("TRUCKERP_POSTGRES_IP") or "").strip()
+    if pg_ip:
+        return pg_ip
+    try:
+        return subprocess.check_output(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                "truckerp-postgres",
+            ],
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def _platform_database_url_sync() -> str:
+    """Resolve platform DB URL on the host (map docker service name to container IP when needed)."""
+    raw = (os.environ.get("DATABASE_URL") or "").replace("postgresql+asyncpg", "postgresql")
+    if not raw:
+        return raw
+    pg_ip = _docker_postgres_ip()
+    if pg_ip and "truckerp-postgres" in raw:
+        return raw.replace("truckerp-postgres", pg_ip)
+    return raw
+
+
+def _patch_runtime_database_urls_for_host_pytest() -> None:
+    """Point Settings + env at docker postgres IP when tests run outside the compose network."""
+    global _HOST_DB_URLS_PATCHED
+    if _HOST_DB_URLS_PATCHED:
+        return
+    pg_ip = _docker_postgres_ip()
+    if not pg_ip:
+        return
+    from app.core import config
+    from app.deps import tenant_db as tenant_db_deps
+
+    for key in ("DATABASE_URL", "TENANT_DATABASE_URL", "ALEMBIC_TENANT_DATABASE_URL", "POSTGRES_ADMIN_URL"):
+        raw = os.environ.get(key) or ""
+        if not raw or "truckerp-postgres" not in raw:
+            continue
+        os.environ[key] = raw.replace("truckerp-postgres", pg_ip)
+
+    for attr in ("database_url", "postgres_admin_url"):
+        val = getattr(config.settings, attr, None)
+        if val and "truckerp-postgres" in str(val):
+            patched = str(val).replace("truckerp-postgres", pg_ip)
+            setattr(config.settings, attr, patched)
+
+    plat = _platform_database_url_sync()
+    if plat:
+        async_plat = plat.replace("postgresql://", "postgresql+asyncpg://", 1)
+        os.environ["DATABASE_URL"] = async_plat
+        config.settings.database_url = async_plat
+
+    tenant_db_deps._ENGINE_CACHE.clear()
+    _HOST_DB_URLS_PATCHED = True
+    ISSUE5_LAST_DB_PATCH.update(
+        {
+            "postgres_ip": pg_ip,
+            "database_url_host": (config.settings.database_url or "").split("@")[-1].split("/")[0],
+            "tenant_database_url_host": (os.environ.get("TENANT_DATABASE_URL") or "").split("@")[-1].split("/")[0],
+        }
+    )
+
+
+async def _cleanup_trip_rows(db: AsyncSession, tenant_id: int, trip_id: int) -> None:
+    await assert_mutating_integration_allowed(tenant_id=tenant_id, context="issue5_cleanup_trip")
+    await db.execute(
+        text("delete from trip_loads where tenant_id=:t and trip_id=:i"),
+        {"t": tenant_id, "i": trip_id},
+    )
+    await db.execute(
+        text("delete from trips where tenant_id=:t and id=:i"),
+        {"t": tenant_id, "i": trip_id},
+    )
+
+
+async def _assert_trip_absent(db: AsyncSession, tenant_id: int, trip_id: int) -> None:
+    n = await db.scalar(
+        text("select count(*) from trips where tenant_id=:t and id=:i"),
+        {"t": tenant_id, "i": trip_id},
+    )
+    assert int(n or 0) == 0, f"trip row still present after cleanup (tenant_id={tenant_id}, id={trip_id})"
+    m = await db.scalar(
+        text("select count(*) from trip_loads where tenant_id=:t and trip_id=:i"),
+        {"t": tenant_id, "i": trip_id},
+    )
+    assert int(m or 0) == 0, f"trip_loads still present after cleanup (trip_id={trip_id})"
 
 
 async def _cleanup_load_rows(db: AsyncSession, tenant_id: int, load_id: int) -> None:
@@ -117,14 +217,17 @@ def issue5_integration_gate():
 
 @pytest.fixture
 async def issue5_http(client, override_auth_tenant, issue5_integration_gate):
+    _patch_runtime_database_urls_for_host_pytest()
+    gate = issue5_integration_gate
     tenant_id = await platform_tenant_id_for_slug()
     await assert_mutating_integration_allowed(
         tenant_id=tenant_id,
         host=AUTH_HEADERS["host"],
         context="issue5_delete_guard",
     )
-    gate = issue5_integration_gate
+
     created_load_ids: list[int] = []
+    created_trip_ids: list[int] = []
 
     async def new_draft(**extra) -> dict:
         r = await client.post(
@@ -137,19 +240,41 @@ async def issue5_http(client, override_auth_tenant, issue5_integration_gate):
         created_load_ids.append(int(body["id"]))
         return body
 
-    ctx = SimpleNamespace(client=client, new_draft=new_draft, tenant_id=tenant_id)
+    async def new_planned_trip(load_ids: list[int]) -> dict:
+        r = await client.post(
+            "/api/v1/trips",
+            headers=AUTH_HEADERS,
+            json={"status": "planned", "load_ids": [int(x) for x in load_ids]},
+        )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        created_trip_ids.append(int(body["id"]))
+        return body
+
+    ctx = SimpleNamespace(
+        client=client,
+        new_draft=new_draft,
+        new_planned_trip=new_planned_trip,
+        tenant_id=tenant_id,
+        created_trip_ids=created_trip_ids,
+    )
     try:
         yield ctx
     finally:
-        if created_load_ids:
-            engine = create_async_engine(to_async_pg_url(gate["tenant_database_url"]), pool_pre_ping=True)
-            Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-            try:
-                async with Session() as db:
-                    for load_id in reversed(created_load_ids):
-                        await _cleanup_load_rows(db, tenant_id, load_id)
-            finally:
-                await engine.dispose()
+        if not created_load_ids and not created_trip_ids:
+            return
+        engine = create_async_engine(to_async_pg_url(gate["tenant_database_url"]), pool_pre_ping=True)
+        Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        try:
+            async with Session() as db:
+                for trip_id in reversed(created_trip_ids):
+                    await _cleanup_trip_rows(db, tenant_id, trip_id)
+                for load_id in reversed(created_load_ids):
+                    await _cleanup_load_rows(db, tenant_id, load_id)
+                for trip_id in created_trip_ids:
+                    await _assert_trip_absent(db, tenant_id, trip_id)
+        finally:
+            await engine.dispose()
 
 
 async def _delete(client: AsyncClient, load_id: int, cv: int = 1):
@@ -160,8 +285,8 @@ async def _delete(client: AsyncClient, load_id: int, cv: int = 1):
     )
 
 
-@pytest.mark.asyncio(loop_scope="function")
 @pytest.mark.skipif(SKIP_ISSUE5_HTTP, reason="integration tenant DB not configured")
+@pytest.mark.asyncio
 class TestLoadPhysicalDeleteGuardIssue5:
     async def test_draft_load_returns_409_disabled(self, issue5_http) -> None:
         load = await issue5_http.new_draft()
@@ -170,7 +295,11 @@ class TestLoadPhysicalDeleteGuardIssue5:
         assert _detail_code(r.json()) == LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED
 
     async def test_ready_load_returns_409_disabled(self, issue5_http) -> None:
-        load = await issue5_http.new_draft(stops=_VALID_STOPS)
+        load = await issue5_http.new_draft(
+            broker_name_snapshot="Broker",
+            broker_load_reference=f"REF-{uuid.uuid4().hex[:8]}",
+            stops=_VALID_STOPS,
+        )
         mr = await issue5_http.client.post(
             f"/api/v1/loads/{load['id']}/mark-ready",
             headers=AUTH_HEADERS,
@@ -184,12 +313,8 @@ class TestLoadPhysicalDeleteGuardIssue5:
 
     async def test_load_with_trip_membership_returns_409_disabled(self, issue5_http) -> None:
         load = await issue5_http.new_draft()
-        tr = await issue5_http.client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "load_ids": [int(load["id"])]},
-        )
-        assert tr.status_code in (200, 201), tr.text
+        await issue5_http.new_planned_trip([int(load["id"])])
+        assert len(issue5_http.created_trip_ids) == 1
         r = await _delete(issue5_http.client, int(load["id"]), int(load["concurrency_version"]))
         assert r.status_code == 409
         assert _detail_code(r.json()) == LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED
@@ -199,9 +324,6 @@ class TestLoadPhysicalDeleteGuardIssue5:
         assert r.status_code == 404
 
     async def test_wrong_tenant_returns_404(self, issue5_http) -> None:
-        """Dependency tenant id mismatch cannot delete a load row owned by another tenant."""
-        from tests.support.integration_auth import install_mutable_tenant_current_user_and_tenant
-
         load = await issue5_http.new_draft()
         load_id = int(load["id"])
         holder = {"tenant_id": issue5_http.tenant_id}
@@ -249,6 +371,8 @@ class TestLoadPhysicalDeleteGuardIssue5:
             await engine.dispose()
 
     async def test_unauthenticated_delete_rejected(self, client) -> None:
+        _patch_runtime_database_urls_for_host_pytest()
+        install_host_aligned_current_user_and_tenant(app)
         old = os.environ.pop("TEST_BYPASS_AUTH", None)
         try:
             r = await client.delete(
@@ -260,7 +384,12 @@ class TestLoadPhysicalDeleteGuardIssue5:
         finally:
             if old is not None:
                 os.environ["TEST_BYPASS_AUTH"] = old
+            clear_current_user_and_tenant_overrides(app)
 
 
 def test_guard_constant_exported() -> None:
     assert LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED == "LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED"
+
+
+if not SKIP_ISSUE5_HTTP:
+    _patch_runtime_database_urls_for_host_pytest()
