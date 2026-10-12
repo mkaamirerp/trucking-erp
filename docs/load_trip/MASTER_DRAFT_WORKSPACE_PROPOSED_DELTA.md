@@ -9,10 +9,10 @@
 
 | Order | ID | Work item | Proposed status | Notes |
 |------:|----|-----------|-----------------|-------|
-| NEW | DW-1 | Load workspace draft schema + storage | ⬜ NOT IMPLEMENTED | `load_workspace_drafts`, evidence table, retention class (no copy on promote) |
+| NEW | DW-1 | Load workspace draft schema + storage | ⬜ NOT IMPLEMENTED | `load_workspace_drafts`, evidence table, `loads.promotion_origin_workspace_draft_id` UNIQUE, retention class (no copy on promote) |
 | NEW | DW-2 | Draft CRUD + promote APIs | ⬜ NOT IMPLEMENTED | See `draft_workspace_api.yaml` |
 | NEW | DW-3 | Email intake → workspace (stop intake `loads` insert) | ⬜ NOT IMPLEMENTED | Replaces junk commercial rows at source |
-| NEW | DW-4 | Promote creates Load `ready` + immutable evidence | ⬜ NOT IMPLEMENTED | Shared mark-ready validator |
+| NEW | DW-4 | Promote creates Load `ready` + immutable evidence | ⬜ NOT IMPLEMENTED | Single DB txn (§5.6); shared mark-ready validator; one load per draft enforced in DB |
 | NEW | DW-5 | Load cancel + payroll accrual block | ⬜ NOT IMPLEMENTED | Replaces hard-delete product goal |
 | REV | I12 | TripLoad requires Load `ready` | ⬜ NOT IMPLEMENTED | Gate `_insert_trip_load_row`; inventory legacy draft memberships |
 | REV | I5 | Hard DELETE unsafe | ✅ CODE COMPLETE / MERGED TO MAIN — NOT DEPLOYED | Interim 409 `LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED` on `main` (`f738339`); **shelve** permanent delete design; cancel is product path |
@@ -37,7 +37,7 @@ Insert or merge with existing **Owner decision — temporary Draft workspace** c
 ### Promotion UX (locked recommendation)
 
 - Incomplete work stays in **workspace**.
-- **Promote** = mark-ready validation + create Load **`ready`** in one DB transaction + evidence row referencing **same** storage key (`commercial_permanent` retention; no PDF copy in txn).
+- **Promote** = **one** database transaction (DRAFT_WORKSPACE_SPEC §5.6): load (`promotion_origin_workspace_draft_id` UNIQUE) + stops + evidence + email/QR links + draft `promoted` — same storage key, `commercial_permanent` retention; no PDF copy in txn; no durable `promoting` state.
 - Do **not** create new `loads.status=draft` rows from `/loads/new` or intake once DW-3 ships.
 
 ---

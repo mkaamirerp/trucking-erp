@@ -4,7 +4,7 @@
 openapi: 3.0.3
 info:
   title: TruckERP Load Workspace Drafts
-  version: 0.2.0-design
+  version: 0.3.0-design
   description: |
     Tenant-scoped temporary drafts before commercial Load promotion.
     Official loads are created only via promote (status=ready).
@@ -28,7 +28,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [draft, promoting, promoted, discarded, expired]
+            enum: [draft, promoted, discarded, expired]
           description: Default active list uses draft only.
         - name: mine
           in: query
@@ -282,8 +282,8 @@ components:
               enum:
                 - LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT
                 - LOAD_WORKSPACE_DRAFT_NOT_EDITABLE
-                - LOAD_WORKSPACE_PROMOTE_IN_FLIGHT
                 - LOAD_WORKSPACE_ALREADY_PROMOTED
+                - LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS
             message:
               type: string
             client_version:
@@ -362,6 +362,7 @@ components:
         - created_at
         - updated_at
         - parse_acceptance_valid
+        - pdf_upload_state
       properties:
         id:
           type: string
@@ -391,6 +392,9 @@ components:
           nullable: true
         has_pdf:
           type: boolean
+        pdf_upload_state:
+          type: string
+          enum: [idle, uploading, ready]
         accepted_parse_json:
           type: object
           nullable: true
