@@ -54,6 +54,7 @@ class LoadWorkspaceDraft(Base):
             name="fk_load_workspace_drafts_promoted_load_tenant",
             ondelete="RESTRICT",
         ),
+        # DB (PG15): ON DELETE SET NULL (email_thread_id) — see dw1c migration.
         ForeignKeyConstraint(
             ["tenant_id", "email_thread_id"],
             ["email_threads.tenant_id", "email_threads.id"],

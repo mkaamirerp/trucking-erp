@@ -25,6 +25,7 @@ class EmailIntakeQrExtraction(Base):
 
     __tablename__ = "email_intake_qr_extractions"
     __table_args__ = (
+        # DB (PG15): ON DELETE SET NULL (workspace_draft_id) — see dw1c migration.
         ForeignKeyConstraint(
             ["tenant_id", "workspace_draft_id"],
             ["load_workspace_drafts.tenant_id", "load_workspace_drafts.id"],
