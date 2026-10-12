@@ -180,21 +180,22 @@ async def issue3_http(client, override_auth_tenant, issue3_integration_gate):
     try:
         yield ctx
     finally:
-        if not created_load_ids:
-            return
-        engine = create_async_engine(
-            to_async_pg_url(gate["tenant_database_url"]), pool_pre_ping=True
-        )
-        Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        try:
-            async with Session() as db:
-                for load_id in reversed(created_load_ids):
-                    await _cleanup_load_rows(db, tenant_id, load_id)
-                for load_id in created_load_ids:
-                    await _assert_load_absent(db, tenant_id, load_id)
-        finally:
-            await engine.dispose()
-        ISSUE3_LAST_ISOLATION_EVIDENCE["cleaned_load_ids"] = ",".join(str(i) for i in created_load_ids)
+        if created_load_ids:
+            engine = create_async_engine(
+                to_async_pg_url(gate["tenant_database_url"]), pool_pre_ping=True
+            )
+            Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+            try:
+                async with Session() as db:
+                    for load_id in reversed(created_load_ids):
+                        await _cleanup_load_rows(db, tenant_id, load_id)
+                    for load_id in created_load_ids:
+                        await _assert_load_absent(db, tenant_id, load_id)
+            finally:
+                await engine.dispose()
+            ISSUE3_LAST_ISOLATION_EVIDENCE["cleaned_load_ids"] = ",".join(
+                str(i) for i in created_load_ids
+            )
 
 
 @pytest.mark.skipif(SKIP_ISSUE3_HTTP, reason="isolated integration tenant DB required (tenant_pytest)")
