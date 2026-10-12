@@ -4,10 +4,11 @@
 openapi: 3.0.3
 info:
   title: TruckERP Load Workspace Drafts
-  version: 0.1.0-design
+  version: 0.2.0-design
   description: |
     Tenant-scoped temporary drafts before commercial Load promotion.
     Official loads are created only via promote (status=ready).
+    Internal storage keys are never exposed in API responses.
 servers:
   - url: /api/v1
 tags:
@@ -33,7 +34,6 @@ paths:
           in: query
           schema:
             type: boolean
-          description: Filter to drafts created by current user.
         - name: email_thread_id
           in: query
           schema:
@@ -45,6 +45,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoadWorkspaceDraftListResponse'
+
     post:
       tags: [load-workspace-drafts]
       summary: Create workspace draft
@@ -81,9 +82,10 @@ paths:
                 $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+
     patch:
       tags: [load-workspace-drafts]
-      summary: Save / update draft fields
+      summary: Save / update draft fields (deep merge)
       operationId: updateLoadWorkspaceDraft
       parameters:
         - $ref: '#/components/parameters/DraftId'
@@ -100,10 +102,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '409':
-          $ref: '#/components/responses/VersionConflict'
+          $ref: '#/components/responses/DraftConflict'
 
   /load-workspace-drafts/{draft_id}/pdf:
+    get:
+      tags: [load-workspace-drafts]
+      summary: Download PDF for left-pane verification
+      operationId: getLoadWorkspaceDraftPdf
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
     put:
       tags: [load-workspace-drafts]
       summary: Replace rate-confirmation PDF
@@ -116,20 +137,23 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required: [file, expected_concurrency_version]
               properties:
+                expected_concurrency_version:
+                  type: integer
+                  minimum: 1
                 file:
                   type: string
                   format: binary
       responses:
         '200':
-          description: PDF stored on draft
+          description: PDF stored; accepted parse cleared
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
         '409':
-          description: Draft not editable (promoting or terminal)
+          $ref: '#/components/responses/DraftConflict'
 
   /load-workspace-drafts/{draft_id}/discard:
     post:
@@ -139,22 +163,16 @@ paths:
       parameters:
         - $ref: '#/components/parameters/DraftId'
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                expected_concurrency_version:
-                  type: integer
-                  minimum: 1
-                reason:
-                  type: string
-                  maxLength: 2000
+              $ref: '#/components/schemas/LoadWorkspaceDraftDiscardRequest'
       responses:
         '204':
           description: Discarded
         '409':
-          description: Not in draft state
+          $ref: '#/components/responses/DraftConflict'
 
   /load-workspace-drafts/{draft_id}/promote:
     post:
@@ -172,7 +190,7 @@ paths:
               $ref: '#/components/schemas/LoadWorkspaceDraftPromoteRequest'
       responses:
         '200':
-          description: Promoted (or idempotent replay)
+          description: Promoted or idempotent replay
           content:
             application/json:
               schema:
@@ -180,7 +198,7 @@ paths:
         '400':
           description: Mark-ready validation failed
         '409':
-          description: Conflict (CAS, promoting, duplicate in flight)
+          $ref: '#/components/responses/DraftConflict'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -229,12 +247,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorDetail'
-    VersionConflict:
-      description: Optimistic concurrency conflict
+    DraftConflict:
+      description: Concurrency, state, or idempotency conflict
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/VersionConflictDetail'
+            $ref: '#/components/schemas/DraftConflictDetail'
 
   schemas:
     ErrorDetail:
@@ -243,14 +261,17 @@ components:
         detail:
           oneOf:
             - type: string
-            - type: object
-              properties:
-                code:
-                  type: string
-                message:
-                  type: string
+            - $ref: '#/components/schemas/ErrorDetailObject'
 
-    VersionConflictDetail:
+    ErrorDetailObject:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    DraftConflictDetail:
       type: object
       properties:
         detail:
@@ -258,13 +279,22 @@ components:
           properties:
             code:
               type: string
-              example: LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT
+              enum:
+                - LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT
+                - LOAD_WORKSPACE_DRAFT_NOT_EDITABLE
+                - LOAD_WORKSPACE_PROMOTE_IN_FLIGHT
+                - LOAD_WORKSPACE_ALREADY_PROMOTED
+            message:
+              type: string
             client_version:
               type: integer
             server_version:
               type: integer
             server_snapshot:
               $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+            promoted_load_id:
+              type: integer
+              description: Present for ALREADY_PROMOTED idempotent guidance
 
     LoadWorkspaceDraftCreate:
       type: object
@@ -279,7 +309,6 @@ components:
         draft_json:
           type: object
           additionalProperties: true
-          description: Partial workspace fields; schema version from server default.
 
     LoadWorkspaceDraftUpdate:
       type: object
@@ -291,7 +320,22 @@ components:
         draft_json:
           type: object
           additionalProperties: true
-          description: Merged per product rules (full replace vs patch documented in spec).
+          description: Deep merge per DRAFT_WORKSPACE_SPEC §1.2
+        reconfirm_parse_acceptance:
+          type: boolean
+          default: false
+          description: When true, keep accepted_parse if pdf sha matches
+
+    LoadWorkspaceDraftDiscardRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 2000
 
     LoadWorkspaceDraftPromoteRequest:
       type: object
@@ -304,7 +348,6 @@ components:
           type: string
           maxLength: 50
           nullable: true
-          description: Optional override; else server allocates.
 
     LoadWorkspaceDraftResponse:
       type: object
@@ -318,6 +361,7 @@ components:
         - expires_at
         - created_at
         - updated_at
+        - parse_acceptance_valid
       properties:
         id:
           type: string
@@ -350,6 +394,8 @@ components:
         accepted_parse_json:
           type: object
           nullable: true
+        parse_acceptance_valid:
+          type: boolean
         expires_at:
           type: string
           format: date-time
@@ -390,8 +436,7 @@ components:
           format: uuid
         load:
           type: object
-          description: Same shape as LoadResponse (official load, status=ready).
+          description: LoadResponse shape; status must be ready.
           additionalProperties: true
         evidence_id:
           type: integer
-          description: load_commercial_evidence.id

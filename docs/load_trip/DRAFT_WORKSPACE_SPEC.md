@@ -33,12 +33,14 @@ Tenant DB only. **Not** a row in `loads`.
 | `created_by_platform_user_id` | `UUID` NULL | Creator; used for list/filter and audit. |
 | `updated_by_platform_user_id` | `UUID` NULL | Last editor. |
 | `email_thread_id` | `INTEGER` NULL | Optional FK `email_threads` (tenant-scoped); intake workflow. |
-| `pdf_storage_key` | `TEXT` NULL | **Per-draft** object key (§4); never shared SHA path without refcount. |
+| `pdf_storage_key` | `TEXT` NULL | Opaque internal key; **never returned by APIs** (§4). |
+| `pdf_retention_class` | `VARCHAR(16)` NOT NULL DEFAULT `workspace_ttl` | `workspace_ttl` until promote; then `commercial_permanent` (§4). |
 | `pdf_sha256` | `CHAR(64)` NULL | Hex SHA-256 of current PDF bytes. |
 | `pdf_filename` | `TEXT` NULL | Original filename for display. |
 | `pdf_size_bytes` | `BIGINT` NULL | |
 | `accepted_parse_json` | `JSONB` NULL | Last operator-accepted parse snapshot (subset of `LoadDocumentParseResponse`). |
 | `accepted_parse_schema_version` | `VARCHAR(64)` NULL | Parser/schema pin at acceptance. |
+| `accepted_parse_pdf_sha256` | `CHAR(64)` NULL | PDF bytes hash when parse was accepted; mismatch ⇒ parse stale (§1.2). |
 | `expires_at` | `TIMESTAMPTZ` NOT NULL | TTL for workspace drafts (not used post-promotion). |
 | `promoted_load_id` | `INTEGER` NULL | Set once on success; FK `loads(id)` RESTRICT or SET NULL per migration policy. |
 | `promoted_at` | `TIMESTAMPTZ` NULL | |
@@ -64,11 +66,15 @@ Tenant DB only. **Not** a row in `loads`.
 
 ### 1.2 Versioned `draft_json`
 
-- **`draft_schema_version`** integer; bump when field contract changes.
-- **Loose validation on save** (types, max lengths, allowed keys); reject unknown critical keys only at schema max version.
-- **Strict validation at promote** — same business rules as Mark Ready **plus** full commercial field contract for create.
-- **Single mapping path:** persist shape aligned with `LoadDocumentParseResponse` / `applyLoadDocumentParseResponse` hydration (no second ad-hoc mapper).
-- Include optional `provenance`: `last_parse_job_id`, `email_attachment_id`, `parser_version` (metadata only).
+- **`draft_schema_version`** integer; bump when field contract changes. Server rejects PATCH if client sends a **higher** version than supported (400 `DRAFT_SCHEMA_VERSION_UNSUPPORTED`).
+- **PATCH semantics (locked):** **deep merge** at the top level of `draft_json` — omitted keys are preserved; `null` on a key **clears** that key if the schema allows null. **Not** full replacement of the document. Arrays (e.g. `stops`, `references`) follow explicit rules in schema v1: **replace entire array** when the key is present in PATCH; omit key to leave unchanged.
+- **Loose validation on save** (types, max lengths, allowed keys).
+- **Strict validation at promote** — shared Mark Ready validator **plus** full commercial create contract.
+- **Single mapping path:** shape aligned with `LoadDocumentParseResponse` / workspace hydration (no second mapper).
+- **Stale parse protection:**
+  - On **PDF replace** (`PUT …/pdf`): set `accepted_parse_json = NULL`, clear `accepted_parse_pdf_sha256`, bump `concurrency_version`; client must re-parse or re-accept.
+  - On PATCH touching **parse-sensitive fields** (broker ref, stops, rate, references — enumerated in schema): clear `accepted_parse_json` unless request includes `reconfirm_parse_acceptance: true` with matching `accepted_parse_pdf_sha256`.
+  - Response includes `parse_acceptance_valid: boolean` (derived: accepted parse present and sha matches current `pdf_sha256`).
 
 ### 1.3 Table: `load_commercial_evidence` (new, at promotion)
 
@@ -81,7 +87,8 @@ Immutable record after promotion (§4). Not TTL’d.
 | `load_id` | `INTEGER` NOT NULL | FK `loads`; UNIQUE `(tenant_id, load_id, evidence_kind)` if one RC per load. |
 | `evidence_kind` | `VARCHAR(32)` | e.g. `rate_confirmation_pdf`. |
 | `file_sha256` | `CHAR(64)` NOT NULL | |
-| `storage_key` | `TEXT` NOT NULL | **Permanent** key (copy or re-key at promote — §4). |
+| `storage_key` | `TEXT` NOT NULL | **Same object key** as workspace draft at promote (§4); retention class permanent. |
+| `retention_class` | `VARCHAR(16)` NOT NULL | Always `commercial_permanent`; excluded from TTL sweeper. |
 | `filename` | `TEXT` | |
 | `accepted_parse_json` | `JSONB` NOT NULL | Frozen at promotion. |
 | `parse_schema_version` | `VARCHAR(64)` | |
@@ -109,9 +116,17 @@ Base path (sketch): `/api/v1/load-workspace-drafts`. See OpenAPI file.
 | Save/update | `PATCH /{draft_id}` | `expected_concurrency_version` + partial `draft_json`; optional merge strategy documented. |
 | List | `GET /` | Paginated; filter `status=active` (draft only), `mine`, `email_thread_id`. **Never** mixed into `GET /loads`. |
 | Retrieve | `GET /{draft_id}` | Resume across devices. |
-| Replace PDF | `PUT /{draft_id}/pdf` | New bytes → new per-draft storage key; update sha256; optional re-parse trigger (parser unchanged). |
-| Discard | `POST /{draft_id}/discard` | Terminal `discarded`; schedule storage delete (§4). |
-| Promote | `POST /{draft_id}/promote` | Terminal `promoted`; creates Load **`ready`** (§5). |
+| Replace PDF | `PUT /{draft_id}/pdf` | `expected_concurrency_version` + file; new bytes → **new** per-draft storage key (§4); invalidates accepted parse. |
+| PDF preview | `GET /{draft_id}/pdf` | Authenticated **stream/download** for left-pane review; **no** `storage_key` in response (§2.1). |
+| Discard | `POST /{draft_id}/discard` | `expected_concurrency_version`; terminal `discarded`; storage cleanup (§4). |
+| Promote | `POST /{draft_id}/promote` | `expected_concurrency_version` + `Idempotency-Key`; creates Load **`ready`** (§5). |
+
+### 2.1 PDF preview (verification UX)
+
+- **GET** `/load-workspace-drafts/{draft_id}/pdf` returns `application/pdf` (or 404 if no PDF).
+- Authorization: same tenant + draft read capability as GET draft.
+- **Never** expose internal `pdf_storage_key` or bucket paths in JSON or headers (use opaque draft id only).
+- UI: **left = PDF stream**, **right = editable fields** (existing workspace form); unchanged parser rules for `POST /loads/parse-document`.
 
 **Not in scope for workspace:** Trip assignment, mark-ready on `loads` for new flow (promote subsumes). Legacy `POST /loads/{id}/mark-ready` remains for **existing** `loads.status=draft` rows until retired.
 
@@ -119,31 +134,28 @@ Base path (sketch): `/api/v1/load-workspace-drafts`. See OpenAPI file.
 
 ## 3. State machine and locking
 
-### 3.1 States
+### 3.1 Allowed transitions (terminal states have **no** outbound edges)
+
+| From | To | Trigger |
+|------|-----|---------|
+| `draft` | `discarded` | Discard (operator) |
+| `draft` | `expired` | Expiry job (`expires_at` passed, status still `draft`) |
+| `draft` | `promoting` | Promote started (DB commit of state change) |
+| `promoting` | `promoted` | Promote success (load + evidence + links committed) |
+| `promoting` | `draft` | Promote **failed** before load commit (transient error; audit `promote_failed`) |
+| `promoting` | `discarded` | Promote **failed** with non-retryable validation (optional; or stay `draft` — product: prefer **`draft`**) |
+
+**Terminal (immutable `status`):** `promoted`, `discarded`, `expired`.
 
 ```
-                    ┌─────────────┐
-                    │   draft     │  (active workspace)
-                    └──────┬──────┘
-           discard         │         promote (start)
-              │            │              │
-              v            │              v
-       ┌────────────┐      │       ┌─────────────┐
-       │ discarded  │      │       │ promoting   │  (short-lived)
-       └────────────┘      │       └──────┬──────┘
-              │            │              │
-     expiry job            │         success │ failure
-              │            │              v
-              v            │       ┌─────────────┐
-       ┌────────────┐      │       │  promoted   │  (terminal)
-       │  expired   │      │       └─────────────┘
-       └────────────┘      │
-                            └── (no transition from terminal states)
+  draft ──discard──► discarded (terminal)
+    │
+    ├──expiry job──► expired (terminal)
+    │
+    └──promote start──► promoting ──success──► promoted (terminal)
+                              │
+                              └──failure (no load row)──► draft
 ```
-
-- **`draft`:** editable; subject to TTL.
-- **`promoting`:** promote in flight; **reject** save, discard, second promote, expiry delete of PDF until resolved.
-- **`promoted` / `discarded` / `expired`:** terminal; read-only except admin audit.
 
 ### 3.2 Locking
 
@@ -155,58 +167,80 @@ WHERE tenant_id = :t AND id = :id
 FOR UPDATE;
 ```
 
-| Operation | Lock | Conflict behavior |
-|-----------|------|-------------------|
-| **Save** | `FOR UPDATE`; status must be `draft` | 409 if `promoting` or terminal; 409 CAS if `concurrency_version` mismatch. |
-| **Promote** | `FOR UPDATE`; `draft` → `promoting` in same txn | Second promote with same idempotency key → 200 + same `load_id`. Different key while `promoting` → 409. |
-| **Discard** | `FOR UPDATE`; status `draft` only | 409 if promoting/promoted. |
-| **Expiry job** | `FOR UPDATE SKIP LOCKED` batch | Skip `promoting`; only `draft` past `expires_at`. |
+| Operation | Lock | `expected_concurrency_version` | 409 codes |
+|-----------|------|-------------------------------|-----------|
+| **PATCH save** | required; status = `draft` | required | `LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT`, `LOAD_WORKSPACE_DRAFT_NOT_EDITABLE` |
+| **PUT pdf** | required; status = `draft` | required | same |
+| **Discard** | required; status = `draft` | required | same |
+| **Promote** | required; `draft`→`promoting` then work | required | same + `LOAD_WORKSPACE_PROMOTE_IN_FLIGHT` |
+| **Expiry job** | `FOR UPDATE SKIP LOCKED`; only `draft` + expired | n/a | n/a (never touches `promoting`) |
+
+**409 response shape (all conflicts):** JSON `detail.code`, `detail.message`, optional `server_snapshot` (draft) or `promoted_load_id` when idempotent replay.
 
 ### 3.3 Promote vs expiry race
 
-Critical case: expiry job vs promote.
+1. Expiry SELECT: `status = 'draft' AND expires_at < now()` only — **never** `promoting`.
+2. Promote: lock row; if `draft`, set `promoting` and commit (or hold in txn until end — either way expiry cannot select row).
+3. While `promoting`, expiry and discard are rejected (`NOT_EDITABLE`).
+4. **Object retention:** before any TTL delete, check `pdf_retention_class = commercial_permanent` OR evidence row references `storage_key` — **skip delete**.
 
-1. Promote takes lock, sets `promoting`, extends `expires_at` optionally or ignores expiry while `promoting`.
-2. Expiry job selects only `status = 'draft' AND expires_at < now()`.
-3. On promote failure, revert `promoting` → `draft` or → `discarded` with error audit (implementation choice: prefer **revert to draft** if load create failed transiently).
+### 3.4 Crash recovery (no duplicate official Loads)
 
-### 3.4 Storage vs DB atomicity
+| Stuck state | Detection | Recovery |
+|-------------|-----------|----------|
+| `promoting` + `promoted_load_id` NULL, no load with `promotion_idempotency_key` | Startup / sweeper | Resume promote or roll back to `draft` if no load insert marker |
+| `promoting` + `promoted_load_id` set | Partial commit | Set `promoted`; idempotent clients get 200 |
+| `promoted` + duplicate idempotency retry | Unique constraints | Return existing load — **never** second insert |
+| Load row exists, draft not `promoted` | Orphan guard | Complete draft→`promoted` link or compensating audit (manual ops only) |
 
-- DB transaction **cannot** include object store.
-- **Promote:** (1) lock draft → `promoting`; (2) validate; (3) insert `loads` + stops + evidence + links; (4) **record permanent `storage_key`** on evidence (copy bytes to `load_evidence/...` or mark key as promoted — no delete from draft bucket until txn commits); (5) `promoted` + `promoted_load_id`; (6) commit; (7) async delete draft-stage object (best-effort).
-- **Failure after load insert:** idempotency key returns existing load; do not orphan duplicate loads.
+**Invariant:** at most **one** `loads.id` per `load_workspace_drafts.id` via `UNIQUE (tenant_id, promoted_load_id)` and idempotency unique index.
+
+### 3.5 Storage vs DB (promotion)
+
+- Use **verified existing** object storage (`app.core.storage`: `resolve_storage_path` / configured `storage_provider` — same as Load Lab and fuel manual receipt bytes).
+- **No PDF copy or move inside the DB transaction.** Bytes stay at the **same `storage_key`**.
+- **Inside one DB transaction on promote:** insert `loads` (ready), stops, `load_commercial_evidence` (same `storage_key`, `retention_class=commercial_permanent`), flip draft `pdf_retention_class` to `commercial_permanent`, set `status=promoted`, `promoted_load_id`, email/QR links.
+- **After commit:** TTL sweeper must ignore keys with `commercial_permanent`. Old keys from **PDF replace** on same draft are eligible for orphan cleanup only when no row references them.
 
 ---
 
-## 4. PDF retention
+## 4. PDF retention and storage safety
 
-### 4.1 Per-draft storage key
+### 4.1 Object ownership model
 
-Pattern (example):
-
-`load_workspace_drafts/tenant_{tenant_id}/draft_{draft_id}/{uuid}.pdf`
-
-**Do not** reuse Load Lab’s `load_lab_uploads/tenant_{id}/{sha256}/` for mutable draft lifecycle (shared deletion risk).
+| Concept | Rule |
+|---------|------|
+| **Key layout** | `load_workspace_drafts/tenant_{tenant_id}/draft_{draft_id}/{upload_uuid}.pdf` — **one active key per draft**; replace creates **new** key, marks previous key orphaned after commit. |
+| **Ownership** | Tenant-scoped; draft row owns key while `workspace_ttl`. |
+| **Retention class** | `workspace_ttl` (expiry/discard eligible) vs `commercial_permanent` (evidence + promoted draft; **never** TTL). |
+| **Shared objects** | **Forbidden** across drafts (no Load-Lab-style `/{sha256}/` sharing for workspace lifecycle). |
 
 ### 4.2 SHA-256
 
-- Compute on upload/replace; store on draft row.
-- At promotion, copy to evidence path e.g. `load_commercial_evidence/tenant_{tenant_id}/load_{load_id}/{sha256}.pdf` (dedupe safe at **load** level, not draft).
+- Stored on draft and copied to evidence at promote (same bytes, same hash).
 
-### 4.3 After promotion
+### 4.3 PDF replace
 
-- Evidence row holds permanent key; **no TTL**.
-- Draft row may clear `pdf_storage_key` after successful promote or leave for audit lineage (implementation: null draft key after copy verified).
+1. `FOR UPDATE` draft; CAS; status `draft`.
+2. Write **new** object via existing storage adapter; update `pdf_storage_key`, `pdf_sha256`, invalidate parse acceptance (§1.2).
+3. Decrement registry for old key; async delete old object if unreferenced after grace period.
 
 ### 4.4 Discard / expiry cleanup
 
-- Delete object **only** when no `load_commercial_evidence.storage_key` references it and refcount = 0.
-- Refcount table optional: `(tenant_id, storage_key, ref_count)` incremented on draft create/replace, decremented on discard/expiry/promote-after-copy.
+Delete object **only if**:
 
-### 4.5 Recovery
+- `pdf_retention_class = workspace_ttl`, AND
+- draft is `discarded` or `expired`, AND
+- no `load_commercial_evidence.storage_key` equals this key, AND
+- optional `storage_object_refs.ref_count = 0`.
 
-- If DB says `discarded` but object remains, sweeper deletes orphan keys older than grace period.
-- If promote committed but copy failed, draft stays `promoting` or rolls back — **no `promoted_load_id`** until evidence insert succeeds (or evidence insert mandatory in same txn with key pointing to already-copied object).
+**Promoted paths:** evidence + `commercial_permanent` ⇒ **never** enter TTL cleanup.
+
+### 4.5 Orphan / crash safety
+
+- Sweeper: keys in storage without DB reference after grace → delete (metrics + log).
+- **Promote/expiry race:** retention class flip committed with evidence ⇒ expiry cannot delete.
+- **Process crash mid-promote:** recovery table §3.4; object remains until explicit orphan policy.
 
 ---
 
@@ -233,21 +267,41 @@ Promotion **must not** insert `status=draft`. Flow:
 
 Issue 3: generic PATCH must still not set `ready`; only mark-ready and promote endpoints.
 
-### 5.3 Idempotency
+### 5.3 Idempotency and one Load per draft
 
-- Header: `Idempotency-Key` (or body field) stored in `promotion_idempotency_key`.
-- Retry with same key: return **same** `LoadResponse` + 200.
-- Unique `(tenant_id, promotion_idempotency_key)` and `(tenant_id, promoted_load_id)`.
+| Scenario | Behavior |
+|----------|----------|
+| **Same `Idempotency-Key` retry** (network) | 200 + same `load` + `promoted_load_id`; no second insert. |
+| **Different key retry** while `promoted` | 409 `LOAD_WORKSPACE_ALREADY_PROMOTED` + existing load id in body. |
+| **Different key** while `draft` | 409 unless first key unused — only one successful promote per draft. |
+| **Promote on `expired` / `discarded`** | 409 `LOAD_WORKSPACE_DRAFT_NOT_EDITABLE`. |
+| **Promote while `promoting`** (other client) | 409 `LOAD_WORKSPACE_PROMOTE_IN_FLIGHT`. |
+| **Failure after `promoting`, no load row** | Revert to `draft`; same idempotency key may retry. |
+| **Failure after load insert** | Commit `promoted` + load; retries with same key return 200. |
+
+**Guarantees:**
+
+- `UNIQUE (tenant_id, id)` on drafts; `UNIQUE (tenant_id, promoted_load_id)` when not null.
+- `UNIQUE (tenant_id, promotion_idempotency_key)` when not null.
+- At most **one** official `loads` row per workspace draft id.
+
+Header: **`Idempotency-Key`** required on promote (max 128 chars).
 
 ### 5.4 Email and QR link transfer (same DB transaction as load create)
 
-Under **`FOR UPDATE`** on draft and relevant thread:
+**Before promote (intake redesign):**
 
-- Set `email_threads.linked_load_id` = new `loads.id` (was null or pointed to deprecated intake load — **intake must not create load** going forward).
-- Update `email_intake_qr_extractions.linked_load_id` for rows tied to `email_thread_id` / attachment lineage.
-- Issue 5 lesson: FK `ON DELETE SET NULL` on loads does not replace need for **ordered locking** when re-linking.
+- `email_threads.workspace_draft_id` → UUID (nullable); **`linked_load_id` NULL** until promote.
+- `email_intake_qr_extractions.workspace_draft_id` optional FK; **`linked_load_id` NULL** until promote.
+- Email messages, attachments, `detail_json`, guarded_parse — **unchanged** (evidence preserved).
 
-Optional: `email_thread.workspace_draft_id` until promote (schema addition TBD).
+**On promote** (lock draft `FOR UPDATE`, lock thread `FOR UPDATE` if `email_thread_id` set):
+
+- Insert load (ready) + evidence; set `email_threads.linked_load_id`, clear `workspace_draft_id`.
+- Update QR rows for thread/attachment lineage: set `linked_load_id`, clear `workspace_draft_id`.
+- **No new commercial Load** on “create from thread” — only workspace draft until promote.
+
+**Legacy intake loads:** existing `linked_load_id` rows are **not** auto-migrated; classification §9 only.
 
 ### 5.5 Duplicate prevention
 
@@ -263,22 +317,26 @@ Optional: `email_thread.workspace_draft_id` until promote (schema addition TBD).
 Replace `create_draft_load_from_review_thread` **load insert** with:
 
 1. Create **`load_workspace_draft`** (`source_channel=email_intake`, `email_thread_id`).
-2. Attach PDF from thread/attachment into per-draft storage (or reference attachment fetch + copy).
-3. Set thread state **linked to workspace draft** (new column or `intake_bucket` + draft id) — **not** `linked_load_id` until promote.
+2. Copy attachment bytes into **workspace** storage key via existing storage adapter (intake may **read** from `email_message_attachments` store; workspace owns its key — not shared SHA pool).
+3. Set `email_threads.workspace_draft_id`; **`linked_load_id` stays NULL**.
 
-### 6.2 Preserve history
+### 6.2 Ownership rules
 
-- **Do not delete** email messages, attachments, or review `detail_json`.
-- QR extractions remain on attachment; link to draft until promote moves `linked_load_id`.
+| Artifact | Before promote | After promote |
+|----------|----------------|---------------|
+| Thread | `workspace_draft_id` set | `linked_load_id` set; `workspace_draft_id` cleared |
+| QR extractions | `workspace_draft_id` optional | `linked_load_id` set |
+| Attachments / messages | Immutable history | Unchanged |
+| Commercial Load | **Does not exist** | `ready` via promote only |
 
 ### 6.3 Workflow
 
 ```
-Thread in review → Create workspace draft → Operator edits in Load Workspace (draft id route)
-→ Promote → official Load ready + thread.linked_load_id
+Thread in review → Create workspace draft → Operator edits (draft route + GET …/pdf)
+→ Promote → Load ready + thread.linked_load_id + permanent evidence (same storage key)
 ```
 
-**Route sketch:** `/loads/workspace/{draftId}` or query param — product TBD; must not use `/loads/{loadId}` until promoted.
+**Route sketch:** `/loads/workspace/{draftId}` — must not use `/loads/{loadId}` until promoted.
 
 ---
 
@@ -306,22 +364,28 @@ No Kanban redesign (owner hold). Board already excludes `draft` loads from `list
 
 ## 8. Cancellation
 
-New commercial loads (post-promote) are **never physically deleted** (owner + Issue 5 guard).
+Official loads are **never physically deleted** (owner + Issue 5 interim guard on `main`). Workspace **discard** ≠ Load cancel.
 
 ### 8.1 `POST /loads/{id}/cancel` (future)
 
 - Body: `reason` (required), `expected_concurrency_version`.
-- Set `loads.status = cancelled`; record `cancelled_at`, `cancelled_by`, `cancel_reason` (columns TBD).
-- Audit event mandatory.
+- Set `loads.status = cancelled`; `cancelled_at`, `cancelled_by`, `cancel_reason` (columns TBD).
+- Mandatory audit event.
 
-### 8.2 Restrictions
+### 8.2 Restrictions by operational / financial state
 
-- **Trip:** cancel does not auto-cancel in-progress trips without explicit product rules (MASTER §2).
-- **Payroll:** pay-generating services **must** exclude `cancelled` loads from new accruals (service-layer, not UI).
-- **Posted history:** immutable; no delete of `pay_run_items`.
-- **TONU / approved cancellation pay:** explicit `PayEntry` (or equivalent) with approval flag — never inferred from status alone.
+| Load situation | Cancel allowed? | Trip / ops | Payroll / AR |
+|----------------|-----------------|------------|--------------|
+| **Ready, not on any Trip** | Yes (default) | N/A | Block **new** accruals from this load after cancel |
+| **On planned Trip only** | Yes with warning | Do not auto-remove TripLoad; operator removes or cancels trip per Trip rules | Block new accruals |
+| **On in-progress Trip** | **No** (409) unless approved exception | Must complete/recover/reassign per Trip playbook — not silent load cancel | No new accruals |
+| **On completed Trip** | **No** for ordinary cancel | Historical trip record stands | No reversal |
+| **Invoiced (AR posted)** | **No** | — | No automatic invoice void; separate AR workflow |
+| **Paid / settled** (`pay_run_items` posted) | **No** | — | **No** deletion or auto-reversal of pay lines; preserve history |
 
-Workspace **discard** is not Load cancel — no `loads` row.
+**TONU / cancellation pay:** explicit approved payable (e.g. `PayEntry` with approval flag) — **never** inferred from `cancelled` status alone.
+
+**No automatic reversal** of historical financial entries on cancel.
 
 ---
 
@@ -340,11 +404,13 @@ Per tenant, bucket:
 
 SQL inventory script (read-only) — run in container with owner approval; no bulk delete.
 
-### 9.2 Transition
+### 9.2 Transition (legacy policy — locked)
 
 - **No changing existing `loads.id`.**
-- Options per bucket: leave as-is; operator promote via legacy mark-ready; operator cancel (once built); manual migration to “legacy draft” flag — **no bulk physical delete**.
-- New workspace flow: **new rows** should not add to bucket A via `/loads/new` or intake.
+- **No bulk delete** of legacy `loads.status=draft` rows.
+- **No auto-promotion** of legacy drafts into workspace or ready without operator action.
+- Options per bucket: leave as-is; operator **mark-ready** (legacy); operator **cancel** (when built); manual review only.
+- New workspace flow must not add junk via `/loads/new` or intake once DW-3 ships.
 
 ---
 
@@ -355,9 +421,9 @@ Each checkpoint: **independent commit**, tests, **STOP for ChatGPT review**, no 
 | # | Segment | Deliverables | Required tests |
 |---|---------|--------------|----------------|
 | 1 | Schema + models (draft + evidence) | Alembic tenant migration | Migration smoke; model tenant isolation |
-| 2 | Storage adapter + per-draft keys | Service + refcount or copy-on-promote | Unit: delete does not cross drafts |
+| 2 | Storage adapter + retention class | Service + orphan sweeper (no copy on promote) | Unit: promote flips retention; TTL never deletes permanent |
 | 3 | Draft CRUD APIs | Router + auth | Integration: create/save/CAS/disc/list |
-| 4 | PDF upload/replace | PUT pdf | Integration: sha256, replace, parse hook optional |
+| 4 | PDF upload/replace + GET preview | PUT pdf, GET pdf stream | Integration: sha256, CAS, parse invalidation, no key leak |
 | 5 | Promote + validation extract | Shared validator with mark-ready | Promote → load `ready`; idempotency; evidence row |
 | 6 | Email intake → workspace | Replace load insert | Thread linked to draft; no new load on create |
 | 7 | I12 trip gate | `_insert_trip_load_row` | Draft load cannot join trip; ready can |
@@ -378,7 +444,8 @@ Each checkpoint: **independent commit**, tests, **STOP for ChatGPT review**, no 
 - `app/services/trips.py` — `_insert_trip_load_row`, `create_planned_trip`
 - `app/services/dispatch_trips.py` — `_upsert_trip_and_membership` (latent path)
 - `app/models/fuel.py` — `FuelManualEntryStage` (staging pattern)
-- `app/services/load_lab.py` — PDF persistence (do not share deletion semantics)
+- `app/core/storage.py` — existing object persistence (`resolve_storage_path`, `storage_provider`)
+- `app/services/load_lab.py` — separate PDF path (do not share workspace deletion semantics)
 - `POST /loads/parse-document` — hydration only, no PDF persist
 
 ---
