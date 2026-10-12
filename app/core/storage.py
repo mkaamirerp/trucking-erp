@@ -858,6 +858,49 @@ def delete_toll_pdf_file(
     get_storage().delete(storage_key, module="toll", tenant_slug=tenant_slug)
 
 
+async def put_bytes_at_storage_key(
+    storage_key: str,
+    body: bytes,
+    *,
+    filename_hint: str = "upload.pdf",
+    content_type: str | None = "application/octet-stream",
+    module: str | None = None,
+    tenant_slug: str | None = None,
+    allow_overwrite: bool = False,
+) -> StoredFile:
+    """Persist bytes at an exact storage key (callers that need replace-on-retry must opt in).
+
+    Default ``allow_overwrite=False``: raises ``FileExistsError`` if the key already exists.
+    Existing ``save_bytes`` / ``save_upload`` paths are unchanged and do not use this helper.
+    """
+    if not storage_key or ".." in storage_key or storage_key.startswith("/"):
+        raise ValueError("invalid storage_key")
+    backend = get_storage()
+    if not allow_overwrite and backend.exists(storage_key, module, tenant_slug):
+        raise FileExistsError(f"storage key already exists: {storage_key}")
+    original = _safe_filename(filename_hint)
+    digest = hashlib.sha256(body).hexdigest()
+    if isinstance(backend, LocalStorageBackend):
+        dest = backend._key_to_path(storage_key, module, tenant_slug)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+    elif isinstance(backend, S3StorageBackend):
+        full_key = backend._full_key(storage_key, module, tenant_slug)
+        extra: dict[str, str] = {}
+        if content_type:
+            extra["ContentType"] = content_type
+        backend._client.put_object(Bucket=backend._bucket, Key=full_key, Body=body, **extra)
+    else:
+        raise RuntimeError("unsupported storage backend")
+    return StoredFile(
+        storage_key=storage_key,
+        original_filename=original,
+        content_type=content_type,
+        file_size_bytes=len(body),
+        sha256=digest,
+    )
+
+
 async def save_fuel_manual_entry_stage_bytes(
     tenant_slug: str,
     stage_id: str,
