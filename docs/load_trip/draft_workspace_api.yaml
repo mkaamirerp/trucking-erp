@@ -371,7 +371,7 @@ components:
           type: integer
         status:
           type: string
-          enum: [draft, promoting, promoted, discarded, expired]
+          enum: [draft, promoted, discarded, expired]
         concurrency_version:
           type: integer
         draft_schema_version:
