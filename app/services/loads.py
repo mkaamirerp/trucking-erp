@@ -560,28 +560,20 @@ async def update_load(
     return load
 
 
+LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED = "LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED"
+
+
 async def delete_load(
     db: AsyncSession, tenant_id: int, load_id: int, *, expected_concurrency_version: int
 ) -> None:
-    stmt = delete(Load).where(
-        Load.id == load_id,
-        Load.tenant_id == tenant_id,
-        Load.concurrency_version == expected_concurrency_version,
-    )
-    result = await db.execute(stmt)
-    if result.rowcount == 1:
-        await db.commit()
-        return
-    await db.rollback()
+    """Issue 5 Phase 2: block all physical deletes until guarded delete is implemented."""
+    _ = expected_concurrency_version
     current_load = await get_load(db, tenant_id, load_id)
     if current_load is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
-    server_snapshot = LoadResponse.model_validate(current_load).model_dump(mode="json")
-    raise load_version_conflict_exception(
-        load_id=load_id,
-        client_version=expected_concurrency_version,
-        server_version=current_load.concurrency_version,
-        server_snapshot=server_snapshot,
+    raise _legacy_write_conflict(
+        LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED,
+        "Physical load deletion is temporarily disabled.",
     )
 
 
