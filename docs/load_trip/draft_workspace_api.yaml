@@ -4,7 +4,7 @@
 openapi: 3.0.3
 info:
   title: TruckERP Load Workspace Drafts
-  version: 0.3.0-design
+  version: 0.4.0-design
   description: |
     Tenant-scoped temporary drafts before commercial Load promotion.
     Official loads are created only via promote (status=ready).
@@ -110,13 +110,13 @@ paths:
   /load-workspace-drafts/{draft_id}/pdf:
     get:
       tags: [load-workspace-drafts]
-      summary: Download PDF for left-pane verification
+      summary: Download committed PDF for left-pane verification
       operationId: getLoadWorkspaceDraftPdf
       parameters:
         - $ref: '#/components/parameters/DraftId'
       responses:
         '200':
-          description: PDF bytes
+          description: Active committed PDF bytes (not pending upload)
           content:
             application/pdf:
               schema:
@@ -124,30 +124,89 @@ paths:
                 format: binary
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: No committed PDF yet (upload in progress only)
 
-    put:
+  /load-workspace-drafts/{draft_id}/pdf-uploads:
+    post:
       tags: [load-workspace-drafts]
-      summary: Replace rate-confirmation PDF
-      operationId: replaceLoadWorkspaceDraftPdf
+      summary: Begin PDF upload (Transaction A)
+      operationId: beginLoadWorkspaceDraftPdfUpload
       parameters:
         - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspacePdfUploadBeginRequest'
+      responses:
+        '201':
+          description: Upload session reserved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspacePdfUploadSessionResponse'
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+  /load-workspace-drafts/{draft_id}/pdf-uploads/{upload_session_id}:
+    put:
+      tags: [load-workspace-drafts]
+      summary: Upload PDF bytes (no DB transaction)
+      operationId: uploadLoadWorkspaceDraftPdfBytes
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/UploadSessionId'
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file, expected_concurrency_version]
+              required: [file]
               properties:
-                expected_concurrency_version:
-                  type: integer
-                  minimum: 1
                 file:
                   type: string
                   format: binary
       responses:
+        '204':
+          description: Bytes stored to pending object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+    delete:
+      tags: [load-workspace-drafts]
+      summary: Abort PDF upload (retain last committed PDF)
+      operationId: abortLoadWorkspaceDraftPdfUpload
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/UploadSessionId'
+      responses:
+        '204':
+          description: Lease cleared
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /load-workspace-drafts/{draft_id}/pdf-uploads/{upload_session_id}/commit:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Commit PDF upload (Transaction B)
+      operationId: commitLoadWorkspaceDraftPdfUpload
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/UploadSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspacePdfUploadCommitRequest'
+      responses:
         '200':
-          description: PDF stored; accepted parse cleared
+          description: PDF activated; parse acceptance invalidated
           content:
             application/json:
               schema:
@@ -233,6 +292,13 @@ components:
       schema:
         type: string
         maxLength: 128
+    UploadSessionId:
+      name: upload_session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
@@ -284,6 +350,8 @@ components:
                 - LOAD_WORKSPACE_DRAFT_NOT_EDITABLE
                 - LOAD_WORKSPACE_ALREADY_PROMOTED
                 - LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS
+                - LOAD_WORKSPACE_PDF_UPLOAD_LEASE_EXPIRED
+                - LOAD_WORKSPACE_PDF_UPLOAD_SESSION_MISMATCH
             message:
               type: string
             client_version:
@@ -336,6 +404,44 @@ components:
         reason:
           type: string
           maxLength: 2000
+
+    LoadWorkspacePdfUploadBeginRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        filename:
+          type: string
+          maxLength: 255
+          description: Hint for display only
+
+    LoadWorkspacePdfUploadSessionResponse:
+      type: object
+      required: [upload_session_id, lease_expires_at, concurrency_version]
+      properties:
+        upload_session_id:
+          type: string
+          format: uuid
+          description: Opaque session handle; not a storage key.
+        lease_expires_at:
+          type: string
+          format: date-time
+        concurrency_version:
+          type: integer
+          description: Unchanged until commit (B) succeeds.
+
+    LoadWorkspacePdfUploadCommitRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        content_sha256:
+          type: string
+          description: Optional client-supplied hex sha256 for verify
 
     LoadWorkspaceDraftPromoteRequest:
       type: object
@@ -395,6 +501,11 @@ components:
         pdf_upload_state:
           type: string
           enum: [idle, uploading, ready]
+        pdf_upload_lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set only while uploading; not a storage key.
         accepted_parse_json:
           type: object
           nullable: true

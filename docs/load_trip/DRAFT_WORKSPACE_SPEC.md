@@ -38,8 +38,10 @@ Tenant DB only. **Not** a row in `loads`.
 | `pdf_sha256` | `CHAR(64)` NULL | Hex SHA-256 of current PDF bytes. |
 | `pdf_filename` | `TEXT` NULL | Original filename for display. |
 | `pdf_size_bytes` | `BIGINT` NULL | |
-| `pdf_upload_state` | `VARCHAR(16)` NOT NULL DEFAULT `idle` | `idle` \| `uploading` \| `ready` (§4.6). |
-| `pdf_pending_storage_key` | `TEXT` NULL | Staging key while `uploading`; not active until commit (§4.6). |
+| `pdf_upload_state` | `VARCHAR(16)` NOT NULL DEFAULT `idle` | `idle` \| `uploading` \| `ready` (§4.6–4.7). |
+| `pdf_pending_storage_key` | `TEXT` NULL | Reserved object key for in-flight upload (§4.7). |
+| `pdf_upload_session_id` | `UUID` NULL | Opaque upload session token (matches client `upload_session_id`; §4.7). |
+| `pdf_upload_lease_expires_at` | `TIMESTAMPTZ` NULL | Upload lease end; while valid and `uploading`, blocks expiry/discard/promote (§4.6). |
 | `accepted_parse_json` | `JSONB` NULL | Last operator-accepted parse snapshot (subset of `LoadDocumentParseResponse`). |
 | `accepted_parse_schema_version` | `VARCHAR(64)` NULL | Parser/schema pin at acceptance. |
 | `accepted_parse_pdf_sha256` | `CHAR(64)` NULL | PDF bytes hash when parse was accepted; mismatch ⇒ parse stale (§1.2). |
@@ -75,7 +77,7 @@ Tenant DB only. **Not** a row in `loads`.
 - **Strict validation at promote** — shared Mark Ready validator **plus** full commercial create contract.
 - **Single mapping path:** shape aligned with `LoadDocumentParseResponse` / workspace hydration (no second mapper).
 - **Stale parse protection:**
-  - On **PDF replace** (`PUT …/pdf`): set `accepted_parse_json = NULL`, clear `accepted_parse_pdf_sha256`, bump `concurrency_version`; client must re-parse or re-accept.
+  - On **PDF commit** (Transaction B, §4.7): set `accepted_parse_json = NULL`, clear `accepted_parse_pdf_sha256`, bump `concurrency_version`; client must re-parse or re-accept.
   - On PATCH touching **parse-sensitive fields** (broker ref, stops, rate, references — enumerated in schema): clear `accepted_parse_json` unless request includes `reconfirm_parse_acceptance: true` with matching `accepted_parse_pdf_sha256`.
   - Response includes `parse_acceptance_valid: boolean` (derived: accepted parse present and sha matches current `pdf_sha256`).
 
@@ -147,8 +149,11 @@ Base path (sketch): `/api/v1/load-workspace-drafts`. See OpenAPI file.
 | Save/update | `PATCH /{draft_id}` | `expected_concurrency_version` + partial `draft_json`; optional merge strategy documented. |
 | List | `GET /` | Paginated; filter `status=active` (draft only), `mine`, `email_thread_id`. **Never** mixed into `GET /loads`. |
 | Retrieve | `GET /{draft_id}` | Resume across devices. |
-| Replace PDF | `PUT /{draft_id}/pdf` | `expected_concurrency_version` + file; new bytes → **new** per-draft storage key (§4); invalidates accepted parse. |
-| PDF preview | `GET /{draft_id}/pdf` | Authenticated **stream/download** for left-pane review; **no** `storage_key` in response (§2.1). |
+| Begin PDF upload | `POST /{draft_id}/pdf-uploads` | Transaction A (§4.7); returns `upload_session_id`, `lease_expires_at`. |
+| Upload bytes | `PUT /{draft_id}/pdf-uploads/{upload_session_id}` | Stream to storage **outside** DB txn. |
+| Commit PDF upload | `POST /{draft_id}/pdf-uploads/{upload_session_id}/commit` | Transaction B; activates PDF + invalidates parse. |
+| Abort PDF upload | `DELETE /{draft_id}/pdf-uploads/{upload_session_id}` | Clears lease; retains last committed PDF. |
+| PDF preview | `GET /{draft_id}/pdf` | Stream active committed PDF (§2.1); 409 if only pending upload exists. |
 | Discard | `POST /{draft_id}/discard` | `expected_concurrency_version`; terminal `discarded`; storage cleanup (§4). |
 | Promote | `POST /{draft_id}/promote` | `expected_concurrency_version` + `Idempotency-Key`; creates Load **`ready`** (§5). |
 
@@ -174,7 +179,7 @@ There is **no** committed `promoting` row state. In-flight promotion is represen
 | From | To | Trigger |
 |------|-----|---------|
 | `draft` | `discarded` | Discard (operator) |
-| `draft` | `expired` | Expiry job (`expires_at` passed, `pdf_upload_state = idle`) |
+| `draft` | `expired` | Expiry job (`expires_at` passed; §4.6) |
 | `draft` | `promoted` | Promote transaction **commits** (atomic with load + evidence + links) |
 
 **Terminal (immutable `status`):** `promoted`, `discarded`, `expired` — **no outbound transitions**.
@@ -202,19 +207,20 @@ FOR UPDATE;
 | Operation | Lock | `expected_concurrency_version` | 409 codes |
 |-----------|------|-------------------------------|-----------|
 | **PATCH save** | required; status = `draft` | required | `LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT`, `LOAD_WORKSPACE_DRAFT_NOT_EDITABLE` |
-| **PUT pdf** | required; status = `draft` | required | same |
+| **PDF begin (A) / commit (B)** | required; status = `draft` | required on A and B | same + `LOAD_WORKSPACE_PDF_UPLOAD_*` (§4.7) |
 | **Discard** | required; status = `draft` | required | same |
 | **Promote** | required; `status = draft`; holds lock for full txn §5.6 | required | same + `LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS` if uploading |
-| **Expiry job** | `FOR UPDATE SKIP LOCKED`; only `draft` + expired + `pdf_upload_state = idle` | n/a | n/a |
+| **Expiry job** | `FOR UPDATE SKIP LOCKED`; eligible drafts only (§4.6) | n/a | n/a |
 
 **409 response shape (all conflicts):** JSON `detail.code`, `detail.message`, optional `server_snapshot` (draft) or `promoted_load_id` when idempotent replay.
 
 ### 3.3 Promote vs expiry vs upload race
 
-1. Expiry SELECT: `status = 'draft' AND expires_at < now() AND pdf_upload_state = 'idle'`.
-2. Promote: `FOR UPDATE` draft — blocks expiry and other promotes until commit/rollback.
-3. Expiry and discard **reject** when `pdf_upload_state = 'uploading'` (409).
-4. **Object retention:** never delete keys with `commercial_permanent` or referenced by `load_commercial_evidence`.
+1. **Expiry eligibility (§4.6):** `status = 'draft' AND expires_at < now() AND pdf_upload_state IN ('idle', 'ready')` — drafts **with** a committed PDF (`ready`) **do** expire when TTL passes.
+2. **Only** an active upload lease blocks expiry: `pdf_upload_state = 'uploading' AND pdf_upload_lease_expires_at > now()`.
+3. Promote: `FOR UPDATE` draft — blocks expiry until commit/rollback.
+4. Expiry and discard **reject** while an active upload lease exists (409 `LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS`).
+5. **Object retention:** never delete keys with `commercial_permanent` or referenced by `load_commercial_evidence` or an active upload lease.
 
 ### 3.4 Crash recovery (single-transaction model — §5.6)
 
@@ -234,8 +240,9 @@ PostgreSQL **rolls back** an incomplete promote transaction; draft stays `draft`
 ### 3.5 Storage vs DB (promotion)
 
 - Use **verified existing** object storage (`app.core.storage`).
-- **No PDF copy or move inside the DB transaction.** Bytes stay at the **same `pdf_storage_key`** active at promote time (`pdf_upload_state` must be `ready`).
-- Storage writes complete **before** promote txn begins (§4.6).
+- **No PDF copy or move inside the DB transaction.** Bytes stay at the **same `pdf_storage_key`** active at promote time.
+- Promote requires **no active upload lease**; commercial validation may require `pdf_upload_state = ready` when RC PDF is mandatory.
+- Object bytes are written **outside** DB transactions (§4.7); promote txn begins only after upload **commit** (Transaction B).
 - Retention flip `workspace_ttl` → `commercial_permanent` on draft + evidence rows occurs **inside** the promote txn (§5.6).
 
 ---
@@ -255,14 +262,9 @@ PostgreSQL **rolls back** an incomplete promote transaction; draft stays `draft`
 
 - Stored on draft and copied to evidence at promote (same bytes, same hash).
 
-### 4.3 PDF replace
+### 4.3 PDF replace (overview)
 
-1. `FOR UPDATE` draft; CAS; `status = draft`, `pdf_upload_state = idle`.
-2. Set `pdf_upload_state = uploading`; write bytes to **`pdf_pending_storage_key`** (new uuid path); compute sha256.
-3. In **same DB transaction:** set `pdf_storage_key = pdf_pending_storage_key`, clear pending, `pdf_upload_state = ready`, invalidate parse acceptance (§1.2), bump `concurrency_version`.
-4. Commit; async delete prior `pdf_storage_key` if unreferenced (§4.4).
-
-Promote, discard, and expiry **must not** run while `pdf_upload_state = uploading`.
+PDF replace uses the **two-transaction upload protocol** (§4.7). Do **not** hold a database transaction open during object upload.
 
 ### 4.4 Discard / expiry cleanup
 
@@ -279,22 +281,65 @@ Delete object **only if**:
 
 - Sweeper: keys in storage without DB reference after grace → delete (metrics + log).
 - **Promote/expiry race:** retention class flip committed with evidence ⇒ expiry cannot delete.
-- **Process crash mid-promote:** DB rolls back (§5.6); `pdf_pending_storage_key` orphans cleaned by sweeper if `uploading` stuck (§4.6).
+- **Process crash mid-promote:** DB rolls back (§5.6); upload lease recovery (§4.7).
 
-### 4.6 Pending-upload protection
+### 4.6 Expiry eligibility (draft TTL)
 
-| State | Meaning | Allowed operations |
-|-------|---------|-------------------|
-| `idle` | No upload in progress | PATCH, PUT pdf, promote, discard |
-| `uploading` | Bytes writing to `pdf_pending_storage_key` | GET draft/pdf may 409 or serve previous ready PDF (product: **serve previous** if `pdf_storage_key` set) |
-| `ready` | Active `pdf_storage_key` committed | All except concurrent second PUT (starts `uploading` again) |
+A draft may transition `draft` → `expired` when **all** hold:
 
-**Crash during `uploading`:**
+- `status = 'draft'`
+- `expires_at < now()`
+- `pdf_upload_state IN ('idle', 'ready')` — **both** qualify (including drafts with a committed PDF).
+- **Not** in active upload lease: `pdf_upload_state != 'uploading'` OR `pdf_upload_lease_expires_at <= now()`.
 
-- Txn rollback leaves `uploading` — startup job sets `uploading` → `idle`, clears `pdf_pending_storage_key`, audit `pdf_upload_aborted` (does **not** delete last committed `pdf_storage_key`).
-- Sweeper deletes orphan `pdf_pending_storage_key` objects after grace if not referenced.
+**Only** `pdf_upload_state = 'uploading'` with a **valid lease** temporarily blocks expiry (and discard/promote).
 
-**Concurrent PUT pdf:** second request blocks on `FOR UPDATE` or 409 `LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS`.
+### 4.7 PDF upload protocol (locked — two DB transactions)
+
+**API surface:** `POST …/pdf-uploads` (begin), `PUT …/pdf-uploads/{upload_session_id}` (bytes), `POST …/pdf-uploads/{upload_session_id}/commit` (activate). See OpenAPI.
+
+**Never expose** `pdf_storage_key`, `pdf_pending_storage_key`, or raw bucket paths in JSON. Client receives opaque `upload_session_id` + `lease_expires_at` only.
+
+#### Transaction A — begin upload (short DB txn)
+
+1. `SELECT … FOR UPDATE` draft.
+2. Validate `status = draft`, CAS `expected_concurrency_version`.
+3. Reject if active lease: `pdf_upload_state = uploading` AND `pdf_upload_lease_expires_at > now()` → 409 `LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS`.
+4. Set `pdf_upload_state = uploading`; generate `pdf_upload_session_id` (UUID); assign new `pdf_pending_storage_key`; set `pdf_upload_lease_expires_at = now() + lease_ttl` (e.g. 15 minutes).
+5. **COMMIT.**
+
+#### Upload bytes (no DB transaction)
+
+6. Client `PUT` multipart to `…/pdf-uploads/{upload_session_id}`.
+7. Server validates session id + lease + tenant; streams bytes to `pdf_pending_storage_key` via existing object storage adapter.
+8. **Do not** open a DB transaction for the duration of the stream.
+
+#### Transaction B — commit upload (short DB txn)
+
+9. `SELECT … FOR UPDATE` draft.
+10. Verify `pdf_upload_session_id` matches path/body; lease not expired; object exists and size &gt; 0; optional client `content_sha256` matches computed hash.
+11. CAS `expected_concurrency_version` (must match value from Transaction A or current after failed B retry policy below).
+12. Set `pdf_storage_key = pdf_pending_storage_key`; clear `pdf_pending_storage_key`; clear session + lease; `pdf_upload_state = ready`; update `pdf_sha256`, `pdf_filename`, `pdf_size_bytes`; invalidate `accepted_parse_json` (§1.2); increment `concurrency_version`.
+13. **COMMIT.** Async delete superseded prior `pdf_storage_key` if unreferenced (§4.4).
+
+#### Aborted / expired upload
+
+- **Client abort:** `DELETE …/pdf-uploads/{upload_session_id}` or wait for lease expiry.
+- **Lease expiry job:** if `uploading` and `pdf_upload_lease_expires_at <= now()`: txn — clear session, pending key, set `pdf_upload_state` to `idle` (if no `pdf_storage_key`) or `ready` (if prior PDF exists); audit `pdf_upload_aborted`.
+- **Retain** last committed active PDF (`pdf_storage_key`) on abort.
+- **Orphan cleanup:** delete `pdf_pending_storage_key` object only when no DB row references it and no active lease points at it.
+
+#### CAS and retry policy
+
+| Step | CAS required | On mismatch |
+|------|----------------|-------------|
+| Begin (A) | yes | 409 `LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT` + `server_snapshot` |
+| Commit (B) | yes | 409; client must **re-read** draft; may need new begin (A) if session invalidated |
+| Bytes PUT | session + lease only | 404 unknown session; 409 `LOAD_WORKSPACE_PDF_UPLOAD_LEASE_EXPIRED` |
+
+After successful B, `concurrency_version` increments — client must use new version for PATCH/promote/discard.
+
+**Concurrent begin:** second begin gets 409 or blocks on `FOR UPDATE` until A/B completes.
 
 ---
 
@@ -343,16 +388,17 @@ Ordered steps:
 1. `SELECT load_workspace_drafts … FOR UPDATE` (+ `email_threads` / QR rows `FOR UPDATE` when `email_thread_id` set).
 2. **Idempotency:** if `status = promoted` → return existing load (commit read-only).
 3. If `status != draft` → rollback, 409 `NOT_EDITABLE`.
-4. If `pdf_upload_state != ready` (or `idle` without pdf when required) → rollback, 409.
-5. CAS `concurrency_version`; store `promotion_idempotency_key` if not already set for this successful attempt.
-6. `validate_load_ready_prerequisites(draft_json)` — on failure rollback, 400 (draft unchanged).
-7. `INSERT loads` (`status=ready`, `promotion_origin_workspace_draft_id=draft.id`, commercial fields).
-8. `INSERT load_stops` from draft_json.
-9. `INSERT load_commercial_evidence` (`workspace_draft_id`, same `storage_key`, `commercial_permanent`, frozen parse).
-10. Update `email_threads` / QR `linked_load_id`, clear `workspace_draft_id`.
-11. `INSERT audit_events` (promote + load created).
-12. `UPDATE load_workspace_drafts` SET `status=promoted`, `promoted_load_id`, `promoted_at`, `pdf_retention_class=commercial_permanent`.
-13. **COMMIT.**
+4. If active upload lease (`uploading` + lease valid) → rollback, 409 `LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS`.
+5. If commercial rules require RC PDF and (`pdf_upload_state != ready` or `pdf_storage_key` null) → rollback, 400.
+6. CAS `concurrency_version`; store `promotion_idempotency_key` if not already set for this successful attempt.
+7. `validate_load_ready_prerequisites(draft_json)` — on failure rollback, 400 (draft unchanged).
+8. `INSERT loads` (`status=ready`, `promotion_origin_workspace_draft_id=draft.id`, commercial fields).
+9. `INSERT load_stops` from draft_json.
+10. `INSERT load_commercial_evidence` (`workspace_draft_id`, same `storage_key`, `commercial_permanent`, frozen parse).
+11. Update `email_threads` / QR `linked_load_id`, clear `workspace_draft_id`.
+12. `INSERT audit_events` (promote + load created).
+13. `UPDATE load_workspace_drafts` SET `status=promoted`, `promoted_load_id`, `promoted_at`, `pdf_retention_class=commercial_permanent`.
+14. **COMMIT.**
 
 **On any exception:** full **ROLLBACK** — draft remains `draft`; no load row; client may retry (same idempotency key).
 
@@ -494,7 +540,7 @@ Each checkpoint: **independent commit**, tests, **STOP for ChatGPT review**, no 
 | 1 | Schema + models (draft + evidence) | Alembic tenant migration | Migration smoke; model tenant isolation |
 | 2 | Storage adapter + retention class | Service + orphan sweeper (no copy on promote) | Unit: promote flips retention; TTL never deletes permanent |
 | 3 | Draft CRUD APIs | Router + auth | Integration: create/save/CAS/disc/list |
-| 4 | PDF upload/replace + GET preview | PUT pdf, GET pdf stream | Integration: sha256, CAS, parse invalidation, no key leak |
+| 4 | PDF upload protocol + GET preview | POST/PUT/POST commit pdf-uploads, GET pdf | Integration: two txn, lease, CAS, no key leak |
 | 5 | Promote + validation extract | Shared validator with mark-ready | Promote → load `ready`; idempotency; evidence row |
 | 6 | Email intake → workspace | Replace load insert | Thread linked to draft; no new load on create |
 | 7 | I12 trip gate | `_insert_trip_load_row` | Draft load cannot join trip; ready can |
