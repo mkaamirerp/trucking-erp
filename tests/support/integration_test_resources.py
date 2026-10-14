@@ -163,7 +163,7 @@ class IntegrationTestScope:
                         await _cleanup_trip_rows(
                             db, self.tenant_id, trip_id, context=self.context
                         )
-                    except BaseException as exc:
+                    except Exception as exc:
                         failures.append(
                             IntegrationCleanupFailure("trip", int(trip_id), exc)
                         )
@@ -173,7 +173,7 @@ class IntegrationTestScope:
                         await _cleanup_load_rows(
                             db, self.tenant_id, load_id, context=self.context
                         )
-                    except BaseException as exc:
+                    except Exception as exc:
                         failures.append(
                             IntegrationCleanupFailure("load", int(load_id), exc)
                         )
