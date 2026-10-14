@@ -4,7 +4,30 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+ResourceKind = Literal["trip", "load"]
+
+
+@dataclass(frozen=True)
+class IntegrationCleanupFailure:
+    resource_type: ResourceKind
+    resource_id: int
+    error: BaseException
+
+
+class IntegrationCleanupError(Exception):
+    """Raised when one or more tracked integration resources could not be cleaned up."""
+
+    def __init__(self, failures: list[IntegrationCleanupFailure]) -> None:
+        self.failures = list(failures)
+        parts = [
+            f"{f.resource_type} id={f.resource_id}: {f.error!r}" for f in self.failures
+        ]
+        super().__init__(
+            f"integration teardown failed for {len(self.failures)} resource(s): "
+            + "; ".join(parts)
+        )
 
 from httpx import AsyncClient, Response
 from sqlalchemy import text
@@ -130,6 +153,7 @@ class IntegrationTestScope:
     async def teardown(self) -> None:
         if not self.tracker.trip_ids and not self.tracker.load_ids:
             return
+        failures: list[IntegrationCleanupFailure] = []
         engine = create_async_engine(to_async_pg_url(self.tenant_url), pool_pre_ping=True)
         Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
         try:
@@ -139,27 +163,45 @@ class IntegrationTestScope:
                         await _cleanup_trip_rows(
                             db, self.tenant_id, trip_id, context=self.context
                         )
-                    except Exception:
+                    except BaseException as exc:
+                        failures.append(
+                            IntegrationCleanupFailure("trip", int(trip_id), exc)
+                        )
                         await db.rollback()
                 for load_id in reversed(self.tracker.load_ids):
                     try:
                         await _cleanup_load_rows(
                             db, self.tenant_id, load_id, context=self.context
                         )
-                    except Exception:
+                    except BaseException as exc:
+                        failures.append(
+                            IntegrationCleanupFailure("load", int(load_id), exc)
+                        )
                         await db.rollback()
         finally:
             await engine.dispose()
+        if failures:
+            raise IntegrationCleanupError(failures)
 
 
 @asynccontextmanager
 async def integration_scope_context(client: AsyncClient, headers: dict[str, str], context: str):
     scope = IntegrationTestScope(client, headers, context=context)
     await scope.activate()
+    test_exc: BaseException | None = None
     try:
         yield scope
+    except BaseException as err:
+        test_exc = err
+        raise
     finally:
-        await scope.teardown()
+        try:
+            await scope.teardown()
+        except BaseException as teardown_err:
+            if test_exc is not None:
+                test_exc.add_note(f"Integration teardown also failed: {teardown_err}")
+            else:
+                raise teardown_err
 
 
 async def _cleanup_trip_rows(
