@@ -13,9 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.load_integrity import (
     LOAD_BOARD_UNKNOWN_STATUS_BUCKET,
+    LOAD_STOP_DUPLICATE_ID,
     LOAD_STOP_HISTORY_PROTECTED,
     LOAD_STOP_INVALID_ID,
-    LOAD_STOP_REPLACE_REQUIRED,
+    LOAD_STOP_REMOVAL_FORBIDDEN,
+    LOAD_STOP_TYPE_UNRESOLVED,
+    WRITABLE_LOAD_STOP_TYPES,
 )
 from app.constants.trip_dispatch import (
     LEGACY_LOAD_ASSIGNMENT_DEPRECATED,
@@ -236,41 +239,67 @@ async def _stop_has_operational_history(
     return int(cnt or 0) > 0
 
 
+def _stop_commercial_snapshot(stop: LoadStop | LoadStopCreate) -> dict[str, object]:
+    if isinstance(stop, LoadStop):
+        return {k: getattr(stop, k, None) for k in _COMMERCIAL_STOP_ATTRS}
+    data = stop.model_dump(exclude={"id"}, exclude_unset=False)
+    return {k: data.get(k) for k in _COMMERCIAL_STOP_ATTRS}
+
+
+def _validate_stops_write_payload(stops_payload: Sequence[LoadStopCreate]) -> None:
+    seen_ids: set[int] = set()
+    for s in stops_payload:
+        st = (s.stop_type or "").strip().upper()
+        if st not in WRITABLE_LOAD_STOP_TYPES:
+            raise _legacy_write_conflict(
+                LOAD_STOP_TYPE_UNRESOLVED,
+                f"Stop type '{s.stop_type}' must be classified as PICKUP, DROP, or DELIVERY before save.",
+            )
+        if s.id is not None and int(s.id) > 0:
+            sid = int(s.id)
+            if sid in seen_ids:
+                raise _legacy_write_conflict(
+                    LOAD_STOP_DUPLICATE_ID,
+                    f"Duplicate stop id {sid} in request.",
+                )
+            seen_ids.add(sid)
+
+
 async def _sync_load_stops_on_update(
     db: AsyncSession,
     tenant_id: int,
     load_id: int,
     stops_payload: Sequence[LoadStopCreate],
-    *,
-    replace_stops: bool,
 ) -> dict[str, object]:
-    """Upsert commercial stop fields; preserve operational timestamps and actions (Issue I2)."""
+    """Upsert commercial stop fields; never delete operational/history-bearing stops (Issue I2)."""
+    _validate_stops_write_payload(stops_payload)
+
     result = await db.execute(
         select(LoadStop).where(LoadStop.tenant_id == tenant_id, LoadStop.load_id == load_id)
     )
     existing = list(result.scalars().all())
     by_id = {int(s.id): s for s in existing}
+    before_by_id = {sid: _stop_commercial_snapshot(row) for sid, row in by_id.items()}
 
     keep_ids: set[int] = set()
     for s in stops_payload:
         if s.id is not None and int(s.id) > 0:
             keep_ids.add(int(s.id))
 
-    removed_ids: list[int] = []
+    removed: list[dict[str, object]] = []
     for sid, row in by_id.items():
         if sid in keep_ids:
             continue
         if await _stop_has_operational_history(db, tenant_id, row):
-            if not replace_stops:
-                raise _legacy_write_conflict(
-                    LOAD_STOP_HISTORY_PROTECTED,
-                    "Cannot remove a stop with operational history without replace_stops=true.",
-                )
-        removed_ids.append(sid)
+            raise _legacy_write_conflict(
+                LOAD_STOP_HISTORY_PROTECTED,
+                "Cannot remove a stop with operational history or dependencies.",
+            )
+        removed.append({"stop_id": sid, "before": before_by_id[sid]})
         await db.delete(row)
 
-    added: list[int] = []
-    updated: list[int] = []
+    added: list[dict[str, object]] = []
+    updated: list[dict[str, object]] = []
     for i, s in enumerate(stops_payload):
         seq = s.sequence if s.sequence is not None else i
         data = s.model_dump(exclude={"id"}, exclude_unset=False)
@@ -286,22 +315,20 @@ async def _sync_load_stops_on_update(
                     LOAD_STOP_INVALID_ID,
                     f"Stop id {s.id} is not part of this load.",
                 )
+            before = before_by_id[int(row.id)]
             for k, v in data.items():
                 setattr(row, k, v)
-            updated.append(int(row.id))
+            after = _stop_commercial_snapshot(row)
+            if before != after:
+                updated.append({"stop_id": int(row.id), "before": before, "after": after})
         else:
             row = LoadStop(tenant_id=tenant_id, load_id=load_id, **data)
             db.add(row)
             await db.flush()
-            added.append(int(row.id))
+            added.append({"stop_id": int(row.id), "after": _stop_commercial_snapshot(row)})
 
     await db.flush()
-    return {
-        "removed_stop_ids": removed_ids,
-        "updated_stop_ids": updated,
-        "added_stop_ids": added,
-        "replace_stops": replace_stops,
-    }
+    return {"removed": removed, "updated": updated, "added": added}
 
 
 def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
@@ -363,8 +390,12 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
     await db.flush()
 
     if payload.stops:
+        _validate_stops_write_payload(payload.stops)
         for i, s in enumerate(payload.stops):
-            stop_data = s.model_dump()
+            stop_data = s.model_dump(exclude={"id"}, exclude_unset=False)
+            for k in list(stop_data.keys()):
+                if k not in _COMMERCIAL_STOP_ATTRS and k != "sequence":
+                    stop_data.pop(k, None)
             stop_data["sequence"] = s.sequence if s.sequence is not None else i
             stop = LoadStop(tenant_id=tenant_id, load_id=load.id, **stop_data)
             db.add(stop)
@@ -563,27 +594,25 @@ async def update_load(
     stop_audit_diff: dict[str, object] | None = None
     if "stops" in payload.model_dump(exclude_unset=True):
         stops_payload: Sequence[LoadStopCreate] = payload.stops or []
-        replace_stops = bool(payload.replace_stops) if payload.replace_stops else False
-        if not stops_payload and not replace_stops:
+        if not stops_payload:
             for row in (await db.execute(
                 select(LoadStop).where(LoadStop.tenant_id == tenant_id, LoadStop.load_id == load_id)
             )).scalars():
                 if await _stop_has_operational_history(db, tenant_id, row):
                     raise _legacy_write_conflict(
-                        LOAD_STOP_REPLACE_REQUIRED,
-                        "Clearing all stops requires replace_stops=true when operational history exists.",
+                        LOAD_STOP_REMOVAL_FORBIDDEN,
+                        "Cannot clear all stops while operational stop history exists.",
                     )
             await db.execute(
                 delete(LoadStop).where(LoadStop.load_id == load_id, LoadStop.tenant_id == tenant_id)
             )
-            stop_audit_diff = {"removed_all": True, "replace_stops": replace_stops}
+            stop_audit_diff = {"removed_all": True, "removed": [], "updated": [], "added": []}
         else:
             stop_audit_diff = await _sync_load_stops_on_update(
                 db,
                 tenant_id,
                 load_id,
                 stops_payload,
-                replace_stops=replace_stops,
             )
 
     # Issue 26: keep Load mutation and audit in one transaction (no commit before audit).
@@ -636,8 +665,12 @@ async def update_load(
             request_id=request_id,
             correlation_id=corr,
             source=source,
-            changed_fields=None,
-            context_json={"stops": stop_audit_diff},
+            changed_fields={"stops": stop_audit_diff},
+            context_json={
+                "load_id": int(load_id),
+                "tenant_id": int(tenant_id),
+                "stop_change_summary": stop_audit_diff,
+            },
             best_effort=False,
         )
 

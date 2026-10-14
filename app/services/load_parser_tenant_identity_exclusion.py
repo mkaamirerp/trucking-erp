@@ -334,7 +334,9 @@ async def build_load_parser_tenant_identity_exclusion_for_tenant(
         platform_db, tenant_id=tenant_id
     )
     if tenant is None:
-        return _empty_exclusion()
+        out = _empty_exclusion()
+        out["_exclusion_lookup_failed"] = True
+        return out
     return build_load_parser_tenant_identity_exclusion(tenant=tenant, profile=profile)
 
 

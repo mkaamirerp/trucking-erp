@@ -861,11 +861,23 @@ async def _complete_trip_load_membership_locked(
     trip_id = int(trip.id)
     load_id = int(load.id)
 
-    tl = await _get_trip_load_row(db, tenant_id, trip_id, load_id)
+    tl = await _get_trip_load_row(db, tenant_id, trip_id, load_id, open_only=True)
+    if tl is None:
+        tl = await db.scalar(
+            select(TripLoad)
+            .where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.trip_id == trip_id,
+                TripLoad.load_id == load_id,
+                TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_COMPLETED,
+            )
+            .order_by(TripLoad.id.desc())
+            .limit(1)
+        )
     if tl is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
+            detail={"detail": "No open trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
         )
 
     # Idempotent: already completed on this membership (allowed even if Trip is completed).
@@ -990,7 +1002,11 @@ async def _validate_decision10_schedule_overlap(
     truck_id: int | None,
     trailer_id: int | None,
 ) -> None:
-    """Issue I16 — Decision 10: block impossible overlap with an in_progress Trip."""
+    """Issue I16 — Decision 10 (MASTER Appendix G): overlap only when both bounds exist.
+
+    Missing planned_start_at or missing expected_completion_at on the in_progress Trip
+    does not hard-block (no invented dates).
+    """
     if trip.planned_start_at is None:
         return
     asset_filters = []
