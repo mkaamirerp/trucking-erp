@@ -1,0 +1,8 @@
+"""Load integrity error codes (Issues I2, I9, I10)."""
+
+LOAD_STOP_HISTORY_PROTECTED = "LOAD_STOP_HISTORY_PROTECTED"
+LOAD_STOP_INVALID_ID = "LOAD_STOP_INVALID_ID"
+LOAD_STOP_REPLACE_REQUIRED = "LOAD_STOP_REPLACE_REQUIRED"
+
+# Legacy dispatch board bucket for statuses outside ALLOWED_STATUSES (Issue I10).
+LOAD_BOARD_UNKNOWN_STATUS_BUCKET = "unknown_legacy_status"

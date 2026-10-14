@@ -1,4 +1,4 @@
-"""Load service. V1: stop-based, draft/ready, full replace stops on update."""
+"""Load service. V1: stop-based, draft/ready; PATCH stops sync in-place (Issue I2)."""
 from __future__ import annotations
 
 import uuid
@@ -11,6 +11,12 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.load_integrity import (
+    LOAD_BOARD_UNKNOWN_STATUS_BUCKET,
+    LOAD_STOP_HISTORY_PROTECTED,
+    LOAD_STOP_INVALID_ID,
+    LOAD_STOP_REPLACE_REQUIRED,
+)
 from app.constants.trip_dispatch import (
     LEGACY_LOAD_ASSIGNMENT_DEPRECATED,
     LEGACY_LOAD_OPERATIONAL_STATUSES,
@@ -24,7 +30,7 @@ from app.constants.trip_dispatch import (
 )
 from app.models.broker import Broker, BrokerContact
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
-from app.models.load import Load, LoadNote, LoadStop
+from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.load_operational_references import sanitize_load_operational_references
@@ -194,6 +200,108 @@ def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
             LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT,
             "Transitioning a load to ready is only allowed via POST /api/v1/loads/{load_id}/mark-ready.",
         )
+
+
+_COMMERCIAL_STOP_ATTRS = (
+    "stop_type",
+    "sequence",
+    "facility_name",
+    "street",
+    "city",
+    "state_or_province",
+    "postal_code",
+    "country",
+    "reference_number",
+    "appointment_type",
+    "appointment_date",
+    "appointment_time_text",
+    "notes",
+    "commodity_notes",
+)
+
+
+async def _stop_has_operational_history(
+    db: AsyncSession, tenant_id: int, stop: LoadStop
+) -> bool:
+    if stop.scheduled_at is not None or stop.arrived_at is not None or stop.departed_at is not None:
+        return True
+    cnt = await db.scalar(
+        select(func.count())
+        .select_from(LoadStopAction)
+        .where(
+            LoadStopAction.tenant_id == tenant_id,
+            LoadStopAction.load_stop_id == stop.id,
+        )
+    )
+    return int(cnt or 0) > 0
+
+
+async def _sync_load_stops_on_update(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    stops_payload: Sequence[LoadStopCreate],
+    *,
+    replace_stops: bool,
+) -> dict[str, object]:
+    """Upsert commercial stop fields; preserve operational timestamps and actions (Issue I2)."""
+    result = await db.execute(
+        select(LoadStop).where(LoadStop.tenant_id == tenant_id, LoadStop.load_id == load_id)
+    )
+    existing = list(result.scalars().all())
+    by_id = {int(s.id): s for s in existing}
+
+    keep_ids: set[int] = set()
+    for s in stops_payload:
+        if s.id is not None and int(s.id) > 0:
+            keep_ids.add(int(s.id))
+
+    removed_ids: list[int] = []
+    for sid, row in by_id.items():
+        if sid in keep_ids:
+            continue
+        if await _stop_has_operational_history(db, tenant_id, row):
+            if not replace_stops:
+                raise _legacy_write_conflict(
+                    LOAD_STOP_HISTORY_PROTECTED,
+                    "Cannot remove a stop with operational history without replace_stops=true.",
+                )
+        removed_ids.append(sid)
+        await db.delete(row)
+
+    added: list[int] = []
+    updated: list[int] = []
+    for i, s in enumerate(stops_payload):
+        seq = s.sequence if s.sequence is not None else i
+        data = s.model_dump(exclude={"id"}, exclude_unset=False)
+        for k in list(data.keys()):
+            if k not in _COMMERCIAL_STOP_ATTRS:
+                data.pop(k, None)
+        data["sequence"] = seq
+
+        if s.id is not None and int(s.id) > 0:
+            row = by_id.get(int(s.id))
+            if row is None or row.tenant_id != tenant_id or row.load_id != load_id:
+                raise _legacy_write_conflict(
+                    LOAD_STOP_INVALID_ID,
+                    f"Stop id {s.id} is not part of this load.",
+                )
+            for k, v in data.items():
+                setattr(row, k, v)
+            updated.append(int(row.id))
+        else:
+            row = LoadStop(tenant_id=tenant_id, load_id=load_id, **data)
+            db.add(row)
+            await db.flush()
+            added.append(int(row.id))
+
+    await db.flush()
+    return {
+        "removed_stop_ids": removed_ids,
+        "updated_stop_ids": updated,
+        "added_stop_ids": added,
+        "replace_stops": replace_stops,
+    }
 
 
 def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
@@ -452,17 +560,31 @@ async def update_load(
             server_snapshot=server_snapshot,
         )
 
+    stop_audit_diff: dict[str, object] | None = None
     if "stops" in payload.model_dump(exclude_unset=True):
-        await db.execute(
-            delete(LoadStop).where(LoadStop.load_id == load_id, LoadStop.tenant_id == tenant_id)
-        )
-        await db.flush()
         stops_payload: Sequence[LoadStopCreate] = payload.stops or []
-        for i, s in enumerate(stops_payload):
-            stop_data = s.model_dump()
-            stop_data["sequence"] = s.sequence if s.sequence is not None else i
-            stop = LoadStop(tenant_id=tenant_id, load_id=load_id, **stop_data)
-            db.add(stop)
+        replace_stops = bool(payload.replace_stops) if payload.replace_stops else False
+        if not stops_payload and not replace_stops:
+            for row in (await db.execute(
+                select(LoadStop).where(LoadStop.tenant_id == tenant_id, LoadStop.load_id == load_id)
+            )).scalars():
+                if await _stop_has_operational_history(db, tenant_id, row):
+                    raise _legacy_write_conflict(
+                        LOAD_STOP_REPLACE_REQUIRED,
+                        "Clearing all stops requires replace_stops=true when operational history exists.",
+                    )
+            await db.execute(
+                delete(LoadStop).where(LoadStop.load_id == load_id, LoadStop.tenant_id == tenant_id)
+            )
+            stop_audit_diff = {"removed_all": True, "replace_stops": replace_stops}
+        else:
+            stop_audit_diff = await _sync_load_stops_on_update(
+                db,
+                tenant_id,
+                load_id,
+                stops_payload,
+                replace_stops=replace_stops,
+            )
 
     # Issue 26: keep Load mutation and audit in one transaction (no commit before audit).
     await db.flush()
@@ -502,6 +624,21 @@ async def update_load(
             source=source,
             changed_fields=audit_changed,
             best_effort=not money_audit_required,
+        )
+
+    if stop_audit_diff is not None:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_stops_changed",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields=None,
+            context_json={"stops": stop_audit_diff},
+            best_effort=False,
         )
 
     if old_status != (out.status or "").strip().lower():
@@ -613,18 +750,32 @@ async def list_loads_for_board(
     loads = list(result.scalars().all())
 
     board_statuses = [s for s in ALLOWED_STATUSES if s != "draft"]
+    board_set = set(board_statuses)
     grouped: dict[str, list] = {s: [] for s in board_statuses}
+    grouped[LOAD_BOARD_UNKNOWN_STATUS_BUCKET] = []
     for load in loads:
-        s = (load.status or "ready").strip().lower()
-        if s in grouped:
-            grouped[s].append(load)
-        else:
-            grouped.setdefault("ready", []).append(load)
+        bucket = _legacy_board_bucket_for_status(load.status, board_set)
+        grouped[bucket].append(load)
     return grouped
 
 
+def _legacy_board_bucket_for_status(status: str | None, board_statuses: set[str]) -> str:
+    """Issue I10: unknown/empty statuses never map to ready."""
+    s = (status or "").strip().lower()
+    if not s or s not in board_statuses:
+        return LOAD_BOARD_UNKNOWN_STATUS_BUCKET
+    return s
+
+
 async def mark_load_ready(
-    db: AsyncSession, tenant_id: int, load_id: int, *, expected_concurrency_version: int
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    expected_concurrency_version: int,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    source: str = "api",
 ) -> Load:
     """Mark draft as ready. Validates minimum: broker, broker_load_reference, at least one pickup and one delivery/drop."""
     load = await get_load(db, tenant_id, load_id)
@@ -687,6 +838,22 @@ async def mark_load_ready(
             server_version=current_load.concurrency_version if current_load else None,
             server_snapshot=server_snapshot,
         )
+    await db.flush()
+    refreshed = await get_load(db, tenant_id, load_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    await _write_load_audit(
+        db,
+        tenant_id=tenant_id,
+        load=refreshed,
+        action="load_marked_ready",
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+        correlation_id=request_id,
+        source=source,
+        changed_fields={"status": {"before": "draft", "after": "ready"}},
+        best_effort=False,
+    )
     await db.commit()
     db.expire_all()
     out = await get_load(db, tenant_id, load_id)
