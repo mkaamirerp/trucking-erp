@@ -61,6 +61,7 @@ import {
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
+import { validateDraftStopsClassifiedForSave } from "@/loadWorkspace/loadStopClassification";
 import { SectionSettlement } from "@/components/load/SectionSettlement";
 
 type WorkspaceToolbarTone = "success" | "warning" | "error" | "neutral";
@@ -896,6 +897,11 @@ export default function LoadWorkspacePage() {
 
   async function onSave() {
     if (!load) return;
+    const stopErr = validateDraftStopsClassifiedForSave(draftStops);
+    if (stopErr) {
+      setToolbarMessage({ text: stopErr, tone: "warning" });
+      return;
+    }
     const expectedVersion = load.concurrency_version ?? 1;
     setSaving(true);
     setToolbarMessage(null);

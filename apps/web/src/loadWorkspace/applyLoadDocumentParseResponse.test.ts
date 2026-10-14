@@ -72,4 +72,105 @@ describe("applyLoadDocumentParseResponse references", () => {
       false,
     );
   });
+
+  it("Issue I19: unknown parser stop types stay UNRESOLVED with evidence", async () => {
+    const setDraftStops = vi.fn();
+    const cbs = {
+      setBrokerNameSnapshot: vi.fn(),
+      setBrokerId: vi.fn(),
+      setBrokerContactId: vi.fn(),
+      setBrokerContacts: vi.fn(),
+      setBrokerContactNameSnapshot: vi.fn(),
+      setBrokerContactPhoneSnapshot: vi.fn(),
+      setBrokerContactEmailSnapshot: vi.fn(),
+      setBrokerLoadReference: vi.fn(),
+      setLoadReferences: vi.fn(),
+      setFreightMode: vi.fn(),
+      setEquipmentType: vi.fn(),
+      setTrailerType: vi.fn(),
+      setTrailerSize: vi.fn(),
+      setCommodity: vi.fn(),
+      setEstimatedWeight: vi.fn(),
+      setTemperatureRequirement: vi.fn(),
+      setRate: vi.fn(),
+      setCustomerRate: vi.fn(),
+      setMiles: vi.fn(),
+      setInternalNotes: vi.fn(),
+      setDraftStops,
+    };
+    const summary = await applyLoadDocumentParseResponse(
+      emptyRes({
+        stops: [{ stop_type: "other", sequence: 0, city: "Dallas" }],
+      }),
+      cbs,
+    );
+    expect(summary.unresolvedStopCount).toBe(1);
+    const draft = setDraftStops.mock.calls[0][0];
+    expect(draft[0].stop_type).toBe("UNRESOLVED");
+    expect(draft[0].parseStopTypeEvidence).toBe("other");
+  });
+
+  it("Issue I18: second document clears prior commodity when omitted", async () => {
+    const setCommodity = vi.fn();
+    const cbs = {
+      setBrokerNameSnapshot: vi.fn(),
+      setBrokerId: vi.fn(),
+      setBrokerContactId: vi.fn(),
+      setBrokerContacts: vi.fn(),
+      setBrokerContactNameSnapshot: vi.fn(),
+      setBrokerContactPhoneSnapshot: vi.fn(),
+      setBrokerContactEmailSnapshot: vi.fn(),
+      setBrokerLoadReference: vi.fn(),
+      setLoadReferences: vi.fn(),
+      setFreightMode: vi.fn(),
+      setEquipmentType: vi.fn(),
+      setTrailerType: vi.fn(),
+      setTrailerSize: vi.fn(),
+      setCommodity,
+      setEstimatedWeight: vi.fn(),
+      setTemperatureRequirement: vi.fn(),
+      setRate: vi.fn(),
+      setCustomerRate: vi.fn(),
+      setMiles: vi.fn(),
+      setInternalNotes: vi.fn(),
+      setDraftStops: vi.fn(),
+    };
+    await applyLoadDocumentParseResponse(emptyRes({ commodity: "Steel" }), cbs);
+    expect(setCommodity).toHaveBeenCalledWith("Steel");
+    setCommodity.mockClear();
+    await applyLoadDocumentParseResponse(emptyRes({}), cbs);
+    expect(setCommodity).toHaveBeenCalledWith("");
+  });
+
+  it("Issue I7: does not write raw_text into internal notes", async () => {
+    const setInternalNotes = vi.fn();
+    const cbs = {
+      setBrokerNameSnapshot: vi.fn(),
+      setBrokerId: vi.fn(),
+      setBrokerContactId: vi.fn(),
+      setBrokerContacts: vi.fn(),
+      setBrokerContactNameSnapshot: vi.fn(),
+      setBrokerContactPhoneSnapshot: vi.fn(),
+      setBrokerContactEmailSnapshot: vi.fn(),
+      setBrokerLoadReference: vi.fn(),
+      setLoadReferences: vi.fn(),
+      setFreightMode: vi.fn(),
+      setEquipmentType: vi.fn(),
+      setTrailerType: vi.fn(),
+      setTrailerSize: vi.fn(),
+      setCommodity: vi.fn(),
+      setEstimatedWeight: vi.fn(),
+      setTemperatureRequirement: vi.fn(),
+      setRate: vi.fn(),
+      setCustomerRate: vi.fn(),
+      setMiles: vi.fn(),
+      setInternalNotes,
+      setDraftStops: vi.fn(),
+    };
+    await applyLoadDocumentParseResponse(
+      { ...emptyRes(), raw_text: "FULL PDF TEXT SHOULD NOT BECOME NOTES" },
+      cbs,
+    );
+    expect(setInternalNotes).not.toHaveBeenCalled();
+  });
 });
