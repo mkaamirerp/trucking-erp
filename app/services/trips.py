@@ -23,6 +23,8 @@ from app.constants.trip_dispatch import (
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_REMOVED,
     LOAD_NOT_READY_FOR_TRIP,
+    TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS,
+    TRIP_ASSIGNMENT_SCHEDULE_OVERLAP,
 )
 from app.models.driver import Driver
 from app.models.load import Load, LoadStop
@@ -684,15 +686,53 @@ def raise_membership_transition_requires_custody(*, action: str) -> None:
 
 
 async def _get_trip_load_row(
-    db: AsyncSession, tenant_id: int, trip_id: int, load_id: int
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+    *,
+    open_only: bool = False,
 ) -> TripLoad | None:
-    return await db.scalar(
-        select(TripLoad).where(
-            TripLoad.tenant_id == tenant_id,
-            TripLoad.trip_id == trip_id,
-            TripLoad.load_id == load_id,
-        )
+    """Issue I17: prefer the latest open membership when multiple historical rows exist."""
+    clauses = [
+        TripLoad.tenant_id == tenant_id,
+        TripLoad.trip_id == trip_id,
+        TripLoad.load_id == load_id,
+    ]
+    if open_only:
+        clauses.append(_trip_load_is_open_clause())
+    stmt = (
+        select(TripLoad)
+        .where(and_(*clauses))
+        .order_by(TripLoad.id.desc())
+        .limit(1)
     )
+    return await db.scalar(stmt)
+
+
+async def get_open_planned_trip_for_load(
+    db: AsyncSession, tenant_id: int, load_id: int
+) -> tuple[int, str] | None:
+    """Issue I13: canonical open PLANNED membership (not active_trip_id)."""
+    row = await db.execute(
+        select(Trip.id, Trip.trip_number)
+        .select_from(TripLoad)
+        .join(
+            Trip,
+            and_(Trip.tenant_id == TripLoad.tenant_id, Trip.id == TripLoad.trip_id),
+        )
+        .where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.load_id == load_id,
+            _trip_load_is_open_planned_clause(),
+        )
+        .order_by(TripLoad.id.desc())
+        .limit(1)
+    )
+    hit = row.first()
+    if hit is None:
+        return None
+    return int(hit[0]), str(hit[1] or "")
 
 
 async def _activate_trip_load_membership_locked(
@@ -713,11 +753,11 @@ async def _activate_trip_load_membership_locked(
             detail={"detail": "Trip is cancelled", "code": "TRIP_CANCELLED"},
         )
 
-    tl = await _get_trip_load_row(db, tenant_id, trip_id, load_id)
+    tl = await _get_trip_load_row(db, tenant_id, trip_id, load_id, open_only=True)
     if tl is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
+            detail={"detail": "No open trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
         )
 
     # Idempotent: already open ACTIVE on this membership.
@@ -941,6 +981,49 @@ def _assignment_snapshot(trip: Trip) -> dict[str, object | None]:
     }
 
 
+async def _validate_decision10_schedule_overlap(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    trip: Trip,
+    driver_id: int | None,
+    truck_id: int | None,
+    trailer_id: int | None,
+) -> None:
+    """Issue I16 — Decision 10: block impossible overlap with an in_progress Trip."""
+    if trip.planned_start_at is None:
+        return
+    asset_filters = []
+    if driver_id is not None:
+        asset_filters.append(Trip.driver_id == driver_id)
+    if truck_id is not None:
+        asset_filters.append(Trip.truck_id == truck_id)
+    if trailer_id is not None:
+        asset_filters.append(Trip.trailer_id == trailer_id)
+    if not asset_filters:
+        return
+    others = await db.execute(
+        select(Trip)
+        .where(
+            Trip.tenant_id == tenant_id,
+            Trip.status == TRIP_CONTAINER_STATUS_IN_PROGRESS,
+            Trip.id != trip.id,
+            or_(*asset_filters),
+        )
+    )
+    for other in others.scalars():
+        if other.expected_completion_at is None:
+            continue
+        if trip.planned_start_at < other.expected_completion_at:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Planned start overlaps current in-progress trip expected completion",
+                    "code": TRIP_ASSIGNMENT_SCHEDULE_OVERLAP,
+                },
+            )
+
+
 async def update_trip_assignment(
     db: AsyncSession,
     tenant_id: int,
@@ -960,6 +1043,19 @@ async def update_trip_assignment(
         )
     _raise_if_trip_already_completed(trip)
 
+    if trip.status == TRIP_CONTAINER_STATUS_IN_PROGRESS and (
+        body.driver_id != trip.driver_id
+        or body.truck_id != trip.truck_id
+        or body.trailer_id != trip.trailer_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Assignment cannot change while trip is in progress; use the approved recovery path",
+                "code": TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS,
+            },
+        )
+
     await _validate_assignment_targets(
         db,
         tenant_id,
@@ -969,6 +1065,15 @@ async def update_trip_assignment(
     )
 
     before = _assignment_snapshot(trip)
+
+    await _validate_decision10_schedule_overlap(
+        db,
+        tenant_id,
+        trip=trip,
+        driver_id=body.driver_id,
+        truck_id=body.truck_id,
+        trailer_id=body.trailer_id,
+    )
 
     trip.driver_id = body.driver_id
     trip.truck_id = body.truck_id
