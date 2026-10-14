@@ -60,7 +60,9 @@ SELECT
     now(),
     now()
 FROM dispatch_trips AS dt
-INNER JOIN trips AS t ON t.legacy_dispatch_trip_id = dt.id
+INNER JOIN trips AS t
+    ON t.legacy_dispatch_trip_id = dt.id
+    AND t.tenant_id = dt.tenant_id
 WHERE dt.load_id IS NOT NULL
   AND NOT EXISTS (
     SELECT 1
@@ -76,6 +78,7 @@ UPDATE loads AS l
 SET active_trip_id = t.id
 FROM trips AS t
 WHERE t.legacy_dispatch_trip_id = l.active_dispatch_trip_id
+  AND t.tenant_id = l.tenant_id
   AND l.active_dispatch_trip_id IS NOT NULL
   AND l.active_trip_id IS DISTINCT FROM t.id
 """
