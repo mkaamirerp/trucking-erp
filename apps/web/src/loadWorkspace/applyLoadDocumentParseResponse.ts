@@ -8,6 +8,11 @@ import { resolveBrokerIdentity, listBrokerContacts } from "@/api";
 import { matchBrokerContactFromParsed } from "@/utils/matchBrokerFromSnapshot";
 import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
 import { workspaceReferencesFromParse } from "@/loadWorkspace/loadOperationalReferences";
+import {
+  applyParseScalarHydration,
+  createEmptyParseHydrationState,
+  type ParseHydrationState,
+} from "@/loadWorkspace/loadParseHydrationState";
 import type { DraftStop } from "@/loadWorkspace/loadWorkspaceShared";
 
 function mapParsedStopType(raw: string | null | undefined): {
@@ -22,6 +27,7 @@ function mapParsedStopType(raw: string | null | undefined): {
   return { stop_type: "UNRESOLVED", parseStopTypeEvidence: evidence ?? "unknown" };
 }
 
+/** @deprecated Use session parse hydration (Issue I18); kept for tests that need a full reset. */
 export function clearParseOwnedCommercialFields(cbs: ApplyLoadDocumentParseCallbacks): void {
   cbs.setBrokerNameSnapshot("");
   cbs.setBrokerId(null);
@@ -108,6 +114,8 @@ export interface ApplyLoadDocumentParseSummary {
   mcOrDotAttempted: boolean;
   /** Issue I19 — stops needing operator classification before save. */
   unresolvedStopCount: number;
+  /** Session-only parse ownership (Issue I18). */
+  parseHydrationState: ParseHydrationState;
 }
 
 /**
@@ -117,22 +125,21 @@ export interface ApplyLoadDocumentParseSummary {
 export async function applyLoadDocumentParseResponse(
   res: LoadDocumentParseResponse,
   cbs: ApplyLoadDocumentParseCallbacks,
+  parseHydrationState?: ParseHydrationState,
 ): Promise<ApplyLoadDocumentParseSummary> {
-  clearParseOwnedCommercialFields(cbs);
+  const hydration =
+    parseHydrationState != null ? parseHydrationState : createEmptyParseHydrationState();
   const ex = res.extracted;
   let resolvedBrokerIdForSummary: number | null = null;
   let brokerContactMatchedForSummary = false;
 
-  const brokerNameSnap = ex.broker_name_snapshot?.trim() ?? "";
-  if (brokerNameSnap) {
-    cbs.setBrokerNameSnapshot(brokerNameSnap);
-  }
+  const nextHydration = applyParseScalarHydration(ex, cbs, hydration);
 
   const mcSnap = ex.broker_mc_number_snapshot?.trim() ?? "";
   const dotSnap = ex.broker_dot_number_snapshot?.trim() ?? "";
   const mcOrDotAttempted = Boolean(mcSnap || dotSnap);
 
-  if (mcSnap || dotSnap) {
+  if (mcOrDotAttempted) {
     let resolvedBrokerId: number | null = null;
     try {
       const resolved = await resolveBrokerIdentity({
@@ -181,20 +188,7 @@ export async function applyLoadDocumentParseResponse(
   if (ex.broker_contact_email_snapshot?.trim()) {
     cbs.setBrokerContactEmailSnapshot(ex.broker_contact_email_snapshot.trim());
   }
-  if (ex.broker_load_reference?.trim()) cbs.setBrokerLoadReference(ex.broker_load_reference.trim());
   cbs.setLoadReferences(workspaceReferencesFromParse(ex.references));
-  if (ex.mode?.trim()) cbs.setFreightMode(ex.mode.trim());
-  if (ex.equipment_type?.trim()) cbs.setEquipmentType(ex.equipment_type.trim());
-  if (ex.trailer_type?.trim()) cbs.setTrailerType(ex.trailer_type.trim());
-  if (ex.trailer_size?.trim()) cbs.setTrailerSize(ex.trailer_size.trim());
-  if (ex.commodity?.trim()) cbs.setCommodity(ex.commodity.trim());
-  if (ex.estimated_weight != null) cbs.setEstimatedWeight(String(ex.estimated_weight));
-  if (ex.temperature_requirement?.trim()) {
-    cbs.setTemperatureRequirement(ex.temperature_requirement.trim());
-  }
-  if (ex.rate != null) cbs.setRate(String(ex.rate));
-  if (ex.customer_rate != null) cbs.setCustomerRate(String(ex.customer_rate));
-  if (ex.miles != null) cbs.setMiles(String(Math.round(ex.miles)));
 
   if (ex.customs_broker_name?.trim()) {
     const prior = (cbs.existingInternalNotes ?? "").trim();
@@ -208,8 +202,6 @@ export async function applyLoadDocumentParseResponse(
     const draft = extractedStopsToDraft(meaningfulStops);
     unresolvedStopCount = draft.filter((d) => (d.stop_type || "").toUpperCase() === "UNRESOLVED").length;
     cbs.setDraftStops(draft);
-  } else {
-    cbs.setDraftStops([]);
   }
 
   return {
@@ -217,5 +209,6 @@ export async function applyLoadDocumentParseResponse(
     brokerContactMatched: brokerContactMatchedForSummary,
     mcOrDotAttempted,
     unresolvedStopCount,
+    parseHydrationState: nextHydration,
   };
 }
