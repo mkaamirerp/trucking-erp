@@ -30,7 +30,12 @@ export function computeLoadWorkspacePdfHydrationResult(
   res: LoadDocumentParseResponse,
   summary: ApplyLoadDocumentParseSummary,
 ): LoadWorkspacePdfHydrationResult {
-  const warnings = res.warnings ?? [];
+  const warnings = [...(res.warnings ?? [])];
+  if (summary.unresolvedStopCount > 0) {
+    warnings.push(
+      `${summary.unresolvedStopCount} stop(s) need an explicit type (Pickup, Delivery, or Drop) before save.`,
+    );
+  }
   const outcome = describeWorkspacePdfParseOutcome(res.extracted, res.raw_text, warnings);
   const tone: LoadWorkspacePdfHydrationTone =
     outcome.tone === "success" ? "success" : outcome.tone === "warning" ? "warning" : "neutral";

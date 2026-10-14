@@ -10,19 +10,50 @@ import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
 import { workspaceReferencesFromParse } from "@/loadWorkspace/loadOperationalReferences";
 import type { DraftStop } from "@/loadWorkspace/loadWorkspaceShared";
 
+function mapParsedStopType(raw: string | null | undefined): {
+  stop_type: DraftStop["stop_type"];
+  parseStopTypeEvidence: string | null;
+} {
+  const evidence = (raw ?? "").trim() || null;
+  const t = (raw || "").toLowerCase();
+  if (t === "pickup") return { stop_type: "PICKUP", parseStopTypeEvidence: null };
+  if (t === "drop") return { stop_type: "DROP", parseStopTypeEvidence: null };
+  if (t === "delivery") return { stop_type: "DELIVERY", parseStopTypeEvidence: null };
+  return { stop_type: "UNRESOLVED", parseStopTypeEvidence: evidence ?? "unknown" };
+}
+
+export function clearParseOwnedCommercialFields(cbs: ApplyLoadDocumentParseCallbacks): void {
+  cbs.setBrokerNameSnapshot("");
+  cbs.setBrokerId(null);
+  cbs.setBrokerContactId(null);
+  cbs.setBrokerContacts([]);
+  cbs.setBrokerContactNameSnapshot("");
+  cbs.setBrokerContactPhoneSnapshot("");
+  cbs.setBrokerContactEmailSnapshot("");
+  cbs.setBrokerLoadReference("");
+  cbs.setLoadReferences([]);
+  cbs.setFreightMode("");
+  cbs.setEquipmentType("");
+  cbs.setTrailerType("");
+  cbs.setTrailerSize("");
+  cbs.setCommodity("");
+  cbs.setEstimatedWeight("");
+  cbs.setTemperatureRequirement("");
+  cbs.setRate("");
+  cbs.setCustomerRate("");
+  cbs.setMiles("");
+}
+
 export function extractedStopsToDraft(stops: LoadDocumentParseStop[]): DraftStop[] {
   const ts = Date.now();
   return stops.map((s, i) => {
-    const t = (s.stop_type || "").toLowerCase();
-    let stop_type: DraftStop["stop_type"] = "PICKUP";
-    if (t === "pickup") stop_type = "PICKUP";
-    else if (t === "drop") stop_type = "DROP";
-    else if (t === "delivery") stop_type = "DELIVERY";
-    else if (t === "other" || t === "unknown") stop_type = "PICKUP";
+    const mapped = mapParsedStopType(s.stop_type);
+    const stop_type = mapped.stop_type;
     return {
       id: 0,
       load_id: 0,
       stop_type,
+      parseStopTypeEvidence: mapped.parseStopTypeEvidence,
       sequence: s.sequence ?? i,
       facility_name: s.facility_name ?? null,
       street: s.street ?? null,
@@ -75,6 +106,8 @@ export interface ApplyLoadDocumentParseSummary {
   resolvedBrokerId: number | null;
   brokerContactMatched: boolean;
   mcOrDotAttempted: boolean;
+  /** Issue I19 — stops needing operator classification before save. */
+  unresolvedStopCount: number;
 }
 
 /**
@@ -85,6 +118,7 @@ export async function applyLoadDocumentParseResponse(
   res: LoadDocumentParseResponse,
   cbs: ApplyLoadDocumentParseCallbacks,
 ): Promise<ApplyLoadDocumentParseSummary> {
+  clearParseOwnedCommercialFields(cbs);
   const ex = res.extracted;
   let resolvedBrokerIdForSummary: number | null = null;
   let brokerContactMatchedForSummary = false;
@@ -162,25 +196,26 @@ export async function applyLoadDocumentParseResponse(
   if (ex.customer_rate != null) cbs.setCustomerRate(String(ex.customer_rate));
   if (ex.miles != null) cbs.setMiles(String(Math.round(ex.miles)));
 
-  let notesBody = res.raw_text?.trim() || "";
   if (ex.customs_broker_name?.trim()) {
-    const cline = `Customs broker (from document): ${ex.customs_broker_name.trim()}`;
-    notesBody = notesBody ? `${notesBody}\n\n---\n${cline}` : cline;
-  }
-  if (notesBody) {
     const prior = (cbs.existingInternalNotes ?? "").trim();
-    if (!prior) cbs.setInternalNotes(notesBody);
-    else if (!prior.includes(notesBody)) cbs.setInternalNotes(`${prior}\n\n---\n${notesBody}`);
+    const cline = `Customs broker (from document): ${ex.customs_broker_name.trim()}`;
+    cbs.setInternalNotes(prior ? `${prior}\n\n---\n${cline}` : cline);
   }
 
   const meaningfulStops = filterMeaningfulParsedStops(ex.stops ?? []);
+  let unresolvedStopCount = 0;
   if (meaningfulStops.length > 0) {
-    cbs.setDraftStops(extractedStopsToDraft(meaningfulStops));
+    const draft = extractedStopsToDraft(meaningfulStops);
+    unresolvedStopCount = draft.filter((d) => (d.stop_type || "").toUpperCase() === "UNRESOLVED").length;
+    cbs.setDraftStops(draft);
+  } else {
+    cbs.setDraftStops([]);
   }
 
   return {
     resolvedBrokerId: resolvedBrokerIdForSummary,
     brokerContactMatched: brokerContactMatchedForSummary,
     mcOrDotAttempted,
+    unresolvedStopCount,
   };
 }
