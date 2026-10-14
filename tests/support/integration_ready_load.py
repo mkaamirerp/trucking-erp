@@ -21,6 +21,8 @@ async def api_create_draft_load(
     client: AsyncClient,
     headers: dict[str, str],
     tag: str,
+    *,
+    tracker: IntegrationResourceTracker | None = None,
     **extra,
 ) -> dict:
     r = await client.post(
@@ -34,7 +36,10 @@ async def api_create_draft_load(
     )
     if r.status_code != 201:
         raise AssertionError(f"create draft load failed: {r.status_code} {r.text}")
-    return r.json()
+    body = r.json()
+    if tracker is not None:
+        tracker.track_load(int(body["id"]))
+    return body
 
 
 async def api_mark_load_ready(
@@ -61,14 +66,18 @@ async def api_create_ready_load(
     *,
     broker_name_snapshot: str = "Integration Broker",
     broker_load_reference: str = "INT-READY",
+    tracker: IntegrationResourceTracker | None = None,
+    **draft_extra,
 ) -> dict:
     draft = await api_create_draft_load(
         client,
         headers,
         tag,
+        tracker=tracker,
         broker_name_snapshot=broker_name_snapshot,
         broker_load_reference=broker_load_reference,
         stops=INTEGRATION_READY_LOAD_STOPS,
+        **draft_extra,
     )
     return await api_mark_load_ready(client, headers, draft)
 
@@ -85,9 +94,11 @@ async def api_create_ready_load_ids(
         return []
     out: list[int] = []
     for i in range(n):
-        body = await api_create_ready_load(client, headers, f"{tag_prefix}-{i}")
-        lid = int(body["id"])
-        if tracker is not None:
-            tracker.track_load(lid)
-        out.append(lid)
+        body = await api_create_ready_load(
+            client,
+            headers,
+            f"{tag_prefix}-{i}",
+            tracker=tracker,
+        )
+        out.append(int(body["id"]))
     return out
