@@ -213,7 +213,7 @@ export function formatEquipmentTempChip(
 }
 
 export function stopToPayload(s: DraftStop, sequence: number): LoadStopWrite {
-  return {
+  const payload: LoadStopWrite = {
     stop_type: s.stop_type,
     sequence,
     facility_name: s.facility_name?.trim() || null,
@@ -229,6 +229,10 @@ export function stopToPayload(s: DraftStop, sequence: number): LoadStopWrite {
     notes: s.notes?.trim() || null,
     commodity_notes: s.commodity_notes?.trim() || null,
   };
+  if (s.id != null && s.id > 0) {
+    (payload as LoadStopWrite & { id?: number }).id = s.id;
+  }
+  return payload;
 }
 
 export function stopsToDraft(stops: LoadStop[] | null | undefined): DraftStop[] {

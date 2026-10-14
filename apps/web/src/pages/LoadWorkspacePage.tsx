@@ -344,7 +344,7 @@ export default function LoadWorkspacePage() {
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
   const onCreatePlannedTrip = useCallback(async () => {
-    if (!load || load.active_trip_id != null) return;
+    if (!load || load.active_trip_id != null || load.open_planned_trip_id != null) return;
     const lid = load.id;
     setCreatePlannedTripBusy(true);
     setCreatePlannedTripError(null);
@@ -660,6 +660,7 @@ export default function LoadWorkspacePage() {
           setCustomerRate,
           setMiles,
           setInternalNotes,
+          existingInternalNotes: internalNotes,
           setDraftStops,
         });
         setParseWarnings(hydration.warnings);
@@ -674,7 +675,7 @@ export default function LoadWorkspacePage() {
         setParseBusy(false);
       }
     },
-    [canWorkspaceParsePdf, hasIntakeThread, intakeThreadId, isManual, loadIdFromRoute],
+    [canWorkspaceParsePdf, hasIntakeThread, intakeThreadId, internalNotes, isManual, loadIdFromRoute],
   );
 
   useOperationalRefresh({
@@ -1336,6 +1337,17 @@ export default function LoadWorkspacePage() {
                 className="font-semibold text-[var(--trk-heading)] hover:underline"
               >
                 View / Assign on Trip →
+              </Link>
+            ) : load.open_planned_trip_id != null ? (
+              <Link
+                to={OPS.TRIP_DETAIL(load.open_planned_trip_id)}
+                className="font-semibold text-[var(--trk-heading)] hover:underline"
+              >
+                Open planned trip
+                {load.open_planned_trip_number?.trim()
+                  ? ` (${load.open_planned_trip_number.trim()})`
+                  : ""}{" "}
+                →
               </Link>
             ) : (
               <button
