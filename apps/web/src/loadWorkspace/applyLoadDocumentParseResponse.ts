@@ -14,10 +14,11 @@ export function extractedStopsToDraft(stops: LoadDocumentParseStop[]): DraftStop
   const ts = Date.now();
   return stops.map((s, i) => {
     const t = (s.stop_type || "").toLowerCase();
-    let stop_type: DraftStop["stop_type"] = "DELIVERY";
+    let stop_type: DraftStop["stop_type"] = "PICKUP";
     if (t === "pickup") stop_type = "PICKUP";
     else if (t === "drop") stop_type = "DROP";
     else if (t === "delivery") stop_type = "DELIVERY";
+    else if (t === "other" || t === "unknown") stop_type = "PICKUP";
     return {
       id: 0,
       load_id: 0,
@@ -65,6 +66,8 @@ export interface ApplyLoadDocumentParseCallbacks {
   setCustomerRate: (v: string) => void;
   setMiles: (v: string) => void;
   setInternalNotes: (v: string) => void;
+  /** Current operator notes before parse apply (Issue I7 — do not overwrite). */
+  existingInternalNotes?: string;
   setDraftStops: Dispatch<SetStateAction<DraftStop[]>>;
 }
 
@@ -164,7 +167,11 @@ export async function applyLoadDocumentParseResponse(
     const cline = `Customs broker (from document): ${ex.customs_broker_name.trim()}`;
     notesBody = notesBody ? `${notesBody}\n\n---\n${cline}` : cline;
   }
-  cbs.setInternalNotes(notesBody);
+  if (notesBody) {
+    const prior = (cbs.existingInternalNotes ?? "").trim();
+    if (!prior) cbs.setInternalNotes(notesBody);
+    else if (!prior.includes(notesBody)) cbs.setInternalNotes(`${prior}\n\n---\n${notesBody}`);
+  }
 
   const meaningfulStops = filterMeaningfulParsedStops(ex.stops ?? []);
   if (meaningfulStops.length > 0) {
