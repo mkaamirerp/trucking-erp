@@ -150,3 +150,15 @@ Do not delete that backup until this TODO is resolved and committed to `main`.
 **Design:** `docs/load_trip/MASTER.md`
 
 On a tenant-scoped broker load number or optional barcode match, pause import and show **Possible Duplicate Load** with **Revised RC** (review differences, explicitly approve changes to existing load, preserve revision/audit history) or **Ignore** (no changes). Do not auto-reject or create a duplicate. Keep the original PDF + JSON AI parsing architecture unchanged.
+
+---
+
+## RBAC — Casbin permission engine
+
+**Status:** TODO — engine selected for the start of RBAC work; implementation not started.
+
+**Decision (2026-10-14):** Start with Casbin (Python/PyCasbin) as TruckERP's backend permission engine. Keep the existing TruckERP user-management UI, authentication, and tenant memberships; extend TruckERP with a tenant-admin Roles & Access page rather than adopting Casdoor or Keycloak.
+
+Initial scope: database-backed role permissions; tenant-scoped member role assignments; a shared permission-check interface for protected backend operations; fixed starter roles and a read-only permission view; audited role changes; last-admin protection; explicit role-assignment permissions; immediate enforcement of role changes and policy refresh across workers. Custom tenant roles can follow later.
+
+Before implementation, inspect current authentication, access levels, membership tables, callers, and tenant scoping. Define the permission catalog and migration from FULL_ACCESS/READ_ONLY, and follow AGENTS.md approval and regression gates for shared contracts. Keep record-level tenant/ownership scoping and financial workflow validation in TruckERP. Test cross-tenant denial, role changes, privilege escalation, and last-admin protection.
