@@ -179,20 +179,21 @@ async def test_teardown_success_does_not_raise(
 async def test_real_cleanup_does_not_remove_untracked_loads(
     client: AsyncClient, override_auth_tenant
 ) -> None:
-    scope = IntegrationTestScope(client, AUTH_HEADERS, context="teardown_peer_safe")
-    await scope.activate()
-    peer_id = await _first_preexisting_load_id(scope)
-    if peer_id is None:
-        pytest.skip("no pre-existing loads in tenant_pytest to use as peer control")
+    peer_id: int | None = None
+    owned_id = 0
+    async with integration_scope_context(client, AUTH_HEADERS, "teardown_peer_safe") as scope:
+        peer_id = await _first_preexisting_load_id(scope)
+        if peer_id is None:
+            pytest.skip("no pre-existing loads in tenant_pytest to use as peer control")
 
-    assert await scope.load_row_exists(int(peer_id))
-    owned_id = await scope.create_ready_load_id("PEER-SAFE-OWNED")
-    assert await scope.load_row_exists(owned_id)
+        assert await scope.load_row_exists(int(peer_id))
+        owned_id = await scope.create_ready_load_id("PEER-SAFE-OWNED")
+        assert await scope.load_row_exists(owned_id)
 
-    await scope.teardown()
-
-    assert await scope.load_row_exists(int(peer_id))
-    assert not await scope.load_row_exists(owned_id)
+    verifier = IntegrationTestScope(client, AUTH_HEADERS, context="teardown_peer_safe_verify")
+    await verifier.activate()
+    assert await verifier.load_row_exists(int(peer_id))
+    assert not await verifier.load_row_exists(owned_id)
 
 
 @pytest.mark.skipif(SKIP, reason="isolated integration tenant DB required (tenant_pytest)")
@@ -200,19 +201,28 @@ async def test_real_cleanup_does_not_remove_untracked_loads(
 async def test_test_failure_preserved_when_teardown_also_fails(
     client: AsyncClient, override_auth_tenant
 ) -> None:
-    mock_cleanup = AsyncMock(side_effect=RuntimeError("teardown cleanup failed"))
+    synthetic_load_id = 30_001
+    mock_load_cleanup = AsyncMock(side_effect=RuntimeError("teardown cleanup failed"))
+    mock_trip_cleanup = AsyncMock()
 
-    with patch(
-        "tests.support.integration_test_resources._cleanup_load_rows",
-        mock_cleanup,
+    with (
+        patch(
+            "tests.support.integration_test_resources._cleanup_load_rows",
+            mock_load_cleanup,
+        ),
+        patch(
+            "tests.support.integration_test_resources._cleanup_trip_rows",
+            mock_trip_cleanup,
+        ),
     ):
         with pytest.raises(RuntimeError, match="original test failure") as raised:
             async with integration_scope_context(
                 client, AUTH_HEADERS, "teardown_preserve_test_failure"
             ) as scope:
-                _ = await scope.create_ready_load_id("PRESERVE-FAIL")
+                scope.tracker.track_load(synthetic_load_id)
                 raise RuntimeError("original test failure")
 
     notes = getattr(raised.value, "__notes__", [])
     assert any("Integration teardown also failed" in note for note in notes)
-    mock_cleanup.assert_awaited()
+    mock_load_cleanup.assert_awaited_once()
+    mock_trip_cleanup.assert_not_awaited()
