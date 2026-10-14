@@ -20,17 +20,27 @@ from tests.support.integration_auth import (
 )
 from tests.support.integration_isolation import (
     AUTH_HEADERS,
+    integration_tenant_db_name,
     require_integration_tenant_database_url,
 )
-from tests.support.integration_test_resources import IntegrationTestScope
+from tests.support.integration_ready_load import (
+    api_create_draft_load,
+    api_mark_load_ready,
+)
+from tests.support.integration_test_resources import (
+    IntegrationTestScope,
+    integration_scope_context,
+)
 
 
 def _integration_db_configured() -> bool:
     try:
-        require_integration_tenant_database_url(context="ready_load_teardown_precheck")
-        return True
+        tenant_url = require_integration_tenant_database_url(context="ready_load_teardown_precheck")
     except IntegrationIsolationError:
         return False
+    from tests.support.integration_isolation import database_name_from_url
+
+    return database_name_from_url(tenant_url) == integration_tenant_db_name()
 
 
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
@@ -61,14 +71,55 @@ def override_auth_tenant(test_bypass_env):
     clear_current_user_and_tenant_overrides(app)
 
 
+async def _assert_load_absent(client: AsyncClient, load_id: int) -> None:
+    scope = IntegrationTestScope(client, AUTH_HEADERS, context="ready_load_teardown_verify")
+    await scope.activate()
+    assert not await scope.load_row_exists(load_id)
+
+
 @pytest.mark.skipif(SKIP, reason="isolated integration tenant DB required (tenant_pytest)")
 @pytest.mark.asyncio
 async def test_tracked_ready_load_removed_after_scope_teardown(
     client: AsyncClient, override_auth_tenant
 ) -> None:
-    scope = IntegrationTestScope(client, AUTH_HEADERS, context="ready_load_teardown")
-    await scope.activate()
-    load_id = await scope.create_ready_load_id("TEARDOWN-REG")
-    assert await scope.load_row_exists(load_id)
-    await scope.teardown()
-    assert not await scope.load_row_exists(load_id)
+    load_id = 0
+    async with integration_scope_context(client, AUTH_HEADERS, "ready_load_teardown") as scope:
+        load_id = await scope.create_ready_load_id("TEARDOWN-REG")
+        assert await scope.load_row_exists(load_id)
+    await _assert_load_absent(client, load_id)
+
+
+@pytest.mark.skipif(SKIP, reason="isolated integration tenant DB required (tenant_pytest)")
+@pytest.mark.asyncio
+async def test_draft_tracked_and_removed_when_mark_ready_fails(
+    client: AsyncClient, override_auth_tenant
+) -> None:
+    load_id = 0
+    async with integration_scope_context(client, AUTH_HEADERS, "mark_ready_fail_teardown") as scope:
+        draft = await api_create_draft_load(
+            scope.client,
+            scope.headers,
+            "MR-FAIL",
+            tracker=scope.tracker,
+        )
+        load_id = int(draft["id"])
+        assert await scope.load_row_exists(load_id)
+        with pytest.raises(AssertionError, match="mark-ready failed"):
+            await api_mark_load_ready(scope.client, scope.headers, draft)
+    await _assert_load_absent(client, load_id)
+
+
+@pytest.mark.skipif(SKIP, reason="isolated integration tenant DB required (tenant_pytest)")
+@pytest.mark.asyncio
+async def test_tracked_load_removed_when_test_raises(
+    client: AsyncClient, override_auth_tenant
+) -> None:
+    load_id = 0
+    with pytest.raises(RuntimeError, match="simulated test failure"):
+        async with integration_scope_context(
+            client, AUTH_HEADERS, "teardown_on_test_exception"
+        ) as scope:
+            load_id = await scope.create_ready_load_id("TEARDOWN-ON-RAISE")
+            assert await scope.load_row_exists(load_id)
+            raise RuntimeError("simulated test failure")
+    await _assert_load_absent(client, load_id)

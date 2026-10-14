@@ -80,14 +80,13 @@ class IntegrationTestScope:
         )
 
     async def create_ready_load(self, tag: str, **extra: Any) -> dict:
-        body = await api_create_ready_load(
+        return await api_create_ready_load(
             self.client,
             self.headers,
             tag,
+            tracker=self.tracker,
             **extra,
         )
-        self.tracker.track_load(int(body["id"]))
-        return body
 
     async def create_ready_load_id(self, tag: str, **extra: Any) -> int:
         return int((await self.create_ready_load(tag, **extra))["id"])
@@ -136,9 +135,19 @@ class IntegrationTestScope:
         try:
             async with Session() as db:
                 for trip_id in reversed(self.tracker.trip_ids):
-                    await _cleanup_trip_rows(db, self.tenant_id, trip_id, context=self.context)
+                    try:
+                        await _cleanup_trip_rows(
+                            db, self.tenant_id, trip_id, context=self.context
+                        )
+                    except Exception:
+                        await db.rollback()
                 for load_id in reversed(self.tracker.load_ids):
-                    await _cleanup_load_rows(db, self.tenant_id, load_id, context=self.context)
+                    try:
+                        await _cleanup_load_rows(
+                            db, self.tenant_id, load_id, context=self.context
+                        )
+                    except Exception:
+                        await db.rollback()
         finally:
             await engine.dispose()
 
