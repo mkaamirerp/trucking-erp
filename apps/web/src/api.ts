@@ -3669,6 +3669,9 @@ export type Load = {
   active_dispatch_trip_id?: number | null;
   /** Mirrored from trips when assigned; use trip workspace for operational view. */
   active_trip_id?: number | null;
+  /** Open PLANNED TripLoad (Issue I13); not the ACTIVE-only active_trip_id mirror. */
+  open_planned_trip_id?: number | null;
+  open_planned_trip_number?: string | null;
   broker_match_method?: string | null;
   broker_match_confidence_tier?: string | null;
   broker_match_explanation?: string | null;
