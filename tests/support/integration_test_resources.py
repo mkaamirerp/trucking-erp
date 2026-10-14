@@ -16,6 +16,25 @@ class IntegrationCleanupFailure:
     error: BaseException
 
 
+class IntegrationFleetDependencyError(Exception):
+    """Untracked trip(s) still reference a test-scoped fleet asset; refuse broad FK nulling."""
+
+    def __init__(
+        self,
+        *,
+        asset_kind: Literal["driver", "truck", "trailer"],
+        asset_id: int,
+        blocking_trip_ids: list[int],
+    ) -> None:
+        self.asset_kind = asset_kind
+        self.asset_id = int(asset_id)
+        self.blocking_trip_ids = [int(x) for x in blocking_trip_ids]
+        super().__init__(
+            f"cannot delete test {asset_kind} id={asset_id}: "
+            f"untracked trip(s) still reference it: {self.blocking_trip_ids}"
+        )
+
+
 class IntegrationCleanupError(Exception):
     """Raised when one or more tracked integration resources could not be cleaned up."""
 
@@ -221,10 +240,15 @@ class IntegrationTestScope:
                             IntegrationCleanupFailure("load", int(load_id), exc)
                         )
                         await db.rollback()
+                tracked_trip_ids = frozenset(int(x) for x in self.tracker.trip_ids)
                 for driver_id in reversed(self.tracker.driver_ids):
                     try:
                         await _cleanup_driver_rows(
-                            db, self.tenant_id, driver_id, context=self.context
+                            db,
+                            self.tenant_id,
+                            driver_id,
+                            tracked_trip_ids=tracked_trip_ids,
+                            context=self.context,
                         )
                     except Exception as exc:
                         failures.append(
@@ -234,7 +258,11 @@ class IntegrationTestScope:
                 for truck_id in reversed(self.tracker.truck_ids):
                     try:
                         await _cleanup_truck_rows(
-                            db, self.tenant_id, truck_id, context=self.context
+                            db,
+                            self.tenant_id,
+                            truck_id,
+                            tracked_trip_ids=tracked_trip_ids,
+                            context=self.context,
                         )
                     except Exception as exc:
                         failures.append(
@@ -244,7 +272,11 @@ class IntegrationTestScope:
                 for trailer_id in reversed(self.tracker.trailer_ids):
                     try:
                         await _cleanup_trailer_rows(
-                            db, self.tenant_id, trailer_id, context=self.context
+                            db,
+                            self.tenant_id,
+                            trailer_id,
+                            tracked_trip_ids=tracked_trip_ids,
+                            context=self.context,
                         )
                     except Exception as exc:
                         failures.append(
@@ -292,13 +324,59 @@ async def _cleanup_trip_rows(
     await db.commit()
 
 
+async def _trip_ids_referencing_fleet_asset(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    column: Literal["driver", "truck", "trailer"],
+    asset_id: int,
+) -> list[int]:
+    col = f"{column}_id"
+    result = await db.execute(
+        text(
+            f"select id from trips where tenant_id=:t and {col}=:aid order by id"
+        ),
+        {"t": tenant_id, "aid": int(asset_id)},
+    )
+    return [int(row[0]) for row in result.fetchall()]
+
+
+async def _assert_safe_to_delete_fleet_asset(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    asset_kind: Literal["driver", "truck", "trailer"],
+    asset_id: int,
+    tracked_trip_ids: frozenset[int],
+) -> None:
+    """Refuse delete if any *untracked* trip still references the asset (no broad FK nulling)."""
+    refs = await _trip_ids_referencing_fleet_asset(
+        db, tenant_id, column=asset_kind, asset_id=asset_id
+    )
+    untracked = [tid for tid in refs if tid not in tracked_trip_ids]
+    if untracked:
+        raise IntegrationFleetDependencyError(
+            asset_kind=asset_kind,
+            asset_id=asset_id,
+            blocking_trip_ids=untracked,
+        )
+
+
 async def _cleanup_driver_rows(
-    db: AsyncSession, tenant_id: int, driver_id: int, *, context: str
+    db: AsyncSession,
+    tenant_id: int,
+    driver_id: int,
+    *,
+    tracked_trip_ids: frozenset[int],
+    context: str,
 ) -> None:
     await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_driver")
-    await db.execute(
-        text("update trips set driver_id=null where tenant_id=:t and driver_id=:i"),
-        {"t": tenant_id, "i": driver_id},
+    await _assert_safe_to_delete_fleet_asset(
+        db,
+        tenant_id,
+        asset_kind="driver",
+        asset_id=driver_id,
+        tracked_trip_ids=tracked_trip_ids,
     )
     await db.execute(
         text("delete from drivers where tenant_id=:t and id=:i"),
@@ -308,12 +386,20 @@ async def _cleanup_driver_rows(
 
 
 async def _cleanup_truck_rows(
-    db: AsyncSession, tenant_id: int, truck_id: int, *, context: str
+    db: AsyncSession,
+    tenant_id: int,
+    truck_id: int,
+    *,
+    tracked_trip_ids: frozenset[int],
+    context: str,
 ) -> None:
     await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_truck")
-    await db.execute(
-        text("update trips set truck_id=null where tenant_id=:t and truck_id=:i"),
-        {"t": tenant_id, "i": truck_id},
+    await _assert_safe_to_delete_fleet_asset(
+        db,
+        tenant_id,
+        asset_kind="truck",
+        asset_id=truck_id,
+        tracked_trip_ids=tracked_trip_ids,
     )
     await db.execute(
         text("delete from trucks where tenant_id=:t and id=:i"),
@@ -323,12 +409,20 @@ async def _cleanup_truck_rows(
 
 
 async def _cleanup_trailer_rows(
-    db: AsyncSession, tenant_id: int, trailer_id: int, *, context: str
+    db: AsyncSession,
+    tenant_id: int,
+    trailer_id: int,
+    *,
+    tracked_trip_ids: frozenset[int],
+    context: str,
 ) -> None:
     await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_trailer")
-    await db.execute(
-        text("update trips set trailer_id=null where tenant_id=:t and trailer_id=:i"),
-        {"t": tenant_id, "i": trailer_id},
+    await _assert_safe_to_delete_fleet_asset(
+        db,
+        tenant_id,
+        asset_kind="trailer",
+        asset_id=trailer_id,
+        tracked_trip_ids=tracked_trip_ids,
     )
     await db.execute(
         text("delete from trailers where tenant_id=:t and id=:i"),
