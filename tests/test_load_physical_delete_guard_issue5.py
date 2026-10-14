@@ -244,7 +244,18 @@ class TestLoadPhysicalDeleteGuardIssue5:
         assert _detail_code(r.json()) == LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED
 
     async def test_load_with_trip_membership_returns_409_disabled(self, issue5_http) -> None:
-        load = await issue5_http.new_draft()
+        load = await issue5_http.new_draft(
+            broker_name_snapshot="Broker",
+            broker_load_reference="REF-I5",
+            stops=_VALID_STOPS,
+        )
+        cv = int(load["concurrency_version"])
+        mr = await issue5_http.client.post(
+            f"/api/v1/loads/{load['id']}/mark-ready",
+            headers=AUTH_HEADERS,
+            json={"expected_concurrency_version": cv},
+        )
+        assert mr.status_code == 200, mr.text
         await issue5_http.new_planned_trip([int(load["id"])])
         assert len(issue5_http.created_trip_ids) == 1
         r = await _delete(issue5_http.client, int(load["id"]), int(load["concurrency_version"]))

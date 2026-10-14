@@ -86,13 +86,14 @@ async def locked_prefix(client, override_auth_tenant) -> str:
 
 
 async def _pick_load_id(client: AsyncClient) -> int | None:
-    lr = await client.get("/api/v1/loads?page=1&size=5", headers=AUTH_HEADERS)
+    lr = await client.get("/api/v1/loads?page=1&size=20", headers=AUTH_HEADERS)
     if lr.status_code != 200:
         return None
     items = lr.json().get("items") or []
-    if not items:
-        return None
-    return int(items[0]["id"])
+    for item in items:
+        if (item.get("status") or "").strip().lower() == "ready":
+            return int(item["id"])
+    return None
 
 
 async def _clear_open_memberships(load_id: int) -> None:
