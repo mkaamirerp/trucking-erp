@@ -61,6 +61,12 @@ import {
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
+import {
+  createEmptyParseHydrationState,
+  registerManualParseFieldEdit,
+  type ParseHydrationState,
+  type ParseScalarFieldKey,
+} from "@/loadWorkspace/loadParseHydrationState";
 import { validateDraftStopsClassifiedForSave } from "@/loadWorkspace/loadStopClassification";
 import { SectionSettlement } from "@/components/load/SectionSettlement";
 
@@ -404,6 +410,7 @@ export default function LoadWorkspacePage() {
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
+  const parseHydrationRef = useRef<ParseHydrationState>(createEmptyParseHydrationState());
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
   const docLineRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
@@ -627,6 +634,95 @@ export default function LoadWorkspacePage() {
   const canWorkspaceParsePdf =
     workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail";
 
+  const trackParseManualScalar = useCallback((key: ParseScalarFieldKey, value: string) => {
+    registerManualParseFieldEdit(parseHydrationRef.current, key, value);
+  }, []);
+
+  const setBrokerNameSnapshotTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("brokerNameSnapshot", v);
+      setBrokerNameSnapshot(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setBrokerLoadReferenceTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("brokerLoadReference", v);
+      setBrokerLoadReference(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setFreightModeTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("freightMode", v);
+      setFreightMode(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setEquipmentTypeTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("equipmentType", v);
+      setEquipmentType(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setTrailerTypeTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("trailerType", v);
+      setTrailerType(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setTrailerSizeTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("trailerSize", v);
+      setTrailerSize(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setCommodityTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("commodity", v);
+      setCommodity(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setEstimatedWeightTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("estimatedWeight", v);
+      setEstimatedWeight(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setTemperatureRequirementTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("temperatureRequirement", v);
+      setTemperatureRequirement(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setRateTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("rate", v);
+      setRate(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setCustomerRateTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("customerRate", v);
+      setCustomerRate(v);
+    },
+    [trackParseManualScalar],
+  );
+  const setMilesTracked = useCallback(
+    (v: string) => {
+      trackParseManualScalar("miles", v);
+      setMiles(v);
+    },
+    [trackParseManualScalar],
+  );
+
   const onParseWorkspacePdf = useCallback(
     async (file: File) => {
       if (!canWorkspaceParsePdf) return;
@@ -640,30 +736,35 @@ export default function LoadWorkspacePage() {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
         });
-        const hydration = await hydrateLoadWorkspaceFromParseResponse(res, {
-          setBrokerNameSnapshot,
-          setBrokerId,
-          setBrokerContactId,
-          setBrokerContacts,
-          setBrokerContactNameSnapshot,
-          setBrokerContactPhoneSnapshot,
-          setBrokerContactEmailSnapshot,
-          setBrokerLoadReference,
-          setLoadReferences,
-          setFreightMode,
-          setEquipmentType,
-          setTrailerType,
-          setTrailerSize,
-          setCommodity,
-          setEstimatedWeight,
-          setTemperatureRequirement,
-          setRate,
-          setCustomerRate,
-          setMiles,
-          setInternalNotes,
-          existingInternalNotes: internalNotes,
-          setDraftStops,
-        });
+        const hydration = await hydrateLoadWorkspaceFromParseResponse(
+          res,
+          {
+            setBrokerNameSnapshot,
+            setBrokerId,
+            setBrokerContactId,
+            setBrokerContacts,
+            setBrokerContactNameSnapshot,
+            setBrokerContactPhoneSnapshot,
+            setBrokerContactEmailSnapshot,
+            setBrokerLoadReference,
+            setLoadReferences,
+            setFreightMode,
+            setEquipmentType,
+            setTrailerType,
+            setTrailerSize,
+            setCommodity,
+            setEstimatedWeight,
+            setTemperatureRequirement,
+            setRate,
+            setCustomerRate,
+            setMiles,
+            setInternalNotes,
+            existingInternalNotes: internalNotes,
+            setDraftStops,
+          },
+          parseHydrationRef.current,
+        );
+        parseHydrationRef.current = hydration.parseHydrationState;
         setParseWarnings(hydration.warnings);
         const tone: WorkspaceToolbarTone = hydration.toolbar.tone;
         setToolbarMessage({ text: hydration.toolbar.text, tone });
@@ -1651,7 +1752,7 @@ export default function LoadWorkspacePage() {
             brokerContactId={brokerContactId}
             setBrokerContactId={setBrokerContactId}
             brokerNameSnapshot={brokerNameSnapshot}
-            setBrokerNameSnapshot={setBrokerNameSnapshot}
+            setBrokerNameSnapshot={setBrokerNameSnapshotTracked}
             brokerContactNameSnapshot={brokerContactNameSnapshot}
             setBrokerContactNameSnapshot={setBrokerContactNameSnapshot}
             brokerContactPhoneSnapshot={brokerContactPhoneSnapshot}
@@ -1661,32 +1762,32 @@ export default function LoadWorkspacePage() {
             brokerContactEmailSnapshot={brokerContactEmailSnapshot}
             setBrokerContactEmailSnapshot={setBrokerContactEmailSnapshot}
             brokerLoadReference={brokerLoadReference}
-            setBrokerLoadReference={setBrokerLoadReference}
+            setBrokerLoadReference={setBrokerLoadReferenceTracked}
             loadReferences={loadReferences}
             freightMode={freightMode}
-            setFreightMode={setFreightMode}
+            setFreightMode={setFreightModeTracked}
             equipmentType={equipmentType}
-            setEquipmentType={setEquipmentType}
+            setEquipmentType={setEquipmentTypeTracked}
             trailerType={trailerType}
-            setTrailerType={setTrailerType}
+            setTrailerType={setTrailerTypeTracked}
             trailerSize={trailerSize}
-            setTrailerSize={setTrailerSize}
+            setTrailerSize={setTrailerSizeTracked}
             commodity={commodity}
-            setCommodity={setCommodity}
+            setCommodity={setCommodityTracked}
             estimatedWeight={estimatedWeight}
-            setEstimatedWeight={setEstimatedWeight}
+            setEstimatedWeight={setEstimatedWeightTracked}
             hazmat={hazmat}
             setHazmat={setHazmat}
             temperatureRequirement={temperatureRequirement}
-            setTemperatureRequirement={setTemperatureRequirement}
+            setTemperatureRequirement={setTemperatureRequirementTracked}
             palletCaseCount={palletCaseCount}
             setPalletCaseCount={setPalletCaseCount}
             rate={rate}
-            setRate={setRate}
+            setRate={setRateTracked}
             customerRate={customerRate}
-            setCustomerRate={setCustomerRate}
+            setCustomerRate={setCustomerRateTracked}
             miles={miles}
-            setMiles={setMiles}
+            setMiles={setMilesTracked}
             driverId={driverId}
             truckId={truckId}
             trailerAssetId={trailerId}

@@ -8,6 +8,7 @@ import {
   type ApplyLoadDocumentParseCallbacks,
   type ApplyLoadDocumentParseSummary,
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
+import type { ParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
 import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
 import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
 
@@ -17,6 +18,7 @@ export type LoadWorkspacePdfHydrationTone = "success" | "warning" | "error" | "n
 export interface LoadWorkspacePdfHydrationResult {
   /** Broker resolution summary from applyLoadDocumentParseResponse. */
   summary: ApplyLoadDocumentParseSummary;
+  parseHydrationState: ParseHydrationState;
   warnings: string[];
   toolbar: { text: string; tone: LoadWorkspacePdfHydrationTone };
   appliedLabels: string[] | null;
@@ -59,7 +61,9 @@ export function computeLoadWorkspacePdfHydrationResult(
 export async function hydrateLoadWorkspaceFromParseResponse(
   res: LoadDocumentParseResponse,
   cbs: ApplyLoadDocumentParseCallbacks,
+  parseHydrationState?: ParseHydrationState,
 ): Promise<LoadWorkspacePdfHydrationResult> {
-  const summary = await applyLoadDocumentParseResponse(res, cbs);
-  return computeLoadWorkspacePdfHydrationResult(res, summary);
+  const summary = await applyLoadDocumentParseResponse(res, cbs, parseHydrationState);
+  const ux = computeLoadWorkspacePdfHydrationResult(res, summary);
+  return { ...ux, parseHydrationState: summary.parseHydrationState };
 }

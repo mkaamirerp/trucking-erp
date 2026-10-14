@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -594,26 +594,14 @@ async def update_load(
     stop_audit_diff: dict[str, object] | None = None
     if "stops" in payload.model_dump(exclude_unset=True):
         stops_payload: Sequence[LoadStopCreate] = payload.stops or []
-        if not stops_payload:
-            for row in (await db.execute(
-                select(LoadStop).where(LoadStop.tenant_id == tenant_id, LoadStop.load_id == load_id)
-            )).scalars():
-                if await _stop_has_operational_history(db, tenant_id, row):
-                    raise _legacy_write_conflict(
-                        LOAD_STOP_REMOVAL_FORBIDDEN,
-                        "Cannot clear all stops while operational stop history exists.",
-                    )
-            await db.execute(
-                delete(LoadStop).where(LoadStop.load_id == load_id, LoadStop.tenant_id == tenant_id)
-            )
-            stop_audit_diff = {"removed_all": True, "removed": [], "updated": [], "added": []}
-        else:
-            stop_audit_diff = await _sync_load_stops_on_update(
-                db,
-                tenant_id,
-                load_id,
-                stops_payload,
-            )
+        stop_audit_diff = await _sync_load_stops_on_update(
+            db,
+            tenant_id,
+            load_id,
+            stops_payload,
+        )
+        if not stops_payload and stop_audit_diff.get("removed"):
+            stop_audit_diff = {**stop_audit_diff, "removed_all": True}
 
     # Issue 26: keep Load mutation and audit in one transaction (no commit before audit).
     await db.flush()

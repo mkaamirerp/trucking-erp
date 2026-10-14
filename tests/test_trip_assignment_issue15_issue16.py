@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
+os.environ.setdefault("TEST_BYPASS_AUTH", "1")
 
 from app.constants.trip_dispatch import (
     TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS,
@@ -25,6 +26,7 @@ from tests.support.integration_auth import (
     install_host_aligned_current_user_and_tenant,
 )
 from tests.support.integration_isolation import AUTH_HEADERS, require_integration_tenant_database_url
+from tests.support.integration_test_resources import integration_scope_context
 
 SKIP = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 
@@ -42,71 +44,56 @@ def override_auth_tenant():
     clear_current_user_and_tenant_overrides(app)
 
 
-async def _fleet_ids(client: AsyncClient) -> tuple[int, int, int] | None:
-    dr = await client.get("/api/v1/drivers?limit=5", headers=AUTH_HEADERS)
-    tr = await client.get("/api/v1/trucks?page=1&size=5", headers=AUTH_HEADERS)
-    rr = await client.get("/api/v1/trailers?page=1&size=5", headers=AUTH_HEADERS)
-    if dr.status_code != 200 or tr.status_code != 200 or rr.status_code != 200:
-        return None
-    dlist = dr.json()
-    tlist = tr.json().get("items") or []
-    rlist = rr.json().get("items") or []
-    if not dlist or not tlist or not rlist:
-        return None
-    return int(dlist[0]["id"]), int(tlist[0]["id"]), int(rlist[0]["id"])
+@pytest.fixture
+async def integration_scope(client, override_auth_tenant):
+    async with integration_scope_context(client, AUTH_HEADERS, "i15_i16_assignment") as scope:
+        yield scope
 
 
 @pytest.mark.skipif(SKIP, reason="tenant_pytest required")
 class TestTripAssignmentIssue15:
-    async def test_in_progress_swap_rejected(self, client: AsyncClient, override_auth_tenant) -> None:
-        assets = await _fleet_ids(client)
-        if not assets:
-            pytest.skip("fleet seed required")
-        d0, t0, r0 = assets
-        cr = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
-        assert cr.status_code == 201
-        trip_id = cr.json()["id"]
-        await client.put(
+    async def test_in_progress_swap_rejected(self, integration_scope) -> None:
+        d0, t0, r0 = await integration_scope.create_fleet_bundle(f"I15-{uuid.uuid4().hex[:6]}")
+        d1, _, _ = await integration_scope.create_fleet_bundle(f"I15B-{uuid.uuid4().hex[:6]}")
+        tr = await integration_scope.post_planned_trip([])
+        assert tr.status_code == 201
+        trip_id = tr.json()["id"]
+        await integration_scope.client.put(
             f"/api/v1/trips/{trip_id}/assignment",
             headers=AUTH_HEADERS,
             json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
         )
-        sig = await client.post(f"/api/v1/trips/{trip_id}/execution-signal", headers=AUTH_HEADERS, json={})
+        sig = await integration_scope.client.post(
+            f"/api/v1/trips/{trip_id}/execution-signal",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual"},
+        )
         assert sig.status_code == 200
         assert sig.json()["status"] == TRIP_CONTAINER_STATUS_IN_PROGRESS
 
-        dr = await client.get("/api/v1/drivers?limit=5", headers=AUTH_HEADERS)
-        d_alt = int(dr.json()[1]["id"]) if len(dr.json()) > 1 else d0
-        bad = await client.put(
+        bad = await integration_scope.client.put(
             f"/api/v1/trips/{trip_id}/assignment",
             headers=AUTH_HEADERS,
-            json={"driver_id": d_alt, "truck_id": t0, "trailer_id": r0},
+            json={"driver_id": d1, "truck_id": t0, "trailer_id": r0},
         )
         assert bad.status_code == 409
         assert bad.json()["detail"]["code"] == TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS
 
-    async def test_in_progress_same_assignment_idempotent(self, client: AsyncClient, override_auth_tenant) -> None:
-        assets = await _fleet_ids(client)
-        if not assets:
-            pytest.skip("fleet seed required")
-        d0, t0, r0 = assets
-        cr = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
-        trip_id = cr.json()["id"]
-        await client.put(
+    async def test_in_progress_same_assignment_idempotent(self, integration_scope) -> None:
+        d0, t0, r0 = await integration_scope.create_fleet_bundle(f"I15I-{uuid.uuid4().hex[:6]}")
+        tr = await integration_scope.post_planned_trip([])
+        trip_id = tr.json()["id"]
+        await integration_scope.client.put(
             f"/api/v1/trips/{trip_id}/assignment",
             headers=AUTH_HEADERS,
             json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
         )
-        await client.post(f"/api/v1/trips/{trip_id}/execution-signal", headers=AUTH_HEADERS, json={})
-        ok = await client.put(
+        await integration_scope.client.post(
+            f"/api/v1/trips/{trip_id}/execution-signal",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual"},
+        )
+        ok = await integration_scope.client.put(
             f"/api/v1/trips/{trip_id}/assignment",
             headers=AUTH_HEADERS,
             json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
@@ -116,55 +103,51 @@ class TestTripAssignmentIssue15:
 
 @pytest.mark.skipif(SKIP, reason="tenant_pytest required")
 class TestTripAssignmentIssue16:
-    async def test_overlap_same_driver_blocked(self, client: AsyncClient, override_auth_tenant) -> None:
-        assets = await _fleet_ids(client)
-        if not assets:
-            pytest.skip("fleet seed required")
-        d0, t0, r0 = assets
-        tenant_url = require_integration_tenant_database_url(context="i16_overlap")
+    async def test_overlap_same_driver_blocked(self, integration_scope) -> None:
+        d0, t0, r0 = await integration_scope.create_fleet_bundle(f"I16-{uuid.uuid4().hex[:6]}")
+        tenant_url = integration_scope.tenant_url
         now = datetime.now(timezone.utc)
         end = now + timedelta(hours=4)
 
-        cr_a = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
-        trip_a = cr_a.json()["id"]
-        await client.put(
+        tr_a = await integration_scope.post_planned_trip([])
+        trip_a = tr_a.json()["id"]
+        asg_a = await integration_scope.client.put(
             f"/api/v1/trips/{trip_a}/assignment",
             headers=AUTH_HEADERS,
             json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
         )
-        await client.post(f"/api/v1/trips/{trip_a}/execution-signal", headers=AUTH_HEADERS, json={})
-
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-        engine = create_async_engine(to_async_pg_url(tenant_url), pool_pre_ping=True)
-        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with Session() as db:
-            await db.execute(
-                text(
-                    "update trips set expected_completion_at=:e where id=:i"
-                ),
-                {"e": end, "i": int(trip_a)},
-            )
-            await db.commit()
-        await engine.dispose()
-
-        cr_b = await client.post(
-            "/api/v1/trips",
+        assert asg_a.status_code == 200
+        sch_a = await integration_scope.client.put(
+            f"/api/v1/trips/{trip_a}/schedule",
             headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
+            json={
+                "planned_start_at": now.isoformat(),
+                "expected_completion_at": end.isoformat(),
+            },
         )
-        trip_b = cr_b.json()["id"]
+        assert sch_a.status_code == 200
+        sig_a = await integration_scope.client.post(
+            f"/api/v1/trips/{trip_a}/execution-signal",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual"},
+        )
+        assert sig_a.status_code == 200
+        assert sig_a.json()["status"] == TRIP_CONTAINER_STATUS_IN_PROGRESS
+
+        tr_b = await integration_scope.post_planned_trip([])
+        trip_b = tr_b.json()["id"]
         start = now + timedelta(hours=1)
-        await client.put(
+        sched = await integration_scope.client.put(
             f"/api/v1/trips/{trip_b}/schedule",
             headers=AUTH_HEADERS,
-            json={"planned_start_at": start.isoformat()},
+            json={
+                "planned_start_at": start.isoformat(),
+                "expected_completion_at": None,
+            },
         )
-        bad = await client.put(
+        assert sched.status_code == 200
+
+        bad = await integration_scope.client.put(
             f"/api/v1/trips/{trip_b}/assignment",
             headers=AUTH_HEADERS,
             json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
@@ -172,22 +155,59 @@ class TestTripAssignmentIssue16:
         assert bad.status_code == 409
         assert bad.json()["detail"]["code"] == TRIP_ASSIGNMENT_SCHEDULE_OVERLAP
 
-    async def test_missing_planned_start_does_not_overlap_block(
-        self, client: AsyncClient, override_auth_tenant
-    ) -> None:
-        assets = await _fleet_ids(client)
-        if not assets:
-            pytest.skip("fleet seed required")
-        d0, t0, r0 = assets
-        cr = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
-        trip_id = cr.json()["id"]
-        ok = await client.put(
+    async def test_missing_planned_start_does_not_overlap_block(self, integration_scope) -> None:
+        d0, t0, r0 = await integration_scope.create_fleet_bundle(f"I16M-{uuid.uuid4().hex[:6]}")
+        tr = await integration_scope.post_planned_trip([])
+        trip_id = tr.json()["id"]
+        ok = await integration_scope.client.put(
             f"/api/v1/trips/{trip_id}/assignment",
             headers=AUTH_HEADERS,
             json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
+        )
+        assert ok.status_code == 200
+
+    async def test_non_overlapping_driver_allowed(self, integration_scope) -> None:
+        d0, t0, r0 = await integration_scope.create_fleet_bundle(f"I16N-{uuid.uuid4().hex[:6]}")
+        d1, t1, r1 = await integration_scope.create_fleet_bundle(f"I16N2-{uuid.uuid4().hex[:6]}")
+        tenant_url = integration_scope.tenant_url
+        now = datetime.now(timezone.utc)
+
+        tr_a = await integration_scope.post_planned_trip([])
+        trip_a = tr_a.json()["id"]
+        await integration_scope.client.put(
+            f"/api/v1/trips/{trip_a}/assignment",
+            headers=AUTH_HEADERS,
+            json={"driver_id": d0, "truck_id": t0, "trailer_id": r0},
+        )
+        await integration_scope.client.put(
+            f"/api/v1/trips/{trip_a}/schedule",
+            headers=AUTH_HEADERS,
+            json={"planned_start_at": now.isoformat()},
+        )
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        engine = create_async_engine(to_async_pg_url(tenant_url), pool_pre_ping=True)
+        Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with Session() as db:
+            await db.execute(
+                text("update trips set expected_completion_at=:e where id=:i"),
+                {"e": now + timedelta(hours=2), "i": int(trip_a)},
+            )
+            await db.commit()
+        await engine.dispose()
+
+        tr_b = await integration_scope.post_planned_trip([])
+        trip_b = tr_b.json()["id"]
+        later = now + timedelta(hours=5)
+        await integration_scope.client.put(
+            f"/api/v1/trips/{trip_b}/schedule",
+            headers=AUTH_HEADERS,
+            json={"planned_start_at": later.isoformat()},
+        )
+        ok = await integration_scope.client.put(
+            f"/api/v1/trips/{trip_b}/assignment",
+            headers=AUTH_HEADERS,
+            json={"driver_id": d1, "truck_id": t1, "trailer_id": r1},
         )
         assert ok.status_code == 200

@@ -127,7 +127,7 @@ async def parse_pdf_bytes_to_load_document_response(
     base_warnings.extend(excl_warnings)
 
     handoff = build_load_rate_con_openai_handoff_v2_payload(
-        tenant_identity_exclusion=exclusion,
+        tenant_identity_exclusion=_strip_exclusion_internal_keys(exclusion),
         pages=handoff_pages,
         filename=fn,
         extraction_method="product_pdf_text",
@@ -174,7 +174,7 @@ async def parse_pdf_bytes_to_load_document_response(
     )
     response = apply_load_parser_mechanical_validation(
         response,
-        tenant_identity_exclusion=exclusion,
+        tenant_identity_exclusion=_exclusion_for_mechanical_validation(exclusion),
         page_texts=[str(p.get("text") or "") for p in handoff_pages],
     )
     return await _canonicalize_broker_snapshot_from_tenant_registry(
@@ -227,7 +227,7 @@ async def _parse_scanned_image_with_ocr(
     warnings.extend(excl_warnings)
 
     handoff = build_load_rate_con_openai_handoff_v2_payload(
-        tenant_identity_exclusion=exclusion,
+        tenant_identity_exclusion=_strip_exclusion_internal_keys(exclusion),
         pages=handoff_pages,
         filename=filename,
         extraction_method="product_pdf_ocr",
@@ -282,12 +282,23 @@ async def _parse_scanned_image_with_ocr(
     response = LoadDocumentParseResponse.model_validate(payload)
     response = apply_load_parser_mechanical_validation(
         response,
-        tenant_identity_exclusion=exclusion,
+        tenant_identity_exclusion=_exclusion_for_mechanical_validation(exclusion),
         page_texts=[str(p.get("text") or "") for p in handoff_pages],
     )
     return await _canonicalize_broker_snapshot_from_tenant_registry(
         db, tenant_id=int(tenant_id), response=response
     )
+
+
+def _strip_exclusion_internal_keys(excl: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in excl.items() if not str(k).startswith("_")}
+
+
+def _exclusion_for_mechanical_validation(excl: dict[str, Any]) -> dict[str, Any] | None:
+    """Do not treat failed lookup as a successful empty exclusion set (Issue I21)."""
+    if excl.get("_exclusion_lookup_failed"):
+        return None
+    return _strip_exclusion_internal_keys(excl)
 
 
 async def _load_tenant_identity_exclusion(
@@ -306,10 +317,16 @@ async def _load_tenant_identity_exclusion(
                 platform_db, tenant_id=int(tenant_id)
             )
         if not isinstance(excl, dict):
-            return dict(_EMPTY_EXCLUSION), ["tenant_identity_exclusion: invalid shape"]
+            failed = dict(_EMPTY_EXCLUSION)
+            failed["_exclusion_lookup_failed"] = True
+            return failed, ["tenant_identity_exclusion_unavailable: invalid shape"]
+        if excl.get("_exclusion_lookup_failed"):
+            return excl, ["tenant_identity_exclusion_unavailable: tenant_lookup_failed"]
         return excl, []
     except Exception as exc:  # noqa: BLE001 — parse must not hard-fail on exclusion lookup
-        return dict(_EMPTY_EXCLUSION), [
+        failed = dict(_EMPTY_EXCLUSION)
+        failed["_exclusion_lookup_failed"] = True
+        return failed, [
             f"tenant_identity_exclusion_unavailable: {type(exc).__name__}"
         ]
 
