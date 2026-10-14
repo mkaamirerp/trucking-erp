@@ -314,7 +314,6 @@ class TestTripLoadReadinessGateIssue12:
         assert _detail_code(r.json()) == LOAD_NOT_READY_FOR_TRIP
 
     async def test_f_wrong_tenant_load_404(self, issue12_http, locked_prefix: str) -> None:
-        ready = await issue12_http.new_ready("I12-404")
         r_trip = await issue12_http.client.post(
             "/api/v1/trips",
             headers=AUTH_HEADERS,
@@ -324,24 +323,47 @@ class TestTripLoadReadinessGateIssue12:
         trip_id = int(r_trip.json()["id"])
         issue12_http.track_trip(trip_id)
 
+        auth_tenant = issue12_http.tenant_id
+        foreign_tenant = auth_tenant + 9_000_001
+        foreign_load_id: int | None = None
+
         engine = create_async_engine(to_async_pg_url(issue12_http.tenant_url), pool_pre_ping=True)
         Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
         try:
             async with Session() as session:
-                other_tenant = issue12_http.tenant_id + 99_999
+                foreign_load_id = int(
+                    (
+                        await session.execute(
+                            text(
+                                """
+                                INSERT INTO loads (tenant_id, load_number, status, concurrency_version)
+                                VALUES (:t, :ln, 'ready', 1)
+                                RETURNING id
+                                """
+                            ),
+                            {
+                                "t": foreign_tenant,
+                                "ln": f"FOREIGN-{uuid.uuid4().hex[:10]}",
+                            },
+                        )
+                    ).scalar_one()
+                )
+                await session.commit()
+
                 with pytest.raises(HTTPException) as ei:
                     await _insert_trip_load_row(
                         session,
-                        other_tenant,
+                        auth_tenant,
                         trip_id,
-                        int(ready["id"]),
+                        foreign_load_id,
                         sequence_hint=None,
                     )
                 assert ei.value.status_code == 404
+
                 with pytest.raises(HTTPException) as ej:
                     await _insert_trip_load_row(
                         session,
-                        issue12_http.tenant_id,
+                        auth_tenant,
                         trip_id,
                         999_999_999,
                         sequence_hint=None,
@@ -349,6 +371,13 @@ class TestTripLoadReadinessGateIssue12:
                 assert ej.value.status_code == 404
                 await session.rollback()
         finally:
+            if foreign_load_id is not None:
+                async with Session() as session:
+                    await session.execute(
+                        text("delete from loads where id = :i and tenant_id = :t"),
+                        {"i": foreign_load_id, "t": foreign_tenant},
+                    )
+                    await session.commit()
             await engine.dispose()
 
     async def test_g_create_planned_trip_respects_gate(self, issue12_http, locked_prefix: str) -> None:
