@@ -28,6 +28,7 @@ from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
+from tests.support.integration_ready_load import api_create_ready_load
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
@@ -85,15 +86,9 @@ async def locked_prefix(client, override_auth_tenant) -> str:
     return prefix
 
 
-async def _pick_load_id(client: AsyncClient) -> int | None:
-    lr = await client.get("/api/v1/loads?page=1&size=20", headers=AUTH_HEADERS)
-    if lr.status_code != 200:
-        return None
-    items = lr.json().get("items") or []
-    for item in items:
-        if (item.get("status") or "").strip().lower() == "ready":
-            return int(item["id"])
-    return None
+async def _create_ready_load_id(client: AsyncClient, tag: str = "MEM-PLANNED") -> int:
+    body = await api_create_ready_load(client, AUTH_HEADERS, tag)
+    return int(body["id"])
 
 
 async def _clear_open_memberships(load_id: int) -> None:
@@ -192,9 +187,7 @@ class TestTripLoadPlannedWithActiveSlice:
     async def test_active_a_plus_planned_b_allowed_pointer_stays_a(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
-        load_id = await _pick_load_id(client)
-        if load_id is None:
-            pytest.skip("no loads")
+        load_id = await _create_ready_load_id(client, "MEM-A-PA")
         await _clear_open_memberships(load_id)
 
         r_a = await client.post(
@@ -232,9 +225,7 @@ class TestTripLoadPlannedWithActiveSlice:
     async def test_second_open_planned_rejected(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
-        load_id = await _pick_load_id(client)
-        if load_id is None:
-            pytest.skip("no loads")
+        load_id = await _create_ready_load_id(client, "MEM-A-PA")
         await _clear_open_memberships(load_id)
 
         r_a = await client.post(
@@ -267,9 +258,7 @@ class TestTripLoadPlannedWithActiveSlice:
         url = _tenant_async_url()
         if not url:
             pytest.skip("no tenant db")
-        load_id = await _pick_load_id(client)
-        if load_id is None:
-            pytest.skip("no loads")
+        load_id = await _create_ready_load_id(client, "MEM-A-PA")
         await _clear_open_memberships(load_id)
 
         r_a = await client.post(
@@ -343,9 +332,7 @@ class TestTripLoadPlannedWithActiveSlice:
     async def test_planned_only_leaves_active_trip_id_null(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
-        load_id = await _pick_load_id(client)
-        if load_id is None:
-            pytest.skip("no loads")
+        load_id = await _create_ready_load_id(client, "MEM-A-PA")
         await _clear_open_memberships(load_id)
 
         r = await client.post(
@@ -366,9 +353,7 @@ class TestTripLoadPlannedWithActiveSlice:
     async def test_remove_and_cancel_planned_b_leaves_active_a(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
-        load_id = await _pick_load_id(client)
-        if load_id is None:
-            pytest.skip("no loads")
+        load_id = await _create_ready_load_id(client, "MEM-A-PA")
         await _clear_open_memberships(load_id)
 
         r_a = await client.post(
@@ -435,9 +420,7 @@ class TestTripLoadPlannedWithActiveSlice:
     async def test_same_trip_duplicate_rejected(
         self, client: AsyncClient, locked_prefix: str, override_auth_tenant
     ):
-        load_id = await _pick_load_id(client)
-        if load_id is None:
-            pytest.skip("no loads")
+        load_id = await _create_ready_load_id(client, "MEM-A-PA")
         await _clear_open_memberships(load_id)
 
         r = await client.post(
