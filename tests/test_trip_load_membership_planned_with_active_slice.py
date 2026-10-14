@@ -28,7 +28,7 @@ from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
-from tests.support.integration_ready_load import api_create_ready_load
+from tests.support.integration_test_resources import integration_scope_context
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
@@ -69,6 +69,13 @@ def override_auth_tenant(test_bypass_env):
     clear_current_user_and_tenant_overrides(app)
 
 
+
+@pytest.fixture
+async def integration_scope(client, override_auth_tenant):
+    async with integration_scope_context(client, AUTH_HEADERS, "trip_mem_planned_active") as scope:
+        yield scope
+
+
 @pytest.fixture
 async def locked_prefix(client, override_auth_tenant) -> str:
     r0 = await client.get("/api/v1/admin/dispatch-numbering", headers=AUTH_HEADERS)
@@ -86,9 +93,6 @@ async def locked_prefix(client, override_auth_tenant) -> str:
     return prefix
 
 
-async def _create_ready_load_id(client: AsyncClient, tag: str = "MEM-PLANNED") -> int:
-    body = await api_create_ready_load(client, AUTH_HEADERS, tag)
-    return int(body["id"])
 
 
 async def _clear_open_memberships(load_id: int) -> None:
@@ -185,26 +189,16 @@ async def _load_active_trip_id(load_id: int) -> int | None:
 @pytest.mark.asyncio
 class TestTripLoadPlannedWithActiveSlice:
     async def test_active_a_plus_planned_b_allowed_pointer_stays_a(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        load_id = await _create_ready_load_id(client, "MEM-A-PA")
-        await _clear_open_memberships(load_id)
-
-        r_a = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        load_id = await integration_scope.create_ready_load_id("MEM-A-PA")
+        r_a = await integration_scope.post_planned_trip([load_id])
         assert r_a.status_code == 201, r_a.text
         trip_a = int(r_a.json()["id"])
         await _promote_membership_active(load_id, trip_a)
         assert await _load_active_trip_id(load_id) == trip_a
 
-        r_b = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r_b = await integration_scope.post_planned_trip([load_id])
         assert r_b.status_code == 201, r_b.text
         trip_b = int(r_b.json()["id"])
         assert await _load_active_trip_id(load_id) == trip_a
@@ -223,58 +217,34 @@ class TestTripLoadPlannedWithActiveSlice:
         assert (detail_b.json().get("status") or "").lower() == "planned"
 
     async def test_second_open_planned_rejected(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        load_id = await _create_ready_load_id(client, "MEM-A-PA")
-        await _clear_open_memberships(load_id)
-
-        r_a = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        load_id = await integration_scope.create_ready_load_id("MEM-A-PA")
+        r_a = await integration_scope.post_planned_trip([load_id])
         assert r_a.status_code == 201, r_a.text
         trip_a = int(r_a.json()["id"])
         await _promote_membership_active(load_id, trip_a)
 
-        r_b = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r_b = await integration_scope.post_planned_trip([load_id])
         assert r_b.status_code == 201, r_b.text
 
-        r_c = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r_c = await integration_scope.post_planned_trip([load_id])
         assert r_c.status_code == 409, r_c.text
         assert r_c.json().get("detail", {}).get("code") == "LOAD_PLANNED_ON_OTHER_TRIP"
 
     async def test_second_open_active_rejected_trip_api_and_legacy(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
         url = _tenant_async_url()
         if not url:
             pytest.skip("no tenant db")
-        load_id = await _create_ready_load_id(client, "MEM-A-PA")
-        await _clear_open_memberships(load_id)
-
-        r_a = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        load_id = await integration_scope.create_ready_load_id("MEM-A-PA")
+        r_a = await integration_scope.post_planned_trip([load_id])
         assert r_a.status_code == 201, r_a.text
         trip_a = int(r_a.json()["id"])
         await _promote_membership_active(load_id, trip_a)
 
-        r_b = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
+        r_b = await integration_scope.post_planned_trip([])
         assert r_b.status_code == 201, r_b.text
         trip_b = int(r_b.json()["id"])
 
@@ -330,16 +300,10 @@ class TestTripLoadPlannedWithActiveSlice:
         assert await _load_active_trip_id(load_id) == trip_a
 
     async def test_planned_only_leaves_active_trip_id_null(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        load_id = await _create_ready_load_id(client, "MEM-A-PA")
-        await _clear_open_memberships(load_id)
-
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        load_id = await integration_scope.create_ready_load_id("MEM-A-PA")
+        r = await integration_scope.post_planned_trip([load_id])
         assert r.status_code == 201, r.text
         assert await _load_active_trip_id(load_id) is None
         rows = await _membership_rows(load_id)
@@ -351,25 +315,15 @@ class TestTripLoadPlannedWithActiveSlice:
         assert len(open_planned) == 1
 
     async def test_remove_and_cancel_planned_b_leaves_active_a(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        load_id = await _create_ready_load_id(client, "MEM-A-PA")
-        await _clear_open_memberships(load_id)
-
-        r_a = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        load_id = await integration_scope.create_ready_load_id("MEM-A-PA")
+        r_a = await integration_scope.post_planned_trip([load_id])
         assert r_a.status_code == 201, r_a.text
         trip_a = int(r_a.json()["id"])
         await _promote_membership_active(load_id, trip_a)
 
-        r_b = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r_b = await integration_scope.post_planned_trip([load_id])
         assert r_b.status_code == 201, r_b.text
         trip_b = int(r_b.json()["id"])
 
@@ -396,11 +350,7 @@ class TestTripLoadPlannedWithActiveSlice:
         # trip_b may be cancelled? No, we only removed membership. Cancel trip B.
         if r_b2.status_code != 200:
             # create new planned trip C instead
-            r_c = await client.post(
-                "/api/v1/trips",
-                headers=AUTH_HEADERS,
-                json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-            )
+            r_c = await integration_scope.post_planned_trip([load_id])
             assert r_c.status_code == 201, r_c.text
             trip_cancel = int(r_c.json()["id"])
         else:
@@ -418,16 +368,10 @@ class TestTripLoadPlannedWithActiveSlice:
         )
 
     async def test_same_trip_duplicate_rejected(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        load_id = await _create_ready_load_id(client, "MEM-A-PA")
-        await _clear_open_memberships(load_id)
-
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        load_id = await integration_scope.create_ready_load_id("MEM-A-PA")
+        r = await integration_scope.post_planned_trip([load_id])
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
 

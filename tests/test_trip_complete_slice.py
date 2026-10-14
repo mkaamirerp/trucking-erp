@@ -22,7 +22,7 @@ from tests.support.integration_auth import (
     install_host_aligned_current_user_and_tenant,
 )
 from tests.support.custody_http import activate_via_custody, complete_via_custody, ensure_active_terminal
-from tests.support.integration_ready_load import api_create_ready_load_ids
+from tests.support.integration_test_resources import IntegrationTestScope, integration_scope_context
 
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
@@ -78,6 +78,13 @@ def override_auth_tenant(test_bypass_env):
     clear_current_user_and_tenant_overrides(app)
 
 
+
+@pytest.fixture
+async def integration_scope(client, override_auth_tenant):
+    async with integration_scope_context(client, AUTH_HEADERS, "trip_complete_slice") as scope:
+        yield scope
+
+
 @pytest.fixture
 async def locked_prefix(client, override_auth_tenant) -> str:
     r0 = await client.get("/api/v1/admin/dispatch-numbering", headers=AUTH_HEADERS)
@@ -95,8 +102,8 @@ async def locked_prefix(client, override_auth_tenant) -> str:
     return prefix
 
 
-async def _pick_load_ids(client: AsyncClient, n: int = 1) -> list[int]:
-    return await api_create_ready_load_ids(client, AUTH_HEADERS, n, tag_prefix="TRIP-COMPLETE")
+async def _pick_load_ids(scope, n: int = 1) -> list[int]:
+    return await scope.create_ready_load_ids(n, tag_prefix="TRIP-COMPLETE")
 
 
 async def _first_driver_truck_trailer(client: AsyncClient) -> tuple[int, int, int] | None:
@@ -269,12 +276,8 @@ async def _assign_and_start(client: AsyncClient, trip_id: int) -> None:
     assert r2.json()["status"] == TRIP_CONTAINER_STATUS_IN_PROGRESS
 
 
-async def _create_in_progress_empty(client: AsyncClient) -> int:
-    r = await client.post(
-        "/api/v1/trips",
-        headers=AUTH_HEADERS,
-        json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-    )
+async def _create_in_progress_empty(client: AsyncClient, scope: IntegrationTestScope) -> int:
+    r = await scope.post_planned_trip([])
     assert r.status_code == 201, r.text
     trip_id = int(r.json()["id"])
     await _assign_and_start(client, trip_id)
@@ -285,9 +288,9 @@ async def _create_in_progress_empty(client: AsyncClient) -> int:
 @pytest.mark.asyncio
 class TestTripCompleteSlice:
     async def test_in_progress_zero_open_completes_and_idempotent(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        trip_id = await _create_in_progress_empty(client)
+        trip_id = await _create_in_progress_empty(client, integration_scope)
         before_aud = await _audit_count("trip_completed", trip_id)
 
         r1 = await client.post(f"/api/v1/trips/{trip_id}/complete", headers=AUTH_HEADERS)
@@ -320,19 +323,14 @@ class TestTripCompleteSlice:
             assert after2 == after_aud
 
     async def test_open_active_and_planned_gates(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r = await integration_scope.post_planned_trip([load_id])
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
         await _assign_and_start(client, trip_id)
@@ -348,13 +346,12 @@ class TestTripCompleteSlice:
             await _complete_mem(client, trip_id, load_id)
         ).status_code == 200
 
-        loads2 = await _pick_load_ids(client, 2)
+        loads2 = await _pick_load_ids(integration_scope, 2)
         if len(loads2) < 2:
             pytest.skip("need second load for planned gate")
         other = loads2[1] if loads2[1] != load_id else (loads2[0] if loads2[0] != load_id else None)
         if other is None:
             pytest.skip("need distinct second load")
-        await _clear_open_memberships(other)
         r_add = await client.post(
             f"/api/v1/trips/{trip_id}/loads",
             headers=AUTH_HEADERS,
@@ -376,20 +373,14 @@ class TestTripCompleteSlice:
         assert r_ok.json()["status"] == "completed"
 
     async def test_multi_load_complete_then_trip_complete_no_auto_activate(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 2)
+        loads = await _pick_load_ids(integration_scope, 2)
         if len(loads) < 2:
             pytest.skip("need two loads")
         load_a, load_b = loads[0], loads[1]
-        await _clear_open_memberships(load_a)
-        await _clear_open_memberships(load_b)
 
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_a, load_b]},
-        )
+        r = await integration_scope.post_planned_trip([load_a, load_b])
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
         await _assign_and_start(client, trip_id)
@@ -411,11 +402,7 @@ class TestTripCompleteSlice:
         assert r_mid.status_code == 409
         assert r_mid.json()["detail"]["code"] == "OPEN_ACTIVE_MEMBERSHIP_REMAINS"
 
-        r_out = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_a]},
-        )
+        r_out = await integration_scope.post_planned_trip([load_a])
         assert r_out.status_code == 201, r_out.text
         outbound = int(r_out.json()["id"])
 
@@ -440,24 +427,16 @@ class TestTripCompleteSlice:
         assert det_out.json()["status"] == "planned"
 
     async def test_status_gates_planned_assigned_cancelled_legacy(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
+        r = await integration_scope.post_planned_trip([])
         assert r.status_code == 201, r.text
         trip_planned = int(r.json()["id"])
         rp = await client.post(f"/api/v1/trips/{trip_planned}/complete", headers=AUTH_HEADERS)
         assert rp.status_code == 409
         assert rp.json()["detail"]["code"] == "INVALID_TRIP_STATUS_FOR_COMPLETE"
 
-        r2 = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
+        r2 = await integration_scope.post_planned_trip([])
         trip_as = int(r2.json()["id"])
         ids = await _first_driver_truck_trailer(client)
         if ids is None:
@@ -474,29 +453,28 @@ class TestTripCompleteSlice:
         assert ra.status_code == 409
         assert ra.json()["detail"]["code"] == "INVALID_TRIP_STATUS_FOR_COMPLETE"
 
-        trip_c = await _create_in_progress_empty(client)
+        trip_c = await _create_in_progress_empty(client, integration_scope)
         assert (await client.post(f"/api/v1/trips/{trip_c}/cancel", headers=AUTH_HEADERS)).status_code == 200
         rc = await client.post(f"/api/v1/trips/{trip_c}/complete", headers=AUTH_HEADERS)
         assert rc.status_code == 409
         assert rc.json()["detail"]["code"] == "TRIP_CANCELLED"
         assert (await _trip_db(trip_c))["completed_at"] is None
 
-        trip_leg = await _create_in_progress_empty(client)
+        trip_leg = await _create_in_progress_empty(client, integration_scope)
         await _force_trip_status(trip_leg, "active")
         rl = await client.post(f"/api/v1/trips/{trip_leg}/complete", headers=AUTH_HEADERS)
         assert rl.status_code == 409
         assert rl.json()["detail"]["code"] == "INVALID_TRIP_STATUS_FOR_COMPLETE"
 
     async def test_terminal_mutators_reject_completed(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
-        trip_id = await _create_in_progress_empty(client)
+        trip_id = await _create_in_progress_empty(client, integration_scope)
         assert (
             await client.post(f"/api/v1/trips/{trip_id}/complete", headers=AUTH_HEADERS)
         ).status_code == 200
@@ -553,19 +531,14 @@ class TestTripCompleteSlice:
         assert r_sig.json()["detail"]["code"] == "TRIP_ALREADY_COMPLETED"
 
     async def test_membership_complete_on_completed_trip_rules(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r = await integration_scope.post_planned_trip([load_id])
         trip_id = int(r.json()["id"])
         await _assign_and_start(client, trip_id)
         assert (
@@ -588,15 +561,14 @@ class TestTripCompleteSlice:
         assert r_rep.json()["detail"]["code"] == "TRIP_ALREADY_COMPLETED"
 
     async def test_serialization_add_then_complete_and_complete_then_add(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
-        trip_a = await _create_in_progress_empty(client)
+        trip_a = await _create_in_progress_empty(client, integration_scope)
         assert (
             await client.post(
                 f"/api/v1/trips/{trip_a}/loads",
@@ -608,8 +580,7 @@ class TestTripCompleteSlice:
         assert r_blk.status_code == 409
         assert r_blk.json()["detail"]["code"] == "OPEN_PLANNED_MEMBERSHIP_REMAINS"
 
-        await _clear_open_memberships(load_id)
-        trip_b = await _create_in_progress_empty(client)
+        trip_b = await _create_in_progress_empty(client, integration_scope)
         assert (
             await client.post(f"/api/v1/trips/{trip_b}/complete", headers=AUTH_HEADERS)
         ).status_code == 200
