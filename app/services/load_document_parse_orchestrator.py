@@ -37,10 +37,18 @@ async def parse_load_workspace_document_orchestrated(
     if tenant_id is None or db is None:
         raise RuntimeError("tenant_id and db are required for parse-document")
 
-    return await parse_pdf_bytes_to_load_document_response(
+    out = await parse_pdf_bytes_to_load_document_response(
         db,
         tenant_id=tenant_id,
         pdf_bytes=pdf_bytes,
         filename=fn,
         openai_chat_json_schema=openai_chat_json_schema,
     )
+    ctx = dict(out.context or {})
+    if email_thread_id is not None:
+        ctx["email_thread_id"] = int(email_thread_id)
+    if load_id is not None:
+        ctx["load_id"] = int(load_id)
+    if ctx != out.context:
+        out = out.model_copy(update={"context": ctx})
+    return out
