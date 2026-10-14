@@ -19,6 +19,7 @@ from app.schemas.load import (
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
 from app.services import loads as loads_service
+from app.services import trips as trips_service
 from app.services import load_custody as custody_service
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
@@ -124,7 +125,13 @@ async def get_load_detail(
     load = await loads_service.get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
-    return LoadResponse.model_validate(load)
+    resp = LoadResponse.model_validate(load)
+    planned = await trips_service.get_open_planned_trip_for_load(db, tenant_id, load_id)
+    if planned is not None:
+        resp = resp.model_copy(
+            update={"open_planned_trip_id": planned[0], "open_planned_trip_number": planned[1]}
+        )
+    return resp
 
 
 @router.patch("/{load_id}", response_model=LoadResponse)
@@ -173,13 +180,25 @@ async def mark_load_ready(
     body: LoadMutationConcurrencyBody,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.mark_load_ready(
-        db, tenant_id, load_id, expected_concurrency_version=body.expected_concurrency_version
+        db,
+        tenant_id,
+        load_id,
+        expected_concurrency_version=body.expected_concurrency_version,
+        actor_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
     )
-    return LoadResponse.model_validate(load)
+    resp = LoadResponse.model_validate(load)
+    planned = await trips_service.get_open_planned_trip_for_load(db, tenant_id, load_id)
+    if planned is not None:
+        resp = resp.model_copy(
+            update={"open_planned_trip_id": planned[0], "open_planned_trip_number": planned[1]}
+        )
+    return resp
 
 
 @router.get("/{load_id}/custody", response_model=LoadCustodySnapshotResponse)

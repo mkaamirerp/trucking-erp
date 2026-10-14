@@ -38,7 +38,8 @@ class LoadStopBase(BaseModel):
 
 
 class LoadStopCreate(LoadStopBase):
-    pass
+    #: When set on PATCH, updates the existing row (tenant-scoped); omit or 0 for insert (Issue I2).
+    id: Optional[int] = Field(default=None, ge=1)
 
 
 class LoadStopUpdate(BaseModel):
@@ -62,6 +63,8 @@ class LoadStopOut(LoadStopBase):
     id: int
     load_id: int
     scheduled_at: Optional[datetime] = None
+    arrived_at: Optional[datetime] = None
+    departed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
@@ -156,6 +159,8 @@ class LoadUpdate(BaseModel):
     miles: Optional[int] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, max_length=32)
     stops: Optional[Sequence[LoadStopCreate]] = None
+    #: When true, allows removing stops that carry operational/history signals (Issue I2).
+    replace_stops: Optional[bool] = False
     #: Present in model_fields_set only when the client sent ``references``.
     #: Omitted → preserve DB value; ``[]`` → clear; list → replace. Null is rejected.
     references: Optional[list[LoadParseReferenceItem]] = Field(default=None, max_length=40)
@@ -237,6 +242,9 @@ class LoadResponse(LoadBase):
     active_dispatch_trip_id: Optional[int] = None
     #: Phase 1+ mirror of `trips.id` when a freight dispatch is active; read-only (set with dispatch allocation).
     active_trip_id: Optional[int] = None
+    #: Open PLANNED TripLoad mirror (Issue I13); not the ACTIVE-only active_trip_id pointer.
+    open_planned_trip_id: Optional[int] = None
+    open_planned_trip_number: Optional[str] = None
     broker_match_method: Optional[str] = Field(default=None, max_length=32)
     broker_match_confidence_tier: Optional[str] = Field(default=None, max_length=8)
     broker_match_explanation: Optional[str] = None

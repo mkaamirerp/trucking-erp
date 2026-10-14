@@ -29,6 +29,12 @@ LOAD_CREATE_STATUS_MUST_BE_DRAFT = "LOAD_CREATE_STATUS_MUST_BE_DRAFT"
 LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT = "LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT"
 # Issue I12: planned TripLoad membership requires Load.status = ready.
 LOAD_NOT_READY_FOR_TRIP = "LOAD_NOT_READY_FOR_TRIP"
+
+# Issue I15 — assignment immutability while executing.
+TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS = "TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS"
+
+# Issue I16 — Decision 10 schedule overlap on assignment.
+TRIP_ASSIGNMENT_SCHEDULE_OVERLAP = "TRIP_ASSIGNMENT_SCHEDULE_OVERLAP"
 # Explicit Load PATCH status outside LOAD_WRITABLE_STATUSES (e.g. null); loads.status is NOT NULL.
 LOAD_STATUS_NOT_WRITABLE = "LOAD_STATUS_NOT_WRITABLE"
 # Rows still holding a legacy operational status cannot change status via Load PATCH (Issue 0B migrates them).
