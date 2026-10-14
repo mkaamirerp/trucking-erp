@@ -159,8 +159,6 @@ class LoadUpdate(BaseModel):
     miles: Optional[int] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, max_length=32)
     stops: Optional[Sequence[LoadStopCreate]] = None
-    #: When true, allows removing stops that carry operational/history signals (Issue I2).
-    replace_stops: Optional[bool] = False
     #: Present in model_fields_set only when the client sent ``references``.
     #: Omitted → preserve DB value; ``[]`` → clear; list → replace. Null is rejected.
     references: Optional[list[LoadParseReferenceItem]] = Field(default=None, max_length=40)

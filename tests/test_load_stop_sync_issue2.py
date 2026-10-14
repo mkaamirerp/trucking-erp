@@ -142,3 +142,71 @@ class TestLoadStopSyncIssue2:
         assert stop_out["id"] == stop_id
         assert stop_out["facility_name"] == "Yard-renamed"
         assert stop_out.get("arrived_at") is not None
+
+    async def test_cannot_remove_stop_with_arrival_history(
+        self, client: AsyncClient, override_auth_tenant
+    ) -> None:
+        tenant_url = require_integration_tenant_database_url(context="issue2_block_remove")
+        ln = f"I2-RM-{uuid.uuid4().hex[:8]}"
+        cr = await client.post(
+            "/api/v1/loads",
+            json={
+                "load_number": ln,
+                "status": "draft",
+                "stops": [{"stop_type": "PICKUP", "sequence": 0, "facility_name": "Yard"}],
+            },
+            headers=AUTH_HEADERS,
+        )
+        load = cr.json()
+        load_id = load["id"]
+        stop_id = load["stops"][0]["id"]
+        from datetime import datetime, timezone
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        engine = create_async_engine(to_async_pg_url(tenant_url), pool_pre_ping=True)
+        async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with async_session() as db:
+            await db.execute(
+                text("update load_stops set arrived_at=:a where id=:i"),
+                {"a": datetime(2026, 2, 1, 8, 0, tzinfo=timezone.utc), "i": stop_id},
+            )
+            await db.commit()
+        await engine.dispose()
+
+        up = await client.patch(
+            f"/api/v1/loads/{load_id}",
+            json={"expected_concurrency_version": load["concurrency_version"], "stops": []},
+            headers=AUTH_HEADERS,
+        )
+        assert up.status_code == 409
+        assert up.json()["detail"]["code"] in ("LOAD_STOP_REMOVAL_FORBIDDEN", "LOAD_STOP_HISTORY_PROTECTED")
+
+    async def test_duplicate_stop_id_rejected(self, client: AsyncClient, override_auth_tenant) -> None:
+        ln = f"I2-DUP-{uuid.uuid4().hex[:8]}"
+        cr = await client.post(
+            "/api/v1/loads",
+            json={
+                "load_number": ln,
+                "status": "draft",
+                "stops": [
+                    {"stop_type": "PICKUP", "sequence": 0, "city": "A"},
+                    {"stop_type": "DELIVERY", "sequence": 1, "city": "B"},
+                ],
+            },
+            headers=AUTH_HEADERS,
+        )
+        load = cr.json()
+        sid = load["stops"][0]["id"]
+        up = await client.patch(
+            f"/api/v1/loads/{load['id']}",
+            json={
+                "expected_concurrency_version": load["concurrency_version"],
+                "stops": [
+                    {"id": sid, "stop_type": "PICKUP", "sequence": 0, "city": "A"},
+                    {"id": sid, "stop_type": "DELIVERY", "sequence": 1, "city": "B"},
+                ],
+            },
+            headers=AUTH_HEADERS,
+        )
+        assert up.status_code == 409
+        assert up.json()["detail"]["code"] == "LOAD_STOP_DUPLICATE_ID"
