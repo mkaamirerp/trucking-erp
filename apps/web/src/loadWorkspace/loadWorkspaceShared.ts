@@ -151,7 +151,11 @@ export function workspaceFieldsFromLoad(l: Load): WorkspaceDraftFields {
   };
 }
 
-export type DraftStop = LoadStop & { _key: string };
+export type DraftStop = LoadStop & {
+  _key: string;
+  /** Parser evidence when stop_type is unresolved (Issue I19). */
+  parseStopTypeEvidence?: string | null;
+};
 
 /** Proposed values sourced from the intake pipeline for a given email thread.
  *  Only fields that the current backend API actually populates are listed here.
