@@ -110,11 +110,12 @@ async def locked_prefix(client, override_auth_tenant) -> str:
 
 
 async def _pick_load_ids(client: AsyncClient, n: int = 1) -> list[int]:
-    lr = await client.get("/api/v1/loads?page=1&size=20", headers=AUTH_HEADERS)
+    lr = await client.get("/api/v1/loads?page=1&size=50", headers=AUTH_HEADERS)
     if lr.status_code != 200:
         return []
     items = lr.json().get("items") or []
-    return [int(x["id"]) for x in items[:n]]
+    ready = [int(x["id"]) for x in items if (x.get("status") or "").strip().lower() == "ready"]
+    return ready[:n]
 
 
 async def _first_driver_truck_trailer(client: AsyncClient) -> tuple[int, int, int] | None:
