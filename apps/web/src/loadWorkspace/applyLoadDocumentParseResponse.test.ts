@@ -110,7 +110,7 @@ describe("applyLoadDocumentParseResponse references", () => {
     expect(draft[0].parseStopTypeEvidence).toBe("other");
   });
 
-  it("Issue I18: second document clears prior commodity when omitted", async () => {
+  it("Issue I18: second document clears parse-owned commodity when omitted", async () => {
     const setCommodity = vi.fn();
     const cbs = {
       setBrokerNameSnapshot: vi.fn(),
@@ -135,11 +135,43 @@ describe("applyLoadDocumentParseResponse references", () => {
       setInternalNotes: vi.fn(),
       setDraftStops: vi.fn(),
     };
-    await applyLoadDocumentParseResponse(emptyRes({ commodity: "Steel" }), cbs);
+    const first = await applyLoadDocumentParseResponse(emptyRes({ commodity: "Steel" }), cbs);
     expect(setCommodity).toHaveBeenCalledWith("Steel");
     setCommodity.mockClear();
-    await applyLoadDocumentParseResponse(emptyRes({}), cbs);
+    await applyLoadDocumentParseResponse(emptyRes({}), cbs, first.parseHydrationState);
     expect(setCommodity).toHaveBeenCalledWith("");
+  });
+
+  it("Issue I18: manual commodity override survives second parse omitting commodity", async () => {
+    const setCommodity = vi.fn();
+    const cbs = {
+      setBrokerNameSnapshot: vi.fn(),
+      setBrokerId: vi.fn(),
+      setBrokerContactId: vi.fn(),
+      setBrokerContacts: vi.fn(),
+      setBrokerContactNameSnapshot: vi.fn(),
+      setBrokerContactPhoneSnapshot: vi.fn(),
+      setBrokerContactEmailSnapshot: vi.fn(),
+      setBrokerLoadReference: vi.fn(),
+      setLoadReferences: vi.fn(),
+      setFreightMode: vi.fn(),
+      setEquipmentType: vi.fn(),
+      setTrailerType: vi.fn(),
+      setTrailerSize: vi.fn(),
+      setCommodity,
+      setEstimatedWeight: vi.fn(),
+      setTemperatureRequirement: vi.fn(),
+      setRate: vi.fn(),
+      setCustomerRate: vi.fn(),
+      setMiles: vi.fn(),
+      setInternalNotes: vi.fn(),
+      setDraftStops: vi.fn(),
+    };
+    const first = await applyLoadDocumentParseResponse(emptyRes({ commodity: "Steel" }), cbs);
+    first.parseHydrationState.manualOverrideKeys.add("commodity");
+    setCommodity.mockClear();
+    await applyLoadDocumentParseResponse(emptyRes({ rate: 100 }), cbs, first.parseHydrationState);
+    expect(setCommodity).not.toHaveBeenCalled();
   });
 
   it("Issue I7: does not write raw_text into internal notes", async () => {

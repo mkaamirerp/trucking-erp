@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-ResourceKind = Literal["trip", "load"]
+ResourceKind = Literal["trip", "load", "driver", "truck", "trailer"]
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,9 @@ from tests.support.integration_isolation import (
     integration_tenant_db_name,
     require_integration_tenant_database_url,
 )
+from tests.support.integration_fleet_fixtures import api_create_integration_fleet_bundle
 from tests.support.integration_ready_load import (
+    api_create_draft_load,
     api_create_ready_load,
     api_create_ready_load_ids,
 )
@@ -52,6 +54,9 @@ from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 class IntegrationResourceTracker:
     load_ids: list[int] = field(default_factory=list)
     trip_ids: list[int] = field(default_factory=list)
+    driver_ids: list[int] = field(default_factory=list)
+    truck_ids: list[int] = field(default_factory=list)
+    trailer_ids: list[int] = field(default_factory=list)
 
     def track_load(self, load_id: int) -> None:
         lid = int(load_id)
@@ -68,6 +73,21 @@ class IntegrationResourceTracker:
             body = response.json()
             if body.get("id") is not None:
                 self.track_trip(int(body["id"]))
+
+    def track_driver(self, driver_id: int) -> None:
+        did = int(driver_id)
+        if did not in self.driver_ids:
+            self.driver_ids.append(did)
+
+    def track_truck(self, truck_id: int) -> None:
+        tid = int(truck_id)
+        if tid not in self.truck_ids:
+            self.truck_ids.append(tid)
+
+    def track_trailer(self, trailer_id: int) -> None:
+        rid = int(trailer_id)
+        if rid not in self.trailer_ids:
+            self.trailer_ids.append(rid)
 
 
 class IntegrationTestScope:
@@ -102,6 +122,15 @@ class IntegrationTestScope:
             context=self.context,
         )
 
+    async def create_draft_load(self, tag: str, **extra: Any) -> dict:
+        return await api_create_draft_load(
+            self.client,
+            self.headers,
+            tag,
+            tracker=self.tracker,
+            **extra,
+        )
+
     async def create_ready_load(self, tag: str, **extra: Any) -> dict:
         return await api_create_ready_load(
             self.client,
@@ -109,6 +138,14 @@ class IntegrationTestScope:
             tag,
             tracker=self.tracker,
             **extra,
+        )
+
+    async def create_fleet_bundle(self, tag: str) -> tuple[int, int, int]:
+        return await api_create_integration_fleet_bundle(
+            self.client,
+            self.headers,
+            tag,
+            tracker=self.tracker,
         )
 
     async def create_ready_load_id(self, tag: str, **extra: Any) -> int:
@@ -151,7 +188,13 @@ class IntegrationTestScope:
             await engine.dispose()
 
     async def teardown(self) -> None:
-        if not self.tracker.trip_ids and not self.tracker.load_ids:
+        if (
+            not self.tracker.trip_ids
+            and not self.tracker.load_ids
+            and not self.tracker.driver_ids
+            and not self.tracker.truck_ids
+            and not self.tracker.trailer_ids
+        ):
             return
         failures: list[IntegrationCleanupFailure] = []
         engine = create_async_engine(to_async_pg_url(self.tenant_url), pool_pre_ping=True)
@@ -176,6 +219,36 @@ class IntegrationTestScope:
                     except Exception as exc:
                         failures.append(
                             IntegrationCleanupFailure("load", int(load_id), exc)
+                        )
+                        await db.rollback()
+                for driver_id in reversed(self.tracker.driver_ids):
+                    try:
+                        await _cleanup_driver_rows(
+                            db, self.tenant_id, driver_id, context=self.context
+                        )
+                    except Exception as exc:
+                        failures.append(
+                            IntegrationCleanupFailure("driver", int(driver_id), exc)
+                        )
+                        await db.rollback()
+                for truck_id in reversed(self.tracker.truck_ids):
+                    try:
+                        await _cleanup_truck_rows(
+                            db, self.tenant_id, truck_id, context=self.context
+                        )
+                    except Exception as exc:
+                        failures.append(
+                            IntegrationCleanupFailure("truck", int(truck_id), exc)
+                        )
+                        await db.rollback()
+                for trailer_id in reversed(self.tracker.trailer_ids):
+                    try:
+                        await _cleanup_trailer_rows(
+                            db, self.tenant_id, trailer_id, context=self.context
+                        )
+                    except Exception as exc:
+                        failures.append(
+                            IntegrationCleanupFailure("trailer", int(trailer_id), exc)
                         )
                         await db.rollback()
         finally:
@@ -215,6 +288,51 @@ async def _cleanup_trip_rows(
     await db.execute(
         text("delete from trips where tenant_id=:t and id=:i"),
         {"t": tenant_id, "i": trip_id},
+    )
+    await db.commit()
+
+
+async def _cleanup_driver_rows(
+    db: AsyncSession, tenant_id: int, driver_id: int, *, context: str
+) -> None:
+    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_driver")
+    await db.execute(
+        text("update trips set driver_id=null where tenant_id=:t and driver_id=:i"),
+        {"t": tenant_id, "i": driver_id},
+    )
+    await db.execute(
+        text("delete from drivers where tenant_id=:t and id=:i"),
+        {"t": tenant_id, "i": driver_id},
+    )
+    await db.commit()
+
+
+async def _cleanup_truck_rows(
+    db: AsyncSession, tenant_id: int, truck_id: int, *, context: str
+) -> None:
+    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_truck")
+    await db.execute(
+        text("update trips set truck_id=null where tenant_id=:t and truck_id=:i"),
+        {"t": tenant_id, "i": truck_id},
+    )
+    await db.execute(
+        text("delete from trucks where tenant_id=:t and id=:i"),
+        {"t": tenant_id, "i": truck_id},
+    )
+    await db.commit()
+
+
+async def _cleanup_trailer_rows(
+    db: AsyncSession, tenant_id: int, trailer_id: int, *, context: str
+) -> None:
+    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_trailer")
+    await db.execute(
+        text("update trips set trailer_id=null where tenant_id=:t and trailer_id=:i"),
+        {"t": tenant_id, "i": trailer_id},
+    )
+    await db.execute(
+        text("delete from trailers where tenant_id=:t and id=:i"),
+        {"t": tenant_id, "i": trailer_id},
     )
     await db.commit()
 
