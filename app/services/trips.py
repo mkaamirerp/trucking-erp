@@ -22,6 +22,7 @@ from app.constants.trip_dispatch import (
     TRIP_LOAD_STATUS_WITHIN_COMPLETED,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_REMOVED,
+    LOAD_NOT_READY_FOR_TRIP,
 )
 from app.models.driver import Driver
 from app.models.load import Load, LoadStop
@@ -466,6 +467,16 @@ async def _insert_trip_load_row(
     _raise_if_trip_already_completed(trip)
 
     load = await _lock_load_for_membership(db, tenant_id, load_id)
+
+    if status_within == TRIP_LOAD_STATUS_WITHIN_PLANNED:
+        if (load.status or "").strip().lower() != "ready":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Load must be ready before planned trip membership",
+                    "code": LOAD_NOT_READY_FOR_TRIP,
+                },
+            )
 
     same = await db.scalar(
         select(TripLoad).where(
