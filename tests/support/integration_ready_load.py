@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import uuid
 
+from typing import TYPE_CHECKING
+
 from httpx import AsyncClient
+
+if TYPE_CHECKING:
+    from tests.support.integration_test_resources import IntegrationResourceTracker
 
 INTEGRATION_READY_LOAD_STOPS = [
     {"stop_type": "PICKUP", "sequence": 0, "city": "Austin", "state_or_province": "TX"},
@@ -73,11 +78,16 @@ async def api_create_ready_load_ids(
     headers: dict[str, str],
     n: int,
     tag_prefix: str = "TRIP",
+    *,
+    tracker: IntegrationResourceTracker | None = None,
 ) -> list[int]:
     if n < 1:
         return []
     out: list[int] = []
     for i in range(n):
         body = await api_create_ready_load(client, headers, f"{tag_prefix}-{i}")
-        out.append(int(body["id"]))
+        lid = int(body["id"])
+        if tracker is not None:
+            tracker.track_load(lid)
+        out.append(lid)
     return out

@@ -36,6 +36,7 @@ from tests.support.integration_isolation import (
     database_name_from_url,
     require_integration_tenant_database_url,
 )
+from tests.support.integration_test_resources import _cleanup_load_rows, _cleanup_trip_rows
 from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 
 _VALID_STOPS = [
@@ -59,48 +60,6 @@ def _integration_db_configured() -> bool:
 
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 SKIP_ISSUE12_HTTP = _PLACEHOLDER_PLATFORM_DB or not _integration_db_configured()
-
-
-async def _cleanup_load_rows(db: AsyncSession, tenant_id: int, load_id: int) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context="issue12_cleanup_load")
-    await db.execute(
-        text(
-            "delete from trip_loads where tenant_id=:t and load_id=:i"
-        ),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.execute(
-        text(
-            "delete from audit_events where tenant_id=:t and entity_type='load' and entity_id=:e"
-        ),
-        {"t": tenant_id, "e": str(load_id)},
-    )
-    await db.execute(
-        text("delete from load_stops where tenant_id=:t and load_id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.execute(
-        text("delete from load_notes where tenant_id=:t and load_id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.execute(
-        text("delete from loads where tenant_id=:t and id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.commit()
-
-
-async def _cleanup_trip_rows(db: AsyncSession, tenant_id: int, trip_id: int) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context="issue12_cleanup_trip")
-    await db.execute(
-        text("delete from trip_loads where tenant_id=:t and trip_id=:i"),
-        {"t": tenant_id, "i": trip_id},
-    )
-    await db.execute(
-        text("delete from trips where tenant_id=:t and id=:i"),
-        {"t": tenant_id, "i": trip_id},
-    )
-    await db.commit()
 
 
 @pytest.fixture
@@ -204,9 +163,9 @@ async def issue12_http(client, override_auth_tenant, issue12_integration_gate):
             try:
                 async with Session() as db:
                     for trip_id in reversed(created_trip_ids):
-                        await _cleanup_trip_rows(db, tenant_id, trip_id)
+                        await _cleanup_trip_rows(db, tenant_id, trip_id, context="issue12")
                     for load_id in reversed(created_load_ids):
-                        await _cleanup_load_rows(db, tenant_id, load_id)
+                        await _cleanup_load_rows(db, tenant_id, load_id, context="issue12")
             finally:
                 await engine.dispose()
 

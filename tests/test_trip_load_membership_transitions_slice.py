@@ -26,7 +26,7 @@ from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
-from tests.support.integration_ready_load import api_create_ready_load_ids
+from tests.support.integration_test_resources import integration_scope_context
 from tests.support.custody_http import (
     activate_via_custody,
     complete_via_custody,
@@ -93,6 +93,13 @@ def override_auth_tenant(test_bypass_env):
     clear_current_user_and_tenant_overrides(app)
 
 
+
+@pytest.fixture
+async def integration_scope(client, override_auth_tenant):
+    async with integration_scope_context(client, AUTH_HEADERS, "trip_mem_transitions") as scope:
+        yield scope
+
+
 @pytest.fixture
 async def locked_prefix(client, override_auth_tenant) -> str:
     r0 = await client.get("/api/v1/admin/dispatch-numbering", headers=AUTH_HEADERS)
@@ -110,8 +117,8 @@ async def locked_prefix(client, override_auth_tenant) -> str:
     return prefix
 
 
-async def _pick_load_ids(client: AsyncClient, n: int = 1) -> list[int]:
-    return await api_create_ready_load_ids(client, AUTH_HEADERS, n, tag_prefix="MEM-TRANS")
+async def _pick_load_ids(scope, n: int = 1) -> list[int]:
+    return await scope.create_ready_load_ids(n, tag_prefix="MEM-TRANS")
 
 
 async def _first_driver_truck_trailer(client: AsyncClient) -> tuple[int, int, int] | None:
@@ -243,20 +250,15 @@ async def _assign_trip(client: AsyncClient, trip_id: int) -> None:
 @pytest.mark.asyncio
 class TestTripLoadMembershipTransitions:
     async def test_activate_complete_flow_and_gates(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 2)
+        loads = await _pick_load_ids(integration_scope, 2)
         if len(loads) < 1:
             pytest.skip("no loads")
         load_a = loads[0]
-        await _clear_open_memberships(load_a)
 
         # Trip A planned + attach load, assign, activate A
-        r_a = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_a]},
-        )
+        r_a = await integration_scope.post_planned_trip([load_a])
         assert r_a.status_code == 201, r_a.text
         trip_a = int(r_a.json()["id"])
 
@@ -272,11 +274,7 @@ class TestTripLoadMembershipTransitions:
         assert r_act_a.json()["trip_status"] == "assigned"  # activation does not start execution
 
         # Trip B planned while A active
-        r_b = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_a]},
-        )
+        r_b = await integration_scope.post_planned_trip([load_a])
         assert r_b.status_code == 201, r_b.text
         trip_b = int(r_b.json()["id"])
         await _assign_trip(client, trip_b)
@@ -327,19 +325,14 @@ class TestTripLoadMembershipTransitions:
         assert r_ca.json()["detail"]["code"] == "MEMBERSHIP_ALREADY_COMPLETED"
 
     async def test_planned_complete_blocked_and_in_progress_activate(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r = await integration_scope.post_planned_trip([load_id])
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
 
@@ -362,19 +355,14 @@ class TestTripLoadMembershipTransitions:
         assert await _load_active_trip_id(load_id) == trip_id
 
     async def test_removed_transitions_blocked_and_cancel_skips_completed(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r = await integration_scope.post_planned_trip([load_id])
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
         await _assign_trip(client, trip_id)
@@ -394,12 +382,7 @@ class TestTripLoadMembershipTransitions:
         assert row["removed_at"] is None
 
         # removed membership: remove open planned on new trip then try activate/complete
-        await _clear_open_memberships(load_id)
-        r2 = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-        )
+        r2 = await integration_scope.post_planned_trip([load_id])
         assert r2.status_code == 201, r2.text
         trip2 = int(r2.json()["id"])
         assert (
@@ -416,20 +399,14 @@ class TestTripLoadMembershipTransitions:
         assert r_rc.json()["detail"]["code"] == "MEMBERSHIP_ALREADY_REMOVED"
 
     async def test_multi_load_complete_isolates_and_db_uniques(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 2)
+        loads = await _pick_load_ids(integration_scope, 2)
         if len(loads) < 2:
             pytest.skip("need two loads")
         load_a, load_b = loads[0], loads[1]
-        await _clear_open_memberships(load_a)
-        await _clear_open_memberships(load_b)
 
-        r = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": [load_a, load_b]},
-        )
+        r = await integration_scope.post_planned_trip([load_a, load_b])
         assert r.status_code == 201, r.text
         trip_id = int(r.json()["id"])
         await _assign_trip(client, trip_id)
@@ -450,11 +427,7 @@ class TestTripLoadMembershipTransitions:
         assert await _load_active_trip_id(load_b) == trip_id
 
         # DB unique: second open ACTIVE for load_b (still active on trip_id)
-        r_empty = await client.post(
-            "/api/v1/trips",
-            headers=AUTH_HEADERS,
-            json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-        )
+        r_empty = await integration_scope.post_planned_trip([])
         assert r_empty.status_code == 201, r_empty.text
         other_trip = int(r_empty.json()["id"])
 
@@ -495,11 +468,7 @@ class TestTripLoadMembershipTransitions:
                 )
                 await session.commit()
 
-                r_empty2 = await client.post(
-                    "/api/v1/trips",
-                    headers=AUTH_HEADERS,
-                    json={"status": "planned", "job_type": "freight_load", "load_ids": []},
-                )
+                r_empty2 = await integration_scope.post_planned_trip([])
                 assert r_empty2.status_code == 201, r_empty2.text
                 other_trip2 = int(r_empty2.json()["id"])
 
@@ -540,9 +509,9 @@ class TestTripLoadMembershipTransitions:
         )
 
     async def test_activate_assigned_requires_complete_assignment(
-        self, client: AsyncClient, locked_prefix: str, override_auth_tenant
+        self, client: AsyncClient, locked_prefix: str, integration_scope
     ):
-        loads = await _pick_load_ids(client, 1)
+        loads = await _pick_load_ids(integration_scope, 1)
         if not loads:
             pytest.skip("no loads")
         ids = await _first_driver_truck_trailer(client)
@@ -550,14 +519,9 @@ class TestTripLoadMembershipTransitions:
             pytest.skip("no driver/truck/trailer")
         d_id, t_id, r_id = ids
         load_id = loads[0]
-        await _clear_open_memberships(load_id)
 
         async def _create_planned() -> int:
-            r = await client.post(
-                "/api/v1/trips",
-                headers=AUTH_HEADERS,
-                json={"status": "planned", "job_type": "freight_load", "load_ids": [load_id]},
-            )
+            r = await integration_scope.post_planned_trip([load_id])
             assert r.status_code == 201, r.text
             return int(r.json()["id"])
 
@@ -570,7 +534,6 @@ class TestTripLoadMembershipTransitions:
         r_idem = await _activate(client, trip_ok, load_id)
         assert r_idem.status_code == 200
         assert await _load_active_trip_id(load_id) == trip_ok
-        await _clear_open_memberships(load_id)
 
         # B/C/D. incomplete assigned via planned create + test-only SQL (POST /trips is planned-only)
         for missing, d, t, r in (
@@ -578,7 +541,6 @@ class TestTripLoadMembershipTransitions:
             ("truck", d_id, None, r_id),
             ("trailer", d_id, t_id, None),
         ):
-            await _clear_open_memberships(load_id)
             trip_id = await _create_planned()
             await _force_incomplete_assigned(
                 trip_id, driver_id=d, truck_id=t, trailer_id=r
@@ -589,7 +551,6 @@ class TestTripLoadMembershipTransitions:
             assert "driver" in r_act.json()["detail"]["detail"].lower()
 
         # E. in_progress allows activate without rechecking (after clear + new trip)
-        await _clear_open_memberships(load_id)
         trip_ip = await _create_planned()
         await _assign_trip(client, trip_ip)
         r_sig = await client.post(
