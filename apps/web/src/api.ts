@@ -1008,6 +1008,109 @@ export async function postTripExecutionSignal(tripId: number, body: TripExecutio
   return handle<TripDetail>(res);
 }
 
+/** POST /api/v1/trips/{id}/complete — close trip container when zero OPEN TripLoads (I14). */
+export async function completeTripContainer(tripId: number): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/complete`, {
+    method: "POST",
+  });
+  return handle<TripDetail>(res);
+}
+
+export type LoadCustodySnapshot = {
+  load_id: number;
+  custody_owner: string;
+  custody_trip_id?: number | null;
+  custody_terminal_id?: number | null;
+  custody_placement: string;
+  custody_trailer_id?: number | null;
+  custody_since_at?: string | null;
+  last_custody_event_id?: number | null;
+};
+
+export async function getLoadCustodySnapshot(loadId: number): Promise<LoadCustodySnapshot> {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/custody`);
+  return handle<LoadCustodySnapshot>(res);
+}
+
+export type TerminalRow = {
+  id: number;
+  tenant_id: number;
+  name: string;
+  street?: string | null;
+  city?: string | null;
+  state_or_province?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listTerminals(activeOnly = true): Promise<TerminalRow[]> {
+  const url = new URL(`${API_BASE}/terminals`, window.location.origin);
+  if (activeOnly) url.searchParams.set("active_only", "true");
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  const body = await handle<{ items: TerminalRow[] }>(res);
+  return body.items ?? [];
+}
+
+export type CustodyTransitionResult = {
+  load_id: number;
+  trip_id: number;
+  trip_status: string;
+  load_status: string;
+  membership_status_within_trip: string;
+  active_trip_id?: number | null;
+  snapshot: LoadCustodySnapshot;
+  replayed: boolean;
+};
+
+export async function acceptTripLoadCustody(
+  tripId: number,
+  loadId: number,
+  body: { notes?: string | null } = {},
+): Promise<CustodyTransitionResult> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/accept-custody`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<CustodyTransitionResult>(res);
+}
+
+export async function takeTripLoadCustody(
+  tripId: number,
+  loadId: number,
+  body: { notes?: string | null } = {},
+): Promise<CustodyTransitionResult> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/take-custody`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<CustodyTransitionResult>(res);
+}
+
+export type YardHandoffPayload = {
+  terminal_id: number;
+  placement: "on_trailer" | "staged";
+  trailer_id?: number | null;
+  notes?: string | null;
+};
+
+export async function yardHandoffTripLoadCustody(
+  tripId: number,
+  loadId: number,
+  body: YardHandoffPayload,
+): Promise<CustodyTransitionResult> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/yard-handoff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<CustodyTransitionResult>(res);
+}
+
 /** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
 export type TripAssignmentPayload = {
   driver_id: number | null;

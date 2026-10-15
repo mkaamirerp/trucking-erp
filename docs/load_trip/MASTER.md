@@ -65,7 +65,7 @@ Status vocabulary:
 | 15 | I9 | Load audit trail incomplete | ⬜ NOT IMPLEMENTED | Integrity Issue 9 | Expand audit events |
 | 16 | I10 | Unknown `Load.status` → Ready on legacy board | ⬜ NOT IMPLEMENTED | `list_loads_for_board` unknown→ready confirmed | Explicit unknown bucket |
 | 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | ⬜ NOT IMPLEMENTED | Create Planned Trip gated on ACTIVE-only mirror | Open-planned discovery API + UI |
-| 18 | I14 | Custody → Trip close operator workflow | ⬜ NOT IMPLEMENTED | Backend complete/custody slices exist; product wiring incomplete | Wire correct operator path |
+| 18 | I14 | Custody → Trip close operator workflow | ✅ CODE COMPLETE / REVIEW PENDING — NOT DEPLOYED | Trip Workspace: custody snapshots, accept/take/yard-handoff, POST `/trips/{id}/complete` with eligibility + confirmation (`gpt-review`) | Independent review + deploy after acceptance |
 | 19 | I15 | Block silent assignment swap on `in_progress` | ⬜ NOT IMPLEMENTED | Decision 13 / integrity Issue 15 | Enforce immutability + recovery path |
 | 20 | I16 | Decision 10 future-assignment conflict guard | ⬜ NOT IMPLEMENTED | Columns + schedule PATCH exist (`planned_start_at` / `expected_completion_at`); assignment overlap guard not enforced | Implement conflict check on assign |
 | 21 | I17 | Current/open TripLoad row selection contract | ⬜ NOT IMPLEMENTED | Integrity Issue 17 | Safe current-row lookups |

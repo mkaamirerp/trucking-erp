@@ -23,6 +23,7 @@ import {
   isOpenTripMembership,
 } from "@/api";
 import { OPS } from "@/routes";
+import { TripWorkspaceExecutionSection } from "@/tripWorkspace/TripWorkspaceExecutionSection";
 
 function formatMoney(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "—";
@@ -565,8 +566,9 @@ export default function TripWorkspacePage() {
               <p className="mt-2 text-[11px] text-[var(--trk-text-muted)]">
                 Trip movement assignment is owned here — not via Load.status. All three resources must be set for the trip
                 to move to <span className="font-medium text-[var(--trk-text)]">assigned</span>.{" "}
-                <span className="font-medium text-[var(--trk-text)]">Saving assignment does not start the trip</span> or
-                change execution state — use future execution controls when shipped.
+                <span className="font-medium text-[var(--trk-text)]">Saving assignment does not start the trip</span> — use{" "}
+                <span className="font-medium text-[var(--trk-text)]">Start Execution</span> above, then custody and closeout
+                below.
               </p>
               <p className="mt-3 text-sm text-[var(--trk-text-muted)]">
                 <span className="font-medium text-[var(--trk-text)]">Driver: </span>
@@ -868,12 +870,7 @@ export default function TripWorkspacePage() {
               ) : null}
             </section>
 
-            <section className="rounded-xl border border-dashed border-[var(--trk-border)] bg-[var(--trk-bg)] p-5">
-              <h2 className="text-sm font-semibold text-[var(--trk-text)]">Execution (coming later)</h2>
-              <p className="mt-2 text-sm text-[var(--trk-text-muted)]">
-                Execution timeline, stops, and custody will be added in a later phase.
-              </p>
-            </section>
+            <TripWorkspaceExecutionSection trip={trip} tripId={tripId} onTripUpdated={setTrip} />
 
             {trip.legacy_dispatch_trip_id != null ? (
               <p className="text-[10px] text-[var(--trk-text-muted)]">
