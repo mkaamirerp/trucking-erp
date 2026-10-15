@@ -23,4 +23,4 @@ If the reverted files fail validation, the later-phase startup rule still applie
 
 ## Dependency
 
-`casbin` is not listed in `requirements.txt` or `requirements.lock.txt`. This package imports it only inside `load_policy`. Adding `casbin==1.41.0` (which requires `simpleeval==1.0.8`) needs a separate approval before it is declared or installed in the API image.
+`casbin==1.41.0` is declared in `requirements.in`, `requirements.txt`, and `requirements.lock.txt`. Its dependency `simpleeval==1.0.8` is in the lockfile. This package imports Casbin only inside `load_policy`. Application startup does not call that loader.
