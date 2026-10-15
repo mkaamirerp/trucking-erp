@@ -31,6 +31,34 @@ After an approved architecture change:
 
 ---
 
+## WORKSTREAM FREEZE — 2026-10-15 — PAUSED FOR SHARED CASBIN/RBAC FOUNDATION
+
+**Owner decision:** Freeze active Load/Trip Integrity implementation here. Investigate application-wide authorization and establish a reusable Casbin permission foundation **before resuming Load Integrity changes**. This is a pause, not a Gold declaration, deployment authorization, or closure of remaining findings.
+
+**Frozen code location:** `gpt-review` (not production). Last reported I5 implementation: `504eca2105a555ee2a2716cb2591fac52ce1e821`. Subsequent **correction pass 1** (read-safe Load status, Ready PATCH invariant, bounded PDF read) is recorded in the I5 tracker and tests, but its integrated acceptance/deployment is **not independently established by this freeze**. I14 final-delivery/idempotency correction was reviewed at `6fde801142e42719bd46ca281609ce764ac3facb` on `gpt-review`. Do not use a Git SHA as a substitute for rechecking the actual code when resuming.
+
+### Frozen implementation checklist — evidence levels
+
+- [x] **I5 code:** physical DELETE blocked; commercial cancel endpoint; cancellation audit and history preservation; cancelled Load PATCH/Mark Ready/customs guard; row locking; TripLoad activation rejects cancelled Load. Cursor reported 26 passing targeted tests; final independent whole-module audit and production verification pending.
+- [x] **I14 code:** explicit consignee final-delivery custody transition, separate terminal yard handoff, trip completion gate; idempotency-key conflict correction and completed-Trip replay. Targeted tests reported passing; not deployed and not Gold.
+- [x] **I3 draft→Ready authority:** dedicated Mark Ready operation; generic PATCH promotion blocked, previously reviewed. **Separate Ready-after-PATCH validity gap** is tracked as correction pass 1; do not confuse the two.
+- [x] **Issue 26 money PATCH audit atomicity:** previously accepted code with targeted tests; **does not close I8 decimal transport** or all I9 audit identity problems.
+- [ ] **Correction pass 1 closure:** verify actual HTTP tests and outcomes for nullable/unknown status reads, Ready requirements after PATCH and bounded PDF intake; tracker shows code but final cross-contract acceptance is not recorded here.
+- [ ] **Shared RBAC/Casbin authorization:** not implemented/verified; **next active workstream**.
+- [ ] **Other outstanding Load/Trip Integrity:** see work-order rows and Claude findings below; do not label complete, deployed, or Gold.
+
+### Exact next work — authorization first
+
+1. **READ-ONLY global authorization inspection**: identify where READ_ONLY/FULL_ACCESS are stored/enforced, platform versus tenant identity, separate tenant-admin authority, and enumerate registered state-changing routes across all modules with existing gates and negative tests. Authentication alone is not authorization. Do not assume every route is vulnerable without checking inherited or middleware controls.
+2. **Owner-reviewed Casbin design and implementation** in shared auth infrastructure (not `loads.py`): tenant-domain role-to-permission policy, source roles from verified DB membership, central `require_permission(object, action)` dependency, existing READ_ONLY/FULL_ACCESS semantics, admin separation, field-permission extension point, route-coverage test, fail-closed initialization, cross-tenant denials. **Do not invent role names, silently change existing access, create a new user store, or deploy without separate approval.**
+3. **Resume Load Integrity at the exact restart point:** validate correction pass 1; close remaining Claude findings (I9 actor/audit consistency, I8 decimal boundary, duplicate numbers, frontend write/filter/reference contracts, parser tenant/rate limits); progress remaining work-order issues; then execute full Load→Trip→Custody→delivery regression and independent Claude/Antigravity final audit.
+
+### Frozen release boundary
+
+No merge to `main`, production deployment, database migration, DW work, additional remote branch, or production data mutation is authorized by this freeze. Existing production Integrity-only baseline was reported as `6919ec0`; **do not assume later `gpt-review` changes are production-live**. Historical migration/0C retirement holds remain in effect. Future updates must distinguish **code implemented**, **tests independently verified**, **review accepted**, **merged**, and **deployed**.
+
+---
+
 # IMPLEMENTATION STATUS / WORK ORDER
 
 Status vocabulary:
@@ -77,7 +105,7 @@ Status vocabulary:
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Exact next executable item:** **Issue 26 production deploy + verification** (code complete on `main`, not deployed). **Issue 3 production deploy + verification** (merged to `main` at `6c7c415…`, not deployed). Then owner approval for **0B migration mapping**. **0C UI retirement** remains on hold by owner decision. **0B** / **0D** historical findings stay open.
+**Exact next active workstream (owner freeze):** global READ_ONLY/FULL_ACCESS authorization inspection → approved shared Casbin foundation → resume Load Integrity at the frozen checklist above. Earlier issue 26 / I3 deploy reminders are **pending release tasks, not instructions to deploy now**. Owner approval remains required for any deploy, 0B migration mapping, and lifting the 0C hold.
 
 ---
 
