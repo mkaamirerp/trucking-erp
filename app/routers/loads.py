@@ -92,7 +92,7 @@ async def parse_load_workspace_document(
     Uses the Rate Confirmation v2 product parser (acquisition + clean OpenAI handoff +
     mechanical validation); no PRODUCT_PARSE_DIAGNOSTICS fallback.
     """
-    data = await file.read()
+    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
     if len(data) > _MAX_PARSE_PDF_BYTES:

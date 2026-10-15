@@ -61,7 +61,7 @@ Status vocabulary:
 | 11 | I3 | Mark Ready bypass / draft→ready authority | ✅ CODE COMPLETE / REVIEW ACCEPTED — MERGED TO MAIN / NOT DEPLOYED | Independent review accepted on `gpt-review`; integrated to `main` via cherry-pick (`6c7c4155b744063f3a7400fa02ae4880821791c9` HEAD). **Review commits:** `d7912962dcb8465d1853a40799b65cb8757e58af` (guard: `_guard_update_payload` rejects generic PATCH into `ready`; `LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT`), `851a7c7282b7297caeef3e08f93836606f87cb14` (HTTP regression + `tenant_pytest` isolation/cleanup), `b67455881671598a99437eb35c3637d3e90e794f` (fixture + MASTER). **`main` integration commits:** `f5bbf5d`, `05c9d50`, `6c7c415`. **Dedicated `mark_load_ready()` / POST mark-ready remains sole authority** for draft→ready (validation + CAS unchanged). **Commercial PATCH with `status` omitted** unchanged. **Ready→draft via PATCH** unchanged in this slice. **7** HTTP tests + Issue 0A unit gates passed on isolated DB. **Production deploy and live verification pending** | Deploy via `reload_api.sh` + verify PATCH rejection on running API |
 | 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | ⬜ NOT IMPLEMENTED | Integrity Phase 1 item; planned membership insert does not currently require ready | Gate membership create |
 | 13 | I2 | Full stop replacement destroys stop/action/history | ⬜ NOT IMPLEMENTED | Integrity Issue 2 | Safer stop persistence |
-| 14 | I5 | Hard DELETE unsafe for commercial/history Loads | ✅ CODE COMPLETE / REVIEW PENDING — NOT DEPLOYED | `gpt-review`: DELETE blocked; **POST `/loads/{id}/cancel`**; `LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED` on PATCH/mark-ready/customs confirm; notes append-only allowed; cancel uses **Load FOR UPDATE**; Trip activate rejects `LOAD_COMMERCIALLY_CANCELLED` (open planned TripLoad may remain per MASTER §13B). Tests: `test_load_physical_delete_guard_issue5.py`, `test_load_cancel_issue5.py`. **Deferred (not I5):** I3 ready invariant after PATCH; I9 audit txn/actor; duplicate load_number race; 0C/0D legacy read-model. | Review; AR/payroll cancel block; draft reversibility; auto-remove TripLoad on cancel |
+| 14 | I5 | Hard DELETE unsafe for commercial/history Loads | ✅ CODE COMPLETE / REVIEW PENDING — NOT DEPLOYED | `gpt-review`: DELETE blocked; **POST `/loads/{id}/cancel`**; `LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED` on PATCH/mark-ready/customs confirm; notes append-only allowed; cancel uses **Load FOR UPDATE**; Trip activate rejects `LOAD_COMMERCIALLY_CANCELLED` (open planned TripLoad may remain per MASTER §13B). **Correction pass 1:** `LoadResponse` permissive `status`; ready commercial PATCH guard (`LOAD_READY_REQUIREMENTS_VIOLATED`); bounded PDF read. Tests: `test_load_physical_delete_guard_issue5.py`, `test_load_cancel_issue5.py`, `test_load_integrity_correction_pass1.py`. **Still open:** see **Claude findings (unresolved)** below. | Review; AR/payroll cancel block; draft reversibility; auto-remove TripLoad on cancel |
 | 15 | I9 | Load audit trail incomplete | ⬜ NOT IMPLEMENTED | Integrity Issue 9 | Expand audit events |
 | 16 | I10 | Unknown `Load.status` → Ready on legacy board | ⬜ NOT IMPLEMENTED | `list_loads_for_board` unknown→ready confirmed | Explicit unknown bucket |
 | 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | ⬜ NOT IMPLEMENTED | Create Planned Trip gated on ACTIVE-only mirror | Open-planned discovery API + UI |
@@ -1473,6 +1473,20 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 6. **11** targeted regression tests passed (Issue 26 suite + `test_load_audit_events_unittest.py`).
 7. Accepted commits: `ede7ba80d0154f39db5a4f23813b7eaceae99030`, `e7ab68ddbea4106aca891455a7b094ebb5277ae3`.
 8. **Production deployment and live verification remain pending** — do not treat as shipped in runtime until API reload + operator verification.
+
+### Claude findings (unresolved — not fixed by correction pass 1)
+
+- RBAC permission gates on Load/Trip mutations
+- Audit actor / request identity on all Load writes
+- Best-effort audit transaction handling edge cases
+- Parser rate limits and tenant context on parse-document
+- Decimal-safe money contract end-to-end (API/parser)
+- Duplicate `load_number` race under concurrency
+- Explicit frontend write payload / field contract drift
+- Nonfunctional pickup date filters on list/board
+- `LoadResponse.references` ORM serialization quirks
+- Legacy read-model / dispatch mirror issues (0C/0D)
+- Other cross-module security findings from integrity audit
 
 ### Gates
 

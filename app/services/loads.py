@@ -350,6 +350,60 @@ def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
     return u in ("DROP", "DELIVERY")
 
 
+async def _ready_requirements_violation(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+) -> str | None:
+    row = (
+        await db.execute(
+            select(
+                Load.broker_id,
+                Load.broker_name_snapshot,
+                Load.broker_load_reference,
+            ).where(
+                Load.id == load_id,
+                Load.tenant_id == tenant_id,
+            )
+        )
+    ).one_or_none()
+
+    if row is None:
+        return "Load not found"
+
+    if not (
+        row.broker_id
+        or (row.broker_name_snapshot or "").strip()
+    ):
+        return "Broker or broker name is required"
+
+    if not (row.broker_load_reference or "").strip():
+        return "Broker load reference is required"
+
+    stop_types = [
+        (value or "").strip().upper()
+        for value in (
+            await db.scalars(
+                select(LoadStop.stop_type).where(
+                    LoadStop.tenant_id == tenant_id,
+                    LoadStop.load_id == load_id,
+                )
+            )
+        ).all()
+    ]
+
+    if "PICKUP" not in stop_types:
+        return "At least one pickup is required"
+
+    if not any(
+        _stop_is_delivery_or_drop(value)
+        for value in stop_types
+    ):
+        return "At least one delivery or drop is required"
+
+    return None
+
+
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
     stmt = select(Load).where(Load.tenant_id == tenant_id, Load.load_number == load_number)
     if exclude_id:
@@ -617,6 +671,29 @@ async def update_load(
 
     # Issue 26: keep Load mutation and audit in one transaction (no commit before audit).
     await db.flush()
+
+    ready_relevant_fields = {
+        "broker_id",
+        "broker_name_snapshot",
+        "broker_load_reference",
+    }
+    if (
+        old_status == "ready"
+        and (
+            bool(ready_relevant_fields.intersection(data))
+            or "stops" in payload.model_fields_set
+        )
+    ):
+        violation = await _ready_requirements_violation(
+            db, tenant_id, load_id
+        )
+        if violation:
+            await db.rollback()
+            raise _legacy_write_conflict(
+                "LOAD_READY_REQUIREMENTS_VIOLATED",
+                f"Ready Load would become invalid: {violation}",
+            )
+
     # CAS uses synchronize_session=False; refresh this row so audit before/after sees DB values.
     await db.refresh(load)
     out = load
@@ -977,28 +1054,13 @@ async def mark_load_ready(
             detail=f"Only draft loads can be marked ready; current status is {load.status}",
         )
 
-    if not (load.broker_id or load.broker_name_snapshot):
+    violation = await _ready_requirements_violation(
+        db, tenant_id, load_id
+    )
+    if violation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Broker or broker name must be set before marking ready",
-        )
-    if not load.broker_load_reference:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Broker load reference must be set before marking ready",
-        )
-
-    pickups = [s for s in load.stops if (s.stop_type or "").strip().upper() == "PICKUP"]
-    deliveries = [s for s in load.stops if _stop_is_delivery_or_drop(s.stop_type)]
-    if not pickups:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one pickup stop is required before marking ready",
-        )
-    if not deliveries:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one delivery or drop stop is required before marking ready",
+            detail=violation,
         )
 
     stmt = (

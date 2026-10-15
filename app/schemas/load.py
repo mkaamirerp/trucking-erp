@@ -103,6 +103,10 @@ class LoadBase(BaseModel):
     #: Public API collection. ORM/DB column is ``operational_references``.
     references: list[LoadParseReferenceItem] = Field(default_factory=list, max_length=40)
 
+
+class LoadCreate(LoadBase):
+    stops: Optional[Sequence[LoadStopCreate]] = None
+
     @field_validator("status")
     @classmethod
     def validate_status(cls, v: str) -> str:
@@ -110,10 +114,6 @@ class LoadBase(BaseModel):
         if v not in ALLOWED_STATUSES:
             raise ValueError(f"Status must be one of {', '.join(sorted(ALLOWED_STATUSES))}")
         return v
-
-
-class LoadCreate(LoadBase):
-    stops: Optional[Sequence[LoadStopCreate]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -242,6 +242,7 @@ class LoadCancelBody(BaseModel):
 
 
 class LoadResponse(LoadBase):
+    status: str | None = None
     id: int
     concurrency_version: int = 1
     trip_number: Optional[str] = None
