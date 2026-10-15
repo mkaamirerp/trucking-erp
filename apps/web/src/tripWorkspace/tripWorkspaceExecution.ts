@@ -16,7 +16,12 @@ export type TripCompleteEligibility = {
   reason: string;
 };
 
-export type CustodyStep = "accept" | "take" | "yard_handoff";
+/** Custody transitions with a dedicated Trip Workspace action (not yard handoff). */
+export type CustodyStep = "accept" | "take";
+
+/** Reserved event type in app/constants/custody.py — no public API route yet. */
+export const FINAL_DELIVERY_API_UNAVAILABLE =
+  "Final delivery at consignee/receiver is not available in the API yet (no final_delivery transition). Use terminal yard handoff only when freight is staged at a yard/terminal.";
 
 /** Backend: POST /trips/{id}/complete requires in_progress and zero OPEN TripLoads. */
 export function tripCompleteEligibility(trip: TripDetail): TripCompleteEligibility {
@@ -42,13 +47,13 @@ export function tripCompleteEligibility(trip: TripDetail): TripCompleteEligibili
     return {
       canComplete: false,
       reason:
-        "Complete each active load on this trip with Yard handoff (terminal custody) before closing the trip.",
+        "Each active load needs a custody closeout on this trip (terminal yard handoff or final delivery when supported) before the trip can be completed.",
     };
   }
   return {
     canComplete: false,
     reason:
-      "Resolve open planned memberships (accept/take custody and yard handoff, or remove from trip) before completing.",
+      "Resolve open planned memberships (accept/take custody, terminal handoff, or remove from trip) before completing.",
   };
 }
 
@@ -72,11 +77,29 @@ export function suggestedCustodyStep(
     if (owner === "trip" && custodyTripId === tripId) return "accept";
     return null;
   }
-  if (within === "active") {
-    if (owner === "trip" && custodyTripId === tripId) return "yard_handoff";
-    return null;
-  }
   return null;
+}
+
+/** POST yard-handoff: trip custody → terminal + completes ACTIVE membership (terminal handoff only). */
+export function canOfferTerminalYardHandoff(
+  membership: TripMemberLoad,
+  snapshot: LoadCustodySnapshot | undefined,
+  tripId: number,
+): boolean {
+  if (!isOpenTripMembership(membership)) return false;
+  const within = (membership.status_within_trip || "").toLowerCase();
+  if (within !== "active") return false;
+  const owner = (snapshot?.custody_owner || "unknown").toLowerCase();
+  const custodyTripId = snapshot?.custody_trip_id ?? null;
+  return owner === "trip" && custodyTripId === tripId;
+}
+
+export function showFinalDeliveryUnavailableNotice(
+  membership: TripMemberLoad,
+  snapshot: LoadCustodySnapshot | undefined,
+  tripId: number,
+): boolean {
+  return canOfferTerminalYardHandoff(membership, snapshot, tripId);
 }
 
 export function formatTripCompleteError(err: unknown): string {
@@ -89,7 +112,7 @@ export function formatTripCompleteError(err: unknown): string {
       const code = (detail as { code?: string }).code;
       switch (code) {
         case "OPEN_ACTIVE_MEMBERSHIP_REMAINS":
-          return "Trip still has an active load membership. Yard handoff each active load first.";
+          return "Trip still has an active load membership. Close out each active load via custody first.";
         case "OPEN_PLANNED_MEMBERSHIP_REMAINS":
           return "Trip still has a planned load membership. Finish custody or remove the load first.";
         case "INVALID_TRIP_STATUS_FOR_COMPLETE":

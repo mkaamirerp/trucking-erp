@@ -14,10 +14,13 @@ import {
   yardHandoffTripLoadCustody,
 } from "@/api";
 import {
+  canOfferTerminalYardHandoff,
   countOpenMemberships,
+  FINAL_DELIVERY_API_UNAVAILABLE,
   formatCustodySnapshotLine,
   formatCustodyTransitionError,
   formatTripCompleteError,
+  showFinalDeliveryUnavailableNotice,
   suggestedCustodyStep,
   tripCompleteEligibility,
 } from "./tripWorkspaceExecution";
@@ -180,32 +183,14 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
           {openMembers.map((m) => {
             const snap = custodyByLoadId[m.load_id];
             const step = suggestedCustodyStep(m, snap, tripId);
+            const terminalHandoff = canOfferTerminalYardHandoff(m, snap, tripId);
+            const finalDeliveryNotice = showFinalDeliveryUnavailableNotice(m, snap, tripId);
             return (
               <li key={m.trip_load_id} className="flex flex-col gap-2 px-4 py-3 text-sm">
                 <div className="font-medium text-[var(--trk-text)]">
                   {m.load_number} · membership {m.status_within_trip}
                 </div>
                 <div className="text-xs text-[var(--trk-text-muted)]">{formatCustodySnapshotLine(snap)}</div>
-                {step === "yard_handoff" ? (
-                  <label className="flex max-w-md flex-col gap-1 text-[11px] text-[var(--trk-text-muted)]">
-                    Terminal for yard handoff
-                    <select
-                      value={yardTerminalByLoad[m.load_id] ?? ""}
-                      onChange={(e) =>
-                        setYardTerminalByLoad((prev) => ({ ...prev, [m.load_id]: e.target.value }))
-                      }
-                      disabled={custodyBusyLoadId === m.load_id}
-                      className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
-                    >
-                      <option value="">— Select terminal —</option>
-                      {terminals.map((t) => (
-                        <option key={t.id} value={String(t.id)}>
-                          #{t.id} {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
                 {step ? (
                   <button
                     type="button"
@@ -216,16 +201,55 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
                     {custodyBusyLoadId === m.load_id
                       ? "Working…"
                       : step === "accept"
-                        ? "Accept custody"
-                        : step === "take"
-                          ? "Take custody from terminal"
-                          : "Yard handoff (end membership)"}
+                        ? "Accept custody (pickup)"
+                        : "Take custody from terminal"}
                   </button>
-                ) : (
+                ) : null}
+                {terminalHandoff ? (
+                  <div className="mt-1 flex flex-col gap-2 border-l-2 border-[var(--trk-border)] pl-3">
+                    <p className="text-[11px] text-[var(--trk-text-muted)]">
+                      Terminal / yard handoff — use only when freight is handed to a tenant terminal (not consignee
+                      delivery).
+                    </p>
+                    <label className="flex max-w-md flex-col gap-1 text-[11px] text-[var(--trk-text-muted)]">
+                      Terminal
+                      <select
+                        value={yardTerminalByLoad[m.load_id] ?? ""}
+                        onChange={(e) =>
+                          setYardTerminalByLoad((prev) => ({ ...prev, [m.load_id]: e.target.value }))
+                        }
+                        disabled={custodyBusyLoadId === m.load_id}
+                        className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
+                      >
+                        <option value="">— Select terminal —</option>
+                        {terminals.map((t) => (
+                          <option key={t.id} value={String(t.id)}>
+                            #{t.id} {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      data-testid={`trip-yard-handoff-${m.load_id}`}
+                      disabled={custodyBusyLoadId != null}
+                      onClick={() => void onCustodyAction(m, "yard_handoff")}
+                      className="w-fit rounded-md border border-amber-300/80 bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      {custodyBusyLoadId === m.load_id ? "Working…" : "Record terminal / yard handoff"}
+                    </button>
+                  </div>
+                ) : null}
+                {finalDeliveryNotice ? (
+                  <p className="text-[11px] text-[var(--trk-text-muted)]" data-testid="final-delivery-unavailable">
+                    {FINAL_DELIVERY_API_UNAVAILABLE}
+                  </p>
+                ) : null}
+                {!step && !terminalHandoff ? (
                   <p className="text-[11px] text-amber-800/90">
                     No custody action available for this membership state. Resolve custody elsewhere or contact support.
                   </p>
-                )}
+                ) : null}
               </li>
             );
           })}

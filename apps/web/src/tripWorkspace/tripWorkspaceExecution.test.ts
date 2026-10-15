@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canOfferTerminalYardHandoff,
   countOpenMemberships,
   suggestedCustodyStep,
   tripCompleteEligibility,
@@ -86,14 +87,14 @@ describe("suggestedCustodyStep", () => {
     ).toBe("accept");
   });
 
-  it("yard_handoff for active + trip custody on same trip", () => {
+  it("does not auto-suggest yard handoff (operator must choose terminal handoff explicitly)", () => {
     expect(
       suggestedCustodyStep(
         member({ load_id: 1, status_within_trip: "active" }),
         snap({ load_id: 1, custody_owner: "trip", custody_trip_id: 5 }),
         5,
       ),
-    ).toBe("yard_handoff");
+    ).toBeNull();
   });
 
   it("take for planned + terminal custody", () => {
@@ -104,6 +105,36 @@ describe("suggestedCustodyStep", () => {
         5,
       ),
     ).toBe("take");
+  });
+});
+
+describe("canOfferTerminalYardHandoff", () => {
+  const snap = (partial: Partial<LoadCustodySnapshot> & { load_id: number }): LoadCustodySnapshot => ({
+    load_id: partial.load_id,
+    custody_owner: partial.custody_owner ?? "unknown",
+    custody_placement: partial.custody_placement ?? "unknown",
+    custody_trip_id: partial.custody_trip_id ?? null,
+    custody_terminal_id: partial.custody_terminal_id ?? null,
+  });
+
+  it("true for active membership with trip custody on this trip", () => {
+    expect(
+      canOfferTerminalYardHandoff(
+        member({ load_id: 1, status_within_trip: "active" }),
+        snap({ load_id: 1, custody_owner: "trip", custody_trip_id: 5 }),
+        5,
+      ),
+    ).toBe(true);
+  });
+
+  it("false for planned membership", () => {
+    expect(
+      canOfferTerminalYardHandoff(
+        member({ load_id: 1, status_within_trip: "planned" }),
+        snap({ load_id: 1, custody_owner: "trip", custody_trip_id: 5 }),
+        5,
+      ),
+    ).toBe(false);
   });
 });
 
