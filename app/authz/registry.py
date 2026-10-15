@@ -12,7 +12,14 @@ ADMIN_ROLES: frozenset[str] = frozenset({"OWNER", "ADMIN", "TENANT_ADMIN", "TENA
 # Request subject the future adapter may pass. Not a policy grant.
 TENANT_MEMBER_ROLE = "TENANT_MEMBER"
 
-KNOWN_ROLES: frozenset[str] = ADMIN_ROLES | {TENANT_MEMBER_ROLE}
+# Prospective subject only. Invites do not store this role.
+# access_level_to_role("FULL_ACCESS") remains TENANT_ADMIN.
+OPERATIONAL_FULL_ACCESS_ROLE = "OPERATIONAL_FULL_ACCESS"
+
+KNOWN_ROLES: frozenset[str] = ADMIN_ROLES | {
+    TENANT_MEMBER_ROLE,
+    OPERATIONAL_FULL_ACCESS_ROLE,
+}
 
 # Categories B, E, F: is_tenant_admin / require_tenant_admin / People _require_admin.
 # Categories C, D: has_full_access, including driver-document writes and user admin mutations.

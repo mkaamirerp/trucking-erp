@@ -6,10 +6,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.authz.catalog import CAPABILITY_PAIRS
 from app.authz.registry import (
     ADMIN_ROLES,
     CAPABILITIES,
-    CAPABILITY_SET,
     KNOWN_ROLES,
     POLICY_VERSION,
 )
@@ -129,7 +129,7 @@ def parse_policy(text: str) -> tuple[int, list[PolicyRow]]:
             raise PolicyLoadError(f"unknown role {subject!r} at line {line_no}")
         if domain != "*" and _TENANT_DOM_RE.match(domain) is None:
             raise PolicyLoadError(f"invalid policy domain {domain!r} at line {line_no}")
-        if (resource, action) not in CAPABILITY_SET:
+        if (resource, action) not in CAPABILITY_PAIRS:
             raise PolicyLoadError(
                 f"unknown capability {resource}/{action} at line {line_no}"
             )

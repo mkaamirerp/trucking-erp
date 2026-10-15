@@ -11,7 +11,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Protocol
 
-from app.authz.registry import AUTH_MODES, CAPABILITY_SET, KNOWN_ROLES
+from app.authz.catalog import CAPABILITY_PAIRS
+from app.authz.registry import AUTH_MODES, KNOWN_ROLES
 
 
 class DecisionCode(str, Enum):
@@ -79,7 +80,7 @@ def decide(
     """
     if enforcer is None:
         return Decision(DecisionCode.UNAVAILABLE, "enforcer_unavailable")
-    if (resource, action) not in CAPABILITY_SET:
+    if (resource, action) not in CAPABILITY_PAIRS:
         return Decision(DecisionCode.UNAVAILABLE, "unknown_capability")
     normalized = _normalize_role(role)
     if normalized not in KNOWN_ROLES:
