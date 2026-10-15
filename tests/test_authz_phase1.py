@@ -263,8 +263,10 @@ def test_route_classes_follow_the_handler_not_the_verb() -> None:
     assert ready.pair == ("loads.records", "mark_ready")
     assert "mark_load_ready" in ready.note
     deleted = binding_for("DELETE", "/api/v1/loads/{load_id}")
-    assert deleted.kind == "domain_blocked"
+    assert deleted.kind == "domain_policy_unresolved"
     assert deleted.pair is None
+    assert "unresolved" in deleted.note
+    assert "I5" in deleted.note
     assert binding_for("DELETE", "/api/v1/drivers/{driver_id}").kind == "not_a_grant"
     assert binding_for("POST", "/api/v1/tolls/manual-entry/stages/{stage_id}/validate").kind == "write"
     assert binding_for("GET", "/api/v1/admin/users").pair == ("tenant.users", "list")
@@ -274,3 +276,61 @@ def test_route_classes_follow_the_handler_not_the_verb() -> None:
     assert custody.pair == ("trips.custody", "transition")
     assert "trip service" in custody.note
     assert "entitlement" not in inspect.signature(decide).parameters
+
+
+def test_sensitive_people_and_payroll_reads_are_not_granted() -> None:
+    pending = [
+        spec
+        for spec in CAPABILITIES.values()
+        if spec.module in {"people", "payroll"} and spec.action == "view"
+    ]
+    assert pending
+    assert {spec.enforcement_approval for spec in pending} == {"owner_required"}
+    enforcer = _prospective().enforcer
+    policy = PROSPECTIVE_POLICY_PATH.read_text(encoding="utf-8")
+    for spec in pending:
+        assert f"{spec.resource}, {spec.action}," not in policy
+        for role in ("OWNER", "TENANT_ADMIN", OPERATIONAL_FULL_ACCESS_ROLE, TENANT_MEMBER_ROLE):
+            decision = decide(
+                enforcer,
+                role=role,
+                domain=_DOMAIN_A,
+                resource=spec.resource,
+                action=spec.action,
+            )
+            assert decision.code is DecisionCode.DENY
+            assert decision.reason == "policy_deny"
+
+
+def test_duplicate_route_binding_is_rejected() -> None:
+    from app.authz.routes import _bind, _index
+
+    row = _bind("GET", "/api/v1/loads", "loads", "loads.records", "view", "read", None)
+    with pytest.raises(CatalogError, match="duplicate route binding"):
+        _index((row, row))
+
+
+def test_route_coverage_reports_unmapped_modules_and_no_stale_bindings() -> None:
+    from app.authz.coverage import audit_route_coverage
+    from app.main import app
+
+    coverage = audit_route_coverage(app)
+    registered = set(coverage.mapped) | set(coverage.intentionally_excluded) | set(coverage.unmapped)
+    assert len(registered) == (
+        len(coverage.mapped) + len(coverage.intentionally_excluded) + len(coverage.unmapped)
+    )
+    assert coverage.stale == ()
+    unmapped_paths = {path for _method, path in coverage.unmapped}
+    for prefix in (
+        "/api/v1/brokers",
+        "/api/v1/customs-brokers",
+        "/api/v1/terminals",
+        "/api/v1/load-lab",
+        "/api/v1/email-threads",
+    ):
+        assert any(path == prefix or path.startswith(prefix + "/") for path in unmapped_paths)
+        assert not any(
+            path == prefix or path.startswith(prefix + "/")
+            for _method, path in coverage.intentionally_excluded
+        )
+    assert ("DELETE", "/api/v1/loads/{load_id}") in coverage.mapped

@@ -149,7 +149,16 @@ def _rows() -> tuple[RouteBinding, ...]:
             _bind("GET", f"{_API}/loads/{{load_id}}/custody-events", "loads", "loads.custody", "view", "read", None),
             _bind("GET", f"{_API}/loads/{{load_id}}/notes", "loads", "loads.notes", "view", "read", None),
             _bind("POST", f"{_API}/loads/{{load_id}}/notes", "loads", "loads.notes", "create", "write", None),
-            _bind("DELETE", f"{_API}/loads/{{load_id}}", "loads", None, None, "domain_blocked", None, "Load Integrity I5. Casbin has no delete grant."),
+            _bind(
+                "DELETE",
+                f"{_API}/loads/{{load_id}}",
+                "loads",
+                None,
+                None,
+                "domain_policy_unresolved",
+                None,
+                "Load Integrity I5 is unresolved. This route can hard-delete a Load. Casbin has no delete grant.",
+            ),
             _bind("POST", f"{_API}/trips", "dispatch", "trips.records", "create", "write", None),
             _bind("POST", f"{_API}/trips/{{trip_id}}/cancel", "dispatch", "trips.records", "cancel", "write", None),
             _bind("POST", f"{_API}/trips/{{trip_id}}/complete", "dispatch", "trips.records", "complete", "write", None),
@@ -276,7 +285,12 @@ def _index(rows: tuple[RouteBinding, ...]) -> dict[tuple[str, str], RouteBinding
                 raise CatalogError(
                     f"{row.method} {row.path} kind {row.kind} does not match {spec.prospective}"
                 )
-        elif row.kind not in {"self_service", "infrastructure", "domain_blocked", "not_a_grant"}:
+        elif row.kind not in {
+            "self_service",
+            "infrastructure",
+            "domain_policy_unresolved",
+            "not_a_grant",
+        }:
             raise CatalogError(f"{row.method} {row.path} needs a capability")
         found[key] = row
     return found

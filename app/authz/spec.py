@@ -11,6 +11,7 @@ PROSPECTIVE_GRANTS = frozenset({"admin", "operational", "read"})
 CURRENT_CONTRACTS = frozenset(
     {"admin", "full_access_same_as_admin", "member", "ungated"}
 )
+ENFORCEMENT_APPROVALS = frozenset({"not_required", "owner_required"})
 
 
 class CatalogError(ValueError):
@@ -26,6 +27,7 @@ class CapabilitySpec:
     current_contract: str
     shipped: bool
     note: str = ""
+    enforcement_approval: str = "not_required"
 
     @property
     def pair(self) -> tuple[str, str]:
@@ -83,6 +85,8 @@ def _check_spec(catalog: ModuleCatalog, spec: CapabilitySpec) -> None:
         raise CatalogError(f"invalid prospective grant on {spec.pair}")
     if spec.current_contract not in CURRENT_CONTRACTS:
         raise CatalogError(f"invalid current contract on {spec.pair}")
+    if spec.enforcement_approval not in ENFORCEMENT_APPROVALS:
+        raise CatalogError(f"invalid enforcement approval on {spec.pair}")
     if not any(spec.resource.startswith(prefix) for prefix in catalog.prefixes):
         raise CatalogError(
             f"module {catalog.module} cannot own {spec.resource}/{spec.action}"

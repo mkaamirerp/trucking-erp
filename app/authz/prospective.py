@@ -23,7 +23,13 @@ ROLE_ORDER = (
 
 
 def subjects_for(spec: CapabilitySpec) -> tuple[str, ...]:
-    """Roles the prospective policy may grant. Stored invites are not changed."""
+    """Roles the prospective policy may grant. Stored invites are not changed.
+
+    ``owner_required`` capabilities stay in the catalog and are omitted from
+    this file until the owner approves enforcement.
+    """
+    if spec.enforcement_approval == "owner_required":
+        return ()
     if spec.prospective == "admin":
         allowed = set(ADMIN_ROLES)
     elif spec.prospective == "operational":
@@ -42,6 +48,7 @@ def render_prospective_policy() -> str:
         "# OPERATIONAL_FULL_ACCESS is not stored by invites. FULL_ACCESS still maps to TENANT_ADMIN.",
         "# TENANT_MEMBER is the read-only subject. READ_ONLY is not a policy subject.",
         "# Fuel stays on the four admin roles. There is no loads delete grant.",
+        "# People and payroll reads marked owner_required are omitted until that approval.",
         "",
     ]
     for spec in CAPABILITIES.values():
