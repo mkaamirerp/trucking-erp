@@ -1,0 +1,44 @@
+# policy_version: 1
+# Phase 0 restatement only. dom=* means the tenant already authenticated on the request.
+# Grants: four admin roles x tenant.admin/access, tenant.full_access/access, and the eight fuel.providers|review|reconciliation actions.
+# No TENANT_MEMBER rows. No loads, trips, dispatch, or custody rows.
+p, OWNER, *, tenant.admin, access, allow
+p, OWNER, *, tenant.full_access, access, allow
+p, OWNER, *, fuel.providers, view, allow
+p, OWNER, *, fuel.providers, manage, allow
+p, OWNER, *, fuel.providers, test_connection, allow
+p, OWNER, *, fuel.providers, sync, allow
+p, OWNER, *, fuel.review, view, allow
+p, OWNER, *, fuel.review, manage, allow
+p, OWNER, *, fuel.reconciliation, view, allow
+p, OWNER, *, fuel.reconciliation, run, allow
+p, ADMIN, *, tenant.admin, access, allow
+p, ADMIN, *, tenant.full_access, access, allow
+p, ADMIN, *, fuel.providers, view, allow
+p, ADMIN, *, fuel.providers, manage, allow
+p, ADMIN, *, fuel.providers, test_connection, allow
+p, ADMIN, *, fuel.providers, sync, allow
+p, ADMIN, *, fuel.review, view, allow
+p, ADMIN, *, fuel.review, manage, allow
+p, ADMIN, *, fuel.reconciliation, view, allow
+p, ADMIN, *, fuel.reconciliation, run, allow
+p, TENANT_ADMIN, *, tenant.admin, access, allow
+p, TENANT_ADMIN, *, tenant.full_access, access, allow
+p, TENANT_ADMIN, *, fuel.providers, view, allow
+p, TENANT_ADMIN, *, fuel.providers, manage, allow
+p, TENANT_ADMIN, *, fuel.providers, test_connection, allow
+p, TENANT_ADMIN, *, fuel.providers, sync, allow
+p, TENANT_ADMIN, *, fuel.review, view, allow
+p, TENANT_ADMIN, *, fuel.review, manage, allow
+p, TENANT_ADMIN, *, fuel.reconciliation, view, allow
+p, TENANT_ADMIN, *, fuel.reconciliation, run, allow
+p, TENANT_OWNER, *, tenant.admin, access, allow
+p, TENANT_OWNER, *, tenant.full_access, access, allow
+p, TENANT_OWNER, *, fuel.providers, view, allow
+p, TENANT_OWNER, *, fuel.providers, manage, allow
+p, TENANT_OWNER, *, fuel.providers, test_connection, allow
+p, TENANT_OWNER, *, fuel.providers, sync, allow
+p, TENANT_OWNER, *, fuel.review, view, allow
+p, TENANT_OWNER, *, fuel.review, manage, allow
+p, TENANT_OWNER, *, fuel.reconciliation, view, allow
+p, TENANT_OWNER, *, fuel.reconciliation, run, allow
