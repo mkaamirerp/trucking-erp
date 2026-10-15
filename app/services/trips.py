@@ -22,6 +22,7 @@ from app.constants.trip_dispatch import (
     TRIP_LOAD_STATUS_WITHIN_COMPLETED,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_REMOVED,
+    LOAD_COMMERCIALLY_CANCELLED,
     LOAD_NOT_READY_FOR_TRIP,
     TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS,
     TRIP_ASSIGNMENT_SCHEDULE_OVERLAP,
@@ -746,6 +747,23 @@ async def _activate_trip_load_membership_locked(
     """planned → active. Assumes Trip and Load rows are already locked (Trip then Load)."""
     trip_id = int(trip.id)
     load_id = int(load.id)
+    load_status = (load.status or "").strip().lower()
+    if load_status == "cancelled":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Commercially cancelled loads cannot be activated on a Trip",
+                "code": LOAD_COMMERCIALLY_CANCELLED,
+            },
+        )
+    if load_status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Load must be ready before membership activation",
+                "code": LOAD_NOT_READY_FOR_TRIP,
+            },
+        )
     _raise_if_trip_already_completed(trip)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(

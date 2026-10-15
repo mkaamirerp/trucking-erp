@@ -280,6 +280,94 @@ class TestLoadCancelIssue5:
         assert r.status_code == 404
         install_host_aligned_current_user_and_tenant(app)
 
+    async def test_patch_cannot_reactivate_cancelled_to_draft(self, issue5_cancel_http) -> None:
+        load = await issue5_cancel_http.new_draft()
+        load_id = int(load["id"])
+        cv = int(load["concurrency_version"])
+        assert (await _cancel(issue5_cancel_http.client, load_id, cv)).status_code == 200
+        r = await issue5_cancel_http.client.patch(
+            f"/api/v1/loads/{load_id}",
+            headers=AUTH_HEADERS,
+            json={"status": "draft", "expected_concurrency_version": cv + 1},
+        )
+        assert r.status_code == 409
+        assert _detail_code(r.json()) == "LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED"
+
+    async def test_patch_commercial_fields_blocked_when_cancelled(self, issue5_cancel_http) -> None:
+        load = await issue5_cancel_http.new_draft(rate=1200.0)
+        load_id = int(load["id"])
+        cv = int(load["concurrency_version"])
+        assert (await _cancel(issue5_cancel_http.client, load_id, cv)).status_code == 200
+        r = await issue5_cancel_http.client.patch(
+            f"/api/v1/loads/{load_id}",
+            headers=AUTH_HEADERS,
+            json={"rate": 9999, "expected_concurrency_version": cv + 1},
+        )
+        assert r.status_code == 409
+        assert _detail_code(r.json()) == "LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED"
+
+    async def test_mark_ready_blocked_when_cancelled(self, issue5_cancel_http) -> None:
+        load = await issue5_cancel_http.new_draft(
+            broker_name_snapshot="Broker",
+            broker_load_reference=f"REF-{uuid.uuid4().hex[:8]}",
+            stops=_VALID_STOPS,
+        )
+        ready = await _mark_ready(issue5_cancel_http.client, load)
+        load_id = int(ready["id"])
+        assert (await _cancel(issue5_cancel_http.client, load_id, int(ready["concurrency_version"]))).status_code == 200
+        r = await issue5_cancel_http.client.post(
+            f"/api/v1/loads/{load_id}/mark-ready",
+            headers=AUTH_HEADERS,
+            json={"expected_concurrency_version": int(ready["concurrency_version"]) + 1},
+        )
+        assert r.status_code == 409
+        assert _detail_code(r.json()) == "LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED"
+
+    async def test_customs_confirm_blocked_when_cancelled(self, issue5_cancel_http) -> None:
+        load = await issue5_cancel_http.new_draft()
+        load_id = int(load["id"])
+        cv = int(load["concurrency_version"])
+        assert (await _cancel(issue5_cancel_http.client, load_id, cv)).status_code == 200
+        r = await issue5_cancel_http.client.post(
+            f"/api/v1/loads/{load_id}/confirm-document-snapshot",
+            headers=AUTH_HEADERS,
+            json={"expected_concurrency_version": cv + 1},
+        )
+        assert r.status_code == 409
+        assert _detail_code(r.json()) == "LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED"
+
+
+    async def test_cancelled_load_cannot_activate_on_trip(self, issue5_cancel_http) -> None:
+        load = await issue5_cancel_http.new_draft(
+            broker_name_snapshot="Broker",
+            broker_load_reference=f"REF-{uuid.uuid4().hex[:8]}",
+            stops=_VALID_STOPS,
+        )
+        ready = await _mark_ready(issue5_cancel_http.client, load)
+        load_id = int(ready["id"])
+        trip_id = int((await issue5_cancel_http.scope.post_planned_trip([load_id])).json()["id"])
+        d_id, t_id, r_id = await issue5_cancel_http.scope.create_fleet_bundle(f"I5C-ACT-{uuid.uuid4().hex[:6]}")
+        assert (
+            await issue5_cancel_http.client.put(
+                f"/api/v1/trips/{trip_id}/assignment",
+                headers=AUTH_HEADERS,
+                json={"driver_id": d_id, "truck_id": t_id, "trailer_id": r_id},
+            )
+        ).status_code == 200
+        gr = await issue5_cancel_http.client.get(f"/api/v1/loads/{load_id}", headers=AUTH_HEADERS)
+        cv = int(gr.json()["concurrency_version"])
+        assert (await _cancel(issue5_cancel_http.client, load_id, cv)).status_code == 200
+        assert (
+            await issue5_cancel_http.client.post(
+                f"/api/v1/trips/{trip_id}/execution-signal",
+                headers=AUTH_HEADERS,
+                json={"source": "dispatcher_manual"},
+            )
+        ).status_code == 200
+        r = await activate_via_custody(issue5_cancel_http.client, AUTH_HEADERS, trip_id, load_id)
+        assert r.status_code == 409
+        assert _detail_code(r.json()) == "LOAD_COMMERCIALLY_CANCELLED"
+
     async def test_repeat_cancel_idempotent(self, issue5_cancel_http) -> None:
         load = await issue5_cancel_http.new_draft()
         load_id = int(load["id"])

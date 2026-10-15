@@ -42,6 +42,7 @@ from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.load_operational_references import sanitize_load_operational_references
+from app.services.trips import _lock_load_for_membership
 from app.utils.pagination import paginate
 
 # Commercial money fields audited on PATCH (Issue 26).
@@ -187,6 +188,12 @@ def _guard_create_payload(payload: LoadCreate) -> None:
 
 def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
     _reject_load_assignment_fields(payload)
+    old_status = (load.status or "").strip().lower()
+    if old_status == LOAD_COMMERCIAL_STATUS_CANCELLED:
+        raise _legacy_write_conflict(
+            LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED,
+            "Cancelled loads cannot be edited or reactivated via PATCH. Use append-only notes if needed.",
+        )
     if "status" not in payload.model_fields_set:
         return
     new_status = (payload.status or "").strip().lower()
@@ -196,7 +203,6 @@ def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
             LOAD_STATUS_NOT_WRITABLE,
             "Load status must be draft or ready when provided. Omit status to keep the current value.",
         )
-    old_status = (load.status or "").strip().lower()
     if old_status in LEGACY_LOAD_OPERATIONAL_STATUSES:
         raise _legacy_write_conflict(
             LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
@@ -528,6 +534,7 @@ async def update_load(
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
+    _reject_commercial_mutation_if_cancelled(load)
     _guard_update_payload(load, payload)
 
     expected = payload.expected_concurrency_version
@@ -731,6 +738,15 @@ LOAD_ALREADY_CANCELLED = "LOAD_ALREADY_CANCELLED"
 LOAD_CANCEL_STATUS_NOT_ALLOWED = "LOAD_CANCEL_STATUS_NOT_ALLOWED"
 LOAD_CANCEL_ACTIVE_TRIP_EXECUTION = "LOAD_CANCEL_ACTIVE_TRIP_EXECUTION"
 LOAD_CANCEL_UNRESOLVED_CUSTODY = "LOAD_CANCEL_UNRESOLVED_CUSTODY"
+LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED = "LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED"
+
+
+def _reject_commercial_mutation_if_cancelled(load: Load) -> None:
+    if (load.status or "").strip().lower() == LOAD_COMMERCIAL_STATUS_CANCELLED:
+        raise _legacy_write_conflict(
+            LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED,
+            "Cancelled loads cannot be commercially modified. Append-only notes are still allowed.",
+        )
 
 
 async def _load_has_open_active_on_executing_trip(
@@ -769,14 +785,17 @@ async def cancel_load(
     request_id: str | None = None,
     source: str = "api",
 ) -> Load:
-    """Commercial cancel — row and history preserved; does not remove TripLoad rows."""
-    load = await get_load(db, tenant_id, load_id)
-    if not load:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    """Commercial cancel — row and history preserved; does not remove TripLoad rows.
+
+    Lock order: Load FOR UPDATE (same row trips use via _lock_load_for_membership) so cancel
+    serializes with TripLoad insert/activate on this load_id.
+    """
+    load = await _lock_load_for_membership(db, tenant_id, load_id)
 
     status_now = (load.status or "").strip().lower()
     if status_now == LOAD_COMMERCIAL_STATUS_CANCELLED:
-        return load
+        existing = await get_load(db, tenant_id, load_id)
+        return existing if existing is not None else load
 
     if status_now not in LOAD_CANCELLABLE_COMMERCIAL_STATUSES:
         if status_now in LEGACY_LOAD_OPERATIONAL_STATUSES:
@@ -826,7 +845,8 @@ async def cancel_load(
         await db.rollback()
         current_load = await get_load(db, tenant_id, load_id)
         if current_load and (current_load.status or "").strip().lower() == LOAD_COMMERCIAL_STATUS_CANCELLED:
-            return current_load
+            replay = await get_load(db, tenant_id, load_id)
+            return replay if replay is not None else current_load
         server_snapshot = (
             LoadResponse.model_validate(current_load).model_dump(mode="json")
             if current_load
@@ -860,8 +880,11 @@ async def cancel_load(
         best_effort=False,
     )
     await db.commit()
-    await db.refresh(refreshed)
-    return refreshed
+    db.expire_all()
+    out = await get_load(db, tenant_id, load_id)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    return out
 
 
 async def delete_load(
@@ -945,6 +968,8 @@ async def mark_load_ready(
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+
+    _reject_commercial_mutation_if_cancelled(load)
 
     if load.status != "draft":
         raise HTTPException(
@@ -1082,6 +1107,7 @@ async def confirm_load_customs_document_snapshot(
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    _reject_commercial_mutation_if_cancelled(load)
     if load.document_snapshot_confirmed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
