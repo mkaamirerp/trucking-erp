@@ -21,12 +21,21 @@ POLICY_PATH = _PACKAGE_DIR / "casbin" / "policy.csv"
 _VERSION_RE = re.compile(r"#\s*policy_version:\s*(\d+)\s*$")
 _TENANT_DOM_RE = re.compile(r"^[1-9][0-9]*$")
 _EFFECTS = frozenset({"allow", "deny"})
+_SECTION_RE = re.compile(r"^\[([A-Za-z0-9_]+)\]$")
 
-_MODEL_CONTRACT_LINES = (
-    "r = sub, dom, obj, act",
-    "p = sub, dom, obj, act, eft",
-    "e = some(where (p.eft == allow)) && !some(where (p.eft == deny))",
-    'm = r.sub == p.sub && (p.dom == "*" || r.dom == p.dom) && r.obj == p.obj && r.act == p.act',
+# Complete Phase 0 model. Section order, names, and the single definition in each
+# section are the contract. Whitespace is normalized; comments are not definitions.
+_APPROVED_MODEL: tuple[tuple[str, str], ...] = (
+    ("request_definition", "r = sub, dom, obj, act"),
+    ("policy_definition", "p = sub, dom, obj, act, eft"),
+    (
+        "policy_effect",
+        "e = some(where (p.eft == allow)) && !some(where (p.eft == deny))",
+    ),
+    (
+        "matchers",
+        'm = r.sub == p.sub && (p.dom == "*" || r.dom == p.dom) && r.obj == p.obj && r.act == p.act',
+    ),
 )
 
 
@@ -65,17 +74,16 @@ def load_shipped_policy() -> LoadedPolicy:
 def load_policy(model_path: Path, policy_path: Path, *, shipped: bool) -> LoadedPolicy:
     model_file = Path(model_path)
     policy_file = Path(policy_path)
-    if not model_file.is_file():
-        raise PolicyLoadError(f"model file missing: {model_file}")
-    if not policy_file.is_file():
-        raise PolicyLoadError(f"policy file missing: {policy_file}")
-    _validate_model_contract(model_file.read_text(encoding="utf-8"))
-    version, rows = parse_policy(policy_file.read_text(encoding="utf-8"))
+    model_text = _read_utf8(model_file, "model")
+    policy_text = _read_utf8(policy_file, "policy")
+    _validate_model_contract(model_text)
+    version, rows = parse_policy(policy_text)
     if version != POLICY_VERSION:
         raise PolicyLoadError(
             f"policy version {version} does not match expected {POLICY_VERSION}"
         )
     _validate_rows(rows, shipped=shipped)
+    # Construct only after validation. A failure above does not return an enforcer.
     enforcer = _build_enforcer(model_file, policy_file)
     return LoadedPolicy(
         version=version,
@@ -84,6 +92,19 @@ def load_policy(model_path: Path, policy_path: Path, *, shipped: bool) -> Loaded
         policy_path=policy_file,
         rows=tuple(rows),
     )
+
+
+def _read_utf8(path: Path, label: str) -> str:
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise PolicyLoadError(f"{label} file missing: {path}") from exc
+    except OSError as exc:
+        raise PolicyLoadError(f"{label} file unreadable: {path}") from exc
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PolicyLoadError(f"{label} file is not valid UTF-8: {path}") from exc
 
 
 def parse_policy(text: str) -> tuple[int, list[PolicyRow]]:
@@ -129,13 +150,45 @@ def parse_policy(text: str) -> tuple[int, list[PolicyRow]]:
     return version, rows
 
 
+def _normalize_model_line(line: str) -> str:
+    return " ".join(line.split())
+
+
 def _validate_model_contract(text: str) -> None:
-    lines = {line.strip() for line in text.splitlines() if line.strip()}
-    missing = [snippet for snippet in _MODEL_CONTRACT_LINES if snippet not in lines]
-    if missing:
-        raise PolicyLoadError("model contract mismatch: " + "; ".join(missing))
-    if any(line.startswith("g =") or line.startswith("g,") for line in lines):
-        raise PolicyLoadError("Phase 0 model must not define role grouping")
+    """Require the approved sections and their single definitions, nothing else."""
+    approved = {name: _normalize_model_line(definition) for name, definition in _APPROVED_MODEL}
+    expected_order = [name for name, _ in _APPROVED_MODEL]
+    found: dict[str, list[str]] = {}
+    order: list[str] = []
+    current: str | None = None
+
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith(";"):
+            continue
+        header = _SECTION_RE.match(stripped)
+        if header:
+            name = header.group(1)
+            if name not in approved:
+                raise PolicyLoadError(f"unexpected model section [{name}] at line {line_no}")
+            if name in found:
+                raise PolicyLoadError(f"duplicate model section [{name}] at line {line_no}")
+            current = name
+            found[name] = []
+            order.append(name)
+            continue
+        if current is None:
+            raise PolicyLoadError(f"malformed model structure at line {line_no}")
+        found[current].append(_normalize_model_line(stripped))
+
+    if order != expected_order:
+        raise PolicyLoadError("model sections do not match the approved Phase 0 model")
+    for name, definition in approved.items():
+        definitions = found.get(name, [])
+        if definitions != [definition]:
+            raise PolicyLoadError(
+                f"model section [{name}] does not match the approved definition"
+            )
 
 
 def _validate_rows(rows: list[PolicyRow], *, shipped: bool) -> None:
@@ -178,5 +231,5 @@ def _build_enforcer(model_file: Path, policy_file: Path) -> object:
         ) from exc
     try:
         return casbin.Enforcer(str(model_file), str(policy_file))
-    except Exception as exc:
+    except (RuntimeError, ValueError) as exc:
         raise PolicyLoadError(f"casbin rejected policy: {exc}") from exc

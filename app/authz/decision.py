@@ -1,4 +1,10 @@
-"""Pure allow/deny decision. No request, JWT, database, or HTTP imports."""
+"""Pure allow/deny decision. No request, JWT, database, or HTTP imports.
+
+Phase 0 does not authenticate the caller. ``decide()`` receives a membership
+role and a tenant domain that the caller claims are already validated.
+``membership_role_for_decision()`` does not look up a user, membership row,
+tenant, or token. It only labels which future auth mode supplied that role.
+"""
 
 from __future__ import annotations
 
@@ -35,11 +41,14 @@ class Enforcer(Protocol):
 
 
 def membership_role_for_decision(auth_mode: str, membership_role: str | None) -> str | None:
-    """Role input shared by both auth modes.
+    """Return the membership role a future adapter would pass into ``decide()``.
 
-    Platform mode will pass ``PlatformTenantMember.role``.
-    Tenant-local mode will pass ``TenantWorkspaceMember.role``.
-    The JWT ``roles`` claim is not an input.
+    This does not verify that the role belongs to a member, that the tenant
+    domain is the request host, or that a JWT is valid. ``auth_mode`` is only
+    the label ``platform`` or ``tenant_local``. Both labels return
+    ``membership_role`` unchanged. Platform callers will eventually pass
+    ``PlatformTenantMember.role``. Tenant-local callers will pass
+    ``TenantWorkspaceMember.role``. The JWT ``roles`` claim is not an input.
     """
     if auth_mode not in AUTH_MODES:
         raise ValueError(f"unsupported auth mode: {auth_mode}")
@@ -63,6 +72,11 @@ def decide(
     resource: str,
     action: str,
 ) -> Decision:
+    """Decide a capability for an already validated role and tenant domain.
+
+    ``role`` is the membership role string. ``domain`` is that tenant's id.
+    Neither value is checked against a session, JWT, or database here.
+    """
     if enforcer is None:
         return Decision(DecisionCode.UNAVAILABLE, "enforcer_unavailable")
     if (resource, action) not in CAPABILITY_SET:

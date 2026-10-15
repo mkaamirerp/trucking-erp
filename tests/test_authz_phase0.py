@@ -196,3 +196,165 @@ def test_enforcer_exception_is_unavailable() -> None:
 def test_unsupported_auth_mode_is_rejected() -> None:
     with pytest.raises(ValueError, match="unsupported auth mode"):
         membership_role_for_decision("jwt", "OWNER")
+
+
+def test_membership_role_helper_does_not_transform_or_verify_identity() -> None:
+    assert membership_role_for_decision("platform", "TENANT_ADMIN") == "TENANT_ADMIN"
+    assert membership_role_for_decision("tenant_local", "TENANT_ADMIN") == "TENANT_ADMIN"
+    assert membership_role_for_decision("platform", None) is None
+
+
+@pytest.mark.parametrize("role", sorted(ADMIN_ROLES))
+@pytest.mark.parametrize("resource,action", CAPABILITIES)
+def test_each_admin_role_allows_every_registered_capability(role: str, resource: str, action: str) -> None:
+    decision = decide(
+        _shipped().enforcer,
+        role=role,
+        domain=_DOMAIN_A,
+        resource=resource,
+        action=action,
+    )
+    assert decision.code is DecisionCode.ALLOW
+    assert decision.reason == "policy_allow"
+
+
+@pytest.mark.parametrize("resource,action", CAPABILITIES)
+def test_tenant_member_denied_every_registered_capability(resource: str, action: str) -> None:
+    decision = decide(
+        _shipped().enforcer,
+        role="TENANT_MEMBER",
+        domain=_DOMAIN_B,
+        resource=resource,
+        action=action,
+    )
+    assert decision.code is DecisionCode.DENY
+    assert decision.reason == "policy_deny"
+
+
+def _approved_model_text() -> str:
+    return MODEL_PATH.read_text(encoding="utf-8")
+
+
+def test_model_allows_comments_and_insignificant_whitespace(tmp_path: Path) -> None:
+    model = tmp_path / "model.conf"
+    model.write_text(
+        "\n".join(
+            [
+                "# phase 0 model comment",
+                "[request_definition]",
+                "r   =   sub,   dom,   obj,   act",
+                "",
+                "; semicolon comment",
+                "[policy_definition]",
+                "p = sub, dom, obj, act, eft",
+                "[policy_effect]",
+                "e = some(where (p.eft == allow)) && !some(where (p.eft == deny))",
+                "[matchers]",
+                'm = r.sub == p.sub && (p.dom == "*" || r.dom == p.dom) && r.obj == p.obj && r.act == p.act',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_policy(model, POLICY_PATH, shipped=True)
+    decision = decide(
+        loaded.enforcer,
+        role="ADMIN",
+        domain=_DOMAIN_A,
+        resource=_FUEL_RESOURCE,
+        action=_FUEL_ACTION,
+    )
+    assert decision.code is DecisionCode.ALLOW
+
+
+def test_unexpected_model_section_is_rejected(tmp_path: Path) -> None:
+    model = tmp_path / "model.conf"
+    model.write_text(
+        _approved_model_text() + "\n[role_definition]\ng = _, _, _\n",
+        encoding="utf-8",
+    )
+    policy = _write_policy(tmp_path, "p, OWNER, *, tenant.admin, access, allow\n")
+    with pytest.raises(PolicyLoadError, match="unexpected model section"):
+        load_policy(model, policy, shipped=False)
+
+
+def test_additional_model_definition_is_rejected(tmp_path: Path) -> None:
+    text = _approved_model_text().replace(
+        "r = sub, dom, obj, act",
+        "r = sub, dom, obj, act\nr2 = sub, dom, obj, act",
+    )
+    model = tmp_path / "model.conf"
+    model.write_text(text, encoding="utf-8")
+    policy = _write_policy(tmp_path, "p, OWNER, *, tenant.admin, access, allow\n")
+    with pytest.raises(PolicyLoadError, match=r"\[request_definition\]"):
+        load_policy(model, policy, shipped=False)
+
+
+def test_changed_matcher_is_rejected(tmp_path: Path) -> None:
+    text = _approved_model_text().replace(
+        'm = r.sub == p.sub && (p.dom == "*" || r.dom == p.dom) && r.obj == p.obj && r.act == p.act',
+        "m = r.sub == p.sub && r.obj == p.obj && r.act == p.act",
+    )
+    model = tmp_path / "model.conf"
+    model.write_text(text, encoding="utf-8")
+    policy = _write_policy(tmp_path, "p, OWNER, *, tenant.admin, access, allow\n")
+    with pytest.raises(PolicyLoadError, match=r"\[matchers\]"):
+        load_policy(model, policy, shipped=False)
+
+
+def test_malformed_model_structure_is_rejected(tmp_path: Path) -> None:
+    model = tmp_path / "model.conf"
+    model.write_text("r = sub, dom, obj, act\n", encoding="utf-8")
+    policy = _write_policy(tmp_path, "p, OWNER, *, tenant.admin, access, allow\n")
+    with pytest.raises(PolicyLoadError, match="malformed model structure"):
+        load_policy(model, policy, shipped=False)
+
+
+def test_missing_model_file(tmp_path: Path) -> None:
+    policy = _write_policy(tmp_path, "p, OWNER, *, tenant.admin, access, allow\n")
+    with pytest.raises(PolicyLoadError, match="model file missing"):
+        load_policy(tmp_path / "missing.conf", policy, shipped=False)
+
+
+def test_invalid_utf8_policy_file(tmp_path: Path) -> None:
+    policy = tmp_path / "policy.csv"
+    policy.write_bytes(b"# policy_version: 1\n\xff\xfe\n")
+    with pytest.raises(PolicyLoadError, match="not valid UTF-8"):
+        load_policy(MODEL_PATH, policy, shipped=False)
+
+
+def test_invalid_utf8_model_file(tmp_path: Path) -> None:
+    model = tmp_path / "model.conf"
+    model.write_bytes(b"\xff\xfe")
+    policy = _write_policy(tmp_path, "p, OWNER, *, tenant.admin, access, allow\n")
+    with pytest.raises(PolicyLoadError, match="not valid UTF-8"):
+        load_policy(model, policy, shipped=False)
+
+
+def test_unreadable_policy_file(tmp_path: Path) -> None:
+    blocked = tmp_path / "policy.csv"
+    blocked.mkdir()
+    with pytest.raises(PolicyLoadError, match="unreadable"):
+        load_policy(MODEL_PATH, blocked, shipped=False)
+
+
+def test_cross_tenant_grants_do_not_cross_domains(tmp_path: Path) -> None:
+    policy = _write_policy(
+        tmp_path,
+        "\n".join(
+            [
+                "p, OWNER, 17, fuel.providers, view, allow",
+                "p, OWNER, 42, fuel.review, view, allow",
+            ]
+        )
+        + "\n",
+    )
+    enforcer = load_policy(MODEL_PATH, policy, shipped=False).enforcer
+    own_fuel = decide(enforcer, role="OWNER", domain="17", resource="fuel.providers", action="view")
+    other_fuel = decide(enforcer, role="OWNER", domain="42", resource="fuel.providers", action="view")
+    own_review = decide(enforcer, role="OWNER", domain="42", resource="fuel.review", action="view")
+    other_review = decide(enforcer, role="OWNER", domain="17", resource="fuel.review", action="view")
+    assert own_fuel.code is DecisionCode.ALLOW
+    assert other_fuel.code is DecisionCode.DENY
+    assert own_review.code is DecisionCode.ALLOW
+    assert other_review.code is DecisionCode.DENY
