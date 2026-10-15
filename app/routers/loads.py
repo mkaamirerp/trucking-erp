@@ -9,6 +9,7 @@ from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load import (
+    LoadCancelBody,
     LoadCreate,
     LoadMutationConcurrencyBody,
     LoadNoteCreate,
@@ -199,6 +200,29 @@ async def mark_load_ready(
             update={"open_planned_trip_id": planned[0], "open_planned_trip_number": planned[1]}
         )
     return resp
+
+
+@router.post("/{load_id}/cancel", response_model=LoadResponse)
+async def cancel_load(
+    load_id: int,
+    body: LoadCancelBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Commercial cancel — preserves load row, TripLoad, and custody history (Issue I5)."""
+    load = await loads_service.cancel_load(
+        db,
+        tenant_id,
+        load_id,
+        expected_concurrency_version=body.expected_concurrency_version,
+        reason=body.reason,
+        actor_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+    )
+    return LoadResponse.model_validate(load)
 
 
 @router.get("/{load_id}/custody", response_model=LoadCustodySnapshotResponse)

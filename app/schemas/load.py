@@ -11,7 +11,7 @@ from app.schemas.customs_broker import CustomsBrokerSummary, LoadCustomsSnapshot
 from app.schemas.load_document_parse import LoadParseReferenceItem
 
 DISPATCH_STATUSES = {
-    "draft", "ready",
+    "draft", "ready", "cancelled",
     "unassigned", "assigned", "dispatched", "arrived_pickup", "in_transit",
     "arrived_delivery", "delivered", "issue_hold",
 }
@@ -231,6 +231,14 @@ class LoadMutationConcurrencyBody(BaseModel):
     """POST bodies for load endpoints that mutate the row without a full LoadUpdate."""
 
     expected_concurrency_version: int = Field(..., ge=1)
+
+
+class LoadCancelBody(BaseModel):
+    """Commercial cancel — preserves row, TripLoad, and custody history (Issue I5)."""
+
+    expected_concurrency_version: int = Field(..., ge=1)
+    reason: str = Field(..., min_length=1, max_length=2000)
+    model_config = ConfigDict(extra="forbid")
 
 
 class LoadResponse(LoadBase):

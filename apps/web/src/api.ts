@@ -1381,6 +1381,22 @@ export async function markLoadReady(loadId: number, expectedConcurrencyVersion: 
   return handle<Load>(res);
 }
 
+export async function cancelLoad(
+  loadId: number,
+  expectedConcurrencyVersion: number,
+  reason: string,
+): Promise<Load> {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expected_concurrency_version: expectedConcurrencyVersion,
+      reason,
+    }),
+  });
+  return handle<Load>(res);
+}
+
 export type CustomsBroker = {
   id: number;
   tenant_id?: number;
