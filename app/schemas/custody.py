@@ -114,6 +114,15 @@ class TakeCustodyBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FinalDeliveryBody(BaseModel):
+    """Consignee/receiver final delivery — completes ACTIVE TripLoad on this Trip."""
+
+    occurred_at: Optional[datetime] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+
+
 class CustodyTransitionResponse(BaseModel):
     load_id: int
     trip_id: int

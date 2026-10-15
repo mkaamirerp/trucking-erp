@@ -11,16 +11,16 @@ import {
   type TerminalRow,
   type TripDetail,
   type TripMemberLoad,
+  finalDeliveryTripLoadCustody,
   yardHandoffTripLoadCustody,
 } from "@/api";
 import {
+  canOfferFinalDelivery,
   canOfferTerminalYardHandoff,
   countOpenMemberships,
-  FINAL_DELIVERY_API_UNAVAILABLE,
   formatCustodySnapshotLine,
   formatCustodyTransitionError,
   formatTripCompleteError,
-  showFinalDeliveryUnavailableNotice,
   suggestedCustodyStep,
   tripCompleteEligibility,
 } from "./tripWorkspaceExecution";
@@ -119,7 +119,7 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
   );
 
   const onCustodyAction = useCallback(
-    async (m: TripMemberLoad, step: "accept" | "take" | "yard_handoff") => {
+    async (m: TripMemberLoad, step: "accept" | "take" | "yard_handoff" | "final_delivery") => {
       if (custodyBusyLoadId != null) return;
       setCustodyBusyLoadId(m.load_id);
       setCustodyActionError(null);
@@ -128,6 +128,12 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
           await acceptTripLoadCustody(tripId, m.load_id, {});
         } else if (step === "take") {
           await takeTripLoadCustody(tripId, m.load_id, {});
+        } else if (step === "final_delivery") {
+          const ok = window.confirm(
+            "Record final delivery to consignee/receiver?\n\nThis completes this load's membership on this trip and sets custody to delivered. It does not change commercial Load.status or post payroll.\n\nContinue?",
+          );
+          if (!ok) return;
+          await finalDeliveryTripLoadCustody(tripId, m.load_id, {});
         } else {
           const tid = Number(yardTerminalByLoad[m.load_id] || "");
           if (!Number.isFinite(tid) || tid < 1) {
@@ -184,7 +190,7 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
             const snap = custodyByLoadId[m.load_id];
             const step = suggestedCustodyStep(m, snap, tripId);
             const terminalHandoff = canOfferTerminalYardHandoff(m, snap, tripId);
-            const finalDeliveryNotice = showFinalDeliveryUnavailableNotice(m, snap, tripId);
+            const finalDelivery = canOfferFinalDelivery(m, snap, tripId);
             return (
               <li key={m.trip_load_id} className="flex flex-col gap-2 px-4 py-3 text-sm">
                 <div className="font-medium text-[var(--trk-text)]">
@@ -204,6 +210,23 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
                         ? "Accept custody (pickup)"
                         : "Take custody from terminal"}
                   </button>
+                ) : null}
+                {finalDelivery ? (
+                  <div className="mt-1 flex flex-col gap-2 border-l-2 border-emerald-300/60 pl-3">
+                    <p className="text-[11px] text-[var(--trk-text-muted)]">
+                      Final delivery to consignee/receiver — completes this load on this trip when freight is delivered
+                      at destination (not a yard/terminal handoff).
+                    </p>
+                    <button
+                      type="button"
+                      data-testid={`trip-final-delivery-${m.load_id}`}
+                      disabled={custodyBusyLoadId != null}
+                      onClick={() => void onCustodyAction(m, "final_delivery")}
+                      className="w-fit rounded-md border border-emerald-300/80 bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                    >
+                      {custodyBusyLoadId === m.load_id ? "Working…" : "Record final delivery to consignee"}
+                    </button>
+                  </div>
                 ) : null}
                 {terminalHandoff ? (
                   <div className="mt-1 flex flex-col gap-2 border-l-2 border-[var(--trk-border)] pl-3">
@@ -240,12 +263,7 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
                     </button>
                   </div>
                 ) : null}
-                {finalDeliveryNotice ? (
-                  <p className="text-[11px] text-[var(--trk-text-muted)]" data-testid="final-delivery-unavailable">
-                    {FINAL_DELIVERY_API_UNAVAILABLE}
-                  </p>
-                ) : null}
-                {!step && !terminalHandoff ? (
+                {!step && !terminalHandoff && !finalDelivery ? (
                   <p className="text-[11px] text-amber-800/90">
                     No custody action available for this membership state. Resolve custody elsewhere or contact support.
                   </p>

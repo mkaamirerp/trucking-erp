@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canOfferFinalDelivery,
   canOfferTerminalYardHandoff,
   countOpenMemberships,
   suggestedCustodyStep,
@@ -105,6 +106,33 @@ describe("suggestedCustodyStep", () => {
         5,
       ),
     ).toBe("take");
+  });
+});
+
+describe("canOfferFinalDelivery", () => {
+  const snap = (partial: Partial<LoadCustodySnapshot> & { load_id: number }): LoadCustodySnapshot => ({
+    load_id: partial.load_id,
+    custody_owner: partial.custody_owner ?? "unknown",
+    custody_placement: partial.custody_placement ?? "unknown",
+    custody_trip_id: partial.custody_trip_id ?? null,
+    custody_terminal_id: partial.custody_terminal_id ?? null,
+  });
+
+  it("mirrors terminal handoff eligibility for active trip custody", () => {
+    const m = member({ load_id: 1, status_within_trip: "active" });
+    const s = snap({ load_id: 1, custody_owner: "trip", custody_trip_id: 5 });
+    expect(canOfferFinalDelivery(m, s, 5)).toBe(true);
+    expect(canOfferTerminalYardHandoff(m, s, 5)).toBe(true);
+  });
+
+  it("false when custody on another trip", () => {
+    expect(
+      canOfferFinalDelivery(
+        member({ load_id: 1, status_within_trip: "active" }),
+        snap({ load_id: 1, custody_owner: "trip", custody_trip_id: 99 }),
+        5,
+      ),
+    ).toBe(false);
   });
 });
 

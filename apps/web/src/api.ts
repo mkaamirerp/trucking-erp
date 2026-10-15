@@ -1111,6 +1111,25 @@ export async function yardHandoffTripLoadCustody(
   return handle<CustodyTransitionResult>(res);
 }
 
+export type FinalDeliveryPayload = {
+  occurred_at?: string | null;
+  notes?: string | null;
+  idempotency_key?: string | null;
+};
+
+export async function finalDeliveryTripLoadCustody(
+  tripId: number,
+  loadId: number,
+  body: FinalDeliveryPayload = {},
+): Promise<CustodyTransitionResult> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/final-delivery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<CustodyTransitionResult>(res);
+}
+
 /** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
 export type TripAssignmentPayload = {
   driver_id: number | null;

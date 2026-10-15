@@ -19,9 +19,14 @@ export type TripCompleteEligibility = {
 /** Custody transitions with a dedicated Trip Workspace action (not yard handoff). */
 export type CustodyStep = "accept" | "take";
 
-/** Reserved event type in app/constants/custody.py — no public API route yet. */
-export const FINAL_DELIVERY_API_UNAVAILABLE =
-  "Final delivery at consignee/receiver is not available in the API yet (no final_delivery transition). Use terminal yard handoff only when freight is staged at a yard/terminal.";
+/** POST final-delivery: trip custody → delivered + completes ACTIVE membership (consignee/receiver). */
+export function canOfferFinalDelivery(
+  membership: TripMemberLoad,
+  snapshot: LoadCustodySnapshot | undefined,
+  tripId: number,
+): boolean {
+  return canOfferTerminalYardHandoff(membership, snapshot, tripId);
+}
 
 /** Backend: POST /trips/{id}/complete requires in_progress and zero OPEN TripLoads. */
 export function tripCompleteEligibility(trip: TripDetail): TripCompleteEligibility {
@@ -92,14 +97,6 @@ export function canOfferTerminalYardHandoff(
   const owner = (snapshot?.custody_owner || "unknown").toLowerCase();
   const custodyTripId = snapshot?.custody_trip_id ?? null;
   return owner === "trip" && custodyTripId === tripId;
-}
-
-export function showFinalDeliveryUnavailableNotice(
-  membership: TripMemberLoad,
-  snapshot: LoadCustodySnapshot | undefined,
-  tripId: number,
-): boolean {
-  return canOfferTerminalYardHandoff(membership, snapshot, tripId);
 }
 
 export function formatTripCompleteError(err: unknown): string {
