@@ -32,6 +32,7 @@ def test_platform_actor_uses_label_not_an_integer() -> None:
 
 def test_tenant_local_actor_uses_tenant_user_id() -> None:
     user = SimpleNamespace(
+        tenant=SimpleNamespace(tenant_auth_mode="tenant"),
         user=SimpleNamespace(id=str(uuid.uuid4())),
         tenant_user=SimpleNamespace(id=17),
         member_id=42,
@@ -63,9 +64,50 @@ def test_integer_actor_user_id_callers_stay_integer() -> None:
     assert (actor_id, label, actor_type) == (1, None, "user")
 
 
-def test_numeric_user_id_without_platform_uuid_stays_integer() -> None:
+def test_numeric_user_id_without_platform_uuid_is_not_a_platform_actor() -> None:
     user = SimpleNamespace(tenant_user=None, user=None, user_id=1, member_id=1)
-    assert resolve_load_audit_actor(user) == (1, None, "user")
+    with pytest.raises(HTTPException) as exc:
+        resolve_load_audit_actor(user)
+    assert exc.value.detail["code"] == "AUDIT_ACTOR_UNRESOLVED"
+
+
+def test_tenant_local_mode_missing_tenant_user_does_not_use_platform_identity() -> None:
+    platform_id = str(uuid.uuid4())
+    user = SimpleNamespace(
+        tenant=SimpleNamespace(tenant_auth_mode="tenant"),
+        user=SimpleNamespace(id=platform_id),
+        tenant_user=None,
+        member_id=42,
+    )
+    with pytest.raises(HTTPException) as exc:
+        resolve_load_audit_actor(user)
+    assert exc.value.detail["code"] == "AUDIT_ACTOR_UNRESOLVED"
+    assert exc.value.detail["detail"] != f"platform:{platform_id}"
+
+
+def test_inconsistent_authentication_mode_is_rejected() -> None:
+    user = SimpleNamespace(
+        tenant=SimpleNamespace(tenant_auth_mode="mixed"),
+        user=SimpleNamespace(id=str(uuid.uuid4())),
+        tenant_user=SimpleNamespace(id=17),
+    )
+    with pytest.raises(HTTPException) as exc:
+        resolve_load_audit_actor(user)
+    assert exc.value.detail["code"] == "AUDIT_ACTOR_UNRESOLVED"
+    assert "inconsistent" in exc.value.detail["detail"]
+
+
+def test_platform_mode_rejects_unexpected_tenant_local_actor() -> None:
+    user = SimpleNamespace(
+        tenant=SimpleNamespace(tenant_auth_mode="platform"),
+        user=SimpleNamespace(id=str(uuid.uuid4())),
+        tenant_user=SimpleNamespace(id=17),
+        member_id=42,
+    )
+    with pytest.raises(HTTPException) as exc:
+        resolve_load_audit_actor(user)
+    assert exc.value.detail["code"] == "AUDIT_ACTOR_UNRESOLVED"
+    assert "tenant-local" in exc.value.detail["detail"]
 
 
 def test_uuid_user_id_is_not_converted_to_an_integer() -> None:

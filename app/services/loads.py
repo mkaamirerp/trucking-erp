@@ -28,6 +28,7 @@ from app.models.load import Load, LoadNote, LoadStop
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.load_operational_references import sanitize_load_operational_references
+from app.services.tenant_auth_constants import TENANT_AUTH_PLATFORM, TENANT_AUTH_TENANT, tenant_uses_tenant_db_auth
 from app.utils.pagination import paginate
 
 # Commercial money fields audited on PATCH (Issue 26).
@@ -51,50 +52,65 @@ def _concrete(value: object) -> object | None:
     return value
 
 
-def resolve_load_audit_actor(user: object) -> tuple[int | None, str | None, str]:
-    """Map an authenticated CurrentUser to a Load audit actor.
+def _tenant_auth_mode(user: object) -> str | None:
+    tenant = _concrete(getattr(user, "tenant", None))
+    if tenant is None:
+        return None
+    mode = _concrete(getattr(tenant, "tenant_auth_mode", None))
+    if mode is None:
+        return None
+    return str(mode).strip().lower()
 
-    Tenant-local sessions store tenant_users.id. Platform sessions store
-    platform:{id} in actor_label. Membership ids are never used as that integer.
-    """
-    tenant_user = _concrete(getattr(user, "tenant_user", None))
-    if tenant_user is not None:
-        raw = _concrete(getattr(tenant_user, "id", None))
-        if isinstance(raw, bool) or raw is None:
-            raise _actor_unresolved("tenant-local actor id is missing")
-        if isinstance(raw, int):
-            actor_id = raw
-        elif isinstance(raw, str) and raw.isdigit():
-            actor_id = int(raw)
-        else:
-            raise _actor_unresolved("tenant-local actor id is not a tenant user id")
-        if actor_id <= 0:
-            raise _actor_unresolved("tenant-local actor id is missing")
-        return actor_id, None, "user"
 
+def _require_tenant_user_id(tenant_user: object | None) -> int:
+    if tenant_user is None:
+        raise _actor_unresolved("tenant-local actor id is missing")
+    raw = _concrete(getattr(tenant_user, "id", None))
+    if isinstance(raw, bool) or raw is None:
+        raise _actor_unresolved("tenant-local actor id is missing")
+    if isinstance(raw, int):
+        actor_id = raw
+    elif isinstance(raw, str) and raw.isdigit():
+        actor_id = int(raw)
+    else:
+        raise _actor_unresolved("tenant-local actor id is not a tenant user id")
+    if actor_id <= 0:
+        raise _actor_unresolved("tenant-local actor id is missing")
+    return actor_id
+
+
+def _require_platform_actor_label(user: object) -> str:
     platform_user = _concrete(getattr(user, "user", None))
     raw_platform = _concrete(getattr(platform_user, "id", None)) if platform_user is not None else None
     member_id = _concrete(getattr(user, "member_id", None))
-    if raw_platform is not None:
-        text_id = str(raw_platform).strip()
-        if member_id is not None and text_id == str(member_id):
-            raise _actor_unresolved("refusing membership id as actor")
-        if not text_id or text_id.isdigit():
-            raise _actor_unresolved("platform actor id is not a platform user id")
-        return None, f"platform:{text_id}", "user"
+    text_id = str(raw_platform).strip() if raw_platform is not None else ""
+    if not text_id:
+        raw_user_id = _concrete(getattr(user, "user_id", None))
+        if isinstance(raw_user_id, str):
+            text_id = raw_user_id.strip()
+    if member_id is not None and text_id == str(member_id):
+        raise _actor_unresolved("refusing membership id as actor")
+    if not text_id or text_id.isdigit():
+        raise _actor_unresolved("platform actor id is missing")
+    return f"platform:{text_id}"
 
-    raw_user_id = _concrete(getattr(user, "user_id", None))
-    if isinstance(raw_user_id, str):
-        text_id = raw_user_id.strip()
-        if text_id.isdigit():
-            if member_id is not None and text_id == str(member_id):
-                raise _actor_unresolved("refusing membership id as actor")
-            return int(text_id), None, "user"
-        if text_id:
-            return None, f"platform:{text_id}", "user"
-    if isinstance(raw_user_id, int) and not isinstance(raw_user_id, bool) and raw_user_id > 0:
-        return raw_user_id, None, "user"
-    raise _actor_unresolved("platform actor id is missing")
+
+def resolve_load_audit_actor(user: object) -> tuple[int | None, str | None, str]:
+    """Map an authenticated CurrentUser to a Load audit actor.
+
+    Tenant-local mode requires tenant_users.id and does not use the platform user.
+    Platform mode requires the platform user id and rejects a tenant-local actor.
+    Membership ids are never used as the audit integer.
+    """
+    mode = _tenant_auth_mode(user)
+    if mode is not None and mode not in {TENANT_AUTH_PLATFORM, TENANT_AUTH_TENANT}:
+        raise _actor_unresolved("authentication mode is inconsistent")
+    tenant_user = _concrete(getattr(user, "tenant_user", None))
+    if tenant_uses_tenant_db_auth(mode):
+        return _require_tenant_user_id(tenant_user), None, "user"
+    if tenant_user is not None:
+        raise _actor_unresolved("unexpected tenant-local actor in platform mode")
+    return None, _require_platform_actor_label(user), "user"
 
 
 def normalize_load_audit_actor(
