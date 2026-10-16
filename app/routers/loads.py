@@ -137,12 +137,15 @@ async def update_load(
     user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     load = await loads_service.update_load(
         db,
         tenant_id,
         load_id,
         payload,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -158,12 +161,16 @@ async def confirm_document_snapshot(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     load = await loads_service.confirm_load_customs_document_snapshot(
         db,
         tenant_id,
         load_id,
         confirming_user_id=getattr(user, "user_id", None),
         expected_concurrency_version=body.expected_concurrency_version,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
     )
     return LoadResponse.model_validate(load)
 
@@ -229,12 +236,16 @@ async def add_load_note(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     note = await loads_service.add_load_note(
         db,
         tenant_id,
         load_id,
         payload.body,
         author_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
