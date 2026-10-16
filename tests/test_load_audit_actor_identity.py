@@ -59,6 +59,35 @@ def test_membership_id_and_uuid_are_rejected() -> None:
         resolve_load_audit_actor(missing)
 
 
+def test_delete_load_blocks_an_existing_row_and_404s_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.loads import LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED, delete_load
+
+    async def _existing(db, tenant_id, load_id):
+        return SimpleNamespace(id=load_id)
+
+    async def _missing(db, tenant_id, load_id):
+        return None
+
+    monkeypatch.setattr("app.services.loads.get_load", _existing)
+
+    async def _blocked() -> None:
+        await delete_load(None, 1, 7, expected_concurrency_version=3)
+
+    with pytest.raises(HTTPException) as blocked:
+        asyncio.run(_blocked())
+    assert blocked.value.status_code == 409
+    assert blocked.value.detail["code"] == LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED
+
+    monkeypatch.setattr("app.services.loads.get_load", _missing)
+
+    async def _absent() -> None:
+        await delete_load(None, 1, 8, expected_concurrency_version=1)
+
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(_absent())
+    assert missing.value.status_code == 404
+
+
 def test_integer_actor_user_id_callers_stay_integer() -> None:
     actor_id, label, actor_type = normalize_load_audit_actor(1)
     assert (actor_id, label, actor_type) == (1, None, "user")
@@ -462,6 +491,24 @@ def test_platform_and_tenant_local_audit_identity(audit_world, monkeypatch: pyte
     assert confirmed.json()["document_snapshot_confirmed_by_user_id"] == ids["platform_user_id"]
     confirmed_audit = _audit_rows(ids["platform_tenant_id"], off_load["id"], "document_snapshot_confirmed")[0]
     assert confirmed_audit[:3] == ("user", None, expected_label)
+
+    for headers, load in ((platform_headers, off_load), (local_headers, local_load)):
+        deleted = client.delete(
+            f"/api/v1/loads/{load['id']}",
+            params={"expected_concurrency_version": load["concurrency_version"]},
+            headers=headers,
+        )
+        assert deleted.status_code == 409, deleted.text
+        assert deleted.json()["detail"]["code"] == "LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED"
+        still_there = client.get(f"/api/v1/loads/{load['id']}", headers=headers)
+        assert still_there.status_code == 200
+        assert still_there.json()["id"] == load["id"]
+    missing = client.delete(
+        "/api/v1/loads/999999999",
+        params={"expected_concurrency_version": 1},
+        headers=platform_headers,
+    )
+    assert missing.status_code == 404
 
     monkeypatch.setattr(settings, "casbin_load_pilot_enforcement", False)
 
