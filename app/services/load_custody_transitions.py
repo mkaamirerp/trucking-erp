@@ -634,14 +634,17 @@ async def final_delivery_load_custody(
     if _is_completed_membership(tl) and _snapshot_is_delivered(load):
         last = await _get_event_by_id(db, tenant_id, load.last_custody_event_id)
         if last is not None and _is_final_delivery_event(last, trip_id):
-            if body.idempotency_key and last.idempotency_key and last.idempotency_key != body.idempotency_key:
-                existing = await _find_event_by_idempotency(db, tenant_id, load_id, body.idempotency_key)
-                if existing is not None and int(existing.id) != int(last.id):
-                    raise _conflict(
-                        "IDEMPOTENCY_KEY_CONFLICT",
-                        "idempotency_key already used for a different custody event on this Load",
-                    )
-            return _transition_response(load=load, trip=trip, tl=tl, event=last, replayed=True)
+            request_key = body.idempotency_key
+            if request_key is None or request_key == last.idempotency_key:
+                return _transition_response(load=load, trip=trip, tl=tl, event=last, replayed=True)
+            existing = await _find_event_by_idempotency(db, tenant_id, load_id, request_key)
+            if existing is not None and int(existing.id) != int(last.id):
+                raise _conflict(
+                    "IDEMPOTENCY_KEY_CONFLICT",
+                    "idempotency_key already used for a different custody event on this Load",
+                )
+            # A new key is a different request. Do not replay the original delivery
+            # and do not append another custody event.
 
     if body.idempotency_key:
         existing = await _find_event_by_idempotency(db, tenant_id, load_id, body.idempotency_key)

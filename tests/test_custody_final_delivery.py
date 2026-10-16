@@ -288,3 +288,65 @@ class TestFinalDelivery:
         assert await _delivery_count(load_unknown) == 0
         assert await _delivery_count(load_terminal) == 0
         assert (await client.get(f"/api/v1/trips/{trip_id}", headers=AUTH_HEADERS)).json()["status"] == "in_progress"
+
+    async def test_idempotency_same_key_replays_different_key_does_not(
+        self, client: AsyncClient, locked_prefix: str, integration_scope
+    ):
+        load_id = (await integration_scope.create_ready_load_ids(1, tag_prefix="FINAL-KEY"))[0]
+        created = await integration_scope.post_planned_trip([load_id])
+        assert created.status_code == 201, created.text
+        trip_id = int(created.json()["id"])
+        await _assign(client, integration_scope, trip_id)
+        await _start(client, trip_id)
+        accept_key = f"accept-{load_id}"
+        accepted = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/accept-custody",
+            headers=AUTH_HEADERS,
+            json={"idempotency_key": accept_key},
+        )
+        assert accepted.status_code == 200, accepted.text
+
+        delivery_key = f"deliver-{load_id}"
+        first = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/final-delivery",
+            headers=AUTH_HEADERS,
+            json={"idempotency_key": delivery_key, "notes": "signed"},
+        )
+        assert first.status_code == 200, first.text
+        event_id = first.json()["event"]["id"]
+        assert await _delivery_count(load_id) == 1
+
+        replay = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/final-delivery",
+            headers=AUTH_HEADERS,
+            json={"idempotency_key": delivery_key, "notes": "signed again"},
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["replayed"] is True
+        assert replay.json()["event"]["id"] == event_id
+        assert replay.json()["membership_status_within_trip"] == "completed"
+        assert replay.json()["snapshot"]["custody_owner"] == "delivered"
+        assert replay.json()["trip_status"] == "in_progress"
+        assert await _delivery_count(load_id) == 1
+
+        other_key = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/final-delivery",
+            headers=AUTH_HEADERS,
+            json={"idempotency_key": f"deliver-other-{load_id}"},
+        )
+        assert other_key.status_code == 409, other_key.text
+        assert _detail_code(other_key) == "MEMBERSHIP_NOT_ACTIVE"
+        assert await _delivery_count(load_id) == 1
+        assert (await client.get(f"/api/v1/trips/{trip_id}", headers=AUTH_HEADERS)).json()["status"] == "in_progress"
+
+        reused = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/final-delivery",
+            headers=AUTH_HEADERS,
+            json={"idempotency_key": accept_key},
+        )
+        assert reused.status_code == 409, reused.text
+        assert _detail_code(reused) == "IDEMPOTENCY_KEY_CONFLICT"
+        assert await _delivery_count(load_id) == 1
+        row = (await _rows("SELECT custody_owner, status, active_trip_id FROM loads WHERE id = :lid", {"lid": load_id}))[0]
+        assert row["custody_owner"] == "delivered"
+        assert row["active_trip_id"] is None
