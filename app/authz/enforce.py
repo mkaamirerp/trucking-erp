@@ -6,6 +6,7 @@ It does not replace authentication, entitlements, or Load service rules.
 
 from __future__ import annotations
 
+import threading
 from typing import NoReturn
 
 from fastapi import Depends, HTTPException
@@ -31,8 +32,36 @@ def pilot_enforcement_enabled() -> bool:
     return bool(settings.casbin_load_pilot_enforcement)
 
 
+_pilot_enforcer: object | None = None
+_pilot_enforcer_lock = threading.Lock()
+
+
+def reset_pilot_policy_cache() -> None:
+    """Drop the process cache. Tests call this so one case cannot leak into the next."""
+    global _pilot_enforcer
+    with _pilot_enforcer_lock:
+        _pilot_enforcer = None
+
+
 def get_pilot_enforcer() -> object:
-    """Load the prospective policy. Raises PolicyLoadError instead of falling open."""
+    """Return the validated prospective enforcer for this process.
+
+    The policy is loaded once. A missing or invalid policy raises PolicyLoadError
+    and is not cached, so a later request still fails closed.
+    """
+    global _pilot_enforcer
+    cached = _pilot_enforcer
+    if cached is not None:
+        return cached
+    with _pilot_enforcer_lock:
+        if _pilot_enforcer is not None:
+            return _pilot_enforcer
+        enforcer = _load_pilot_enforcer()
+        _pilot_enforcer = enforcer
+        return enforcer
+
+
+def _load_pilot_enforcer() -> object:
     try:
         loaded = load_prospective_policy()
     except PolicyLoadError:
