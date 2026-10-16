@@ -32,6 +32,7 @@ import {
 import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops, formatStopCityState } from "@/utils/loadStops";
 import { FuturePlaceholderPanels } from "./FuturePlaceholderPanels";
+import TripCustodyPanel from "./TripCustodyPanel";
 
 type LifecycleTab = "active" | "planned" | "assigned" | "in_progress" | "completed" | "problem_hold";
 
@@ -1384,9 +1385,6 @@ function LoadStackBlock({
             </button>
           ) : null}
           <span className={btn + " cursor-not-allowed opacity-50"} title="··· soon">
-            Handoff ··· soon
-          </span>
-          <span className={btn + " cursor-not-allowed opacity-50"} title="··· soon">
             Transfer ··· soon
           </span>
         </div>
@@ -2076,13 +2074,17 @@ export default function TripContainerPage() {
                     <Link to={OPS.TRIP_DETAIL(focusedTripId!)} className={btn}>
                       Workspace ↗
                     </Link>
-                    <button type="button" className={btn} disabled title="··· soon">
-                      Complete Trip ··· soon
-                    </button>
-                    <button type="button" className={btn} disabled title="··· soon">
-                      Handoff ··· soon
-                    </button>
                   </div>
+                  {focusedDetail ? (
+                    <TripCustodyPanel
+                      trip={focusedDetail}
+                      onRefresh={async () => {
+                        const refreshed = await getTrip(focusedDetail.id);
+                        setTripDetailById((current) => new Map(current).set(focusedDetail.id, refreshed));
+                        void fetchTripList();
+                      }}
+                    />
+                  ) : null}
                   {showAddLoad && focusedTripId != null && focusedDetail ? (
                     <AddLoadPanel
                       tripId={focusedTripId}

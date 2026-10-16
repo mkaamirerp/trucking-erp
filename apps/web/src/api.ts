@@ -1008,6 +1008,71 @@ export async function postTripExecutionSignal(tripId: number, body: TripExecutio
   return handle<TripDetail>(res);
 }
 
+/** POST /api/v1/trips/{id}/complete — close the Trip only. Does not change Load.status. */
+export async function completeTrip(tripId: number): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/complete`, { method: "POST" });
+  return handle<TripDetail>(res);
+}
+
+export type LoadCustodySnapshot = {
+  load_id: number;
+  custody_owner: string;
+  custody_trip_id?: number | null;
+  custody_terminal_id?: number | null;
+  custody_placement: string;
+  custody_trailer_id?: number | null;
+  custody_since_at?: string | null;
+  last_custody_event_id?: number | null;
+};
+
+export async function getLoadCustody(loadId: number): Promise<LoadCustodySnapshot> {
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/custody`);
+  return handle<LoadCustodySnapshot>(res);
+}
+
+export type TerminalOption = {
+  id: number;
+  name: string;
+  is_active: boolean;
+};
+
+export async function listTerminals(): Promise<{ items: TerminalOption[] }> {
+  const res = await fetchWithTenant(`${API_BASE}/terminals?active_only=true`);
+  return handle<{ items: TerminalOption[] }>(res);
+}
+
+export async function acceptLoadCustody(tripId: number, loadId: number): Promise<unknown> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/accept-custody`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return handle<unknown>(res);
+}
+
+export async function takeLoadCustody(tripId: number, loadId: number): Promise<unknown> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/take-custody`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return handle<unknown>(res);
+}
+
+export type YardHandoffPayload = {
+  terminal_id: number;
+  placement: "on_trailer" | "staged";
+};
+
+export async function yardHandoffLoad(tripId: number, loadId: number, body: YardHandoffPayload): Promise<unknown> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/yard-handoff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<unknown>(res);
+}
+
 /** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
 export type TripAssignmentPayload = {
   driver_id: number | null;
