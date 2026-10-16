@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.authz.enforce import require_pilot_capability
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -31,7 +32,7 @@ async def create_load(
     payload: LoadCreate,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    user=Depends(get_current_user),
+    user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     # Slice 5: request/user captured for future audit correlation; create_load audit currently best-effort.
@@ -44,7 +45,7 @@ async def create_load(
 @router.get("", response_model=dict)
 async def list_loads(
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "view")),
     db: AsyncSession = Depends(get_tenant_db),
     status: Optional[List[str]] = Query(None),
     driver_id: int | None = Query(None),
@@ -118,7 +119,7 @@ async def parse_load_workspace_document(
 async def get_load_detail(
     load_id: int,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "view")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.get_load(db, tenant_id, load_id)
@@ -133,7 +134,7 @@ async def update_load(
     payload: LoadUpdate,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    user=Depends(get_current_user),
+    user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.update_load(

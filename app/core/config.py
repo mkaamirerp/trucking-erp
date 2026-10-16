@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     # When True, semantic stateless path only — no silent regex fallback (Track B1).
     load_parse_document_semantic_adapter_enabled: bool = False
 
+    # Phase 4A Loads pilot. Default off. Do not enable in production.
+    # When false, the four pilot routes keep today's authorization.
+    casbin_load_pilot_enforcement: bool = False
+
     # Storage (S3 or local)
     storage_provider: str = "local"
     aws_region: str = "us-east-1"
