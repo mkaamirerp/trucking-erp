@@ -46,8 +46,10 @@ def reset_pilot_policy_cache() -> None:
 def get_pilot_enforcer() -> object:
     """Return the validated prospective enforcer for this process.
 
-    The policy is loaded once. A missing or invalid policy raises PolicyLoadError
-    and is not cached, so a later request still fails closed.
+    The first successful load is kept for the life of the process. A replacement
+    policy file is not read until the process restarts or ``reset_pilot_policy_cache()``
+    runs. A missing or invalid policy raises PolicyLoadError and is not cached,
+    so the next request still fails closed.
     """
     global _pilot_enforcer
     cached = _pilot_enforcer
