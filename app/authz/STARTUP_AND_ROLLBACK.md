@@ -1,26 +1,42 @@
-# Phase 0 startup and rollback (not wired)
+# Loads pilot startup and rollback
 
-This package is not imported from `app/main.py`. Loading a valid policy does not change live authorization.
+`casbin_load_pilot_enforcement` defaults to false. While it is false, the four routes below keep today's authorization. The pilot dependency does not load a policy, and no request calls `decide()`.
 
-## Later-phase startup (one step, not this change)
+There is no database policy table. Application startup does not load Casbin. The first enforced request in a process loads the policy described below.
 
-When a future change is approved to enforce policy:
+## Routes controlled by the switch
 
-1. Call `load_shipped_policy()` once, after settings load and before the process accepts requests.
-2. If it raises `PolicyLoadError`, log the error and exit non-zero. Do not serve with an empty enforcer, a previous in-memory policy, or an implicit allow.
-3. Keep the returned enforcer in one process-local variable. Do not reload from disk on each request in that phase.
-4. Only after that load succeeds, attach a dependency that calls `decide(...)`. That attachment is a separate change and is out of scope here.
+Only these operations call `require_pilot_capability`. No other route, and no other module, uses live Casbin enforcement.
 
-There is no database policy table. The files `app/authz/casbin/model.conf` and `app/authz/casbin/policy.csv` are the only shipped policy source. `policy_prospective.csv` is a Phase 1 design artifact. Startup must not load it, and live routes must not call `decide()` against it.
+| Method | Path | Capability |
+|---|---|---|
+| `GET` | `/api/v1/loads` | `loads.records` / `view` |
+| `GET` | `/api/v1/loads/{load_id}` | `loads.records` / `view` |
+| `POST` | `/api/v1/loads` | `loads.records` / `create` |
+| `PATCH` | `/api/v1/loads/{load_id}` | `loads.records` / `update` |
+
+Mark Ready, physical DELETE, notes, document confirmation, custody, and parse stay outside the pilot.
+
+## Which policy is enforced
+
+When the switch is on, the pilot validates and uses `app/authz/casbin/policy_prospective.csv` through `load_prospective_policy()`. It does not enforce the Phase 0 shipped policy.
+
+`app/authz/casbin/policy.csv`, with `app/authz/casbin/model.conf`, remains the original foundation policy. `load_shipped_policy()` still reads that pair and is not used by the pilot.
+
+## Process cache and fail closed
+
+A successful prospective load is cached for the life of that API process. A later edit to `policy_prospective.csv` is not read until the process restarts or `reset_pilot_policy_cache()` runs.
+
+While enforcement is enabled, a missing or invalid prospective policy raises `PolicyLoadError`. That failure is not cached. The request is denied with HTTP 403 `AUTHZ_UNAVAILABLE` (`policy_load_failed`). The next request loads again and stays closed until a valid file loads. An unavailable decision is never treated as allow.
 
 ## Rollback
 
-1. `git revert` the commit that changed `model.conf` or `policy.csv` (and the loader, if the contract changed with them).
-2. Restart the API process so it loads the restored files.
+1. Set `casbin_load_pilot_enforcement` to false. That is the default. The environment name is `CASBIN_LOAD_PILOT_ENFORCEMENT`.
+2. Restart the API and confirm the running process is using that disabled value.
 3. Do not stamp, migrate, or edit tenant data. There is nothing in the database to roll back.
 
-If the reverted files fail validation, the later-phase startup rule still applies: the process stays down until a valid pair is deployed. Do not add a fallback allow.
+With the switch off, the four routes return to today's authorization even if the cached enforcer or the prospective file is wrong. Do not add a fallback allow.
 
 ## Dependency
 
-`casbin==1.41.0` is declared in `requirements.in`, `requirements.txt`, and `requirements.lock.txt`. Its dependency `simpleeval==1.0.8` is in the lockfile. This package imports Casbin only inside `load_policy`. Application startup does not call that loader.
+`casbin==1.41.0` is declared in `requirements.in`, `requirements.txt`, and `requirements.lock.txt`. Its dependency `simpleeval==1.0.8` is in the lockfile. Casbin is imported only when a policy loader runs. Startup does not call `load_shipped_policy()` or `load_prospective_policy()`.
