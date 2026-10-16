@@ -4,6 +4,7 @@ import {
   canCompleteTrip,
   formatCustodyApiError,
   showAcceptCustody,
+  showFinalDelivery,
   showHandoff,
   showTakeCustody,
 } from "./custodyOperator";
@@ -85,6 +86,27 @@ describe("custody operator eligibility", () => {
     expect(showHandoff(trip("in_progress", [member("active")]), member("active"), held)).toBe(true);
     expect(showHandoff(trip("in_progress", [member("planned")]), member("planned"), held)).toBe(false);
     expect(showHandoff(trip("in_progress", [member("active")]), member("active"), snap({ custody_owner: "terminal", custody_terminal_id: 4, custody_placement: "staged" }))).toBe(false);
+  });
+
+  it("shows Final Delivery only for an in-progress Trip holding that Load", () => {
+    const held = snap({ custody_owner: "trip", custody_trip_id: 3, custody_placement: "on_trailer" });
+    expect(showFinalDelivery(trip("in_progress", [member("active")]), member("active"), held)).toBe(true);
+    expect(showFinalDelivery(trip("assigned", [member("active")]), member("active"), held)).toBe(false);
+    expect(showFinalDelivery(trip("in_progress", [member("planned")]), member("planned"), held)).toBe(false);
+    expect(
+      showFinalDelivery(
+        trip("in_progress", [member("active")]),
+        member("active"),
+        snap({ custody_owner: "terminal", custody_terminal_id: 4, custody_placement: "staged" }),
+      ),
+    ).toBe(false);
+    expect(
+      showFinalDelivery(
+        trip("in_progress", [member("active")]),
+        member("active"),
+        snap({ custody_owner: "unknown" }),
+      ),
+    ).toBe(false);
   });
 
   it("keeps Complete Trip unavailable until the Trip is in progress and every membership is closed", () => {

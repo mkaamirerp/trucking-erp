@@ -9,6 +9,7 @@ from app.deps.tenant_db import get_tenant_db
 from app.schemas.custody import (
     AcceptCustodyBody,
     CustodyTransitionResponse,
+    FinalDeliveryBody,
     TakeCustodyBody,
     YardHandoffBody,
 )
@@ -204,6 +205,31 @@ async def take_load_custody(
 ) -> CustodyTransitionResponse:
     """Terminal takeover: terminal custody → outbound Trip custody + planned→active."""
     out = await custody_transitions.take_load_custody(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        body,
+        actor_user_id=int(user.tenant_user.id) if user.tenant_user else None,
+    )
+    await db.commit()
+    return out
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/final-delivery",
+    response_model=CustodyTransitionResponse,
+)
+async def final_delivery_load_custody(
+    trip_id: int,
+    load_id: int,
+    body: FinalDeliveryBody | None = None,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> CustodyTransitionResponse:
+    """Final delivery: trip custody → delivered + active→completed for this Load only."""
+    out = await custody_transitions.final_delivery_load_custody(
         db,
         tenant_id,
         trip_id,

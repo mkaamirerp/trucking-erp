@@ -72,6 +72,16 @@ export function showTakeCustody(
   return snapshot.custody_trailer_id != null && snapshot.custody_trailer_id === trip.trailer_id;
 }
 
+export function showFinalDelivery(
+  trip: TripDetail,
+  member: TripMemberLoad,
+  snapshot: LoadCustodySnapshot | null | undefined,
+): boolean {
+  if (trip.cancelled_at || (trip.status || "").toLowerCase() !== "in_progress") return false;
+  if (!snapshot || !activeMembership(member)) return false;
+  return (snapshot.custody_owner || "").toLowerCase() === "trip" && snapshot.custody_trip_id === trip.id;
+}
+
 export function showHandoff(
   trip: TripDetail,
   member: TripMemberLoad,

@@ -71,6 +71,7 @@ function api(overrides: Partial<CustodyPanelApi> = {}): CustodyPanelApi {
     acceptLoadCustody: async () => ({}),
     takeLoadCustody: async () => ({}),
     yardHandoffLoad: async () => ({}),
+    finalDeliveryLoad: async () => ({}),
     completeTrip: async () => trip("completed", "completed"),
     ...overrides,
   };
@@ -221,6 +222,69 @@ describe("TripCustodyPanel", () => {
       "Terminal is inactive (TERMINAL_INACTIVE)",
     );
     expect(container.querySelector("[data-testid='membership-9']")?.textContent).toContain("active");
+  });
+
+  it("hides Final Delivery when the Trip is not in progress or does not hold the Load", async () => {
+    mount(
+      <TripCustodyPanel
+        trip={trip("assigned", "active")}
+        api={api()}
+        onRefresh={async () => undefined}
+      />,
+    );
+    await settle();
+    expect(container.querySelector("[data-testid='final-delivery-9']")).toBeNull();
+    act(() => root.unmount());
+    mount(
+      <TripCustodyPanel
+        trip={trip("in_progress", "active")}
+        api={api({
+          getLoadCustody: async () => snap({ custody_owner: "unknown", custody_placement: "unknown" }),
+        })}
+        onRefresh={async () => undefined}
+      />,
+    );
+    await settle();
+    expect(container.querySelector("[data-testid='final-delivery-9']")).toBeNull();
+  });
+
+  it("confirms final delivery without completing the Trip", async () => {
+    const calls = { deliver: 0, handoff: 0, complete: 0 };
+    mount(
+      <TripCustodyPanel
+        trip={trip("in_progress", "active")}
+        api={api({
+          finalDeliveryLoad: async () => {
+            calls.deliver += 1;
+            return {};
+          },
+          yardHandoffLoad: async () => {
+            calls.handoff += 1;
+            return {};
+          },
+          completeTrip: async () => {
+            calls.complete += 1;
+            return trip("completed", "completed");
+          },
+        })}
+        onRefresh={async () => undefined}
+      />,
+    );
+    await settle();
+    const opener = container.querySelector("[data-testid='final-delivery-9']") as HTMLButtonElement;
+    expect(opener).not.toBeNull();
+    await act(async () => {
+      opener.click();
+    });
+    expect(calls.deliver).toBe(0);
+    await act(async () => {
+      (container.querySelector("[data-testid='final-delivery-submit-9']") as HTMLButtonElement).click();
+    });
+    await settle();
+    expect(calls.deliver).toBe(1);
+    expect(calls.handoff).toBe(0);
+    expect(calls.complete).toBe(0);
+    expect((container.querySelector("[data-testid='complete-trip']") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("ignores a second handoff click while the first request is pending", async () => {

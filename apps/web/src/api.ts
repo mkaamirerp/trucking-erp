@@ -1073,6 +1073,25 @@ export async function yardHandoffLoad(tripId: number, loadId: number, body: Yard
   return handle<unknown>(res);
 }
 
+export type FinalDeliveryPayload = {
+  occurred_at?: string | null;
+  notes?: string | null;
+  idempotency_key?: string | null;
+};
+
+export async function finalDeliveryLoad(
+  tripId: number,
+  loadId: number,
+  body: FinalDeliveryPayload = {},
+): Promise<unknown> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/loads/${loadId}/final-delivery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<unknown>(res);
+}
+
 /** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
 export type TripAssignmentPayload = {
   driver_id: number | null;

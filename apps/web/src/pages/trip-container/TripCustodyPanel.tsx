@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   acceptLoadCustody,
   completeTrip,
+  finalDeliveryLoad,
   getLoadCustody,
   listTerminals,
   takeLoadCustody,
@@ -16,6 +17,7 @@ import {
   custodyStatusLabel,
   formatCustodyApiError,
   showAcceptCustody,
+  showFinalDelivery,
   showHandoff,
   showTakeCustody,
   type CustodyPlacement,
@@ -27,6 +29,7 @@ export type CustodyPanelApi = {
   acceptLoadCustody: typeof acceptLoadCustody;
   takeLoadCustody: typeof takeLoadCustody;
   yardHandoffLoad: typeof yardHandoffLoad;
+  finalDeliveryLoad: typeof finalDeliveryLoad;
   completeTrip: typeof completeTrip;
 };
 
@@ -36,6 +39,7 @@ const defaultApi: CustodyPanelApi = {
   acceptLoadCustody,
   takeLoadCustody,
   yardHandoffLoad,
+  finalDeliveryLoad,
   completeTrip,
 };
 
@@ -62,6 +66,7 @@ export default function TripCustodyPanel({
   const [drafts, setDrafts] = useState<Record<number, HandoffDraft>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmDeliveryId, setConfirmDeliveryId] = useState<number | null>(null);
 
   const membershipKey = trip.member_loads
     .map((member) => `${member.load_id}:${member.status_within_trip}:${member.completed_at ?? ""}:${member.removed_at ?? ""}`)
@@ -134,7 +139,7 @@ export default function TripCustodyPanel({
         >
           {pendingKey === "complete" ? "Completing…" : "Complete Trip"}
         </button>
-        <span className="text-[9px] text-[var(--trk-text-muted)]">Handoff does not complete the Trip.</span>
+        <span className="text-[9px] text-[var(--trk-text-muted)]">Handoff and final delivery do not complete the Trip.</span>
       </div>
       {actionError ? (
         <p className="text-[10px] text-[var(--trk-danger)]" role="alert" data-testid="custody-action-error">
@@ -149,6 +154,7 @@ export default function TripCustodyPanel({
           const accept = showAcceptCustody(trip, member, snapshot);
           const take = showTakeCustody(trip, member, snapshot);
           const handoff = showHandoff(trip, member, snapshot);
+          const finalDelivery = showFinalDelivery(trip, member, snapshot);
           const handoffReady = draft.terminalId !== "" && (draft.placement === "on_trailer" || draft.placement === "staged");
           return (
             <li
@@ -253,6 +259,45 @@ export default function TripCustodyPanel({
                       Handoff
                     </button>
                   </>
+                ) : null}
+                {finalDelivery && confirmDeliveryId !== member.load_id ? (
+                  <button
+                    type="button"
+                    className={btn}
+                    data-testid={`final-delivery-${member.load_id}`}
+                    disabled={pendingKey != null}
+                    onClick={() => setConfirmDeliveryId(member.load_id)}
+                  >
+                    Final Delivery
+                  </button>
+                ) : null}
+                {finalDelivery && confirmDeliveryId === member.load_id ? (
+                  <div className="flex flex-wrap items-center gap-1" data-testid={`final-delivery-confirm-${member.load_id}`}>
+                    <span className="text-[9px] text-[var(--trk-text)]">
+                      Record final delivery for this Load? This does not complete the Trip.
+                    </span>
+                    <button
+                      type="button"
+                      className={btn}
+                      disabled={pendingKey != null}
+                      onClick={() => setConfirmDeliveryId(null)}
+                    >
+                      Go back
+                    </button>
+                    <button
+                      type="button"
+                      className={btnPrimary}
+                      data-testid={`final-delivery-submit-${member.load_id}`}
+                      disabled={pendingKey != null}
+                      onClick={() =>
+                        void runAction(`deliver-${member.load_id}`, () =>
+                          api.finalDeliveryLoad(trip.id, member.load_id, {}),
+                        )
+                      }
+                    >
+                      Confirm final delivery
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </li>
