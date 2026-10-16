@@ -22,16 +22,17 @@ from app.deps.admin import has_full_access, is_tenant_admin
 from app.deps.fuel_rbac import fuel_capability_allowed
 
 EVIDENCE = "simulated_role_gate"
+NO_EXPLICIT_ROLE_GATE = "NO_EXPLICIT_ROLE_GATE"
 _SIMULATED_TENANT_ID = 17
+_AUTH_MODES = ("platform", "tenant_local")
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-MATRIX_ROLES: tuple[str, ...] = (
-    "OWNER",
-    "ADMIN",
-    "TENANT_ADMIN",
-    "TENANT_OWNER",
+# Admin subjects come from the registry. Invite mapping stays in access_level_to_role.
+MATRIX_ROLES: tuple[str, ...] = tuple(sorted(ADMIN_ROLES)) + (
     OPERATIONAL_FULL_ACCESS_ROLE,
     TENANT_MEMBER_ROLE,
 )
+REPRESENTATIVE_ADMIN_ROLE = next(iter(sorted(ADMIN_ROLES)))
 
 # Registered business areas that the catalog intentionally does not map yet.
 UNMAPPED_MODULES: tuple[tuple[str, str], ...] = (
@@ -56,10 +57,14 @@ class MatrixCell:
     existing_reason: str
     prospective: str
     entitlement: str | None
+    granted_entitlements: frozenset[str] | None
     status: str
     owner_approval_required: bool
     evidence: str
     sample_route: str | None
+    risk_label: str | None = None
+    simulated_auth_modes: tuple[str, ...] = _AUTH_MODES
+    route_outcomes: tuple[str, ...] = ()
 
     @property
     def pair(self) -> tuple[str, str]:
@@ -91,8 +96,8 @@ def build_matrix(enforcer: object | None = None) -> DecisionMatrix:
     cells: list[MatrixCell] = []
     for spec in CAPABILITIES.values():
         routes = tuple(sorted(by_pair.get(spec.pair, []), key=lambda row: (row.method, row.path)))
-        entitlement = _entitlement(routes)
-        granted = frozenset({entitlement}) if entitlement else None
+        granted = entitlement_names(routes)
+        entitlement = entitlement_display(granted)
         for role in MATRIX_ROLES:
             cells.append(_cell(spec, role, routes, entitlement, granted, enforcer))
     return DecisionMatrix(
@@ -112,16 +117,39 @@ def render_decision_report(matrix: DecisionMatrix | None = None) -> str:
         "and it does not change authentication, entitlements, or route behavior.",
         "",
         "Each cell is `existing role gate → prospective Casbin (status)`.",
-        "The existing side assumes the listed entitlement is granted.",
+        "The existing side assumes each listed entitlement name is granted.",
+        "The entitlement column is a display string. It is not itself an entitlement name.",
         "A missing subscription can still deny the live route.",
         "`pending` means owner approval is required. It is not a denial of current admin access.",
         "`OPERATIONAL_FULL_ACCESS` is not a stored invite role.",
+        "`TENANT_MEMBER (READ_ONLY)` is the stored membership for a READ_ONLY invite.",
+        "READ_ONLY is not a separate role and not a Casbin subject.",
+        "Every cell simulates platform and tenant-local membership resolution.",
+        "Those results are simulations, not live requests.",
+        f"`{NO_EXPLICIT_ROLE_GATE}` means no explicit membership role gate was found.",
+        "The existing decision stays UNKNOWN. Other protections may still apply.",
+        "The label is not evidence that a route is universally accessible.",
         "",
         "## Unresolved decisions",
         "",
     ]
     for index, item in enumerate(matrix.unresolved, start=1):
         lines.append(f"{index}. **{item.topic}.** {item.detail}")
+    writes = ungated_write_lines()
+    lines.extend(
+        [
+            "",
+            "## Ungated writes",
+            "",
+            f"Risk label `{NO_EXPLICIT_ROLE_GATE}`.",
+            "These write routes have no explicit membership role gate in the simulation.",
+            "The existing decision stays UNKNOWN.",
+            "Authentication, tenant isolation, entitlements, or domain rules may still apply.",
+            "This list is not evidence that the routes are universally accessible.",
+            "",
+        ]
+    )
+    lines.extend(f"- {line}" for line in writes)
     lines.extend(["", "## Matrix", ""])
     modules: list[str] = []
     for cell in matrix.cells:
@@ -149,26 +177,14 @@ def _cell(
 ) -> MatrixCell:
     if not routes:
         return _catalog_only_cell(spec, role, enforcer)
-    principal = ShadowPrincipal("platform", role, _SIMULATED_TENANT_ID)
-    results = tuple(
-        evaluate_shadow(
-            principal,
-            method=route.method,
-            path=route.path,
-            granted_entitlements=granted,
-            enforcer=enforcer,
-        )
-        for route in routes
-    )
+    results, split_reason = _simulate_routes(role, routes, granted, enforcer)
+    route_outcomes = _route_outcome_lines(routes, results) if split_reason else ()
     first = results[0]
-    if any(
-        (row.existing, row.casbin, row.outcome) != (first.existing, first.casbin, first.outcome)
-        for row in results[1:]
-    ):
+    if split_reason:
         status = "split"
         prospective = "split"
         existing = "split"
-        reason = "routes_disagree"
+        reason = split_reason
     else:
         status = first.outcome.value
         prospective = first.casbin.value
@@ -185,10 +201,13 @@ def _cell(
         existing_reason=reason,
         prospective=prospective,
         entitlement=entitlement,
+        granted_entitlements=granted,
         status=status,
         owner_approval_required=spec.enforcement_approval == "owner_required",
         evidence=EVIDENCE,
         sample_route=f"{sample.method} {sample.path}",
+        risk_label=NO_EXPLICIT_ROLE_GATE if reason == "no_role_gate" or (split_reason and first.existing_reason == "no_role_gate") else None,
+        route_outcomes=route_outcomes,
     )
 
 
@@ -199,14 +218,19 @@ def _catalog_only_cell(spec: CapabilitySpec, role: str, enforcer: object) -> Mat
         prospective = ShadowCasbin.PENDING.value
         status = ShadowOutcome.PENDING_OWNER_APPROVAL.value
     else:
-        decision = decide(
-            enforcer,  # type: ignore[arg-type]
-            role=membership_role_for_decision("platform", role),
-            domain=str(_SIMULATED_TENANT_ID),
-            resource=spec.resource,
-            action=spec.action,
-        )
-        prospective, status = _pair_outcome(existing, decision.code)
+        decisions = [
+            decide(
+                enforcer,  # type: ignore[arg-type]
+                role=membership_role_for_decision(mode, role),
+                domain=str(_SIMULATED_TENANT_ID),
+                resource=spec.resource,
+                action=spec.action,
+            )
+            for mode in _AUTH_MODES
+        ]
+        if any(item.code is not decisions[0].code for item in decisions[1:]):
+            raise ValueError(f"auth modes disagree for {spec.resource}/{spec.action} {role}")
+        prospective, status = _pair_outcome(existing, decisions[0].code)
     return MatrixCell(
         module=spec.module,
         resource=spec.resource,
@@ -217,10 +241,12 @@ def _catalog_only_cell(spec: CapabilitySpec, role: str, enforcer: object) -> Mat
         existing_reason=reason,
         prospective=prospective,
         entitlement=None,
+        granted_entitlements=None,
         status=status,
         owner_approval_required=spec.enforcement_approval == "owner_required",
         evidence=EVIDENCE,
         sample_route=None,
+        risk_label=NO_EXPLICIT_ROLE_GATE if reason == "no_role_gate" else None,
     )
 
 
@@ -258,16 +284,61 @@ def _pair_outcome(existing: str, casbin_code: DecisionCode) -> tuple[str, str]:
         return prospective, ShadowOutcome.CONFLICT_EXISTING_ALLOW.value
     if existing == ExistingCode.DENY.value and prospective == ShadowCasbin.ALLOW.value:
         return prospective, ShadowOutcome.CONFLICT_EXISTING_DENY.value
-    return prospective, ShadowOutcome.CASBIN_UNAVAILABLE.value
+    raise ValueError(
+        f"unsupported existing/casbin combination: {existing} / {casbin_code.value}"
+    )
 
 
-def _entitlement(routes: tuple[RouteBinding, ...]) -> str | None:
-    values = {route.entitlement for route in routes if route.entitlement}
-    if not values:
+def entitlement_names(routes: tuple[RouteBinding, ...]) -> frozenset[str] | None:
+    """Individual entitlement names. None when the routes declare none."""
+    names = frozenset(route.entitlement for route in routes if route.entitlement)
+    return names or None
+
+
+def entitlement_display(names: frozenset[str] | None) -> str | None:
+    """Readable list. Not a value to pass to evaluate_shadow()."""
+    if not names:
         return None
-    if len(values) == 1:
-        return next(iter(values))
-    return ",".join(sorted(values))
+    return ", ".join(sorted(names))
+
+
+def _simulate_routes(
+    role: str,
+    routes: tuple[RouteBinding, ...],
+    granted: frozenset[str] | None,
+    enforcer: object,
+) -> tuple[tuple, str | None]:
+    by_mode = {
+        mode: tuple(
+            evaluate_shadow(
+                ShadowPrincipal(mode, role, _SIMULATED_TENANT_ID),
+                method=route.method,
+                path=route.path,
+                granted_entitlements=granted,
+                enforcer=enforcer,
+            )
+            for route in routes
+        )
+        for mode in _AUTH_MODES
+    }
+    platform_results = by_mode["platform"]
+    if any(_shadow_signature(left) != _shadow_signature(right) for left, right in zip(platform_results, by_mode["tenant_local"])):
+        return platform_results, "auth_modes_disagree"
+    if len({_shadow_signature(row) for row in platform_results}) > 1:
+        return platform_results, "routes_disagree"
+    return platform_results, None
+
+
+def _shadow_signature(result: object) -> tuple[str, str, str]:
+    return (result.existing.value, result.casbin.value, result.outcome.value)  # type: ignore[attr-defined]
+
+
+def _route_outcome_lines(routes: tuple[RouteBinding, ...], results: tuple) -> tuple[str, ...]:
+    return tuple(
+        f"{route.method} {route.path}: existing {result.existing.value}, "
+        f"prospective {result.casbin.value}, {result.outcome.value}"
+        for route, result in zip(routes, results)
+    )
 
 
 def _unresolved(cells: tuple[MatrixCell, ...]) -> tuple[UnresolvedDecision, ...]:
@@ -283,7 +354,7 @@ def _unresolved(cells: tuple[MatrixCell, ...]) -> tuple[UnresolvedDecision, ...]
         {
             f"{cell.resource}/{cell.action}"
             for cell in cells
-            if cell.owner_approval_required and cell.role == "OWNER"
+            if cell.owner_approval_required and cell.role == REPRESENTATIVE_ADMIN_ROLE
         }
     )
     ungated = sorted(
@@ -298,7 +369,7 @@ def _unresolved(cells: tuple[MatrixCell, ...]) -> tuple[UnresolvedDecision, ...]
             f"{cell.resource}/{cell.action}"
             for cell in cells
             if cell.owner_approval_required
-            and cell.role == "OWNER"
+            and cell.role == REPRESENTATIVE_ADMIN_ROLE
             and cell.contract in {"admin", "full_access_same_as_admin"}
             and cell.existing_role_gate == ExistingCode.ALLOW.value
         }
@@ -308,6 +379,16 @@ def _unresolved(cells: tuple[MatrixCell, ...]) -> tuple[UnresolvedDecision, ...]
         "DELETE /api/v1/loads/{load_id}",
     )
     unmapped = ", ".join(f"{name} ({prefix})" for name, prefix in UNMAPPED_MODULES)
+    splits = [
+        f"{cell.resource}/{cell.action} for {cell.role}: " + "; ".join(cell.route_outcomes)
+        for cell in cells
+        if cell.status == "split"
+    ]
+    split_detail = (
+        "No capability currently has routes with different simulated outcomes."
+        if not splits
+        else "Routes under one capability do not share one outcome. " + " | ".join(splits)
+    )
     return (
         UnresolvedDecision(
             "Operational access versus tenant administration",
@@ -322,8 +403,14 @@ def _unresolved(cells: tuple[MatrixCell, ...]) -> tuple[UnresolvedDecision, ...]
         ),
         UnresolvedDecision(
             "Existing ungated operational routes",
-            "No live role gate exists, so the existing side is unknown rather than allow. "
+            "No live role gate exists, so the existing side stays UNKNOWN rather than allow. "
+            f"Risk label {NO_EXPLICIT_ROLE_GATE}. Other protections may still apply. "
+            "This is not evidence that the routes are universally accessible. "
             f"Capabilities: {', '.join(ungated)}.",
+        ),
+        UnresolvedDecision(
+            "Mixed route-level decisions",
+            split_detail,
         ),
         UnresolvedDecision(
             "Unmapped modules",
@@ -331,16 +418,30 @@ def _unresolved(cells: tuple[MatrixCell, ...]) -> tuple[UnresolvedDecision, ...]
         ),
         UnresolvedDecision(
             "Load Integrity I5 hard deletion",
-            f"{load_delete} can hard-delete a Load. Casbin has no delete grant. The domain policy is unresolved.",
+            f"{load_delete} does not physically delete an existing Load on current main. "
+            "The Load service returns 409 LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED. "
+            "Casbin has no delete grant. The domain policy remains unresolved.",
         ),
     )
+
+
+def ungated_write_lines() -> tuple[str, ...]:
+    lines: list[str] = []
+    for binding in ROUTE_BINDINGS.values():
+        if binding.method not in _WRITE_METHODS or binding.pair is None:
+            continue
+        spec = CAPABILITIES.get(binding.pair)
+        if spec is None or spec.current_contract != "ungated":
+            continue
+        lines.append(f"{binding.method} {binding.path} ({spec.resource}/{spec.action})")
+    return tuple(sorted(lines))
 
 
 def _module_table(matrix: DecisionMatrix, module: str) -> list[str]:
     lines = [
         f"### {module}",
         "",
-        "| Capability | Contract | Entitlement | Approval | Admin roles | Operational | Member |",
+        "| Capability | Contract | Entitlement | Approval | Admin roles | Operational | TENANT_MEMBER (READ_ONLY) |",
         "|---|---|---|---|---|---|---|",
     ]
     seen: list[tuple[str, str]] = []
@@ -353,7 +454,7 @@ def _module_table(matrix: DecisionMatrix, module: str) -> list[str]:
             for cell in matrix.cells
             if cell.module == module and cell.pair == pair
         }
-        sample = role_cells["OWNER"]
+        sample = role_cells[REPRESENTATIVE_ADMIN_ROLE]
         lines.append(
             "| {cap} | {contract} | {entitlement} | {approval} | {admin} | {operational} | {member} |".format(
                 cap=f"{pair[0]}/{pair[1]}",

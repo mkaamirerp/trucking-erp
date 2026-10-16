@@ -157,7 +157,7 @@ def _rows() -> tuple[RouteBinding, ...]:
                 None,
                 "domain_policy_unresolved",
                 None,
-                "Load Integrity I5 is unresolved. This route can hard-delete a Load. Casbin has no delete grant.",
+                "Load Integrity I5 remains unresolved. On current main an existing Load returns 409 LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED. Casbin has no delete grant.",
             ),
             _bind("POST", f"{_API}/trips", "dispatch", "trips.records", "create", "write", None),
             _bind("POST", f"{_API}/trips/{{trip_id}}/cancel", "dispatch", "trips.records", "cancel", "write", None),
