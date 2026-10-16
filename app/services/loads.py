@@ -37,10 +37,131 @@ from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.load_operational_references import sanitize_load_operational_references
+from app.services.tenant_auth_constants import TENANT_AUTH_PLATFORM, TENANT_AUTH_TENANT, tenant_uses_tenant_db_auth
 from app.utils.pagination import paginate
 
 # Commercial money fields audited on PATCH (Issue 26).
 LOAD_MONEY_AUDIT_FIELDS = frozenset({"rate", "customer_rate"})
+AUDIT_ACTOR_UNRESOLVED = "AUDIT_ACTOR_UNRESOLVED"
+
+
+def _actor_unresolved(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"code": AUDIT_ACTOR_UNRESOLVED, "detail": detail},
+    )
+
+
+def _concrete(value: object) -> object | None:
+    """Ignore missing values and mock attributes. Do not treat a MagicMock as an id."""
+    if value is None:
+        return None
+    if type(value).__module__.split(".", 1)[0] in {"unittest", "mock"}:
+        return None
+    return value
+
+
+def _tenant_auth_mode(user: object) -> str | None:
+    tenant = _concrete(getattr(user, "tenant", None))
+    if tenant is None:
+        return None
+    mode = _concrete(getattr(tenant, "tenant_auth_mode", None))
+    if mode is None:
+        return None
+    return str(mode).strip().lower()
+
+
+def _require_tenant_user_id(tenant_user: object | None) -> int:
+    if tenant_user is None:
+        raise _actor_unresolved("tenant-local actor id is missing")
+    raw = _concrete(getattr(tenant_user, "id", None))
+    if isinstance(raw, bool) or raw is None:
+        raise _actor_unresolved("tenant-local actor id is missing")
+    if isinstance(raw, int):
+        actor_id = raw
+    elif isinstance(raw, str) and raw.isdigit():
+        actor_id = int(raw)
+    else:
+        raise _actor_unresolved("tenant-local actor id is not a tenant user id")
+    if actor_id <= 0:
+        raise _actor_unresolved("tenant-local actor id is missing")
+    return actor_id
+
+
+def _require_platform_actor_label(user: object) -> str:
+    platform_user = _concrete(getattr(user, "user", None))
+    raw_platform = _concrete(getattr(platform_user, "id", None)) if platform_user is not None else None
+    member_id = _concrete(getattr(user, "member_id", None))
+    text_id = str(raw_platform).strip() if raw_platform is not None else ""
+    if not text_id:
+        raw_user_id = _concrete(getattr(user, "user_id", None))
+        if isinstance(raw_user_id, str):
+            text_id = raw_user_id.strip()
+    if member_id is not None and text_id == str(member_id):
+        raise _actor_unresolved("refusing membership id as actor")
+    if not text_id or text_id.isdigit():
+        raise _actor_unresolved("platform actor id is missing")
+    return f"platform:{text_id}"
+
+
+def resolve_load_audit_actor(user: object) -> tuple[int | None, str | None, str]:
+    """Map an authenticated CurrentUser to a Load audit actor.
+
+    Tenant-local mode requires tenant_users.id and does not use the platform user.
+    Platform mode requires the platform user id and rejects a tenant-local actor.
+    Membership ids are never used as the audit integer.
+    """
+    mode = _tenant_auth_mode(user)
+    if mode is not None and mode not in {TENANT_AUTH_PLATFORM, TENANT_AUTH_TENANT}:
+        raise _actor_unresolved("authentication mode is inconsistent")
+    tenant_user = _concrete(getattr(user, "tenant_user", None))
+    if tenant_uses_tenant_db_auth(mode):
+        return _require_tenant_user_id(tenant_user), None, "user"
+    if tenant_user is not None:
+        raise _actor_unresolved("unexpected tenant-local actor in platform mode")
+    return None, _require_platform_actor_label(user), "user"
+
+
+def normalize_load_audit_actor(
+    actor_user_id: int | None,
+    actor_label: str | None = None,
+    actor_type: str | None = None,
+    *,
+    legacy_author: str | None = None,
+) -> tuple[int | None, str | None, str | None]:
+    """Accept an integer tenant user id or a platform label. Reject a UUID used as the id."""
+    if actor_user_id is None and actor_label is None and actor_type is None and legacy_author is not None:
+        author = str(legacy_author).strip()
+        if author.isdigit():
+            actor_user_id = int(author)
+            actor_type = "user"
+        elif author:
+            raise _actor_unresolved("authenticated actor was not resolved")
+    if isinstance(actor_user_id, bool) or (actor_user_id is not None and not isinstance(actor_user_id, int)):
+        if isinstance(actor_user_id, str) and actor_user_id.isdigit():
+            actor_user_id = int(actor_user_id)
+        else:
+            raise _actor_unresolved("actor_user_id must be an integer tenant user id")
+    if actor_user_id is not None and actor_user_id <= 0:
+        raise _actor_unresolved("actor_user_id must be an integer tenant user id")
+    if actor_label is not None:
+        label = str(actor_label).strip()
+        prefix = "platform:"
+        if not label.startswith(prefix):
+            raise _actor_unresolved("platform actor label is inconsistent")
+        token = label[len(prefix) :].strip()
+        if not token or token.isdigit():
+            raise _actor_unresolved("platform actor label is inconsistent")
+        if actor_user_id is not None:
+            raise _actor_unresolved("actor cannot be both a tenant user and a platform user")
+        actor_label = label
+    if actor_type not in (None, "user"):
+        raise _actor_unresolved("load audit actor_type must be user")
+    if (actor_user_id is not None or actor_label is not None) and actor_type is None:
+        actor_type = "user"
+    if actor_type == "user" and actor_user_id is None and actor_label is None:
+        raise _actor_unresolved("authenticated actor is missing")
+    return actor_user_id, actor_label, actor_type
 
 
 def _audit_encode_money_value(value: object) -> object:
@@ -80,6 +201,8 @@ async def _write_load_audit(
     request_id: str | None,
     correlation_id: str | None,
     source: str,
+    actor_label: str | None = None,
+    actor_type: str | None = None,
     changed_fields: dict | None = None,
     context_json: dict | None = None,
     best_effort: bool = True,
@@ -106,7 +229,9 @@ async def _write_load_audit(
             entity_label=(str(load.load_number) if getattr(load, "load_number", None) else None),
             action=action,
             source=source,
+            actor_type=actor_type,
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=correlation_id,
             changed_fields=changed_fields,
@@ -515,10 +640,15 @@ async def update_load(
     payload: LoadUpdate,
     *,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
+    actor_type: str | None = None,
     request_id: str | None = None,
     correlation_id: str | None = None,
     source: str = "ui",
 ) -> Load:
+    actor_user_id, actor_label, actor_type = normalize_load_audit_actor(
+        actor_user_id, actor_label, actor_type
+    )
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
@@ -636,6 +766,8 @@ async def update_load(
             load=out,
             action="load_updated",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            actor_type=actor_type,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -669,6 +801,8 @@ async def update_load(
             load=out,
             action="load_status_changed",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            actor_type=actor_type,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -681,6 +815,8 @@ async def update_load(
                 load=out,
                 action="load_dispatched",
                 actor_user_id=actor_user_id,
+                actor_label=actor_label,
+                actor_type=actor_type,
                 request_id=request_id,
                 correlation_id=corr,
                 source=source,
@@ -694,6 +830,8 @@ async def update_load(
             load=out,
             action="load_assigned",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            actor_type=actor_type,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -707,6 +845,8 @@ async def update_load(
             load=out,
             action="customs_broker_changed",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            actor_type=actor_type,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -795,10 +935,15 @@ async def mark_load_ready(
     *,
     expected_concurrency_version: int,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
+    actor_type: str | None = None,
     request_id: str | None = None,
     source: str = "api",
 ) -> Load:
     """Mark draft as ready. Validates minimum: broker, broker_load_reference, at least one pickup and one delivery/drop."""
+    actor_user_id, actor_label, actor_type = normalize_load_audit_actor(
+        actor_user_id, actor_label, actor_type
+    )
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
@@ -869,6 +1014,8 @@ async def mark_load_ready(
         load=refreshed,
         action="load_marked_ready",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=request_id,
         correlation_id=request_id,
         source=source,
@@ -890,10 +1037,19 @@ async def add_load_note(
     body: str,
     author_user_id: str | None = None,
     *,
+    actor_user_id: int | None = None,
+    actor_label: str | None = None,
+    actor_type: str | None = None,
     request_id: str | None = None,
     correlation_id: str | None = None,
     source: str = "ui",
 ) -> LoadNote:
+    actor_user_id, actor_label, actor_type = normalize_load_audit_actor(
+        actor_user_id,
+        actor_label,
+        actor_type,
+        legacy_author=author_user_id,
+    )
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
@@ -907,7 +1063,9 @@ async def add_load_note(
         tenant_id=tenant_id,
         load=load,
         action="note_added",
-        actor_user_id=int(author_user_id) if author_user_id is not None and str(author_user_id).isdigit() else None,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=request_id,
         correlation_id=correlation_id or request_id,
         source=source,
@@ -935,7 +1093,16 @@ async def confirm_load_customs_document_snapshot(
     *,
     confirming_user_id: str | None,
     expected_concurrency_version: int,
+    actor_user_id: int | None = None,
+    actor_label: str | None = None,
+    actor_type: str | None = None,
 ) -> Load:
+    actor_user_id, actor_label, actor_type = normalize_load_audit_actor(
+        actor_user_id,
+        actor_label,
+        actor_type,
+        legacy_author=confirming_user_id,
+    )
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
@@ -1017,7 +1184,9 @@ async def confirm_load_customs_document_snapshot(
             tenant_id=tenant_id,
             load=out,
             action="document_snapshot_confirmed",
-            actor_user_id=int(confirming_user_id) if confirming_user_id and str(confirming_user_id).isdigit() else None,
+            actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            actor_type=actor_type,
             request_id=None,
             correlation_id=None,
             source="ui",

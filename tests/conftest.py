@@ -33,6 +33,20 @@ def pytest_sessionstart(session):  # noqa: ARG001
         pytest.exit(f"INTEGRATION ISOLATION GATE: {exc}", returncode=2)
 
 
+@pytest.fixture(autouse=True)
+def _reset_casbin_load_pilot_between_tests():
+    """Pilot enforcement stays off, and a cached enforcer cannot leak across tests."""
+    from app.authz.enforce import reset_pilot_policy_cache
+    from app.core.config import settings
+
+    reset_pilot_policy_cache()
+    previous = settings.casbin_load_pilot_enforcement
+    settings.casbin_load_pilot_enforcement = False
+    yield
+    reset_pilot_policy_cache()
+    settings.casbin_load_pilot_enforcement = previous
+
+
 @pytest.fixture(scope="module")
 def app():
     """FastAPI app for TestClient (lazy import so skipped tests don't load Settings)."""

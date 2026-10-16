@@ -1,0 +1,26 @@
+# Phase 0 startup and rollback (not wired)
+
+This package is not imported from `app/main.py`. Loading a valid policy does not change live authorization.
+
+## Later-phase startup (one step, not this change)
+
+When a future change is approved to enforce policy:
+
+1. Call `load_shipped_policy()` once, after settings load and before the process accepts requests.
+2. If it raises `PolicyLoadError`, log the error and exit non-zero. Do not serve with an empty enforcer, a previous in-memory policy, or an implicit allow.
+3. Keep the returned enforcer in one process-local variable. Do not reload from disk on each request in that phase.
+4. Only after that load succeeds, attach a dependency that calls `decide(...)`. That attachment is a separate change and is out of scope here.
+
+There is no database policy table. The files `app/authz/casbin/model.conf` and `app/authz/casbin/policy.csv` are the only shipped policy source. `policy_prospective.csv` is a Phase 1 design artifact. Startup must not load it, and live routes must not call `decide()` against it.
+
+## Rollback
+
+1. `git revert` the commit that changed `model.conf` or `policy.csv` (and the loader, if the contract changed with them).
+2. Restart the API process so it loads the restored files.
+3. Do not stamp, migrate, or edit tenant data. There is nothing in the database to roll back.
+
+If the reverted files fail validation, the later-phase startup rule still applies: the process stays down until a valid pair is deployed. Do not add a fallback allow.
+
+## Dependency
+
+`casbin==1.41.0` is declared in `requirements.in`, `requirements.txt`, and `requirements.lock.txt`. Its dependency `simpleeval==1.0.8` is in the lockfile. This package imports Casbin only inside `load_policy`. Application startup does not call that loader.

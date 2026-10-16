@@ -14,6 +14,7 @@ Do not add helpers here that encode product behavior; keep overrides thin.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -39,7 +40,10 @@ def install_host_aligned_current_user_and_tenant(app: Any, *, role: str = "TENAN
                 "(e.g. pytest.truckerp.me)"
             )
         fake_user = MagicMock()
-        # Integer id: loads/audit_events.actor_user_id is BIGINT.
+        # Platform identity for Load audit. Not a membership id and not hashed into an integer.
+        fake_user.user = SimpleNamespace(id="11111111-1111-4111-8111-111111111111")
+        # Integer remains for callers that still pass user_id into bigint columns.
+        # Load audit resolution uses user.id, not this integer.
         fake_user.user_id = 1
         fake_user.email = "test@example.com"
         fake_user.tenant_id = int(tid)
@@ -47,6 +51,7 @@ def install_host_aligned_current_user_and_tenant(app: Any, *, role: str = "TENAN
         # Admin onboarding routes (e.g. PersonApplication approve) persist reviewed_by / approved_by.
         fake_user.member_id = 1
         fake_user.tenant_user = None
+        fake_user.tenant = SimpleNamespace(tenant_auth_mode="platform")
         return fake_user
 
     def _tenant_from_request(request: Request) -> int:
@@ -79,12 +84,18 @@ def install_mutable_tenant_current_user_and_tenant(
     async def _fake_current_user(request: Request) -> MagicMock:
         tid = int(holder["tenant_id"])
         fake_user = MagicMock()
-        fake_user.user_id = user_id
+        if isinstance(user_id, int) or (isinstance(user_id, str) and str(user_id).isdigit()):
+            fake_user.user = SimpleNamespace(id="11111111-1111-4111-8111-111111111111")
+            fake_user.user_id = int(user_id)
+        else:
+            fake_user.user = SimpleNamespace(id=str(user_id))
+            fake_user.user_id = str(user_id)
         fake_user.email = email
         fake_user.tenant_id = tid
         fake_user.role = role
         fake_user.member_id = 1
         fake_user.tenant_user = None
+        fake_user.tenant = SimpleNamespace(tenant_auth_mode="platform")
         return fake_user
 
     def _tenant_from_holder(request: Request) -> int:  # noqa: ARG001
