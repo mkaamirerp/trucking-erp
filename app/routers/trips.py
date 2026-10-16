@@ -13,6 +13,7 @@ from app.schemas.custody import (
     TakeCustodyBody,
     YardHandoffBody,
 )
+from app.schemas.load_stop_execution import StopExecutionBody, StopExecutionResponse
 from app.schemas.trip_read import (
     AddTripLoadBody,
     CreatePlannedTripBody,
@@ -22,6 +23,7 @@ from app.schemas.trip_read import (
     TripListPageResponse,
     TripScheduleBody,
 )
+from app.services import load_stop_execution
 from app.services import trips as trips_service
 from app.services import load_custody_transitions as custody_transitions
 
@@ -236,6 +238,76 @@ async def final_delivery_load_custody(
         load_id,
         body,
         actor_user_id=int(user.tenant_user.id) if user.tenant_user else None,
+    )
+    await db.commit()
+    return out
+
+
+def _stop_execution_actor(user: CurrentUser) -> tuple[int | None, str | None]:
+    actor_user_id = int(user.tenant_user.id) if user.tenant_user else None
+    actor_label = None if user.tenant_user else f"platform:{user.user.id}"
+    return actor_user_id, actor_label
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/stops/{stop_id}/arrival",
+    response_model=StopExecutionResponse,
+)
+async def record_stop_arrival(
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> StopExecutionResponse:
+    """Set arrived_at once for one existing stop. Does not change custody or Load.status."""
+    actor_user_id, actor_label = _stop_execution_actor(user)
+    rid = getattr(request.state, "request_id", None)
+    out = await load_stop_execution.record_stop_arrival(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        stop_id,
+        body,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=str(rid) if rid else None,
+    )
+    await db.commit()
+    return out
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/stops/{stop_id}/departure",
+    response_model=StopExecutionResponse,
+)
+async def record_stop_departure(
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> StopExecutionResponse:
+    """Set departed_at once after arrival. Does not change custody or Load.status."""
+    actor_user_id, actor_label = _stop_execution_actor(user)
+    rid = getattr(request.state, "request_id", None)
+    out = await load_stop_execution.record_stop_departure(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        stop_id,
+        body,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=str(rid) if rid else None,
     )
     await db.commit()
     return out

@@ -999,6 +999,61 @@ export type TripExecutionSignalBody = {
   signal_at?: string | null;
 };
 
+export type StopExecutionBody = {
+  source: "dispatcher_manual" | "driver_app";
+  occurred_at?: string | null;
+  notes?: string | null;
+};
+
+export type StopExecutionResult = {
+  trip_id: number;
+  load_id: number;
+  stop_id: number;
+  stop_type: string;
+  arrived_at: string | null;
+  departed_at: string | null;
+  replayed: boolean;
+  load_status: string;
+  trip_status: string;
+  membership_status_within_trip: string;
+};
+
+async function postStopExecution(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  kind: "arrival" | "departure",
+  body: StopExecutionBody,
+): Promise<StopExecutionResult> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/trips/${tripId}/loads/${loadId}/stops/${stopId}/${kind}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return handle<StopExecutionResult>(res);
+}
+
+export function recordStopArrival(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<StopExecutionResult> {
+  return postStopExecution(tripId, loadId, stopId, "arrival", body);
+}
+
+export function recordStopDeparture(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<StopExecutionResult> {
+  return postStopExecution(tripId, loadId, stopId, "departure", body);
+}
+
 export async function postTripExecutionSignal(tripId: number, body: TripExecutionSignalBody): Promise<TripDetail> {
   const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/execution-signal`, {
     method: "POST",
@@ -3676,6 +3731,8 @@ export type LoadStopRead = {
   appointment_date?: string | null;
   appointment_time_text?: string | null;
   scheduled_at?: string | null;
+  arrived_at?: string | null;
+  departed_at?: string | null;
   notes?: string | null;
   commodity_notes?: string | null;
   created_at?: string | null;
