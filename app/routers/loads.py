@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.authz.enforce import require_pilot_capability
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -32,7 +33,7 @@ async def create_load(
     payload: LoadCreate,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    user=Depends(get_current_user),
+    user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     # Slice 5: request/user captured for future audit correlation; create_load audit currently best-effort.
@@ -45,7 +46,7 @@ async def create_load(
 @router.get("", response_model=dict)
 async def list_loads(
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "view")),
     db: AsyncSession = Depends(get_tenant_db),
     status: Optional[List[str]] = Query(None),
     driver_id: int | None = Query(None),
@@ -119,7 +120,7 @@ async def parse_load_workspace_document(
 async def get_load_detail(
     load_id: int,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "view")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.get_load(db, tenant_id, load_id)
@@ -140,15 +141,18 @@ async def update_load(
     payload: LoadUpdate,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    user=Depends(get_current_user),
+    user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     load = await loads_service.update_load(
         db,
         tenant_id,
         load_id,
         payload,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -164,12 +168,16 @@ async def confirm_document_snapshot(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     load = await loads_service.confirm_load_customs_document_snapshot(
         db,
         tenant_id,
         load_id,
         confirming_user_id=getattr(user, "user_id", None),
         expected_concurrency_version=body.expected_concurrency_version,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
     )
     return LoadResponse.model_validate(load)
 
@@ -183,12 +191,15 @@ async def mark_load_ready(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     load = await loads_service.mark_load_ready(
         db,
         tenant_id,
         load_id,
         expected_concurrency_version=body.expected_concurrency_version,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -247,12 +258,16 @@ async def add_load_note(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label, actor_type = loads_service.resolve_load_audit_actor(user)
     note = await loads_service.add_load_note(
         db,
         tenant_id,
         load_id,
         payload.body,
         author_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        actor_type=actor_type,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
