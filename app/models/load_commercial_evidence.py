@@ -59,7 +59,7 @@ class LoadCommercialEvidence(Base):
     file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)
     retention_class: Mapped[str] = mapped_column(
-        String(16), nullable=False, server_default="commercial_permanent"
+        String(32), nullable=False, server_default="commercial_permanent"
     )
     filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     accepted_parse_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

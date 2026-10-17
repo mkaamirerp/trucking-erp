@@ -78,7 +78,7 @@ export function TripWorkspaceExecutionSection({ trip, tripId, onTripUpdated }: P
     void (async () => {
       setTerminalsError(null);
       try {
-        const items = await listTerminals(true);
+        const { items } = await listTerminals();
         if (!cancelled) setTerminals(items);
       } catch (e: unknown) {
         if (!cancelled) setTerminalsError(e instanceof Error ? e.message : "Could not load terminals.");

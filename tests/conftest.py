@@ -24,13 +24,29 @@ def pytest_sessionstart(session):  # noqa: ARG001
     """Fail loudly if tenant URL env still points at live demo / non-dedicated DB."""
     from tests.support.integration_isolation import (
         IntegrationIsolationError,
+        pytest_enforce_platform_database_env,
         pytest_enforce_tenant_database_env,
     )
 
     try:
+        pytest_enforce_platform_database_env()
         pytest_enforce_tenant_database_env()
     except IntegrationIsolationError as exc:
         pytest.exit(f"INTEGRATION ISOLATION GATE: {exc}", returncode=2)
+
+
+@pytest.fixture(autouse=True)
+def _reset_casbin_load_pilot_between_tests():
+    """Pilot enforcement stays off, and a cached enforcer cannot leak across tests."""
+    from app.authz.enforce import reset_pilot_policy_cache
+    from app.core.config import settings
+
+    reset_pilot_policy_cache()
+    previous = settings.casbin_load_pilot_enforcement
+    settings.casbin_load_pilot_enforcement = False
+    yield
+    reset_pilot_policy_cache()
+    settings.casbin_load_pilot_enforcement = previous
 
 
 @pytest.fixture(scope="module")

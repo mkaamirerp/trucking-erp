@@ -31,31 +31,17 @@ After an approved architecture change:
 
 ---
 
-## WORKSTREAM FREEZE — 2026-10-15 — PAUSED FOR SHARED CASBIN/RBAC FOUNDATION
+## Production Integrity release record — 2026-10-15 (reported)
 
-**Owner decision:** Freeze active Load/Trip Integrity implementation here. Investigate application-wide authorization and establish a reusable Casbin permission foundation **before resuming Load Integrity changes**. This is a pause, not a Gold declaration, deployment authorization, or closure of remaining findings.
+- **Reported live application release:** isolated Load Integrity-only code at [`6919ec0323742345a84968ae4f5cc9f26b930d69`](https://github.com/mkaamirerp/trucking-erp/commit/6919ec0323742345a84968ae4f5cc9f26b930d69), assembled from production baseline `7fbd69c2eec3fee384676886cd8c675fe7773933`. Cursor reports API/nginx images tagged `integrity-6919ec0-20261015`; **live image content and authenticated product smoke checks have not been independently verified here**.
+- **GitHub `main`:** carries broader integrity fixes, **DW-1** workspace draft/promote, and **I14** custody/stop/POD code through `7241d83` (retention-class fix); **do not equate `main` or integrated `gpt-review` with the running isolated release** until owner deploys and verifies.
+- **Active development branch:** `gpt-review` after merging `origin/main` (DW-1 + I14 backend from `main`; gpt-review **I5 commercial cancel** and Trip Workspace UI retained where compatible). **Not production-live.**
+- **Database scope:** Cursor reports `tenant_demo` remains at `x5y6z7a8b9c0` for the isolated release; tenant DW-1/I14 migrations are **not** authorized on production tenants without separate owner approval.
+- **Status convention for rows below:** `LIVE CODE REPORTED — ACCEPTANCE PENDING` means included in the reported isolated release, **not** independently demonstrated correct in production. `PARTIAL` means the full work-item acceptance contract is still open. **Load Integrity is not Gold.**
 
-**Frozen code location:** `gpt-review` (not production). Last reported I5 implementation: `504eca2105a555ee2a2716cb2591fac52ce1e821`. Subsequent **correction pass 1** (read-safe Load status, Ready PATCH invariant, bounded PDF read) is recorded in the I5 tracker and tests, but its integrated acceptance/deployment is **not independently established by this freeze**. I14 final-delivery/idempotency correction was reviewed at `6fde801142e42719bd46ca281609ce764ac3facb` on `gpt-review`. Do not use a Git SHA as a substitute for rechecking the actual code when resuming.
+## WORKSTREAM NOTE — Casbin/RBAC (paused, not superseded)
 
-### Frozen implementation checklist — evidence levels
-
-- [x] **I5 code:** physical DELETE blocked; commercial cancel endpoint; cancellation audit and history preservation; cancelled Load PATCH/Mark Ready/customs guard; row locking; TripLoad activation rejects cancelled Load. Cursor reported 26 passing targeted tests; final independent whole-module audit and production verification pending.
-- [x] **I14 code:** explicit consignee final-delivery custody transition, separate terminal yard handoff, trip completion gate; idempotency-key conflict correction and completed-Trip replay. Targeted tests reported passing; not deployed and not Gold.
-- [x] **I3 draft→Ready authority:** dedicated Mark Ready operation; generic PATCH promotion blocked, previously reviewed. **Separate Ready-after-PATCH validity gap** is tracked as correction pass 1; do not confuse the two.
-- [x] **Issue 26 money PATCH audit atomicity:** previously accepted code with targeted tests; **does not close I8 decimal transport** or all I9 audit identity problems.
-- [ ] **Correction pass 1 closure:** verify actual HTTP tests and outcomes for nullable/unknown status reads, Ready requirements after PATCH and bounded PDF intake; tracker shows code but final cross-contract acceptance is not recorded here.
-- [ ] **Shared RBAC/Casbin authorization:** not implemented/verified; **next active workstream**.
-- [ ] **Other outstanding Load/Trip Integrity:** see work-order rows and Claude findings below; do not label complete, deployed, or Gold.
-
-### Exact next work — authorization first
-
-1. **READ-ONLY global authorization inspection**: identify where READ_ONLY/FULL_ACCESS are stored/enforced, platform versus tenant identity, separate tenant-admin authority, and enumerate registered state-changing routes across all modules with existing gates and negative tests. Authentication alone is not authorization. Do not assume every route is vulnerable without checking inherited or middleware controls.
-2. **Owner-reviewed Casbin design and implementation** in shared auth infrastructure (not `loads.py`): tenant-domain role-to-permission policy, source roles from verified DB membership, central `require_permission(object, action)` dependency, existing READ_ONLY/FULL_ACCESS semantics, admin separation, field-permission extension point, route-coverage test, fail-closed initialization, cross-tenant denials. **Do not invent role names, silently change existing access, create a new user store, or deploy without separate approval.**
-3. **Resume Load Integrity at the exact restart point:** validate correction pass 1; close remaining Claude findings (I9 actor/audit consistency, I8 decimal boundary, duplicate numbers, frontend write/filter/reference contracts, parser tenant/rate limits); progress remaining work-order issues; then execute full Load→Trip→Custody→delivery regression and independent Claude/Antigravity final audit.
-
-### Frozen release boundary
-
-No merge to `main`, production deployment, database migration, DW work, additional remote branch, or production data mutation is authorized by this freeze. Existing production Integrity-only baseline was reported as `6919ec0`; **do not assume later `gpt-review` changes are production-live**. Historical migration/0C retirement holds remain in effect. Future updates must distinguish **code implemented**, **tests independently verified**, **review accepted**, **merged**, and **deployed**.
+**Owner decision (2026-10-15):** Investigate application-wide authorization and establish a reusable Casbin permission foundation **in parallel with** remaining Load Integrity gaps. Default-off Casbin Loads pilot exists on `main`; full RBAC rollout is **not** verified. Authentication alone is not authorization. **No deploy** without separate owner approval.
 
 ---
 
@@ -69,6 +55,8 @@ Status vocabulary:
 | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | Accepted on `main` with regression tests; production deploy + live verification still pending |
 | ☑ AUDIT / DESIGN COMPLETE | Investigation/design/reconciliation complete; implementation or migration still pending |
 | ⬜ NOT IMPLEMENTED | Approved rule exists; code/work still needed |
+| 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Included in reported 6919ec0 release; live end-to-end/product validation incomplete |
+| 🟠 PARTIAL | Some code delivered but full acceptance criterion remains open |
 | ⚠ OWNER DECISION REQUIRED | Unsafe to implement until owner decides |
 | 🚫 BLOCKED | Prerequisite prevents work |
 
@@ -79,33 +67,33 @@ Status vocabulary:
 | 1 | DOC-1 | One-master Load/Trip documentation consolidation | ✅ DONE / SHIPPED | Sole authority at `docs/load_trip/MASTER.md`; competing Decision/Phase/index/foundation/remediation MDs retired; docs tree reorganized by module | Maintain master + module tree |
 | 2 | DOC-2 | AGENTS.md + Cursor read-before-write enforcement | ✅ DONE / SHIPPED | Already on `main` in `cc1a1f1` (`AGENTS.md` Load/Trip section; `.cursor/rules/load-trip-master-architecture.mdc`). Working-tree pointer refinements (sole-authority wording; trip-container rule retarget) ride with DOC-1 commit | Keep pointers current |
 | 3 | 0A | Freeze legacy Load / Dispatch writers | ✅ DONE / SHIPPED | Independently accepted review commit `26621fe2e0c9c843f18f5b820c0cfc663c178c23` (`review/load-issue0a`; acceptance recorded in former integrity §16 / commit `53e81b0`). Same freeze patch is on `main` as `7fbd69c2eec3fee384676886cd8c675fe7773933` (identical `git patch-id`; 26621fe is not an ancestor of current HEAD). Tests: `tests/test_load_writer_freeze_issue0a.py`; `apps/web/src/loadWorkspace/loadWriterFreeze.test.ts`. Rejects legacy ops status + Load assignment; removes Assign strip / `?dispatchAssign=1`. **Issue 4** (legacy Load assignment executable) closed by same freeze | No further 0A work; do not reopen writers |
-| 4 | 26 | Money mutation vs audit atomicity | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | Independent review accepted. Commits `ede7ba80d0154f39db5a4f23813b7eaceae99030` (implementation), `e7ab68ddbea4106aca891455a7b094ebb5277ae3` (flush-path regression). Load `rate`/`customer_rate` PATCH + required `load_updated` audit = **one transaction**; failed required audit rolls back money, `concurrency_version`, and audit work; money audit uses exact **decimal strings**; targeted `await db.refresh(load)` replaces `expire_all()`; non-money best-effort audit unchanged. **11** targeted tests passed (`tests/test_load_money_audit_atomicity_issue26.py` + `tests/test_load_audit_events_unittest.py`). **Production deploy + verification pending** — not marked shipped live | Deploy via `reload_api.sh` + verify money PATCH/audit on running API |
+| 4 | 26 | Money mutation vs audit atomicity | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | I26 code in isolated production release 6919ec0 (Cursor reported); money PATCH + audit atomicity regression accepted earlier. Live failure-path verification remains pending. | Verify deployed I26 behavior safely; no unapproved financial write tests |
 | 5 | 0B-AUDIT | Trip.status contamination audit (`active` / `open`, mirrors) | ☑ AUDIT / DESIGN COMPLETE | Issue 0B investigation completed; mapping proposal only | Owner approve migration mapping |
 | 6 | 0B-MIG | Historical Trip.status / mirror data migration | ⬜ NOT IMPLEMENTED | No approved migration run; historical findings remain open | 🚫 until owner approves 0B mapping (Issue 26 code prerequisite met on `main`) |
 | 7 | 0C-AUDIT | Legacy operator surface retirement map | ☑ AUDIT / DESIGN COMPLETE | Issue 0C map delivered; historical findings remain open for reference | Reference only |
 | 8 | 0C-IMPL | Retire `/dispatch` as ops authority; Trip-first nav/readers | ⬜ NOT IMPLEMENTED | **On hold by owner decision.** Slice 1 (F1/F2 nav → Trip Container) shipped separately; broader 0C UI retirement not active | No further 0C implementation until owner lifts hold |
-| 9 | 0D | Legacy mirror / backfill safety (`dispatch_trips`, Load.trip_number, active_dispatch_trip_id, payroll readers) | ⬜ NOT IMPLEMENTED | Mirrors still consumed (e.g. pay_runs meta); no tenant-safe cleanup approved | Audit readers → read-only → remove only after proof |
+| 9 | 0D | Legacy mirror / backfill safety (`dispatch_trips`, Load.trip_number, active_dispatch_trip_id, payroll readers) | 🟠 PARTIAL | Tenant-safe mirror joins included in reported release; historical mirror/backfill retirement and downstream reader proof remain open. | Complete tenant/reader checks before changing mirrors |
 | 10 | I1 | New-write `Load.status` commercial boundary | ✅ DONE / SHIPPED | Covered by accepted 0A (`26621fe…` / mainline `7fbd69c…`): create=`draft`; writable PATCH statuses `draft`/`ready`; legacy ops rejected | Watch for residual holes only |
-| 11 | I3 | Mark Ready bypass / draft→ready authority | ✅ CODE COMPLETE / REVIEW ACCEPTED — MERGED TO MAIN / NOT DEPLOYED | Independent review accepted on `gpt-review`; integrated to `main` via cherry-pick (`6c7c4155b744063f3a7400fa02ae4880821791c9` HEAD). **Review commits:** `d7912962dcb8465d1853a40799b65cb8757e58af` (guard: `_guard_update_payload` rejects generic PATCH into `ready`; `LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT`), `851a7c7282b7297caeef3e08f93836606f87cb14` (HTTP regression + `tenant_pytest` isolation/cleanup), `b67455881671598a99437eb35c3637d3e90e794f` (fixture + MASTER). **`main` integration commits:** `f5bbf5d`, `05c9d50`, `6c7c415`. **Dedicated `mark_load_ready()` / POST mark-ready remains sole authority** for draft→ready (validation + CAS unchanged). **Commercial PATCH with `status` omitted** unchanged. **Ready→draft via PATCH** unchanged in this slice. **7** HTTP tests + Issue 0A unit gates passed on isolated DB. **Production deploy and live verification pending** | Deploy via `reload_api.sh` + verify PATCH rejection on running API |
-| 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | ⬜ NOT IMPLEMENTED | Integrity Phase 1 item; planned membership insert does not currently require ready | Gate membership create |
-| 13 | I2 | Full stop replacement destroys stop/action/history | ⬜ NOT IMPLEMENTED | Integrity Issue 2 | Safer stop persistence |
-| 14 | I5 | Hard DELETE unsafe for commercial/history Loads | ✅ CODE COMPLETE / REVIEW PENDING — NOT DEPLOYED | `gpt-review`: DELETE blocked; **POST `/loads/{id}/cancel`**; `LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED` on PATCH/mark-ready/customs confirm; notes append-only allowed; cancel uses **Load FOR UPDATE**; Trip activate rejects `LOAD_COMMERCIALLY_CANCELLED` (open planned TripLoad may remain per MASTER §13B). **Correction pass 1:** `LoadResponse` permissive `status`; ready commercial PATCH guard (`LOAD_READY_REQUIREMENTS_VIOLATED`); bounded PDF read. Tests: `test_load_physical_delete_guard_issue5.py`, `test_load_cancel_issue5.py`, `test_load_integrity_correction_pass1.py`. **Still open:** see **Claude findings (unresolved)** below. | Review; AR/payroll cancel block; draft reversibility; auto-remove TripLoad on cancel |
-| 15 | I9 | Load audit trail incomplete | ⬜ NOT IMPLEMENTED | Integrity Issue 9 | Expand audit events |
-| 16 | I10 | Unknown `Load.status` → Ready on legacy board | ⬜ NOT IMPLEMENTED | `list_loads_for_board` unknown→ready confirmed | Explicit unknown bucket |
-| 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | ⬜ NOT IMPLEMENTED | Create Planned Trip gated on ACTIVE-only mirror | Open-planned discovery API + UI |
-| 18 | I14 | Custody → Trip close operator workflow | ✅ CODE COMPLETE / REVIEW PENDING — NOT DEPLOYED | `gpt-review`: Trip Workspace accept/take; **POST `/trips/{id}/loads/{load_id}/final-delivery`** (consignee → `delivered` + membership complete); explicit terminal yard-handoff; trip complete gated on zero OPEN memberships. Integration: `tests/test_trip_final_delivery_slice.py` + Vitest execution helpers. **Not Gold / not production-live.** | ChatGPT GitHub review on `gpt-review`; then owner merge/deploy |
-| 19 | I15 | Block silent assignment swap on `in_progress` | ⬜ NOT IMPLEMENTED | Decision 13 / integrity Issue 15 | Enforce immutability + recovery path |
-| 20 | I16 | Decision 10 future-assignment conflict guard | ⬜ NOT IMPLEMENTED | Columns + schedule PATCH exist (`planned_start_at` / `expected_completion_at`); assignment overlap guard not enforced | Implement conflict check on assign |
-| 21 | I17 | Current/open TripLoad row selection contract | ⬜ NOT IMPLEMENTED | Integrity Issue 17 | Safe current-row lookups |
+| 11 | I3 | Mark Ready bypass / draft→ready authority | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Mark Ready guard on `main` / integrated `gpt-review`; live authenticated behavior not confirmed on running release. | Verify ready bypass rejected and authorized mark-ready works |
+| 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Ready-gated planned TripLoad on `main`; live verification pending. | Verify planning membership behavior |
+| 13 | I2 | Full stop replacement destroys stop/action/history | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Stable-ID stop sync and history-protected removal on `main`; live verification pending. | Verify stop history and audit remain intact |
+| 14 | I5 | Hard DELETE unsafe for commercial/history Loads | 🟠 PARTIAL | DELETE blocked on 6919ec0; **POST `/loads/{id}/cancel`** and mutation guards on integrated `gpt-review`; AR/payroll cancel block and draft policy still open. | Owner decision on cancellation policy; live verification |
+| 15 | I9 | Load audit trail incomplete | 🟠 PARTIAL | Stop/commercial audit hooks and I26 atomic money audit on `main`; full mutation/actor/request coverage not proven. | Finish audit matrix and required gaps |
+| 16 | I10 | Unknown `Load.status` → Ready on legacy board | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Unknown legacy statuses bucketed on `main`. | Verify no unknown status appears Ready |
+| 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Open planned Trip lookup and Load UI on `main`. | Verify live planned Trip navigation |
+| 18 | I14 | Custody → Trip close operator workflow | 🟠 PARTIAL | **Backend (`main`):** custody handoff through `f2c9762`, stop execution `4560245`, unloading `41dde67`, POD evidence `2f60200`. **UI:** Trip Container panels on integrated `gpt-review` aligned to `main` API names. **Not production-deployed.** | Live operator verification; POD acceptance |
+| 19 | I15 | Block silent assignment swap on `in_progress` | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | In-progress assignment guard on `main`. | Verify lock and controlled exceptions |
+| 20 | I16 | Decision 10 future-assignment conflict guard | 🟠 PARTIAL | Overlap guard on `main`; edge cases thin. | Complete assignment overlap cases |
+| 21 | I17 | Current/open TripLoad row selection contract | 🟠 PARTIAL | Selection improvements on `main`; lifecycle scenarios unproven. | Complete lifecycle scenario and tests |
 | 22 | I6 | Rate Confirmation evidence/classification gate | ☑ AUDIT / DESIGN COMPLETE | Agriculture classified as model quality (gpt-4o-mini); not hydration corruption | Parser quality track (not Trip ops) |
-| 23 | I7 | Raw PDF overwrites Internal Notes | ⬜ NOT IMPLEMENTED | Integrity Issue 7 | Separate evidence vs notes |
-| 24 | I11 | Parse context API drift | ⬜ NOT IMPLEMENTED | Integrity Issue 11 | Contract cleanup |
+| 23 | I7 | Raw PDF overwrites Internal Notes | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Parser no longer injects full PDF raw_text into operator Internal Notes in reported release. | Verify existing notes retained across reparse |
+| 24 | I11 | Parse context API drift | 🟠 PARTIAL | Parse context forwarding improvements included in orchestrator, but public contract/caller coverage not fully closed. | Validate context API contract |
 | 25 | I8 | Load money float at API/parser boundary | ⬜ NOT IMPLEMENTED | DB NUMERIC; Pydantic/parser still float | Decimal end-to-end |
-| 26 | I18–I22 | Parser hydration / stop coercion / field contract / exclusion / inbox hydration | ⬜ NOT IMPLEMENTED | Integrity Phase 3 new issues | Parser/intake slices |
+| 26 | I18–I22 | Parser hydration / stop coercion / field contract / exclusion / inbox hydration | 🟠 PARTIAL | Scalar parse ownership, unresolved stop classification and exclusion warnings included in reported release; manual stop edits on reparse, I20 field length and I22 inbox hydration remain open. | Define stop-ownership policy; complete I20/I22 and regression proof |
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Exact next active workstream (owner freeze):** global READ_ONLY/FULL_ACCESS authorization inspection → approved shared Casbin foundation → resume Load Integrity at the frozen checklist above. Earlier issue 26 / I3 deploy reminders are **pending release tasks, not instructions to deploy now**. Owner approval remains required for any deploy, 0B migration mapping, and lifting the 0C hold.
+**Next Integrity work (integrated `gpt-review`):** Close acceptance gaps for I14 (custody, stop execution, unloading, POD), **DW-1** workspace draft operator flow, and remaining partial items (I5 cancel policy, I9 audit, I8 decimal, I18–I22 parser/inbox). Continue Casbin/RBAC inspection as a **separate** track (default-off pilot on `main`). **Load Integrity is not complete.** **0B migration and 0C operator-surface retirement are not authorized.** **No production tenant migration or deploy** without owner approval.
 
 ---
 
@@ -178,7 +166,7 @@ Primary detail: `load_trip/MASTER.md`.
 ## 3. Trip ownership
 
 
-**Implementation state:** ✅ planned/assigned/in_progress/completed APIs shipped. ⬜ full product completion/custody UX (I14).
+**Implementation state:** ✅ planned/assigned/in_progress/completed APIs shipped. 🟠 I14 custody handoff, per-Load final delivery, and separate Trip completion are code-reviewed on `main` through `f2c9762` and are not production-deployed. Stop arrival/departure are code-reviewed on `main` at `4560245` but not deployed; unloading V1 is code-reviewed at `41dde673` but not deployed; POD remains open.
 ### Trip owns
 
 - trip number
@@ -585,7 +573,7 @@ Primary detail: multi-Trip rules in §13A; custody in §12 / Decision 12.
 ## 12. Custody / terminal / handoff
 
 
-**Implementation state:** ☑ / partial custody slices. ⬜ full operator workflow (I14).
+**Implementation state:** 🟠 I14 operator custody path is code-reviewed on `main` through `f2c9762` (yard handoff, per-Load final delivery, separate Trip completion). Not production-deployed. Stop arrival/departure are code-reviewed on `main` at `4560245` but not deployed; unloading V1 is code-reviewed at `41dde673` but not deployed; POD remains open.
 **Lock:**
 
 - Custody is **separate** from commercial Load state and Trip header lifecycle.
@@ -1473,7 +1461,7 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 | 11 | Parse context drift | ⬜ |
 | 12 | TripLoad requires ready | ⬜ |
 | 13 | Planned Trip discoverability | ⬜ |
-| 14 | Custody→complete workflow | ⬜ |
+| 14 | Custody→complete workflow | 🟠 PARTIAL — slices through `f2c9762` code-reviewed; deploy, live verification, and POD open; stop arrival/departure code-reviewed at `4560245`, unloading V1 at `41dde673` |
 | 15 | In-progress assignment immutability | ⬜ |
 | 16 | Decision 10 conflict guard | ⬜ |
 | 17 | Current TripLoad row selection | ⬜ |

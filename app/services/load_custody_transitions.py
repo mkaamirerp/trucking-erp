@@ -1,4 +1,4 @@
-"""Custody Slice 2 — operational transitions (accept / yard-handoff / take-custody).
+"""Custody Slice 2 — operational transitions (accept / yard-handoff / take-custody / final-delivery).
 
 Lock order: Trip FOR UPDATE → Load FOR UPDATE → event/snapshot/TripLoad.
 Does not start Trip execution or mutate Load commercial status.
@@ -47,6 +47,7 @@ from app.schemas.custody import (
     FinalDeliveryBody,
     LoadCustodyEventResponse,
     LoadCustodySnapshotResponse,
+    FinalDeliveryBody,
     TakeCustodyBody,
     YardHandoffBody,
 )
@@ -573,6 +574,141 @@ async def yard_handoff_load_custody(
         terminal_id=int(terminal.id),
         placement=body.placement,
         trailer_id=retained_trailer,
+        since=occurred_at,
+        event_id=int(ev.id),
+    )
+    await db.flush()
+
+    tl = await _complete_trip_load_membership_locked(db, tenant_id, trip, load)
+    await db.refresh(load)
+    return _transition_response(load=load, trip=trip, tl=tl, event=ev, replayed=False)
+
+
+def _snapshot_is_delivered(load: Load) -> bool:
+    return (
+        load.custody_owner == CUSTODY_OWNER_DELIVERED
+        and load.custody_trip_id is None
+        and load.custody_terminal_id is None
+        and load.custody_trailer_id is None
+        and load.custody_placement == CUSTODY_PLACEMENT_UNKNOWN
+    )
+
+
+def _is_final_delivery_event(event: LoadCustodyEvent, trip_id: int) -> bool:
+    return (
+        event.event_type == CUSTODY_EVENT_FINAL_DELIVERY
+        and event.trip_id == trip_id
+        and event.custody_owner_after == CUSTODY_OWNER_DELIVERED
+        and event.placement_after == CUSTODY_PLACEMENT_UNKNOWN
+        and event.terminal_id is None
+        and event.trailer_id is None
+    )
+
+
+async def final_delivery_load_custody(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+    body: FinalDeliveryBody | None = None,
+    *,
+    actor_user_id: int | None = None,
+) -> CustodyTransitionResponse:
+    """Receiver delivery for one Load. Does not complete the Trip or change Load.status."""
+    body = body or FinalDeliveryBody()
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
+    load = await _lock_load_for_membership(db, tenant_id, load_id)
+    _require_trip_not_terminal(trip)
+    if trip.status != TRIP_CONTAINER_STATUS_IN_PROGRESS:
+        raise _conflict(
+            "INVALID_TRIP_STATUS_FOR_FINAL_DELIVERY",
+            f"Trip status '{trip.status}' cannot record final delivery",
+        )
+
+    tl = await _get_trip_load(db, tenant_id, trip_id, load_id)
+    if tl is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
+        )
+
+    if _is_completed_membership(tl) and _snapshot_is_delivered(load):
+        last = await _get_event_by_id(db, tenant_id, load.last_custody_event_id)
+        if last is not None and _is_final_delivery_event(last, trip_id):
+            request_key = body.idempotency_key
+            if request_key is None or request_key == last.idempotency_key:
+                return _transition_response(load=load, trip=trip, tl=tl, event=last, replayed=True)
+            existing = await _find_event_by_idempotency(db, tenant_id, load_id, request_key)
+            if existing is not None and int(existing.id) != int(last.id):
+                raise _conflict(
+                    "IDEMPOTENCY_KEY_CONFLICT",
+                    "idempotency_key already used for a different custody event on this Load",
+                )
+            # A new key is a different request. Do not replay the original delivery
+            # and do not append another custody event.
+
+    if body.idempotency_key:
+        existing = await _find_event_by_idempotency(db, tenant_id, load_id, body.idempotency_key)
+        if existing is not None:
+            if (
+                _is_final_delivery_event(existing, trip_id)
+                and _is_completed_membership(tl)
+                and _snapshot_is_delivered(load)
+            ):
+                return _transition_response(load=load, trip=trip, tl=tl, event=existing, replayed=True)
+            raise _conflict(
+                "IDEMPOTENCY_KEY_CONFLICT",
+                "idempotency_key already used for a different custody event on this Load",
+            )
+
+    _raise_if_membership_removed(tl)
+    if not _is_open_active(tl):
+        raise _conflict("MEMBERSHIP_NOT_ACTIVE", "Membership is not active")
+
+    if load.custody_owner == CUSTODY_OWNER_TERMINAL:
+        raise _conflict(
+            "INVALID_CUSTODY_STATE",
+            "Final delivery requires trip custody; Load is in terminal custody",
+        )
+    if load.custody_owner == CUSTODY_OWNER_UNKNOWN:
+        raise _conflict(
+            "INVALID_CUSTODY_STATE",
+            "Final delivery requires trip custody; Load custody is unknown",
+        )
+    if load.custody_owner != CUSTODY_OWNER_TRIP or load.custody_trip_id != trip_id:
+        raise _conflict(
+            "CUSTODY_SNAPSHOT_MISMATCH",
+            "Load custody snapshot must be trip custody on this Trip for final delivery",
+        )
+    if load.active_trip_id != trip_id:
+        raise _conflict(
+            "CUSTODY_SNAPSHOT_MISMATCH",
+            "loads.active_trip_id must equal this Trip for final delivery",
+        )
+
+    occurred_at = body.occurred_at or datetime.now(timezone.utc)
+    ev = await _append_event(
+        db,
+        tenant_id=tenant_id,
+        load_id=load_id,
+        event_type=CUSTODY_EVENT_FINAL_DELIVERY,
+        occurred_at=occurred_at,
+        custody_owner_after=CUSTODY_OWNER_DELIVERED,
+        placement_after=CUSTODY_PLACEMENT_UNKNOWN,
+        trip_id=trip_id,
+        terminal_id=None,
+        trailer_id=None,
+        actor_user_id=actor_user_id,
+        notes=body.notes,
+        idempotency_key=body.idempotency_key,
+    )
+    _apply_snapshot(
+        load,
+        owner=CUSTODY_OWNER_DELIVERED,
+        trip_id=None,
+        terminal_id=None,
+        placement=CUSTODY_PLACEMENT_UNKNOWN,
+        trailer_id=None,
         since=occurred_at,
         event_id=int(ev.id),
     )

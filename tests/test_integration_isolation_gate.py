@@ -57,6 +57,81 @@ class TestIntegrationDbGuardUnit:
             "postgresql://u:p@db:5432/tenant_pytest", context="unit"
         )
 
+    def test_production_platform_url_fails(self) -> None:
+        from app.core.integration_db_guard import assert_test_platform_database_url_allowed
+
+        with pytest.raises(IntegrationIsolationError, match="production platform"):
+            assert_test_platform_database_url_allowed(
+                "postgresql+asyncpg://u:p@truckerp-postgres:5432/trucking_erp",
+                context="unit",
+            )
+        with pytest.raises(IntegrationIsolationError, match="production platform"):
+            assert_test_platform_database_url_allowed(
+                "postgresql://u:p@172.29.0.4:5432/platform_phase4c",
+                context="unit",
+            )
+        with pytest.raises(IntegrationIsolationError, match="production platform"):
+            assert_test_platform_database_url_allowed(
+                "postgresql://u:p@172.24.0.2:5432/trucking_erp",
+                context="unit",
+            )
+
+    def test_isolated_platform_url_is_allowed(self) -> None:
+        from app.core.integration_db_guard import assert_test_platform_database_url_allowed
+
+        assert_test_platform_database_url_allowed(
+            "postgresql+asyncpg://phase4c:secret@172.24.0.2:5432/platform_phase4c",
+            context="unit",
+        )
+        assert_test_platform_database_url_allowed(
+            "postgresql://test:test@db.example.invalid:5432/test",
+            context="unit",
+        )
+        assert_test_platform_database_url_allowed(
+            "postgresql://phase4c:secret@truckerp-phase4c-postgres:5432/platform_phase4c",
+            context="unit",
+        )
+
+    def test_platform_alias_and_query_overrides_fail_closed(self) -> None:
+        from app.core.integration_db_guard import assert_test_platform_database_url_allowed
+
+        refused = (
+            "postgresql://u:p@localhost:5432/trucking_erp",
+            "postgresql://u:p@truckerp-postgres.trucking_erp_default:5432/trucking_erp",
+            "postgresql://u:p@db.internal:5432/platform_phase4c",
+            "postgresql://u:p@172.24.0.2:5432/platform_phase4c?host=172.29.0.4",
+            "postgresql://u:p@172.24.0.2:5432/platform_phase4c?hostaddr=172.29.0.4",
+            "postgresql://u:p@172.24.0.2:5432/platform_phase4c?dbname=trucking_erp",
+            "postgresql://u:p@172.24.0.2,172.29.0.4:5432/platform_phase4c",
+            "host=truckerp-postgres dbname=trucking_erp",
+        )
+        for url in refused:
+            with pytest.raises(IntegrationIsolationError, match="production platform"):
+                assert_test_platform_database_url_allowed(url, context="unit")
+
+    def test_session_gate_refuses_production_platform_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tests.support.integration_isolation import pytest_enforce_platform_database_env
+
+        monkeypatch.setenv(
+            "DATABASE_URL",
+            "postgresql+asyncpg://u:p@172.29.0.4:5432/trucking_erp",
+        )
+        with pytest.raises(IntegrationIsolationError, match="production platform"):
+            pytest_enforce_platform_database_env()
+
+    def test_session_gate_allows_isolated_platform_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from tests.support.integration_isolation import pytest_enforce_platform_database_env
+
+        monkeypatch.setenv(
+            "DATABASE_URL",
+            "postgresql+asyncpg://phase4c:secret@172.24.0.2:5432/platform_phase4c",
+        )
+        monkeypatch.setenv(
+            "POSTGRES_ADMIN_URL",
+            "postgresql://phase4c:secret@172.24.0.2:5432/postgres",
+        )
+        pytest_enforce_platform_database_env()
+
     def test_require_url_rejects_demo(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ENVIRONMENT", "test")
         monkeypatch.setenv("TENANT_DATABASE_URL", "postgresql://u:p@db:5432/tenant_demo")

@@ -21,6 +21,7 @@ from app.core.integration_db_guard import (
     assert_integration_host_allowed,
     assert_integration_tenant_slug_allowed,
     assert_tenant_database_url_allowed,
+    assert_test_platform_database_url_allowed,
     database_name_from_url,
     integration_tenant_db_name,
     integration_tenant_slug,
@@ -43,6 +44,7 @@ __all__ = [
     "assert_integration_tenant_slug_allowed",
     "assert_mutating_integration_allowed",
     "assert_tenant_database_url_allowed",
+    "assert_test_platform_database_url_allowed",
     "database_name_from_url",
     "integration_auth_headers",
     "integration_tenant_db_name",
@@ -132,3 +134,12 @@ def pytest_enforce_tenant_database_env() -> None:
     if not raw:
         return
     assert_tenant_database_url_allowed(raw, context="pytest_sessionstart")
+
+
+def pytest_enforce_platform_database_env() -> None:
+    """Fail closed before tests can read or write the production platform database."""
+    for key in ("DATABASE_URL", "POSTGRES_ADMIN_URL"):
+        raw = os.environ.get(key)
+        if not raw or not str(raw).strip():
+            continue
+        assert_test_platform_database_url_allowed(raw, context=f"pytest_sessionstart:{key}")

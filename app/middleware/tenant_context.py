@@ -206,6 +206,22 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                     set_request_id(response)
                     log("test_bypass_forbidden_tenant", level="error")
                     return response
+                demo_clone_tid = (os.environ.get("TRUCKERP_DEMO_CLONE_TENANT_ID") or "").strip()
+                if (
+                    os.environ.get("DEMO_CLONE_EXTERNAL_EFFECTS") == "disabled"
+                    and demo_clone_tid
+                    and bypass_slug
+                ):
+                    from app.core.integration_db_guard import integration_tenant_slug
+
+                    if bypass_slug == integration_tenant_slug():
+                        request.state.tenant_id = int(demo_clone_tid)
+                        request.state.tenant_slug = bypass_slug
+                        request.state.user_id = "test-bypass-user"
+                        response = await call_next(request)
+                        set_request_id(response)
+                        log("test_bypass_demo_clone", tenant_id=request.state.tenant_id)
+                        return response
                 try:
                     async with AsyncSessionLocal() as session:
                         row = await session.scalar(

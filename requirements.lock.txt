@@ -28,6 +28,8 @@ botocore==1.42.69
     #   awscli
     #   boto3
     #   s3transfer
+casbin==1.41.0
+    # via -r requirements.in
 certifi==2026.1.4
     # via
     #   httpcore
@@ -149,6 +151,8 @@ s3transfer==0.16.1
     # via
     #   awscli
     #   boto3
+simpleeval==1.0.8
+    # via casbin
 six==1.17.0
     # via python-dateutil
 sqlalchemy==2.0.49

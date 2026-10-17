@@ -32,6 +32,9 @@ import {
 import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops, formatStopCityState } from "@/utils/loadStops";
 import { FuturePlaceholderPanels } from "./FuturePlaceholderPanels";
+import StopExecutionActions from "./StopExecutionActions";
+import LoadPodEvidencePanel from "./LoadPodEvidencePanel";
+import TripCustodyPanel from "./TripCustodyPanel";
 
 type LifecycleTab = "active" | "planned" | "assigned" | "in_progress" | "completed" | "problem_hold";
 
@@ -384,6 +387,10 @@ function StopRow({
   open,
   stopKey,
   onToggle,
+  tripId,
+  tripStatus,
+  membershipStatus,
+  onStopsChanged,
 }: {
   loadId: number;
   stop: LoadStop;
@@ -391,6 +398,10 @@ function StopRow({
   open: boolean;
   stopKey: string;
   onToggle: () => void;
+  tripId?: number;
+  tripStatus?: string;
+  membershipStatus?: string;
+  onStopsChanged?: () => Promise<void>;
 }) {
   const appt = [stop.appointment_date, stop.appointment_time_text].filter(Boolean).join(" · ");
   return (
@@ -416,12 +427,23 @@ function StopRow({
             "—"}
           {stop.appointment_type ? ` · ${stop.appointment_type}` : ""}
           {stop.scheduled_at ? <div className="mt-0.5">Scheduled: {stop.scheduled_at}</div> : null}
+          {stop.arrived_at ? <div className="mt-0.5">Arrived: {stop.arrived_at}</div> : null}
+          {stop.unloading_started_at ? <div className="mt-0.5">Unloading started: {stop.unloading_started_at}</div> : null}
+          {stop.unloading_completed_at ? <div className="mt-0.5">Unloading completed: {stop.unloading_completed_at}</div> : null}
+          {stop.departed_at ? <div className="mt-0.5">Departed: {stop.departed_at}</div> : null}
           {stop.notes ? <div className="mt-1 italic">{stop.notes}</div> : null}
           {stop.commodity_notes ? <div className="mt-0.5">Commodity notes: {stop.commodity_notes}</div> : null}
           {stop.reference_number ? <div className="mt-0.5">Ref: {stop.reference_number}</div> : null}
-          <div className="mt-1 rounded border border-dashed border-[var(--trk-border)] px-1 py-0.5 text-[9px]">
-            Arrived · Loaded/Unloaded · Departed will appear here when stop execution is live.
-          </div>
+          {tripId != null && tripStatus && membershipStatus && onStopsChanged ? (
+            <StopExecutionActions
+              tripId={tripId}
+              loadId={loadId}
+              tripStatus={tripStatus}
+              membershipStatus={membershipStatus}
+              stop={stop}
+              onRecorded={onStopsChanged}
+            />
+          ) : null}
         </div>
       ) : null}
     </li>
@@ -432,10 +454,18 @@ function ExpandedLoadSummary({
   load,
   onToggleStop,
   expandedStops,
+  tripId,
+  tripStatus,
+  membershipStatus,
+  onStopsChanged,
 }: {
   load: Load;
   onToggleStop: (loadId: number, stopKey: string) => void;
   expandedStops: Set<string>;
+  tripId: number;
+  tripStatus: string;
+  membershipStatus: string;
+  onStopsChanged: () => Promise<void>;
 }) {
   const stops = sortedStops(load.stops);
   const docSnap = load.document_snapshot_confirmed_at
@@ -468,6 +498,7 @@ function ExpandedLoadSummary({
         </div>
       </div>
       <div className="text-[9px] text-[var(--trk-text-muted)]">{docSnap}</div>
+      <LoadPodEvidencePanel loadId={load.id} />
       {load.internal_notes?.trim() ? (
         <div className="text-[var(--trk-text-muted)]">
           <span className="font-semibold text-[var(--trk-text)]">Notes: </span>
@@ -490,6 +521,10 @@ function ExpandedLoadSummary({
                 open={open}
                 stopKey={sk}
                 onToggle={() => onToggleStop(load.id, sk)}
+                tripId={tripId}
+                tripStatus={tripStatus}
+                membershipStatus={membershipStatus}
+                onStopsChanged={onStopsChanged}
               />
             );
           })}
@@ -873,6 +908,8 @@ function TripMergedStopsTimeline({
                       · ref <span className="font-mono">{r.stop.reference_number}</span>
                     </span>
                   ) : null}
+                  {r.stop.arrived_at ? <span> · Arrived {r.stop.arrived_at}</span> : null}
+                  {r.stop.departed_at ? <span> · Departed {r.stop.departed_at}</span> : null}
                 </div>
                 {docsPending && loadForStop && docsIndicator(loadForStop).warn ? (
                   <div className="mt-1 inline-flex items-center gap-1 rounded border border-[var(--trk-warning)]/60 bg-[var(--trk-warning)]/10 px-1.5 py-0.5 text-[8px] font-medium text-[var(--trk-warning)]">
@@ -1266,6 +1303,8 @@ function LoadStackBlock({
   onToggleStop,
   onRefreshList,
   onDetailRefresh,
+  tripStatus,
+  onStopsChanged,
   btn,
   btnDanger,
 }: {
@@ -1281,6 +1320,8 @@ function LoadStackBlock({
   onToggleStop: (loadId: number, stopKey: string) => void;
   onRefreshList: () => void;
   onDetailRefresh: () => void;
+  tripStatus: string;
+  onStopsChanged: () => Promise<void>;
   btn: string;
   btnDanger: string;
 }) {
@@ -1384,9 +1425,6 @@ function LoadStackBlock({
             </button>
           ) : null}
           <span className={btn + " cursor-not-allowed opacity-50"} title="··· soon">
-            Handoff ··· soon
-          </span>
-          <span className={btn + " cursor-not-allowed opacity-50"} title="··· soon">
             Transfer ··· soon
           </span>
         </div>
@@ -1395,7 +1433,17 @@ function LoadStackBlock({
         <div className="border-t border-[var(--trk-border)] bg-[var(--trk-bg)]/25 px-3 py-2">
           {loadLoading ? <p className="text-[9px] text-[var(--trk-text-muted)]">Loading load…</p> : null}
           {loadErr ? <p className="text-[9px] text-[var(--trk-danger)]">{loadErr}</p> : null}
-          {load ? <ExpandedLoadSummary load={load} onToggleStop={onToggleStop} expandedStops={expandedStops} /> : null}
+          {load ? (
+            <ExpandedLoadSummary
+              load={load}
+              onToggleStop={onToggleStop}
+              expandedStops={expandedStops}
+              tripId={tripId}
+              tripStatus={tripStatus}
+              membershipStatus={m.status_within_trip}
+              onStopsChanged={onStopsChanged}
+            />
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -2076,13 +2124,17 @@ export default function TripContainerPage() {
                     <Link to={OPS.TRIP_DETAIL(focusedTripId!)} className={btn}>
                       Workspace ↗
                     </Link>
-                    <button type="button" className={btn} disabled title="··· soon">
-                      Complete Trip ··· soon
-                    </button>
-                    <button type="button" className={btn} disabled title="··· soon">
-                      Handoff ··· soon
-                    </button>
                   </div>
+                  {focusedDetail ? (
+                    <TripCustodyPanel
+                      trip={focusedDetail}
+                      onRefresh={async () => {
+                        const refreshed = await getTrip(focusedDetail.id);
+                        setTripDetailById((current) => new Map(current).set(focusedDetail.id, refreshed));
+                        void fetchTripList();
+                      }}
+                    />
+                  ) : null}
                   {showAddLoad && focusedTripId != null && focusedDetail ? (
                     <AddLoadPanel
                       tripId={focusedTripId}
@@ -2160,6 +2212,11 @@ export default function TripContainerPage() {
                           onRefreshList={() => void fetchTripList()}
                           onDetailRefresh={() => {
                             void refreshTripDetail(focusedTripId!);
+                          }}
+                          tripStatus={focusedDetail?.status ?? ""}
+                          onStopsChanged={async () => {
+                            const lo = await getLoad(m.load_id);
+                            setLoadById((current) => new Map(current).set(m.load_id, lo));
                           }}
                           btn={btn}
                           btnDanger={btnDanger}

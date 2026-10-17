@@ -176,7 +176,7 @@ def upgrade() -> None:
         sa.Column("storage_key", sa.Text(), nullable=False),
         sa.Column(
             "retention_class",
-            sa.String(length=16),
+            sa.String(length=32),
             server_default="commercial_permanent",
             nullable=False,
         ),

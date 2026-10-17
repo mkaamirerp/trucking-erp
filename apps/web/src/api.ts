@@ -75,6 +75,123 @@ export function parseLoadVersionConflict(err: unknown): LoadVersionConflictDetai
   return null;
 }
 
+export const LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT = "LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT" as const;
+
+export type LoadWorkspaceDraftVersionConflictDetail = {
+  code: typeof LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT;
+  draft_id: string;
+  client_version: number;
+  server_version: number | null;
+};
+
+export function parseLoadWorkspaceDraftVersionConflict(
+  err: unknown,
+): LoadWorkspaceDraftVersionConflictDetail | null {
+  if (!(err instanceof Error) || !err.message) return null;
+  try {
+    const outer = JSON.parse(err.message) as { detail?: unknown };
+    const d = outer.detail;
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const rec = d as Record<string, unknown>;
+      if (rec.code === LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT) {
+        return d as LoadWorkspaceDraftVersionConflictDetail;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export type LoadWorkspaceDraft = {
+  id: string;
+  tenant_id: number;
+  concurrency_version: number;
+  status: string;
+  draft_schema_version: number;
+  draft_json: Record<string, unknown>;
+  source_channel: string;
+  expires_at: string;
+  created_by_platform_user_id: string | null;
+  updated_by_platform_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  pdf_upload_state?: string;
+  pdf_filename?: string | null;
+  pdf_sha256?: string | null;
+  pdf_size_bytes?: number | null;
+  accepted_parse_json?: Record<string, unknown> | null;
+  accepted_parse_schema_version?: string | null;
+  accepted_parse_pdf_sha256?: string | null;
+  discarded_at?: string | null;
+  discard_reason?: string | null;
+};
+
+export type LoadWorkspaceDraftPromoteResult = {
+  draft: LoadWorkspaceDraft;
+  load_id: number;
+  idempotent_replay: boolean;
+};
+
+export async function createLoadWorkspaceDraft(payload?: {
+  source_channel?: string;
+  draft_json?: Record<string, unknown>;
+}) {
+  const res = await fetchWithTenant(`${API_BASE}/load-workspace-drafts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+  });
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function getLoadWorkspaceDraft(draftId: string) {
+  const res = await fetchWithTenant(`${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}`);
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function updateLoadWorkspaceDraft(
+  draftId: string,
+  payload: { expected_concurrency_version: number; draft_json: Record<string, unknown> },
+) {
+  const res = await fetchWithTenant(`${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function discardLoadWorkspaceDraft(
+  draftId: string,
+  payload?: { discard_reason?: string | null },
+) {
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/discard`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    },
+  );
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function promoteLoadWorkspaceDraft(
+  draftId: string,
+  payload: { expected_concurrency_version: number; promotion_idempotency_key: string },
+) {
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/promote`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return handle<LoadWorkspaceDraftPromoteResult>(res);
+}
+
 export async function getPayPeriods() {
   const res = await fetchWithTenant(`${API_BASE}/payroll/pay-periods`);
   return handle<PayPeriod[]>(res);
@@ -999,6 +1116,84 @@ export type TripExecutionSignalBody = {
   signal_at?: string | null;
 };
 
+export type StopExecutionBody = {
+  source: "dispatcher_manual" | "driver_app";
+  occurred_at?: string | null;
+  notes?: string | null;
+};
+
+export type StopExecutionResult = {
+  trip_id: number;
+  load_id: number;
+  stop_id: number;
+  stop_type: string;
+  arrived_at: string | null;
+  departed_at: string | null;
+  replayed: boolean;
+  load_status: string;
+  trip_status: string;
+  membership_status_within_trip: string;
+};
+
+async function postStopExecution<T>(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  kind: "arrival" | "departure" | "unloading-started" | "unloading-completed",
+  body: StopExecutionBody,
+): Promise<T> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/trips/${tripId}/loads/${loadId}/stops/${stopId}/${kind}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return handle<T>(res);
+}
+
+export function recordStopArrival(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<StopExecutionResult> {
+  return postStopExecution<StopExecutionResult>(tripId, loadId, stopId, "arrival", body);
+}
+
+export function recordStopDeparture(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<StopExecutionResult> {
+  return postStopExecution<StopExecutionResult>(tripId, loadId, stopId, "departure", body);
+}
+
+export type UnloadingExecutionResult = StopExecutionResult & {
+  unloading_started_at: string | null;
+  unloading_completed_at: string | null;
+};
+
+export function recordUnloadingStarted(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<UnloadingExecutionResult> {
+  return postStopExecution<UnloadingExecutionResult>(tripId, loadId, stopId, "unloading-started", body);
+}
+
+export function recordUnloadingCompleted(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<UnloadingExecutionResult> {
+  return postStopExecution<UnloadingExecutionResult>(tripId, loadId, stopId, "unloading-completed", body);
+}
+
 export async function postTripExecutionSignal(tripId: number, body: TripExecutionSignalBody): Promise<TripDetail> {
   const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/execution-signal`, {
     method: "POST",
@@ -1008,13 +1203,14 @@ export async function postTripExecutionSignal(tripId: number, body: TripExecutio
   return handle<TripDetail>(res);
 }
 
-/** POST /api/v1/trips/{id}/complete — close trip container when zero OPEN TripLoads (I14). */
-export async function completeTripContainer(tripId: number): Promise<TripDetail> {
-  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/complete`, {
-    method: "POST",
-  });
+/** POST /api/v1/trips/{id}/complete — close the Trip only. Does not change Load.status. */
+export async function completeTrip(tripId: number): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/trips/${tripId}/complete`, { method: "POST" });
   return handle<TripDetail>(res);
 }
+
+/** @deprecated Use completeTrip — Trip Workspace execution section alias. */
+export const completeTripContainer = completeTrip;
 
 export type LoadCustodySnapshot = {
   load_id: number;
@@ -1027,31 +1223,26 @@ export type LoadCustodySnapshot = {
   last_custody_event_id?: number | null;
 };
 
-export async function getLoadCustodySnapshot(loadId: number): Promise<LoadCustodySnapshot> {
+export async function getLoadCustody(loadId: number): Promise<LoadCustodySnapshot> {
   const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/custody`);
   return handle<LoadCustodySnapshot>(res);
 }
 
-export type TerminalRow = {
+/** @deprecated Use getLoadCustody — Trip Workspace execution section alias. */
+export const getLoadCustodySnapshot = getLoadCustody;
+
+export type TerminalOption = {
   id: number;
-  tenant_id: number;
   name: string;
-  street?: string | null;
-  city?: string | null;
-  state_or_province?: string | null;
-  postal_code?: string | null;
-  country?: string | null;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
 };
 
-export async function listTerminals(activeOnly = true): Promise<TerminalRow[]> {
-  const url = new URL(`${API_BASE}/terminals`, window.location.origin);
-  if (activeOnly) url.searchParams.set("active_only", "true");
-  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
-  const body = await handle<{ items: TerminalRow[] }>(res);
-  return body.items ?? [];
+/** Trip Workspace execution UI alias for terminal picker rows. */
+export type TerminalRow = TerminalOption;
+
+export async function listTerminals(): Promise<{ items: TerminalOption[] }> {
+  const res = await fetchWithTenant(`${API_BASE}/terminals?active_only=true`);
+  return handle<{ items: TerminalOption[] }>(res);
 }
 
 export type CustodyTransitionResult = {
@@ -1062,10 +1253,10 @@ export type CustodyTransitionResult = {
   membership_status_within_trip: string;
   active_trip_id?: number | null;
   snapshot: LoadCustodySnapshot;
-  replayed: boolean;
+  replayed?: boolean;
 };
 
-export async function acceptTripLoadCustody(
+export async function acceptLoadCustody(
   tripId: number,
   loadId: number,
   body: { notes?: string | null } = {},
@@ -1078,7 +1269,9 @@ export async function acceptTripLoadCustody(
   return handle<CustodyTransitionResult>(res);
 }
 
-export async function takeTripLoadCustody(
+export const acceptTripLoadCustody = acceptLoadCustody;
+
+export async function takeLoadCustody(
   tripId: number,
   loadId: number,
   body: { notes?: string | null } = {},
@@ -1091,6 +1284,8 @@ export async function takeTripLoadCustody(
   return handle<CustodyTransitionResult>(res);
 }
 
+export const takeTripLoadCustody = takeLoadCustody;
+
 export type YardHandoffPayload = {
   terminal_id: number;
   placement: "on_trailer" | "staged";
@@ -1098,7 +1293,7 @@ export type YardHandoffPayload = {
   notes?: string | null;
 };
 
-export async function yardHandoffTripLoadCustody(
+export async function yardHandoffLoad(
   tripId: number,
   loadId: number,
   body: YardHandoffPayload,
@@ -1111,13 +1306,15 @@ export async function yardHandoffTripLoadCustody(
   return handle<CustodyTransitionResult>(res);
 }
 
+export const yardHandoffTripLoadCustody = yardHandoffLoad;
+
 export type FinalDeliveryPayload = {
   occurred_at?: string | null;
   notes?: string | null;
   idempotency_key?: string | null;
 };
 
-export async function finalDeliveryTripLoadCustody(
+export async function finalDeliveryLoad(
   tripId: number,
   loadId: number,
   body: FinalDeliveryPayload = {},
@@ -1129,6 +1326,8 @@ export async function finalDeliveryTripLoadCustody(
   });
   return handle<CustodyTransitionResult>(res);
 }
+
+export const finalDeliveryTripLoadCustody = finalDeliveryLoad;
 
 /** PUT /api/v1/trips/{id}/assignment — Decision 14A: driver/truck/trailer only (all keys required; null clears). */
 export type TripAssignmentPayload = {
@@ -1245,6 +1444,45 @@ export async function parseLoadWorkspaceDocument(
     body: fd,
   });
   return handle<LoadDocumentParseResponse>(res);
+}
+
+export type LoadWorkspaceDraftParseResult = {
+  draft: LoadWorkspaceDraft;
+  parse: LoadDocumentParseResponse;
+};
+
+/** Parse + persist rate-confirmation PDF on a workspace draft (does not create a Load). */
+export async function parseLoadWorkspaceDraftDocument(
+  draftId: string,
+  file: File,
+  opts?: { expectedConcurrencyVersion?: number },
+) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (opts?.expectedConcurrencyVersion != null) {
+    fd.append("expected_concurrency_version", String(opts.expectedConcurrencyVersion));
+  }
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/parse-document`,
+    { method: "POST", body: fd },
+  );
+  return handle<LoadWorkspaceDraftParseResult>(res);
+}
+
+/** Object URL for the saved draft PDF (caller must revoke when done). */
+export async function fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(
+  draftId: string,
+): Promise<string | null> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/rate-confirmation-pdf`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    await handle(res);
+    return null;
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 /** Load Lab — persisted extraction run (tenant DB). */
@@ -1460,6 +1698,59 @@ export async function addLoadNote(loadId: number, body: string) {
     body: JSON.stringify({ body }),
   });
   return handle<LoadNote>(res);
+}
+
+export type LoadPodEvidence = {
+  id: number;
+  load_id: number;
+  file_sha256: string;
+  original_filename?: string | null;
+  content_type?: string | null;
+  file_size_bytes: number;
+  uploaded_at: string;
+  actor_user_id?: number | null;
+  actor_label?: string | null;
+};
+
+export async function listLoadPodEvidence(loadId: number): Promise<LoadPodEvidence[]> {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/pod`, window.location.origin);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  const data = await handle<{ items: LoadPodEvidence[] }>(res);
+  return data.items;
+}
+
+export async function uploadLoadPodEvidence(loadId: number, file: File): Promise<LoadPodEvidence> {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/pod`, window.location.origin);
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+    body: form,
+  });
+  return handle<LoadPodEvidence>(res);
+}
+
+export async function downloadLoadPodEvidenceFile(
+  loadId: number,
+  podId: number,
+  filename?: string | null
+): Promise<void> {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/pod/${podId}/file`, window.location.origin);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  if (!res.ok) {
+    await handle(res);
+    return;
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename?.trim() || `pod-${podId}`;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export async function listBrokers(
@@ -3730,6 +4021,10 @@ export type LoadStopRead = {
   appointment_date?: string | null;
   appointment_time_text?: string | null;
   scheduled_at?: string | null;
+  arrived_at?: string | null;
+  departed_at?: string | null;
+  unloading_started_at?: string | null;
+  unloading_completed_at?: string | null;
   notes?: string | null;
   commodity_notes?: string | null;
   created_at?: string | null;

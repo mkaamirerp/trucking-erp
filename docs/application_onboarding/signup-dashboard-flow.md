@@ -79,7 +79,7 @@ If the dashboard shows zeros and API errors mention missing tables, the tenant D
 
 **Driver list empty but count &gt; 0 (new tenants):** Seed and default driver data must use validation-safe values (e.g. `@demo.test` for email, not `@demo.local`). See **docs/driver-list-root-cause-and-prevention.md** (§0 and §3) so new tenants never get "List could not be loaded" with a non-zero driver count.
 
-1. **Config (new tenants):** `app/core/config.py` sets `tenant_alembic_target_rev = "head"` so **new** signups always get the current tenant schema (loads, drivers, etc.) without hardcoding a revision.
+1. **Config (new tenants):** `app/core/config.py` sets `tenant_alembic_target_rev = "i14_load_pod_evidence_x5"` so new signups get the x5 schema line plus POD and do not apply DW-1. Do not point this at `head` while the two POD heads exist (`docs/load_trip/POD_MIGRATION_TARGETS.md`).
 2. **Existing tenant:** Run the **locked tenant upgrade** once for that workspace’s database (preflight + `alembic_tenant.ini` under the hood). Use the tenant’s **`platform_tenants.db_name`** (e.g. `tenant_acme`) in `ALEMBIC_TENANT_DATABASE_URL`—not the workspace slug if they differ.
 
    ```bash

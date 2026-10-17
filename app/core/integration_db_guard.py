@@ -9,11 +9,27 @@ Do not weaken these rules to “skip” on misconfiguration — fail loudly.
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 # Live shared demo workspace — never a mutation target for integration tests.
 FORBIDDEN_INTEGRATION_TENANT_SLUGS = frozenset({"demo"})
 FORBIDDEN_INTEGRATION_TENANT_DB_NAMES = frozenset({"tenant_demo"})
+
+# Production platform catalog and the Postgres service that hosts it.
+# These identities are refused. They are not an allowlist.
+PRODUCTION_PLATFORM_DB_NAMES = frozenset({"trucking_erp"})
+PRODUCTION_PLATFORM_HOSTS = frozenset({"truckerp-postgres", "172.29.0.4"})
+
+# Pytest may use only these platform connections. Any other host, alias,
+# hostaddr, or dbname is refused, including a production database reached
+# through a hostname that is not listed above.
+ALLOWED_TEST_PLATFORM_CONNECTIONS = frozenset({
+    ("db.example.invalid", "test"),
+    ("172.24.0.2", "platform_phase4c"),
+    ("172.24.0.2", "postgres"),
+    ("truckerp-phase4c-postgres", "platform_phase4c"),
+    ("truckerp-phase4c-postgres", "postgres"),
+})
 
 # Dedicated disposable integration tenant (override via env; never hardcode credentials).
 DEFAULT_INTEGRATION_TENANT_SLUG = "pytest"
@@ -48,6 +64,84 @@ def allowed_integration_db_names() -> frozenset[str]:
 
 def allowed_integration_slugs() -> frozenset[str]:
     return frozenset({integration_tenant_slug()})
+
+
+def database_host_from_url(url: str) -> str:
+    """Return the hostname from a PostgreSQL URL (no credentials returned)."""
+    if not url or not str(url).strip():
+        return ""
+    return (urlparse(str(url).strip()).hostname or "").strip().lower()
+
+
+def _test_platform_connection_identity(url: str) -> tuple[list[str], list[str]]:
+    """Return every host and database name encoded in a PostgreSQL URL.
+
+    Query parameters ``host``, ``hostaddr``, and ``dbname`` are included so an
+    allowlisted path cannot hide a production target.
+    """
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if not scheme.startswith("postgres"):
+        raise IntegrationIsolationError(
+            "Integration isolation: refusing production platform connection. "
+            "Unrecognized platform URL. Use the isolated platform database platform_phase4c."
+        )
+    if "," in (parsed.netloc or ""):
+        raise IntegrationIsolationError(
+            "Integration isolation: refusing production platform connection. "
+            "Multiple hosts are not an allowed test platform identity."
+        )
+    hosts: list[str] = []
+    if parsed.hostname:
+        hosts.append(parsed.hostname.strip().lower())
+    names: list[str] = []
+    path_name = database_name_from_url(url)
+    if path_name:
+        names.append(path_name)
+    for key, values in parse_qs(parsed.query, keep_blank_values=False).items():
+        lowered = key.strip().lower()
+        for value in values:
+            item = value.strip().lower()
+            if not item:
+                continue
+            if lowered in {"host", "hostaddr"}:
+                hosts.append(item)
+            elif lowered == "dbname":
+                names.append(item)
+    return hosts, names
+
+
+def assert_test_platform_database_url_allowed(url: str | None, *, context: str) -> None:
+    """Refuse every platform URL except the explicit isolated-test allowlist.
+
+    The placeholder ``db.example.invalid/test`` and the phase4c platform
+    database are allowed. Any other host, alias, or database name fails closed.
+    """
+    if not url or not str(url).strip():
+        raise IntegrationIsolationError(
+            f"Integration isolation: platform database URL missing ({context})."
+        )
+    raw = str(url).strip()
+    hosts, names = _test_platform_connection_identity(raw)
+    if not hosts or not names:
+        raise IntegrationIsolationError(
+            f"Integration isolation: refusing production platform connection "
+            f"({context}). The URL has no allowlisted host and database. "
+            f"Use the isolated platform database platform_phase4c."
+        )
+    for host in hosts:
+        for name in names:
+            if (
+                host in PRODUCTION_PLATFORM_HOSTS
+                or name in PRODUCTION_PLATFORM_DB_NAMES
+                or (host, name) not in ALLOWED_TEST_PLATFORM_CONNECTIONS
+            ):
+                raise IntegrationIsolationError(
+                    f"Integration isolation: refusing production platform connection "
+                    f"host={host} database={name} ({context}). "
+                    f"Tests must not insert or delete platform_tenants on the production "
+                    f"platform database. Use the isolated platform database platform_phase4c."
+                )
 
 
 def database_name_from_url(url: str) -> str:

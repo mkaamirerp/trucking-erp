@@ -117,6 +117,126 @@ export function initialWorkspaceFieldsManual(): WorkspaceDraftFields {
   };
 }
 
+/** Serialize workspace form state for load_workspace_drafts.draft_json (camelCase). */
+export function buildWorkspaceDraftJson(
+  params: LoadPersistParams & { status?: string },
+): Record<string, unknown> {
+  return {
+    status: params.status ?? "draft",
+    loadNumber: params.loadNumber,
+    brokerId: params.brokerId,
+    brokerContactId: params.brokerContactId,
+    brokerNameSnapshot: params.brokerNameSnapshot,
+    brokerContactNameSnapshot: params.brokerContactNameSnapshot,
+    brokerContactPhoneSnapshot: params.brokerContactPhoneSnapshot,
+    brokerContactExtensionSnapshot: params.brokerContactExtensionSnapshot,
+    brokerContactEmailSnapshot: params.brokerContactEmailSnapshot,
+    brokerLoadReference: params.brokerLoadReference,
+    loadReferences: params.loadReferences ?? [],
+    freightMode: params.mode,
+    equipmentType: params.equipmentType,
+    trailerType: params.trailerType,
+    trailerSize: params.trailerSize,
+    commodity: params.commodity,
+    estimatedWeight: params.estimatedWeight,
+    hazmat: params.hazmat,
+    temperatureRequirement: params.temperatureRequirement,
+    palletCaseCount: params.palletCaseCount,
+    rate: params.rate,
+    customerRate: params.customerRate,
+    miles: params.miles,
+    customsBrokerId: params.customsBrokerId,
+    internalNotes: params.internalNotes,
+    draftStops: params.draftStops.map((stop, index) => {
+      const { _key, load_id: _loadId, ...rest } = stop;
+      return { ...rest, sequence: rest.sequence ?? index };
+    }),
+  };
+}
+
+function draftStopsFromDraftJson(raw: unknown): DraftStop[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return initialManualCreateStops();
+  }
+  return raw.map((entry, index) => {
+    const row = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+    const stopType = String(row.stop_type ?? row.stopType ?? "PICKUP");
+    const seq = typeof row.sequence === "number" ? row.sequence : index;
+    const id = typeof row.id === "number" ? row.id : 0;
+    return {
+      id,
+      load_id: 0,
+      stop_type: stopType,
+      sequence: seq,
+      facility_name: (row.facility_name ?? row.facilityName ?? null) as string | null,
+      street: (row.street ?? null) as string | null,
+      city: (row.city ?? null) as string | null,
+      state_or_province: (row.state_or_province ?? row.stateOrProvince ?? null) as string | null,
+      postal_code: (row.postal_code ?? row.postalCode ?? null) as string | null,
+      country: (row.country ?? null) as string | null,
+      reference_number: (row.reference_number ?? row.referenceNumber ?? null) as string | null,
+      appointment_type: (row.appointment_type ?? row.appointmentType ?? null) as string | null,
+      appointment_date: (row.appointment_date ?? row.appointmentDate ?? null) as string | null,
+      appointment_time_text: (row.appointment_time_text ?? row.appointmentTimeText ?? null) as string | null,
+      notes: (row.notes ?? null) as string | null,
+      commodity_notes: (row.commodity_notes ?? row.commodityNotes ?? null) as string | null,
+      _key: `draft-stop-${index}-${id}`,
+    };
+  });
+}
+
+/** Hydrate workspace field snapshot from persisted draft_json. */
+export function workspaceFieldsFromDraftJson(j: Record<string, unknown>): WorkspaceDraftFields {
+  const hazmatRaw = j.hazmat;
+  let hazmat: "unset" | "yes" | "no" = "unset";
+  if (hazmatRaw === true || hazmatRaw === "yes") hazmat = "yes";
+  else if (hazmatRaw === false || hazmatRaw === "no") hazmat = "no";
+
+  return {
+    status: String(j.status ?? "draft"),
+    loadNumber: String(j.loadNumber ?? j.load_number ?? ""),
+    brokerId: (j.brokerId ?? j.broker_id ?? null) as number | null,
+    brokerContactId: (j.brokerContactId ?? j.broker_contact_id ?? null) as number | null,
+    brokerNameSnapshot: String(j.brokerNameSnapshot ?? j.broker_name_snapshot ?? ""),
+    brokerContactNameSnapshot: String(
+      j.brokerContactNameSnapshot ?? j.broker_contact_name_snapshot ?? "",
+    ),
+    brokerContactPhoneSnapshot: String(
+      j.brokerContactPhoneSnapshot ?? j.broker_contact_phone_snapshot ?? "",
+    ),
+    brokerContactExtensionSnapshot: String(
+      j.brokerContactExtensionSnapshot ?? j.broker_contact_extension_snapshot ?? "",
+    ),
+    brokerContactEmailSnapshot: String(
+      j.brokerContactEmailSnapshot ?? j.broker_contact_email_snapshot ?? "",
+    ),
+    brokerLoadReference: String(j.brokerLoadReference ?? j.broker_load_reference ?? ""),
+    loadReferences: Array.isArray(j.loadReferences)
+      ? (j.loadReferences as LoadDocumentParseReference[])
+      : Array.isArray(j.references)
+        ? (j.references as LoadDocumentParseReference[])
+        : [],
+    freightMode: String(j.freightMode ?? j.mode ?? ""),
+    equipmentType: String(j.equipmentType ?? j.equipment_type ?? ""),
+    trailerType: String(j.trailerType ?? j.trailer_type ?? ""),
+    trailerSize: String(j.trailerSize ?? j.trailer_size ?? ""),
+    commodity: String(j.commodity ?? ""),
+    estimatedWeight: String(j.estimatedWeight ?? j.estimated_weight ?? ""),
+    hazmat,
+    temperatureRequirement: String(j.temperatureRequirement ?? j.temperature_requirement ?? ""),
+    palletCaseCount: String(j.palletCaseCount ?? j.pallet_case_count ?? ""),
+    rate: String(j.rate ?? ""),
+    customerRate: String(j.customerRate ?? j.customer_rate ?? ""),
+    miles: String(j.miles ?? ""),
+    driverId: null,
+    truckId: null,
+    trailerAssetId: null,
+    customsBrokerId: (j.customsBrokerId ?? j.customs_broker_id ?? null) as number | null,
+    internalNotes: String(j.internalNotes ?? j.internal_notes ?? ""),
+    draftStops: draftStopsFromDraftJson(j.draftStops ?? j.stops),
+  };
+}
+
 export function workspaceFieldsFromLoad(l: Load): WorkspaceDraftFields {
   return {
     status: l.status,

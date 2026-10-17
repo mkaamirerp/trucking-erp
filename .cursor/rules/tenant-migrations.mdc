@@ -24,6 +24,8 @@ Tenant migrations are authoritative only inside the truckerp-api container at `/
 
 Before upgrade, the wrapper runs preflight, which checks that `alembic -c alembic_tenant.ini heads` shows exactly one head. If you have multiple heads, create a merge revision and commit it before running the wrapper again.
 
+**I14 POD exception (approved):** the only extra head pair preflight accepts is `i14_load_pod_evidence` and `i14_load_pod_evidence_x5`. While that pair is present, `scripts/tenant_upgrade_head.sh` refuses `upgrade head`. Use `scripts/tenant_upgrade_revision.sh` with the revision in `docs/load_trip/POD_MIGRATION_TARGETS.md`. Do not add a merge revision unless the owner approves one.
+
 ## Must have ALEMBIC_TENANT_DATABASE_URL set
 
 Tenant upgrades require `ALEMBIC_TENANT_DATABASE_URL` (and preflight derives `TENANT_DATABASE_URL` for psql if not set). Derivation is bullet-proofed:

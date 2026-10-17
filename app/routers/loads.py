@@ -3,10 +3,13 @@ from __future__ import annotations
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps.auth import get_current_user
-from app.deps.tenant import require_tenant
+from app.authz.enforce import require_pilot_capability
+from app.core.storage import download_response
+from app.deps.auth import CurrentUser, get_current_user
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load import (
     LoadCancelBody,
@@ -22,10 +25,25 @@ from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapsho
 from app.services import loads as loads_service
 from app.services import trips as trips_service
 from app.services import load_custody as custody_service
+from app.schemas.load_pod_evidence import LoadPodEvidenceListResponse, LoadPodEvidenceOut
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
+from app.services.load_pod_evidence import (
+    PodEvidenceError,
+    assert_pod_storage_key_tenant,
+    get_load_pod_evidence_row,
+    list_load_pod_evidence,
+    upload_load_pod_evidence,
+    LOAD_POD_MODULE,
+)
 
 router = APIRouter(prefix="/loads", tags=["loads"])
+
+
+def _pod_actor(user: CurrentUser) -> tuple[int | None, str | None]:
+    actor_user_id = int(user.tenant_user.id) if user.tenant_user else None
+    actor_label = None if user.tenant_user else f"platform:{user.user.id}"
+    return actor_user_id, actor_label
 
 
 @router.post("", response_model=LoadResponse, status_code=status.HTTP_201_CREATED)
@@ -33,7 +51,7 @@ async def create_load(
     payload: LoadCreate,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    user=Depends(get_current_user),
+    user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     # Slice 5: request/user captured for future audit correlation; create_load audit currently best-effort.
@@ -46,7 +64,7 @@ async def create_load(
 @router.get("", response_model=dict)
 async def list_loads(
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "view")),
     db: AsyncSession = Depends(get_tenant_db),
     status: Optional[List[str]] = Query(None),
     driver_id: int | None = Query(None),
@@ -120,7 +138,7 @@ async def parse_load_workspace_document(
 async def get_load_detail(
     load_id: int,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "view")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.get_load(db, tenant_id, load_id)
@@ -141,7 +159,7 @@ async def update_load(
     payload: LoadUpdate,
     request: Request,
     tenant_id: int = Depends(require_tenant),
-    user=Depends(get_current_user),
+    user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     load = await loads_service.update_load(
@@ -248,6 +266,68 @@ async def list_load_custody_events(
     """Append-only custody event history for a Load (read-only)."""
     return await custody_service.list_load_custody_events(
         db, tenant_id, load_id, limit=limit, offset=offset
+    )
+
+
+@router.post("/{load_id}/pod", response_model=LoadPodEvidenceOut, status_code=status.HTTP_201_CREATED)
+async def upload_load_pod(
+    load_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> LoadPodEvidenceOut:
+    actor_user_id, actor_label = _pod_actor(user)
+    try:
+        row = await upload_load_pod_evidence(
+            db,
+            tenant_id,
+            tenant_slug,
+            load_id,
+            file,
+            actor_user_id=actor_user_id,
+            actor_label=actor_label,
+            request_id=getattr(request.state, "request_id", None),
+            source="ui",
+        )
+    except PodEvidenceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"detail": exc.message, "code": exc.code},
+        ) from exc
+    return LoadPodEvidenceOut.model_validate(row)
+
+
+@router.get("/{load_id}/pod", response_model=LoadPodEvidenceListResponse)
+async def list_load_pod(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> LoadPodEvidenceListResponse:
+    rows = await list_load_pod_evidence(db, tenant_id, load_id)
+    return LoadPodEvidenceListResponse(items=[LoadPodEvidenceOut.model_validate(r) for r in rows])
+
+
+@router.get("/{load_id}/pod/{pod_id}/file")
+async def download_load_pod_file(
+    load_id: int,
+    pod_id: int,
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> Response:
+    row = await get_load_pod_evidence_row(db, tenant_id, load_id, pod_id)
+    assert_pod_storage_key_tenant(row, tenant_slug)
+    return download_response(
+        row.storage_key,
+        module=LOAD_POD_MODULE,
+        tenant_slug=tenant_slug,
+        content_type=row.content_type or "application/octet-stream",
+        filename=row.original_filename or f"pod-{pod_id}",
     )
 
 

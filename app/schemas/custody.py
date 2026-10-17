@@ -115,7 +115,7 @@ class TakeCustodyBody(BaseModel):
 
 
 class FinalDeliveryBody(BaseModel):
-    """Consignee/receiver final delivery — completes ACTIVE TripLoad on this Trip."""
+    """Receiver proof for one Load. Notes and occurred_at are non-semantic for replay."""
 
     occurred_at: Optional[datetime] = None
     notes: Optional[str] = Field(default=None, max_length=2000)

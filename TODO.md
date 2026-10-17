@@ -1,5 +1,24 @@
 # TruckERP TODO
 
+## AGY architecture audit + API runtime safety — implementation handoff (2026-10-17)
+
+**Status:** AUDIT / PLAN SAVED; code changes, migrations, deployment and implementation commits remain **not started** in this documentation update. AGY quota was exhausted before its revised security plan could be executed.
+
+**Implementation handoff / prioritized work register:** [docs/AGY_AUDIT_IMPLEMENTATION_HANDOFF.md](docs/AGY_AUDIT_IMPLEMENTATION_HANDOFF.md)  
+**Original AGY audit (historical evidence):** [docs/module_onboarding_audit.md](docs/module_onboarding_audit.md) — [frozen publication](https://github.com/mkaamirerp/trucking-erp/blob/19822b3a9b95ab7f842b6112ce9d9149ab70ff9d/docs/module_onboarding_audit.md)
+
+**Next ordered work (one bounded slice at a time):**
+- [ ] **P0-A — Environment security gate:** Explicit environment-name allowlists; unknown names fail; strong JWT outside CI/test; safe password-reset/cookie fallbacks; `SSM_ENV=prod` identity and bypass checks **before platform migrations**; isolated subprocess tests. The AGY revised `api_boundary_runtime_safety_verification_plan.md` was a local plan artifact **not committed to docs/**; use the reconstructed handoff and revalidate exact diff.
+- [ ] **P0-B — Read-only tenant schema/revision inventory:** Check all ACTIVE/READY tenants, actual approved Alembic targets, branch/head state, missing columns/tables and compatibility. **Do not run a fleet upgrade.** `app/scripts/tenant_fleet_upgrade_head.py` already exists, and `scripts/tenant_upgrade_head.sh` refuses multi-head `upgrade head`; do not create a duplicate or assume the audit's single-head model.
+- [ ] **P0-C — Silent-green tenant safety CI:** Replace dead-path scanning with live-code coverage, explicit reviewed exceptions and negative tests that prove the gate fails on an actual violation.
+- [ ] **P0-D — Schema/data propagation impact audit:** Map field ownership, relational consumers, alternate write paths, duplicated projections, and reconciliation requirements (begin People → Drivers → Dispatch/Payroll). Migration of schema **does not** automatically sync business values.
+- [ ] **P1 — Provisioning READY validation, migration dry-run/backup/stop policy, Alembic metadata separation, real shared-core owner-approval gate, route/import tests.**
+- [ ] **P2 / HOLD — Fuel cross-DB transaction consistency, multi-worker outbox/SSE, incremental frontend/Casbin navigation.** Do not automatically rewrite Payroll `drivers.id` FKs, bulk rename routes, delete legacy Alembic, or loosen mandatory security settings.
+
+**STOP:** Preserve `AGENTS.md`, active Casbin and Load/Dispatch contracts. No code writes or migrations without separate owner approval. Update statuses only after evidence and regression results are recorded in the handoff.
+
+---
+
 ## BVD import staging — hardening (post-rollout)
 
 **Status:** TODO — follow-up only; do not side-track staging rollout.
@@ -150,3 +169,15 @@ Do not delete that backup until this TODO is resolved and committed to `main`.
 **Design:** `docs/load_trip/MASTER.md`
 
 On a tenant-scoped broker load number or optional barcode match, pause import and show **Possible Duplicate Load** with **Revised RC** (review differences, explicitly approve changes to existing load, preserve revision/audit history) or **Ignore** (no changes). Do not auto-reject or create a duplicate. Keep the original PDF + JSON AI parsing architecture unchanged.
+
+---
+
+## RBAC — Casbin permission engine
+
+**Status:** TODO — engine selected for the start of RBAC work; implementation not started.
+
+**Decision (2026-10-14):** Start with Casbin (Python/PyCasbin) as TruckERP's backend permission engine. Keep the existing TruckERP user-management UI, authentication, and tenant memberships; extend TruckERP with a tenant-admin Roles & Access page rather than adopting Casdoor or Keycloak.
+
+Initial scope: database-backed role permissions; tenant-scoped member role assignments; a shared permission-check interface for protected backend operations; fixed starter roles and a read-only permission view; audited role changes; last-admin protection; explicit role-assignment permissions; immediate enforcement of role changes and policy refresh across workers. Custom tenant roles can follow later.
+
+Before implementation, inspect current authentication, access levels, membership tables, callers, and tenant scoping. Define the permission catalog and migration from FULL_ACCESS/READ_ONLY, and follow AGENTS.md approval and regression gates for shared contracts. Keep record-level tenant/ownership scoping and financial workflow validation in TruckERP. Test cross-tenant denial, role changes, privilege escalation, and last-admin protection.
