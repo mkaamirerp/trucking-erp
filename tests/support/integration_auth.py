@@ -14,13 +14,19 @@ Do not add helpers here that encode product behavior; keep overrides thin.
 
 from __future__ import annotations
 
+import os
+from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import MagicMock
 
 from fastapi import Request
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.db_url import to_async_pg_url
+from app.core.integration_db_guard import assert_integration_db_name_allowed, database_name_from_url
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
+from app.deps.tenant_db import get_tenant_db
 
 
 def install_host_aligned_current_user_and_tenant(app: Any, *, role: str = "TENANT_ADMIN") -> None:
@@ -94,6 +100,26 @@ def install_mutable_tenant_current_user_and_tenant(
     app.dependency_overrides[require_tenant] = _tenant_from_holder
 
 
+def install_integration_tenant_database_override(app: Any) -> None:
+    """Route get_tenant_db to TENANT_DATABASE_URL when set (isolated integration DB)."""
+    raw = os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL")
+    if not raw:
+        return
+    tenant_url = to_async_pg_url(raw)
+    db_name = database_name_from_url(raw)
+    assert_integration_db_name_allowed(db_name, context="integration_tenant_database_override")
+
+    async def _tenant_db(_request: Request) -> AsyncGenerator[AsyncSession, None]:
+        engine = create_async_engine(tenant_url, pool_pre_ping=True)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        async with session_factory() as session:
+            yield session
+        await engine.dispose()
+
+    app.dependency_overrides[get_tenant_db] = _tenant_db
+
+
 def clear_current_user_and_tenant_overrides(app: Any) -> None:
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(require_tenant, None)
+    app.dependency_overrides.pop(get_tenant_db, None)
