@@ -720,7 +720,21 @@ def docker_psql_argv(host: str, database: str, sql: str) -> list[str]:
     if host.strip().lower() in PRODUCTION_PLATFORM_HOSTS:
         argv.extend(["-e", "PGOPTIONS=-c default_transaction_read_only=on"])
     argv.extend(
-        [container, "psql", "-U", user, "-d", database, "-v", "ON_ERROR_STOP=1", "-At", "-c", sql]
+        [
+            container,
+            "psql",
+            "-U",
+            user,
+            "-d",
+            database,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-At",
+            "-F",
+            "\t",
+            "-c",
+            sql,
+        ]
     )
     return argv
 
