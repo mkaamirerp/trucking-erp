@@ -59,8 +59,26 @@ export TRUCKERP_INTEGRATION_TENANT_SLUG="${TRUCKERP_INTEGRATION_TENANT_SLUG:-pyt
 echo "Fuel pytest: ENVIRONMENT=$ENVIRONMENT TENANT_DATABASE_URL db=$(python3 -c "from urllib.parse import urlparse; import os; print(urlparse(os.environ['TENANT_DATABASE_URL']).path.lstrip('/'))")" >&2
 
 if [[ "${RUN_FUEL_TENANT_MIGRATE:-0}" == "1" ]]; then
-  echo "Refusing alembic upgrade head (I14 POD branches are split). See docs/load_trip/POD_MIGRATION_TARGETS.md" >&2
-  exit 1
+  CURRENT="$(cd "$REPO_ROOT" && PYTHONPATH="$REPO_ROOT" "$VENV_PY" -m alembic -c alembic_tenant.ini current 2>/dev/null | awk 'NF {print $1; exit}')"
+  TARGET="$(
+    cd "$REPO_ROOT" && CURRENT_REVISION="$CURRENT" PYTHONPATH="$REPO_ROOT" "$VENV_PY" - <<'PY'
+import os
+import sys
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from scripts.tenant_revision_plan import RevisionPlanError, fuel_test_migrate_target
+
+current = os.environ.get("CURRENT_REVISION") or None
+script = ScriptDirectory.from_config(Config("alembic_tenant.ini"))
+try:
+    print(fuel_test_migrate_target(script, current))
+except RevisionPlanError as exc:
+    print(f"Refusing fuel tenant migrate: {exc}", file=sys.stderr)
+    sys.exit(1)
+PY
+  )" || exit 1
+  echo "Fuel pytest: alembic upgrade ${TARGET} (not head)" >&2
+  (cd "$REPO_ROOT" && PYTHONPATH="$REPO_ROOT" "$VENV_PY" -m alembic -c alembic_tenant.ini upgrade "$TARGET") >&2
 fi
 
 exec "$VENV_PY" -m pytest "$@"

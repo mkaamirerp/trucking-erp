@@ -64,6 +64,79 @@ def _ancestor_ids(plan: list[str], current: str | None) -> set[str]:
     return ids
 
 
+def ancestor_revisions(script: ScriptDirectory, revision: str) -> set[str]:
+    found: set[str] = set()
+    pending = [revision]
+    while pending:
+        rev_id = pending.pop()
+        if not rev_id or rev_id in found:
+            continue
+        found.add(rev_id)
+        try:
+            rev = script.get_revision(rev_id)
+        except Exception as exc:
+            raise RevisionPlanError(f"unknown revision {rev_id}") from exc
+        if rev is None:
+            raise RevisionPlanError(f"unknown revision {rev_id}")
+        pending.extend(rev._normalized_down_revisions)
+    return found
+
+
+def on_dw1_line(script: ScriptDirectory, current: str) -> bool:
+    return any(
+        rev == DW1C or rev.startswith("dw0") or rev.startswith("dw1")
+        for rev in ancestor_revisions(script, current)
+    )
+
+
+def approved_heads_are_split(script: ScriptDirectory) -> bool:
+    return set(script.get_heads()) == set(APPROVED_POD_TARGETS)
+
+
+def migration_target_for_request(
+    script: ScriptDirectory,
+    current: str | None,
+    requested: str | None,
+) -> str:
+    """Resolve one upgrade target. `head` is refused while the POD heads are split."""
+    if requested in {None, "", "head", "heads"}:
+        if approved_heads_are_split(script):
+            raise RevisionPlanError("refusing upgrade head while POD branches are split")
+        if len(script.get_heads()) != 1:
+            raise RevisionPlanError(f"unexpected tenant heads: {sorted(script.get_heads())}")
+        return "head"
+    if approved_heads_are_split(script) and requested not in APPROVED_POD_TARGETS:
+        raise RevisionPlanError(
+            f"target must be one of {sorted(APPROVED_POD_TARGETS)} while POD heads are split; got {requested!r}"
+        )
+    if requested in APPROVED_POD_TARGETS:
+        if current == requested:
+            return requested
+        assert_target_matches_history(script, current, requested)
+        return requested
+    plan = upgrade_plan(script, current, requested)
+    if POD_X5 in plan and POD_DW1 in plan:
+        raise RevisionPlanError("plan runs both POD revisions; refusing duplicate CREATE TABLE")
+    return requested
+
+
+def fuel_test_migrate_target(script: ScriptDirectory, current: str | None) -> str:
+    """Pinned revision for Fuel's optional integration migrate. Never `head`."""
+    if not approved_heads_are_split(script):
+        heads = list(script.get_heads())
+        if len(heads) != 1:
+            raise RevisionPlanError(f"unexpected tenant heads: {sorted(heads)}")
+        return heads[0]
+    if current == POD_DW1 or (current is not None and on_dw1_line(script, current)):
+        target = POD_DW1
+    else:
+        target = POD_X5
+    if current == target:
+        return target
+    assert_target_matches_history(script, current, target)
+    return target
+
+
 def assert_target_matches_history(script: ScriptDirectory, current: str | None, target: str) -> list[str]:
     """Return the upgrade plan or raise RevisionPlanError.
 

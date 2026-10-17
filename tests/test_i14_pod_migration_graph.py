@@ -15,6 +15,8 @@ from scripts.tenant_revision_plan import (
     X5,
     RevisionPlanError,
     assert_target_matches_history,
+    fuel_test_migrate_target,
+    migration_target_for_request,
     upgrade_plan,
 )
 
@@ -72,3 +74,34 @@ def test_upgrade_heads_from_x5_would_run_both_pod_revisions(script: ScriptDirect
     assert POD_DW1 in pending
     with pytest.raises(Exception, match="multiple heads"):
         script.get_current_head()
+
+
+def test_explicit_tenant_targets_stay_usable_and_head_fails_closed(script: ScriptDirectory) -> None:
+    assert migration_target_for_request(script, X5, POD_X5) == POD_X5
+    assert migration_target_for_request(script, DW1C, POD_DW1) == POD_DW1
+    assert migration_target_for_request(script, POD_DW1, POD_DW1) == POD_DW1
+    assert migration_target_for_request(script, POD_X5, POD_X5) == POD_X5
+    with pytest.raises(RevisionPlanError, match="refusing upgrade head"):
+        migration_target_for_request(script, X5, "head")
+    with pytest.raises(RevisionPlanError, match="refusing upgrade head"):
+        migration_target_for_request(script, None, None)
+    with pytest.raises(RevisionPlanError, match="already at"):
+        migration_target_for_request(script, POD_DW1, POD_X5)
+    with pytest.raises(RevisionPlanError, match="allowlist|must be one of"):
+        migration_target_for_request(script, X5, "dw1c_composite_fk_set_null_optional_columns")
+
+
+def test_fuel_migrate_picks_one_branch_and_rejects_the_other(script: ScriptDirectory) -> None:
+    assert fuel_test_migrate_target(script, X5) == POD_X5
+    assert fuel_test_migrate_target(script, None) == POD_X5
+    assert fuel_test_migrate_target(script, DW1C) == POD_DW1
+    assert fuel_test_migrate_target(script, POD_DW1) == POD_DW1
+    assert fuel_test_migrate_target(script, POD_X5) == POD_X5
+    x5_plan = upgrade_plan(script, X5, fuel_test_migrate_target(script, X5))
+    dw1_plan = upgrade_plan(script, DW1C, fuel_test_migrate_target(script, DW1C))
+    assert x5_plan == [POD_X5]
+    assert dw1_plan == [POD_DW1]
+    assert POD_DW1 not in x5_plan
+    assert POD_X5 not in dw1_plan
+    with pytest.raises(RevisionPlanError):
+        fuel_test_migrate_target(script, "not-a-real-revision")
