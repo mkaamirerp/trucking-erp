@@ -54,6 +54,11 @@ class LoadWorkspaceDraftUpdate(BaseModel):
         return _validate_draft_json_object(value)
 
 
+class LoadWorkspaceDraftPromote(BaseModel):
+    expected_concurrency_version: int = Field(..., ge=1)
+    promotion_idempotency_key: str = Field(..., min_length=1, max_length=128)
+
+
 class LoadWorkspaceDraftOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -76,3 +81,9 @@ class LoadWorkspaceDraftOut(BaseModel):
         if value not in LOAD_WORKSPACE_DRAFT_STATUSES:
             raise ValueError("unexpected draft status")
         return value
+
+
+class LoadWorkspaceDraftPromoteOut(BaseModel):
+    draft: LoadWorkspaceDraftOut
+    load_id: int
+    idempotent_replay: bool = False

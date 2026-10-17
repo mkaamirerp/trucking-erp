@@ -16,12 +16,17 @@ if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "postgresql://test:test@db.example.invalid:5432/test"
 
 from app.main import app
-from app.schemas.load_workspace_draft import LoadWorkspaceDraftCreate, LoadWorkspaceDraftUpdate
+from app.schemas.load_workspace_draft import (
+    LoadWorkspaceDraftCreate,
+    LoadWorkspaceDraftPromote,
+    LoadWorkspaceDraftUpdate,
+)
 from app.services.load_workspace_draft import (
     create_workspace_draft,
     get_workspace_draft,
     update_workspace_draft,
 )
+from app.services.load_workspace_draft_promotion import promote_workspace_draft
 from tests.support.demo_clone_integration import demo_clone_active, install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
@@ -185,6 +190,92 @@ async def test_http_create_get_update_on_demo_clone() -> None:
                 os.environ.pop("TEST_BYPASS_AUTH", None)
             else:
                 os.environ["TEST_BYPASS_AUTH"] = old_bypass
+
+
+@pytest.mark.asyncio
+async def test_service_promote_creates_one_load_with_origin_link() -> None:
+    engine, factory = _session()
+    draft_id = None
+    load_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            loads_before = await db.scalar(text("SELECT COUNT(*) FROM loads"))
+
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"PROMO-{uuid.uuid4().hex[:8]}"},
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            promo_key = f"promo-{uuid.uuid4().hex}"
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=promo_key,
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+            assert result.idempotent_replay is False
+
+            replay = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=promo_key,
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            assert replay.idempotent_replay is True
+            assert replay.load_id == load_id
+
+        async with factory() as db:
+            loads_after = await db.scalar(text("SELECT COUNT(*) FROM loads"))
+            assert loads_after == loads_before + 1
+            origin = await db.scalar(
+                text(
+                    "SELECT promotion_origin_workspace_draft_id FROM loads WHERE id = :id"
+                ),
+                {"id": load_id},
+            )
+            assert str(origin) == str(draft_id)
+    finally:
+        if load_id is not None or draft_id is not None:
+            async with factory() as db:
+                if load_id is not None:
+                    await db.execute(text("DELETE FROM load_stops WHERE load_id = :id"), {"id": load_id})
+                    await db.execute(
+                        text("DELETE FROM load_commercial_evidence WHERE load_id = :id"),
+                        {"id": load_id},
+                    )
+                    await db.execute(
+                        text(
+                            "UPDATE loads SET promotion_origin_workspace_draft_id = NULL WHERE id = :id"
+                        ),
+                        {"id": load_id},
+                    )
+                if draft_id is not None:
+                    await db.execute(
+                        text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                        {"id": draft_id},
+                    )
+                if load_id is not None:
+                    await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
+                await db.commit()
+        await engine.dispose()
 
 
 async def _scalar_count(sql: str) -> int:
