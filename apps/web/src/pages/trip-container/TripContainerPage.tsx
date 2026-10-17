@@ -33,6 +33,7 @@ import { OPS } from "@/routes";
 import { formatRouteFromStops, sortedStops, formatStopCityState } from "@/utils/loadStops";
 import { FuturePlaceholderPanels } from "./FuturePlaceholderPanels";
 import StopExecutionActions from "./StopExecutionActions";
+import LoadPodEvidencePanel from "./LoadPodEvidencePanel";
 import TripCustodyPanel from "./TripCustodyPanel";
 
 type LifecycleTab = "active" | "planned" | "assigned" | "in_progress" | "completed" | "problem_hold";
@@ -497,6 +498,7 @@ function ExpandedLoadSummary({
         </div>
       </div>
       <div className="text-[9px] text-[var(--trk-text-muted)]">{docSnap}</div>
+      <LoadPodEvidencePanel loadId={load.id} />
       {load.internal_notes?.trim() ? (
         <div className="text-[var(--trk-text-muted)]">
           <span className="font-semibold text-[var(--trk-text)]">Notes: </span>

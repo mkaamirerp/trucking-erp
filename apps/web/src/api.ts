@@ -1486,6 +1486,59 @@ export async function addLoadNote(loadId: number, body: string) {
   return handle<LoadNote>(res);
 }
 
+export type LoadPodEvidence = {
+  id: number;
+  load_id: number;
+  file_sha256: string;
+  original_filename?: string | null;
+  content_type?: string | null;
+  file_size_bytes: number;
+  uploaded_at: string;
+  actor_user_id?: number | null;
+  actor_label?: string | null;
+};
+
+export async function listLoadPodEvidence(loadId: number): Promise<LoadPodEvidence[]> {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/pod`, window.location.origin);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  const data = await handle<{ items: LoadPodEvidence[] }>(res);
+  return data.items;
+}
+
+export async function uploadLoadPodEvidence(loadId: number, file: File): Promise<LoadPodEvidence> {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/pod`, window.location.origin);
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""), {
+    method: "POST",
+    body: form,
+  });
+  return handle<LoadPodEvidence>(res);
+}
+
+export async function downloadLoadPodEvidenceFile(
+  loadId: number,
+  podId: number,
+  filename?: string | null
+): Promise<void> {
+  const base = (API_BASE || "/api/v1").replace(/\/+$/, "");
+  const url = new URL(`${base}/loads/${loadId}/pod/${podId}/file`, window.location.origin);
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  if (!res.ok) {
+    await handle(res);
+    return;
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename?.trim() || `pod-${podId}`;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export async function listBrokers(
   params: {
     page?: number;

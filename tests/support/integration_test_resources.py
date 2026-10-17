@@ -458,6 +458,10 @@ async def _cleanup_load_rows(
         {"t": tenant_id, "i": load_id},
     )
     await db.execute(
+        text("delete from load_pod_evidence where tenant_id=:t and load_id=:i"),
+        {"t": tenant_id, "i": load_id},
+    )
+    await db.execute(
         text("delete from loads where tenant_id=:t and id=:i"),
         {"t": tenant_id, "i": load_id},
     )
