@@ -24,10 +24,12 @@ def pytest_sessionstart(session):  # noqa: ARG001
     """Fail loudly if tenant URL env still points at live demo / non-dedicated DB."""
     from tests.support.integration_isolation import (
         IntegrationIsolationError,
+        pytest_enforce_platform_database_env,
         pytest_enforce_tenant_database_env,
     )
 
     try:
+        pytest_enforce_platform_database_env()
         pytest_enforce_tenant_database_env()
     except IntegrationIsolationError as exc:
         pytest.exit(f"INTEGRATION ISOLATION GATE: {exc}", returncode=2)
