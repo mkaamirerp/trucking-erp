@@ -123,6 +123,8 @@ export type LoadWorkspaceDraft = {
   accepted_parse_json?: Record<string, unknown> | null;
   accepted_parse_schema_version?: string | null;
   accepted_parse_pdf_sha256?: string | null;
+  discarded_at?: string | null;
+  discard_reason?: string | null;
 };
 
 export type LoadWorkspaceDraftPromoteResult = {
@@ -157,6 +159,21 @@ export async function updateLoadWorkspaceDraft(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function discardLoadWorkspaceDraft(
+  draftId: string,
+  payload?: { discard_reason?: string | null },
+) {
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/discard`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    },
+  );
   return handle<LoadWorkspaceDraft>(res);
 }
 

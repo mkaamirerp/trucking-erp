@@ -27,6 +27,7 @@ from app.services.load_workspace_draft import (
     update_workspace_draft,
 )
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
+from app.services.load_workspace_draft_lifecycle import discard_workspace_draft
 from app.services.load_workspace_draft_promotion import promote_workspace_draft
 from fastapi import HTTPException
 from tests.support.demo_clone_integration import demo_clone_active, install_demo_clone_tenant_db_override
@@ -288,6 +289,105 @@ async def test_service_promote_creates_one_load_with_origin_link() -> None:
                     )
                 if load_id is not None:
                     await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
+                await db.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_service_discard_unpromoted_draft() -> None:
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            row = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"DISC-{uuid.uuid4().hex[:8]}"},
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = row.id
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            discarded = await discard_workspace_draft(
+                db,
+                tenant_id,
+                "pytest",
+                draft_id,
+                discard_reason="integration discard",
+                updated_by_platform_user_id="integration-test-user",
+            )
+            assert discarded.status == "discarded"
+            assert discarded.discarded_at is not None
+            assert discarded.discard_reason == "integration discard"
+            assert discarded.pdf_upload_state == "idle"
+    finally:
+        if draft_id is not None:
+            async with factory() as db:
+                await db.execute(
+                    text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                    {"id": draft_id},
+                )
+                await db.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expired_draft_cannot_be_promoted() -> None:
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            row = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"EXP-{uuid.uuid4().hex[:8]}"},
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = row.id
+            await db.execute(
+                text(
+                    """
+                    UPDATE load_workspace_drafts
+                    SET expires_at = now() - interval '1 hour'
+                    WHERE tenant_id = :tenant_id AND id = :id
+                    """
+                ),
+                {"tenant_id": tenant_id, "id": draft_id},
+            )
+            await db.commit()
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"exp-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 409
+            assert exc.value.detail["code"] == "LOAD_WORKSPACE_DRAFT_NOT_EDITABLE"
+            assert exc.value.detail["status"] == "expired"
+    finally:
+        if draft_id is not None:
+            async with factory() as db:
+                await db.execute(
+                    text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                    {"id": draft_id},
+                )
                 await db.commit()
         await engine.dispose()
 

@@ -15,6 +15,7 @@ from app.models.load_workspace_draft import LoadWorkspaceDraft
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError, validate_load_parser_pdf
+from app.services.load_workspace_draft_lifecycle import require_workspace_draft_open_for_mutation
 
 LOAD_WORKSPACE_DRAFT_PDF_MODULE = "load_workspace_draft"
 WORKSPACE_DRAFT_ACCEPTED_PARSE_SCHEMA_VERSION = "load_document_parse_response_v1"
@@ -65,14 +66,7 @@ async def parse_and_attach_workspace_draft_pdf(
     )
     if current is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace draft not found")
-    if current.status != EDITABLE_STATUS:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "LOAD_WORKSPACE_DRAFT_NOT_EDITABLE",
-                "status": current.status,
-            },
-        )
+    await require_workspace_draft_open_for_mutation(db, current)
     server_version = int(current.concurrency_version)
     if expected_concurrency_version is not None and expected_concurrency_version != server_version:
         raise workspace_draft_version_conflict_exception(

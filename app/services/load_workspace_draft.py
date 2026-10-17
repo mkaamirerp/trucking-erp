@@ -15,6 +15,10 @@ from app.schemas.load_workspace_draft import (
     LoadWorkspaceDraftCreate,
     LoadWorkspaceDraftUpdate,
 )
+from app.services.load_workspace_draft_lifecycle import (
+    apply_expiry_if_overdue,
+    require_workspace_draft_open_for_mutation,
+)
 
 DEFAULT_DRAFT_TTL_DAYS = 7
 EDITABLE_STATUS = "draft"
@@ -73,15 +77,8 @@ async def update_workspace_draft(
     current = await get_workspace_draft(db, tenant_id, draft_id)
     if current is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace draft not found")
+    await require_workspace_draft_open_for_mutation(db, current)
     server_version = int(current.concurrency_version)
-    if current.status != EDITABLE_STATUS:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "LOAD_WORKSPACE_DRAFT_NOT_EDITABLE",
-                "status": current.status,
-            },
-        )
 
     stmt = (
         update(LoadWorkspaceDraft)

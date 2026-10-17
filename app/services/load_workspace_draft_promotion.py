@@ -15,6 +15,7 @@ from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_workspace_draft import LoadWorkspaceDraft
 from app.schemas.load import LoadCreate
 from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
+from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.loads import (
     _COMMERCIAL_STOP_ATTRS,
@@ -166,7 +167,10 @@ async def promote_workspace_draft(
     if replay is not None:
         return replay
 
+    await apply_expiry_if_overdue(db, draft)
     if draft.status != "draft":
+        if draft.status in {"discarded", "expired"}:
+            raise_not_editable(draft)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "LOAD_WORKSPACE_DRAFT_NOT_PROMOTABLE", "status": draft.status},

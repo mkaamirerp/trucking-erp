@@ -15,6 +15,7 @@ from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load_workspace_draft import (
     LoadWorkspaceDraftCreate,
+    LoadWorkspaceDraftDiscard,
     LoadWorkspaceDraftOut,
     LoadWorkspaceDraftParseOut,
     LoadWorkspaceDraftPromote,
@@ -22,6 +23,10 @@ from app.schemas.load_workspace_draft import (
     LoadWorkspaceDraftUpdate,
 )
 from app.services import load_workspace_draft as draft_service
+from app.services.load_workspace_draft_lifecycle import (
+    discard_workspace_draft,
+    get_workspace_draft_with_lifecycle,
+)
 from app.services.load_workspace_draft_document import (
     LOAD_WORKSPACE_DRAFT_PDF_MODULE,
     get_workspace_draft_pdf_row,
@@ -59,9 +64,29 @@ async def get_load_workspace_draft(
     _user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> LoadWorkspaceDraftOut:
-    row = await draft_service.get_workspace_draft(db, tenant_id, draft_id)
+    row = await get_workspace_draft_with_lifecycle(db, tenant_id, draft_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace draft not found")
+    return LoadWorkspaceDraftOut.model_validate(row)
+
+
+@router.post("/{draft_id}/discard", response_model=LoadWorkspaceDraftOut)
+async def discard_load_workspace_draft(
+    draft_id: uuid.UUID,
+    payload: LoadWorkspaceDraftDiscard,
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> LoadWorkspaceDraftOut:
+    row = await discard_workspace_draft(
+        db,
+        tenant_id,
+        tenant_slug,
+        draft_id,
+        discard_reason=payload.discard_reason,
+        updated_by_platform_user_id=_platform_user_id(user),
+    )
     return LoadWorkspaceDraftOut.model_validate(row)
 
 

@@ -12,6 +12,7 @@ import {
   confirmLoadDocumentSnapshot,
   createPlannedTrip,
   createLoadWorkspaceDraft,
+  discardLoadWorkspaceDraft,
   fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
   getLoadWorkspaceDraft,
   parseLoadWorkspaceDraftDocument,
@@ -296,6 +297,19 @@ function formatPlannedTripCreateError(err: unknown): string {
 }
 
 /** Human-readable message from FastAPI-style JSON error body in Error.message. */
+function workspaceDraftClosedMessage(status: string): string {
+  switch (status) {
+    case "discarded":
+      return "This workspace draft was discarded.";
+    case "expired":
+      return "This workspace draft has expired.";
+    case "promoted":
+      return "This workspace draft was already promoted.";
+    default:
+      return "This workspace draft is no longer editable.";
+  }
+}
+
 function formatApiErrorMessage(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const raw = err.message?.trim() || "";
@@ -368,6 +382,7 @@ export default function LoadWorkspacePage() {
     serverSnapshot: Load | null;
   } | null>(null);
   const [workspaceDraft, setWorkspaceDraft] = useState<LoadWorkspaceDraft | null>(null);
+  const isDraftEditable = isDraftWorkspace && workspaceDraft?.status === "draft";
   const [draftConflict, setDraftConflict] = useState<{ serverVersion: number | null } | null>(null);
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
@@ -983,7 +998,7 @@ export default function LoadWorkspacePage() {
         .then(([draft, customsPaged, brPaged, dr, trk, trl]) => {
           if (cancelled) return;
           if (draft.status !== "draft") {
-            setError("This workspace draft is no longer editable.");
+            setError(workspaceDraftClosedMessage(draft.status));
             setWorkspaceDraft(draft);
             return;
           }
@@ -1166,8 +1181,26 @@ export default function LoadWorkspacePage() {
     (workspaceMode === "detail" || workspaceMode === "intake") &&
     (load.status || "").toLowerCase() === "draft";
 
+  async function onDiscardDraft() {
+    if (!draftIdFromRoute || !isDraftEditable) return;
+    const confirmed = window.confirm(
+      "Discard this workspace draft? Saved draft data and the workspace PDF will be removed. This cannot be undone.",
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setToolbarMessage(null);
+    try {
+      await discardLoadWorkspaceDraft(draftIdFromRoute, { discard_reason: "operator_discard" });
+      navigate(OPS.LOADS, { replace: true });
+    } catch (e: unknown) {
+      setToolbarMessage({ text: formatApiErrorMessage(e, "Could not discard draft"), tone: "error" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function onSaveDraft() {
-    if (!draftIdFromRoute || !workspaceDraft) return;
+    if (!draftIdFromRoute || !workspaceDraft || !isDraftEditable) return;
     const stopErr = validateDraftStopsClassifiedForSave(draftStops);
     if (stopErr) {
       setToolbarMessage({ text: stopErr, tone: "warning" });
@@ -1224,7 +1257,7 @@ export default function LoadWorkspacePage() {
   }
 
   async function onPromoteDraft() {
-    if (!draftIdFromRoute || !workspaceDraft) return;
+    if (!draftIdFromRoute || !workspaceDraft || !isDraftEditable) return;
     const stopErr = validateDraftStopsClassifiedForSave(draftStops);
     if (stopErr) {
       setToolbarMessage({ text: stopErr, tone: "warning" });
@@ -1671,7 +1704,7 @@ export default function LoadWorkspacePage() {
                 markReadyBusy ||
                 parseBusy ||
                 loading ||
-                (isDraftWorkspace && !workspaceDraft)
+                (isDraftWorkspace && !isDraftEditable)
               }
               onClick={() => pdfInputRef.current?.click()}
             >
@@ -1683,7 +1716,15 @@ export default function LoadWorkspacePage() {
               <Button
                 variant="secondary"
                 type="button"
-                disabled={saving || markReadyBusy || !workspaceDraft}
+                disabled={saving || markReadyBusy || !isDraftEditable}
+                onClick={() => void onDiscardDraft()}
+              >
+                Discard draft
+              </Button>
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={saving || markReadyBusy || !isDraftEditable}
                 onClick={() => void onSaveDraft()}
               >
                 {saving ? "Saving…" : "Save draft"}
@@ -1691,7 +1732,7 @@ export default function LoadWorkspacePage() {
               <Button
                 variant="primary"
                 type="button"
-                disabled={saving || markReadyBusy || !workspaceDraft}
+                disabled={saving || markReadyBusy || !isDraftEditable}
                 onClick={() => void onPromoteDraft()}
               >
                 {saving ? "Creating…" : "Create load"}

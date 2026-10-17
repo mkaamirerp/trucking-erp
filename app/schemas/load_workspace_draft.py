@@ -60,6 +60,10 @@ class LoadWorkspaceDraftPromote(BaseModel):
     promotion_idempotency_key: str = Field(..., min_length=1, max_length=128)
 
 
+class LoadWorkspaceDraftDiscard(BaseModel):
+    discard_reason: str | None = Field(default=None, max_length=2000)
+
+
 class LoadWorkspaceDraftOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -82,6 +86,8 @@ class LoadWorkspaceDraftOut(BaseModel):
     accepted_parse_json: dict[str, Any] | None = None
     accepted_parse_schema_version: str | None = None
     accepted_parse_pdf_sha256: str | None = None
+    discarded_at: datetime | None = None
+    discard_reason: str | None = None
 
     @field_validator("status")
     @classmethod
