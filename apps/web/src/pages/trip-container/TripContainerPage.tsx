@@ -427,6 +427,8 @@ function StopRow({
           {stop.appointment_type ? ` · ${stop.appointment_type}` : ""}
           {stop.scheduled_at ? <div className="mt-0.5">Scheduled: {stop.scheduled_at}</div> : null}
           {stop.arrived_at ? <div className="mt-0.5">Arrived: {stop.arrived_at}</div> : null}
+          {stop.unloading_started_at ? <div className="mt-0.5">Unloading started: {stop.unloading_started_at}</div> : null}
+          {stop.unloading_completed_at ? <div className="mt-0.5">Unloading completed: {stop.unloading_completed_at}</div> : null}
           {stop.departed_at ? <div className="mt-0.5">Departed: {stop.departed_at}</div> : null}
           {stop.notes ? <div className="mt-1 italic">{stop.notes}</div> : null}
           {stop.commodity_notes ? <div className="mt-0.5">Commodity notes: {stop.commodity_notes}</div> : null}

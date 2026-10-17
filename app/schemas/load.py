@@ -65,6 +65,8 @@ class LoadStopOut(LoadStopBase):
     scheduled_at: Optional[datetime] = None
     arrived_at: Optional[datetime] = None
     departed_at: Optional[datetime] = None
+    unloading_started_at: Optional[datetime] = None
+    unloading_completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)

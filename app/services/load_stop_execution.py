@@ -13,9 +13,13 @@ from app.constants.trip_dispatch import (
     TRIP_CONTAINER_STATUS_IN_PROGRESS,
     TRIP_LOAD_STATUS_WITHIN_ACTIVE,
 )
-from app.models.load import LoadStop
+from app.models.load import LoadStop, LoadStopAction
 from app.models.trip import TripLoad
-from app.schemas.load_stop_execution import StopExecutionBody, StopExecutionResponse
+from app.schemas.load_stop_execution import (
+    StopExecutionBody,
+    StopExecutionResponse,
+    UnloadingExecutionResponse,
+)
 from app.services.audit_events import write_audit_event
 from app.services.trips import (
     _lock_load_for_membership,
@@ -229,5 +233,245 @@ async def _record_stop_execution(
         trip_status=str(trip.status),
         load_status=str(load.status),
         membership_status=str(membership.status_within_trip),
+        replayed=False,
+    )
+
+
+UNLOADING_STARTED = "unloading_started"
+UNLOADING_COMPLETED = "unloading_completed"
+_UNLOADING_STOP_TYPES = frozenset({"DROP", "DELIVERY"})
+
+
+async def record_unloading_started(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    *,
+    actor_user_id: int | None,
+    actor_label: str | None,
+    request_id: str | None,
+) -> UnloadingExecutionResponse:
+    return await _record_unloading(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        stop_id,
+        body,
+        action_type=UNLOADING_STARTED,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=request_id,
+    )
+
+
+async def record_unloading_completed(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    *,
+    actor_user_id: int | None,
+    actor_label: str | None,
+    request_id: str | None,
+) -> UnloadingExecutionResponse:
+    return await _record_unloading(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        stop_id,
+        body,
+        action_type=UNLOADING_COMPLETED,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=request_id,
+    )
+
+
+async def _action_occurred_at(
+    db: AsyncSession, tenant_id: int, stop_id: int, action_type: str
+) -> datetime | None:
+    return await db.scalar(
+        select(LoadStopAction.occurred_at)
+        .where(
+            LoadStopAction.tenant_id == tenant_id,
+            LoadStopAction.load_stop_id == stop_id,
+            LoadStopAction.action_type == action_type,
+        )
+        .order_by(LoadStopAction.id)
+        .limit(1)
+    )
+
+
+def _unloading_response(
+    *,
+    trip_id: int,
+    load_id: int,
+    stop: LoadStop,
+    trip_status: str,
+    load_status: str,
+    membership_status: str,
+    started_at: datetime | None,
+    completed_at: datetime | None,
+    replayed: bool,
+) -> UnloadingExecutionResponse:
+    return UnloadingExecutionResponse(
+        trip_id=trip_id,
+        load_id=load_id,
+        stop_id=int(stop.id),
+        stop_type=str(stop.stop_type),
+        arrived_at=stop.arrived_at,
+        departed_at=stop.departed_at,
+        unloading_started_at=started_at,
+        unloading_completed_at=completed_at,
+        replayed=replayed,
+        load_status=load_status,
+        trip_status=trip_status,
+        membership_status_within_trip=membership_status,
+    )
+
+
+async def _record_unloading(
+    db: AsyncSession,
+    tenant_id: int,
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    *,
+    action_type: str,
+    actor_user_id: int | None,
+    actor_label: str | None,
+    request_id: str | None,
+) -> UnloadingExecutionResponse:
+    signal_source = _validate_execution_signal_source(body.source)
+    trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
+    load = await _lock_load_for_membership(db, tenant_id, load_id)
+    if trip.status != TRIP_CONTAINER_STATUS_IN_PROGRESS:
+        raise _conflict(
+            "INVALID_TRIP_STATUS_FOR_STOP_EXECUTION",
+            f"Trip status '{trip.status}' cannot record unloading",
+        )
+    membership = await db.scalar(
+        select(TripLoad).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.trip_id == trip_id,
+            TripLoad.load_id == load_id,
+        )
+    )
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "No trip_load membership for this load", "code": "TRIP_LOAD_NOT_FOUND"},
+        )
+    if (
+        membership.status_within_trip != TRIP_LOAD_STATUS_WITHIN_ACTIVE
+        or membership.completed_at is not None
+        or membership.removed_at is not None
+    ):
+        raise _conflict("MEMBERSHIP_NOT_ACTIVE", "Membership is not active")
+
+    stop = await db.scalar(
+        select(LoadStop)
+        .where(
+            LoadStop.tenant_id == tenant_id,
+            LoadStop.load_id == load_id,
+            LoadStop.id == stop_id,
+        )
+        .with_for_update()
+    )
+    if stop is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "Stop is not on this Load", "code": "STOP_NOT_FOUND"},
+        )
+    stop_type = (stop.stop_type or "").strip().upper()
+    if stop_type not in _UNLOADING_STOP_TYPES:
+        raise _conflict(
+            "INVALID_STOP_TYPE",
+            f"Stop type '{stop.stop_type}' cannot record unloading",
+        )
+    if stop.arrived_at is None:
+        raise _conflict("UNLOADING_REQUIRES_ARRIVAL", "Unloading requires an arrival timestamp")
+
+    started_at = await _action_occurred_at(db, tenant_id, int(stop.id), UNLOADING_STARTED)
+    completed_at = await _action_occurred_at(db, tenant_id, int(stop.id), UNLOADING_COMPLETED)
+    if action_type == UNLOADING_COMPLETED and started_at is None:
+        raise _conflict("UNLOADING_NOT_STARTED", "Unloading completion requires unloading to have started")
+    existing = completed_at if action_type == UNLOADING_COMPLETED else started_at
+    if existing is not None:
+        return _unloading_response(
+            trip_id=trip_id,
+            load_id=load_id,
+            stop=stop,
+            trip_status=str(trip.status),
+            load_status=str(load.status),
+            membership_status=str(membership.status_within_trip),
+            started_at=started_at,
+            completed_at=completed_at,
+            replayed=True,
+        )
+
+    occurred_at = body.occurred_at or datetime.now(timezone.utc)
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    db.add(
+        LoadStopAction(
+            tenant_id=tenant_id,
+            load_stop_id=int(stop.id),
+            action_type=action_type,
+            occurred_at=occurred_at,
+            notes=body.notes,
+        )
+    )
+    await db.flush()
+    if action_type == UNLOADING_STARTED:
+        started_at = occurred_at
+        audit_action = "stop_unloading_started"
+        field = "unloading_started_at"
+    else:
+        completed_at = occurred_at
+        audit_action = "stop_unloading_completed"
+        field = "unloading_completed_at"
+    await write_audit_event(
+        db,
+        tenant_id=tenant_id,
+        module="loads",
+        entity_type="load_stop",
+        entity_id=str(int(stop.id)),
+        entity_label=f"load:{load_id} stop:{stop.id}",
+        action=audit_action,
+        source="api",
+        actor_type="user" if actor_user_id is not None else "api",
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=request_id,
+        correlation_id=request_id,
+        changed_fields={field: {"before": None, "after": occurred_at.isoformat()}},
+        context_json={
+            "signal_source": signal_source,
+            "trip_id": trip_id,
+            "load_id": load_id,
+            "stop_id": int(stop.id),
+            "notes": body.notes,
+        },
+        event_at=occurred_at,
+        best_effort=False,
+    )
+    return _unloading_response(
+        trip_id=trip_id,
+        load_id=load_id,
+        stop=stop,
+        trip_status=str(trip.status),
+        load_status=str(load.status),
+        membership_status=str(membership.status_within_trip),
+        started_at=started_at,
+        completed_at=completed_at,
         replayed=False,
     )

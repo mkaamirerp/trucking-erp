@@ -117,4 +117,55 @@ describe("StopExecutionActions", () => {
     });
     expect(container.querySelector("[data-testid='stop-execution-error-4']")?.textContent).toContain("Arrival rejected");
   });
+
+  it("confirms unloading start without arrival, departure, delivery, or trip completion", async () => {
+    const calls = { unload: 0, arrival: 0, departure: 0 };
+    const drop = { ...stop, stop_type: "DROP", arrived_at: "2026-10-16T12:00:00Z", unloading_started_at: null };
+    mount(
+      <StopExecutionActions
+        tripId={3}
+        loadId={9}
+        tripStatus="in_progress"
+        membershipStatus="active"
+        stop={drop}
+        onRecorded={async () => undefined}
+        recordArrival={async () => {
+          calls.arrival += 1;
+          throw new Error("arrival");
+        }}
+        recordDeparture={async () => {
+          calls.departure += 1;
+          throw new Error("departure");
+        }}
+        recordUnloadingStart={async () => {
+          calls.unload += 1;
+          return {
+            trip_id: 3,
+            load_id: 9,
+            stop_id: 4,
+            stop_type: "DROP",
+            arrived_at: "2026-10-16T12:00:00Z",
+            departed_at: null,
+            unloading_started_at: "2026-10-16T12:05:00Z",
+            unloading_completed_at: null,
+            replayed: false,
+            load_status: "ready",
+            trip_status: "in_progress",
+            membership_status_within_trip: "active",
+          };
+        }}
+      />,
+    );
+    expect(container.querySelector("[data-testid='arrive-4']")).toBeNull();
+    await act(async () => {
+      (container.querySelector("[data-testid='unload-start-4']") as HTMLButtonElement).click();
+    });
+    expect(calls.unload).toBe(0);
+    await act(async () => {
+      (container.querySelector("[data-testid='unload-start-submit-4']") as HTMLButtonElement).click();
+    });
+    expect(calls.unload).toBe(1);
+    expect(calls.arrival).toBe(0);
+    expect(calls.departure).toBe(0);
+  });
 });

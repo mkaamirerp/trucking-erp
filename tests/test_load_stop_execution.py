@@ -378,3 +378,180 @@ class TestStopExecution:
             "arrived_at"
         ] is None
         assert await _audits(int(pickup["id"])) == []
+
+
+def _fail_unloading_audit():
+    real_flush = AsyncSession.flush
+
+    async def flush_wrapper(self, *args, **kwargs):
+        for obj in list(self.new):
+            if isinstance(obj, AuditEvent) and obj.action == "stop_unloading_started":
+                raise RuntimeError("unloading audit flush failure")
+        return await real_flush(self, *args, **kwargs)
+
+    return patch.object(AsyncSession, "flush", flush_wrapper)
+
+
+@pytest.mark.skipif(REQUIRES_DB or REQUIRES_TENANT_DB or _PLACEHOLDER_PLATFORM_DB, reason="integration")
+@pytest.mark.asyncio
+class TestUnloading:
+    async def test_unloading_sequence_leaves_other_load_unchanged(
+        self, client: AsyncClient, locked_prefix: str, integration_scope
+    ):
+        load_a, load_b = await integration_scope.create_ready_load_ids(2, tag_prefix="UNLOAD")
+        status_a = (await _rows("SELECT status, custody_owner FROM loads WHERE id = :lid", {"lid": load_a}))[0]
+        trip_id = await _prepare(client, integration_scope, [load_a, load_b])
+        await _start(client, trip_id)
+        body_a = await _load(client, load_a)
+        pickup = _stop(body_a, "PICKUP")
+        drop = _stop(body_a, "DROP")
+        other_drop = _stop(await _load(client, load_b), "DROP")
+
+        early = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/unloading-started",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual"},
+        )
+        assert early.status_code == 409
+        assert _code(early) == "UNLOADING_REQUIRES_ARRIVAL"
+
+        arrived = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{pickup['id']}/arrival",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual", "occurred_at": "2026-10-16T11:00:00Z"},
+        )
+        assert arrived.status_code == 200, arrived.text
+        pickup_unload = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{pickup['id']}/unloading-started",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual"},
+        )
+        assert pickup_unload.status_code == 409
+        assert _code(pickup_unload) == "INVALID_STOP_TYPE"
+        pickup_after = _stop(await _load(client, load_a), "PICKUP")
+        assert pickup_after["arrived_at"] == arrived.json()["arrived_at"]
+        assert pickup_after["unloading_started_at"] is None
+
+        drop_arrived = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/arrival",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual", "occurred_at": "2026-10-16T12:00:00Z"},
+        )
+        assert drop_arrived.status_code == 200, drop_arrived.text
+        before_complete = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/unloading-completed",
+            headers=AUTH_HEADERS,
+            json={"source": "driver_app"},
+        )
+        assert before_complete.status_code == 409
+        assert _code(before_complete) == "UNLOADING_NOT_STARTED"
+
+        started = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/unloading-started",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual", "occurred_at": "2026-10-16T12:10:00Z", "notes": "doors open"},
+        )
+        assert started.status_code == 200, started.text
+        assert started.json()["replayed"] is False
+        assert started.json()["arrived_at"] == drop_arrived.json()["arrived_at"]
+        assert started.json()["departed_at"] is None
+        assert started.json()["load_status"] == status_a["status"]
+        assert started.json()["trip_status"] == "in_progress"
+        assert started.json()["membership_status_within_trip"] == "active"
+        started_at = started.json()["unloading_started_at"]
+
+        replay = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/unloading-started",
+            headers=AUTH_HEADERS,
+            json={"source": "driver_app", "occurred_at": "2026-10-16T18:00:00Z"},
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["replayed"] is True
+        assert replay.json()["unloading_started_at"] == started_at
+
+        completed = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/unloading-completed",
+            headers=AUTH_HEADERS,
+            json={"source": "driver_app", "occurred_at": "2026-10-16T12:40:00Z"},
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["replayed"] is False
+        completed_at = completed.json()["unloading_completed_at"]
+        replay_done = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_a}/stops/{drop['id']}/unloading-completed",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual", "occurred_at": "2026-10-16T19:00:00Z"},
+        )
+        assert replay_done.json()["replayed"] is True
+        assert replay_done.json()["unloading_completed_at"] == completed_at
+        assert replay_done.json()["departed_at"] is None
+
+        actions = await _rows(
+            """
+            SELECT action_type, count(*)::int AS n
+            FROM load_stop_actions WHERE load_stop_id = :sid
+            GROUP BY action_type ORDER BY action_type
+            """,
+            {"sid": drop["id"]},
+        )
+        assert actions == [
+            {"action_type": "unloading_completed", "n": 1},
+            {"action_type": "unloading_started", "n": 1},
+        ]
+        audits = await _audits(int(drop["id"]))
+        assert [row["action"] for row in audits] == ["stop_arrived", "stop_unloading_started", "stop_unloading_completed"]
+        assert audits[1]["context_json"]["signal_source"] == "dispatcher_manual"
+        assert audits[2]["context_json"]["signal_source"] == "driver_app"
+        assert audits[1]["source"] == "api"
+        assert all(row["actor_label"] or row["actor_user_id"] is not None for row in audits[1:])
+
+        other_actions = await _rows(
+            "SELECT count(*)::int AS n FROM load_stop_actions WHERE load_stop_id = :sid",
+            {"sid": other_drop["id"]},
+        )
+        assert other_actions[0]["n"] == 0
+        membership_b = await _rows(
+            "SELECT status_within_trip FROM trip_loads WHERE trip_id = :tid AND load_id = :lid",
+            {"tid": trip_id, "lid": load_b},
+        )
+        assert membership_b[0]["status_within_trip"] == "active"
+        after = (await _rows("SELECT status, custody_owner FROM loads WHERE id = :lid", {"lid": load_a}))[0]
+        assert after["status"] == status_a["status"]
+        assert after["custody_owner"] == "trip"
+        assert (await client.get(f"/api/v1/trips/{trip_id}", headers=AUTH_HEADERS)).json()["status"] == "in_progress"
+        refreshed = await _load(client, load_a)
+        refreshed_drop = next(row for row in refreshed["stops"] if row["id"] == drop["id"])
+        assert refreshed_drop["unloading_started_at"] == started_at
+        assert refreshed_drop["unloading_completed_at"] == completed_at
+        assert refreshed_drop["arrived_at"] == drop_arrived.json()["arrived_at"]
+
+    async def test_unloading_audit_failure_rolls_back_the_action(
+        self, client: AsyncClient, locked_prefix: str, integration_scope
+    ):
+        load_id = (await integration_scope.create_ready_load_ids(1, tag_prefix="UNLOAD-AUDIT"))[0]
+        trip_id = await _prepare(client, integration_scope, [load_id])
+        await _start(client, trip_id)
+        drop = _stop(await _load(client, load_id), "DROP")
+        arrived = await client.post(
+            f"/api/v1/trips/{trip_id}/loads/{load_id}/stops/{drop['id']}/arrival",
+            headers=AUTH_HEADERS,
+            json={"source": "dispatcher_manual"},
+        )
+        assert arrived.status_code == 200, arrived.text
+        with _fail_unloading_audit():
+            with pytest.raises(RuntimeError, match="unloading audit flush failure"):
+                await client.post(
+                    f"/api/v1/trips/{trip_id}/loads/{load_id}/stops/{drop['id']}/unloading-started",
+                    headers=AUTH_HEADERS,
+                    json={"source": "dispatcher_manual"},
+                )
+        remaining = await _rows(
+            "SELECT count(*)::int AS n FROM load_stop_actions WHERE load_stop_id = :sid",
+            {"sid": drop["id"]},
+        )
+        assert remaining[0]["n"] == 0
+        audits = await _audits(int(drop["id"]))
+        assert [row["action"] for row in audits] == ["stop_arrived"]
+        assert (await _rows("SELECT arrived_at FROM load_stops WHERE id = :sid", {"sid": drop["id"]}))[0][
+            "arrived_at"
+        ] is not None

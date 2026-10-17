@@ -13,7 +13,11 @@ from app.schemas.custody import (
     TakeCustodyBody,
     YardHandoffBody,
 )
-from app.schemas.load_stop_execution import StopExecutionBody, StopExecutionResponse
+from app.schemas.load_stop_execution import (
+    StopExecutionBody,
+    StopExecutionResponse,
+    UnloadingExecutionResponse,
+)
 from app.schemas.trip_read import (
     AddTripLoadBody,
     CreatePlannedTripBody,
@@ -299,6 +303,70 @@ async def record_stop_departure(
     actor_user_id, actor_label = _stop_execution_actor(user)
     rid = getattr(request.state, "request_id", None)
     out = await load_stop_execution.record_stop_departure(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        stop_id,
+        body,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=str(rid) if rid else None,
+    )
+    await db.commit()
+    return out
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/stops/{stop_id}/unloading-started",
+    response_model=UnloadingExecutionResponse,
+)
+async def record_unloading_started(
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> UnloadingExecutionResponse:
+    """Record unloading start once. Does not change custody, membership, or Trip status."""
+    actor_user_id, actor_label = _stop_execution_actor(user)
+    rid = getattr(request.state, "request_id", None)
+    out = await load_stop_execution.record_unloading_started(
+        db,
+        tenant_id,
+        trip_id,
+        load_id,
+        stop_id,
+        body,
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
+        request_id=str(rid) if rid else None,
+    )
+    await db.commit()
+    return out
+
+
+@router.post(
+    "/{trip_id}/loads/{load_id}/stops/{stop_id}/unloading-completed",
+    response_model=UnloadingExecutionResponse,
+)
+async def record_unloading_completed(
+    trip_id: int,
+    load_id: int,
+    stop_id: int,
+    body: StopExecutionBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> UnloadingExecutionResponse:
+    """Record unloading completion once, after start. Does not deliver the Load."""
+    actor_user_id, actor_label = _stop_execution_actor(user)
+    rid = getattr(request.state, "request_id", None)
+    out = await load_stop_execution.record_unloading_completed(
         db,
         tenant_id,
         trip_id,

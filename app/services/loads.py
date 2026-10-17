@@ -436,7 +436,7 @@ async def get_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | Non
             selectinload(Load.customs_snapshot),
             selectinload(Load.truck),
             selectinload(Load.trailer),
-            selectinload(Load.stops),
+            selectinload(Load.stops).selectinload(LoadStop.actions),
         )
         .where(Load.id == load_id, Load.tenant_id == tenant_id)
     )

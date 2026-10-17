@@ -1018,13 +1018,13 @@ export type StopExecutionResult = {
   membership_status_within_trip: string;
 };
 
-async function postStopExecution(
+async function postStopExecution<T>(
   tripId: number,
   loadId: number,
   stopId: number,
-  kind: "arrival" | "departure",
+  kind: "arrival" | "departure" | "unloading-started" | "unloading-completed",
   body: StopExecutionBody,
-): Promise<StopExecutionResult> {
+): Promise<T> {
   const res = await fetchWithTenant(
     `${API_BASE}/trips/${tripId}/loads/${loadId}/stops/${stopId}/${kind}`,
     {
@@ -1033,7 +1033,7 @@ async function postStopExecution(
       body: JSON.stringify(body),
     },
   );
-  return handle<StopExecutionResult>(res);
+  return handle<T>(res);
 }
 
 export function recordStopArrival(
@@ -1042,7 +1042,7 @@ export function recordStopArrival(
   stopId: number,
   body: StopExecutionBody,
 ): Promise<StopExecutionResult> {
-  return postStopExecution(tripId, loadId, stopId, "arrival", body);
+  return postStopExecution<StopExecutionResult>(tripId, loadId, stopId, "arrival", body);
 }
 
 export function recordStopDeparture(
@@ -1051,7 +1051,30 @@ export function recordStopDeparture(
   stopId: number,
   body: StopExecutionBody,
 ): Promise<StopExecutionResult> {
-  return postStopExecution(tripId, loadId, stopId, "departure", body);
+  return postStopExecution<StopExecutionResult>(tripId, loadId, stopId, "departure", body);
+}
+
+export type UnloadingExecutionResult = StopExecutionResult & {
+  unloading_started_at: string | null;
+  unloading_completed_at: string | null;
+};
+
+export function recordUnloadingStarted(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<UnloadingExecutionResult> {
+  return postStopExecution<UnloadingExecutionResult>(tripId, loadId, stopId, "unloading-started", body);
+}
+
+export function recordUnloadingCompleted(
+  tripId: number,
+  loadId: number,
+  stopId: number,
+  body: StopExecutionBody,
+): Promise<UnloadingExecutionResult> {
+  return postStopExecution<UnloadingExecutionResult>(tripId, loadId, stopId, "unloading-completed", body);
 }
 
 export async function postTripExecutionSignal(tripId: number, body: TripExecutionSignalBody): Promise<TripDetail> {
@@ -3733,6 +3756,8 @@ export type LoadStopRead = {
   scheduled_at?: string | null;
   arrived_at?: string | null;
   departed_at?: string | null;
+  unloading_started_at?: string | null;
+  unloading_completed_at?: string | null;
   notes?: string | null;
   commodity_notes?: string | null;
   created_at?: string | null;

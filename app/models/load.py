@@ -194,6 +194,25 @@ class LoadStop(Base):
     load = relationship("Load", back_populates="stops")
     actions = relationship("LoadStopAction", back_populates="load_stop", cascade="all, delete-orphan")
 
+    def _loaded_action_occurred_at(self, action_type: str) -> datetime | None:
+        """Read an already-loaded action time. Does not lazy-load the relationship."""
+        from sqlalchemy import inspect as sa_inspect
+
+        if "actions" in sa_inspect(self).unloaded:
+            return None
+        for action in self.actions or []:
+            if action.action_type == action_type:
+                return action.occurred_at
+        return None
+
+    @property
+    def unloading_started_at(self) -> datetime | None:
+        return self._loaded_action_occurred_at("unloading_started")
+
+    @property
+    def unloading_completed_at(self) -> datetime | None:
+        return self._loaded_action_occurred_at("unloading_completed")
+
 
 class LoadStopAction(Base):
     """Stop-level actions: live_load, drop_trailer, hook_trailer, relay, yard_move."""
