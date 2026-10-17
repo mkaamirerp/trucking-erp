@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.authz.enforce import require_pilot_capability
 from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -79,7 +80,7 @@ async def promote_load_workspace_draft(
     draft_id: uuid.UUID,
     payload: LoadWorkspaceDraftPromote,
     tenant_id: int = Depends(require_tenant),
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> LoadWorkspaceDraftPromoteOut:
     result = await promote_workspace_draft(

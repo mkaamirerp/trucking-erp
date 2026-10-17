@@ -26,7 +26,9 @@ from app.services.load_workspace_draft import (
     get_workspace_draft,
     update_workspace_draft,
 )
+from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.load_workspace_draft_promotion import promote_workspace_draft
+from fastapi import HTTPException
 from tests.support.demo_clone_integration import demo_clone_active, install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
@@ -192,6 +194,18 @@ async def test_http_create_get_update_on_demo_clone() -> None:
                 os.environ["TEST_BYPASS_AUTH"] = old_bypass
 
 
+def test_mapper_rejects_invalid_rate() -> None:
+    with pytest.raises(DraftJsonMappingError) as exc:
+        draft_json_to_load_create({"rate": "not-a-number"})
+    assert exc.value.field == "rate"
+
+
+def test_mapper_rejects_invalid_reference_entry() -> None:
+    with pytest.raises(DraftJsonMappingError) as exc:
+        draft_json_to_load_create({"loadReferences": [{"kind": "po"}]})
+    assert exc.value.field.startswith("loadReferences")
+
+
 @pytest.mark.asyncio
 async def test_service_promote_creates_one_load_with_origin_link() -> None:
     engine, factory = _session()
@@ -275,6 +289,83 @@ async def test_service_promote_creates_one_load_with_origin_link() -> None:
                 if load_id is not None:
                     await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
                 await db.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promotion_idempotency_key_conflict_across_drafts() -> None:
+    engine, factory = _session()
+    draft_a_id = draft_b_id = None
+    load_id = None
+    shared_key = f"shared-{uuid.uuid4().hex}"
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            draft_a = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"A-{uuid.uuid4().hex[:6]}"},
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_a_id = draft_a.id
+            draft_b = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"B-{uuid.uuid4().hex[:6]}"},
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_b_id = draft_b.id
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            first = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_a_id,
+                LoadWorkspaceDraftPromote(expected_concurrency_version=1, promotion_idempotency_key=shared_key),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = first.load_id
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_b_id,
+                    LoadWorkspaceDraftPromote(expected_concurrency_version=1, promotion_idempotency_key=shared_key),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 409
+            assert exc.value.detail["code"] == "LOAD_WORKSPACE_DRAFT_PROMOTION_IDEMPOTENCY_KEY_CONFLICT"
+    finally:
+        async with factory() as db:
+            if load_id is not None:
+                await db.execute(text("DELETE FROM load_stops WHERE load_id = :id"), {"id": load_id})
+                await db.execute(
+                    text("DELETE FROM load_commercial_evidence WHERE load_id = :id"),
+                    {"id": load_id},
+                )
+                await db.execute(
+                    text("UPDATE loads SET promotion_origin_workspace_draft_id = NULL WHERE id = :id"),
+                    {"id": load_id},
+                )
+            for did in (draft_a_id, draft_b_id):
+                if did is not None:
+                    await db.execute(
+                        text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                        {"id": did},
+                    )
+            if load_id is not None:
+                await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
+            await db.commit()
         await engine.dispose()
 
 

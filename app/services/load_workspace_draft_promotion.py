@@ -15,7 +15,7 @@ from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_workspace_draft import LoadWorkspaceDraft
 from app.schemas.load import LoadCreate
 from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
-from app.services.load_workspace_draft_mapper import draft_json_to_load_create
+from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.loads import (
     _COMMERCIAL_STOP_ATTRS,
     _ensure_unique_load_number,
@@ -50,22 +50,19 @@ async def _idempotent_replay(
                 "promoted_load_id": draft.promoted_load_id,
             },
         )
-    if draft.promotion_idempotency_key == key and draft.status == "draft":
-        # Another in-flight attempt may have failed after setting the key; treat as conflict.
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "LOAD_WORKSPACE_DRAFT_PROMOTION_IN_PROGRESS"},
-        )
-    existing = await db.scalar(
+    key_owner = await db.scalar(
         select(LoadWorkspaceDraft).where(
             LoadWorkspaceDraft.tenant_id == tenant_id,
             LoadWorkspaceDraft.promotion_idempotency_key == key,
-            LoadWorkspaceDraft.status == "promoted",
         )
     )
-    if existing is not None and existing.promoted_load_id is not None:
-        return PromotionResult(
-            draft=existing, load_id=int(existing.promoted_load_id), idempotent_replay=True
+    if key_owner is not None and key_owner.id != draft.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "LOAD_WORKSPACE_DRAFT_PROMOTION_IDEMPOTENCY_KEY_CONFLICT",
+                "owner_draft_id": str(key_owner.id),
+            },
         )
     return None
 
@@ -181,7 +178,13 @@ async def promote_workspace_draft(
             server_version=int(draft.concurrency_version),
         )
 
-    load_create = draft_json_to_load_create(draft.draft_json or {})
+    try:
+        load_create = draft_json_to_load_create(draft.draft_json or {})
+    except DraftJsonMappingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "LOAD_WORKSPACE_DRAFT_MAPPING_INVALID", "field": exc.field, "message": str(exc)},
+        ) from exc
     now = datetime.now(timezone.utc)
 
     load = await _insert_load_from_create(
