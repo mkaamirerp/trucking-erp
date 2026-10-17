@@ -1,5 +1,23 @@
 # TruckERP TODO
 
+## Module onboarding / isolation architecture audit — deferred follow-up (2026-10-17)
+
+**Status:** AUDIT PUBLISHED; implementation pending separate owner review and approval. Do not interrupt active Casbin or Load/Dispatch development.
+
+**Canonical audit:** [docs/module_onboarding_audit.md](docs/module_onboarding_audit.md)  
+**Frozen publication:** [commit 19822b3](https://github.com/mkaamirerp/trucking-erp/blob/19822b3a9b95ab7f842b6112ce9d9149ab70ff9d/docs/module_onboarding_audit.md)
+
+Follow-up queue (not authorized for implementation):
+- **P0 — Tenant safety CI:** Verify and repair stale scan paths in `ci_tenant_safety_grep.sh` and `test_no_platform_db_in_tenant_code.py`; distinguish legitimate platform-DB uses from forbidden tenant-path dependencies. Add positive/negative CI regression proofs.
+- **P0 — Automated shared-core STOP gate:** Design a guard for changes to shared models, schemas, routing, authorization, and cross-module contracts. Require independent owner approval and regression/impact review; a self-written `CORE-CHANGE:` commit marker alone is insufficient, especially for direct pushes to `main`.
+- **P1 — Tenant migration orchestration:** Inventory actual active tenants and migration heads; design read-only/dry-run preflight and guarded sequential migrations with backups, failure isolation, and operator approval. Do not perform fleet-wide migrations or alter historical Alembic trees during this planning step.
+- **P2 — Frontend decoupling:** Use module-scoped API clients and lazy route loading for new modules; refactor existing `api.ts` / `App.tsx` incrementally with tests, not as a mass rewrite.
+- **Cross-cutting acceptance:** Explicitly distinguish change isolation, runtime failure isolation, and deployment isolation. Preserve existing behavior; do not claim that CI guards or lazy loading alone give independent backend deployments.
+
+**Next action:** Prepare a bounded P0 implementation proposal and regression matrix for owner review before any code/config/migration changes. Follow `AGENTS.md` STOP rule. No production deployment.
+
+---
+
 ## BVD import staging — hardening (post-rollout)
 
 **Status:** TODO — follow-up only; do not side-track staging rollout.
