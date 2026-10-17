@@ -75,7 +75,7 @@ Status vocabulary:
 | 15 | I9 | Load audit trail incomplete | 🟠 PARTIAL | Stop/commercial audit hooks and I26 atomic money audit implemented; full mutation/actor/request coverage not proven. | Finish audit matrix and required gaps |
 | 16 | I10 | Unknown `Load.status` → Ready on legacy board | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Unknown legacy statuses moved to explicit unknown bucket in reported release. | Verify no unknown status appears Ready |
 | 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Open planned Trip lookup and Load UI discoverability included in reported release. | Verify live planned Trip navigation |
-| 18 | I14 | Custody → Trip close operator workflow | 🟠 PARTIAL | Slice 1 — yard handoff and Trip completion UI: implemented and code-reviewed (`6ac67fa`). Slice 2 — final customer delivery: implemented and code-reviewed through `f2c9762`. Per-Load custody transitions and TripLoad membership closure are implemented. Trip completion remains a separate action. `Load.status` remains unchanged. No automatic next-Trip activation. **Stop execution:** arrival/departure implemented and code-reviewed at `4560245` (existing PICKUP/DROP/DELIVERY stops; once-only timestamps and required atomic audit), not production-deployed. **Still open:** production deployment, live operator verification, unloading actions, and POD evidence. | Do not treat I14 as production-live. Next product gap is unloading actions; stop arrival/departure needs live verification, not another design cycle. |
+| 18 | I14 | Custody → Trip close operator workflow | 🟠 PARTIAL | Slice 1 — yard handoff and Trip completion UI: implemented and code-reviewed (`6ac67fa`). Slice 2 — final customer delivery: implemented and code-reviewed through `f2c9762`. Per-Load custody transitions and TripLoad membership closure are implemented. Trip completion remains a separate action. `Load.status` remains unchanged. No automatic next-Trip activation. **Stop execution:** arrival/departure implemented and code-reviewed at `4560245` (existing PICKUP/DROP/DELIVERY stops; once-only timestamps and required atomic audit), not production-deployed. **Unloading V1:** start/completion code-reviewed at `41dde673` using `load_stop_actions`, required atomic audit, and no schema migration. **Still open:** production deployment, live operator verification, and POD evidence. | Do not treat I14 as production-live. Next product gap is POD evidence; stop execution and unloading need live verification. |
 | 19 | I15 | Block silent assignment swap on `in_progress` | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | In-progress assignment-change guard included in reported release; test evidence exists. | Verify lock and controlled exceptions |
 | 20 | I16 | Decision 10 future-assignment conflict guard | 🟠 PARTIAL | Decision 10 overlap guard implemented for bounded time windows; truck-only/trailer-only and tenant-isolation coverage remains thin. | Complete assignment overlap cases |
 | 21 | I17 | Current/open TripLoad row selection contract | 🟠 PARTIAL | Current/open TripLoad selection improvements included; broader lifecycle membership resolution remains unproven. | Complete lifecycle scenario and tests |
@@ -87,7 +87,7 @@ Status vocabulary:
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Next Integrity work:** Verify the reported isolated production release and close outstanding Integrity acceptance gaps. I14 custody handoff, per-Load final delivery, and separate Trip completion are code-reviewed on `main` through `f2c9762`; stop arrival/departure are code-reviewed on `main` at `4560245` (required audit in the timestamp transaction). Production deployment and live operator verification are still open, as are unloading actions and POD evidence. I5 cancellation, I6 Rate Confirmation evidence gate, I8 Decimal money boundary, I9 audit completeness, I16/I17 edge cases, and I18–I22 parser/inbox remain open or partial. **Load Integrity is not complete.** **0B data migration and 0C operator-surface retirement are not authorized.** No resumption of the 107-tenant DW migration.
+**Next Integrity work:** Verify the reported isolated production release and close outstanding Integrity acceptance gaps. I14 custody handoff, per-Load final delivery, and separate Trip completion are code-reviewed on `main` through `f2c9762`; stop arrival/departure are code-reviewed on `main` at `4560245` (required audit in the timestamp transaction). Unloading V1 is code-reviewed at `41dde673` (start/completion with required audit). Production deployment and live operator verification remain open, as does POD evidence. I5 cancellation, I6 Rate Confirmation evidence gate, I8 Decimal money boundary, I9 audit completeness, I16/I17 edge cases, and I18–I22 parser/inbox remain open or partial. **Load Integrity is not complete.** **0B data migration and 0C operator-surface retirement are not authorized.** No resumption of the 107-tenant DW migration.
 
 ---
 
@@ -160,7 +160,7 @@ Primary detail: `load_trip/MASTER.md`.
 ## 3. Trip ownership
 
 
-**Implementation state:** ✅ planned/assigned/in_progress/completed APIs shipped. 🟠 I14 custody handoff, per-Load final delivery, and separate Trip completion are code-reviewed on `main` through `f2c9762` and are not production-deployed. Stop arrival/departure are code-reviewed on `main` at `4560245` but not deployed; unloading and POD remain open.
+**Implementation state:** ✅ planned/assigned/in_progress/completed APIs shipped. 🟠 I14 custody handoff, per-Load final delivery, and separate Trip completion are code-reviewed on `main` through `f2c9762` and are not production-deployed. Stop arrival/departure are code-reviewed on `main` at `4560245` but not deployed; unloading V1 is code-reviewed at `41dde673` but not deployed; POD remains open.
 ### Trip owns
 
 - trip number
@@ -567,7 +567,7 @@ Primary detail: multi-Trip rules in §13A; custody in §12 / Decision 12.
 ## 12. Custody / terminal / handoff
 
 
-**Implementation state:** 🟠 I14 operator custody path is code-reviewed on `main` through `f2c9762` (yard handoff, per-Load final delivery, separate Trip completion). Not production-deployed. Stop arrival/departure are code-reviewed on `main` at `4560245` but not deployed; unloading and POD remain open.
+**Implementation state:** 🟠 I14 operator custody path is code-reviewed on `main` through `f2c9762` (yard handoff, per-Load final delivery, separate Trip completion). Not production-deployed. Stop arrival/departure are code-reviewed on `main` at `4560245` but not deployed; unloading V1 is code-reviewed at `41dde673` but not deployed; POD remains open.
 **Lock:**
 
 - Custody is **separate** from commercial Load state and Trip header lifecycle.
@@ -1455,7 +1455,7 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 | 11 | Parse context drift | ⬜ |
 | 12 | TripLoad requires ready | ⬜ |
 | 13 | Planned Trip discoverability | ⬜ |
-| 14 | Custody→complete workflow | 🟠 PARTIAL — slices through `f2c9762` code-reviewed; deploy, live verification, unloading, and POD open; stop arrival/departure code-reviewed at `4560245` |
+| 14 | Custody→complete workflow | 🟠 PARTIAL — slices through `f2c9762` code-reviewed; deploy, live verification, and POD open; stop arrival/departure code-reviewed at `4560245`, unloading V1 at `41dde673` |
 | 15 | In-progress assignment immutability | ⬜ |
 | 16 | Decision 10 conflict guard | ⬜ |
 | 17 | Current TripLoad row selection | ⬜ |
