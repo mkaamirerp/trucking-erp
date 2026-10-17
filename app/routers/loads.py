@@ -229,7 +229,7 @@ async def cancel_load(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Commercial cancel — preserves load row, TripLoad, and custody history (Issue I5)."""
+    """Commercial cancel — preserves load row and history; closes OPEN TripLoads (Issue I5)."""
     load = await loads_service.cancel_load(
         db,
         tenant_id,

@@ -16,7 +16,11 @@ os.environ.setdefault("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "postgresql://test:test@db.example.invalid:5432/test"
 
-from app.constants.trip_dispatch import TRIP_CONTAINER_STATUS_IN_PROGRESS
+from app.constants.trip_dispatch import (
+    TRIP_CONTAINER_STATUS_IN_PROGRESS,
+    TRIP_CONTAINER_STATUS_PLANNED,
+    TRIP_LOAD_STATUS_WITHIN_REMOVED,
+)
 from app.core.db_url import to_async_pg_url
 from app.core.integration_db_guard import IntegrationIsolationError, integration_tenant_db_name
 from app.main import app
@@ -225,7 +229,7 @@ class TestLoadCancelIssue5:
         assert r.status_code == 409
         assert _detail_code(r.json()) == "LOAD_CANCEL_UNRESOLVED_CUSTODY"
 
-    async def test_historical_trip_load_preserved(self, issue5_cancel_http) -> None:
+    async def test_open_trip_load_closed_but_row_preserved(self, issue5_cancel_http) -> None:
         load = await issue5_cancel_http.new_draft(
             broker_name_snapshot="Broker",
             broker_load_reference=f"REF-{uuid.uuid4().hex[:8]}",
@@ -241,13 +245,21 @@ class TestLoadCancelIssue5:
         Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
         try:
             async with Session() as session:
-                n = await session.scalar(
+                row = await session.execute(
                     text(
-                        "SELECT count(*)::int FROM trip_loads WHERE trip_id = :tid AND load_id = :lid"
+                        "SELECT status_within_trip, removed_at IS NOT NULL AS removed "
+                        "FROM trip_loads WHERE trip_id = :tid AND load_id = :lid"
                     ),
                     {"tid": trip_id, "lid": load_id},
                 )
-                assert int(n or 0) == 1
+                one = row.one()
+                assert one.status_within_trip == TRIP_LOAD_STATUS_WITHIN_REMOVED
+                assert one.removed is True
+                trip_status = await session.scalar(
+                    text("SELECT status FROM trips WHERE id = :tid"),
+                    {"tid": trip_id},
+                )
+                assert trip_status == TRIP_CONTAINER_STATUS_PLANNED
         finally:
             await engine.dispose()
 

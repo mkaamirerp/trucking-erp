@@ -236,7 +236,7 @@ class LoadMutationConcurrencyBody(BaseModel):
 
 
 class LoadCancelBody(BaseModel):
-    """Commercial cancel — preserves row, TripLoad, and custody history (Issue I5)."""
+    """Commercial cancel — preserves row and audit history; closes OPEN TripLoad memberships (Issue I5)."""
 
     expected_concurrency_version: int = Field(..., ge=1)
     reason: str = Field(..., min_length=1, max_length=2000)

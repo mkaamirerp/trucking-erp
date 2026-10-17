@@ -42,7 +42,10 @@ from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.load_operational_references import sanitize_load_operational_references
-from app.services.trips import _lock_load_for_membership
+from app.services.trips import (
+    _lock_load_for_membership,
+    close_open_trip_load_memberships_for_commercial_cancel,
+)
 from app.utils.pagination import paginate
 
 # Commercial money fields audited on PATCH (Issue 26).
@@ -862,8 +865,9 @@ async def cancel_load(
     request_id: str | None = None,
     source: str = "api",
 ) -> Load:
-    """Commercial cancel — row and history preserved; does not remove TripLoad rows.
+    """Commercial cancel — preserves Load row, TripLoad history, Trip, and custody.
 
+    OPEN TripLoad memberships are closed (removed_at) without cancelling the Trip.
     Lock order: Load FOR UPDATE (same row trips use via _lock_load_for_membership) so cancel
     serializes with TripLoad insert/activate on this load_id.
     """
@@ -937,6 +941,9 @@ async def cancel_load(
         )
 
     await db.flush()
+    memberships_closed = await close_open_trip_load_memberships_for_commercial_cancel(
+        db, tenant_id, load_id
+    )
     refreshed = await get_load(db, tenant_id, load_id)
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
@@ -953,7 +960,10 @@ async def cancel_load(
         changed_fields={
             "status": {"before": status_now, "after": LOAD_COMMERCIAL_STATUS_CANCELLED},
         },
-        context_json={"cancel_reason": reason.strip()},
+        context_json={
+            "cancel_reason": reason.strip(),
+            "open_trip_load_memberships_closed": memberships_closed,
+        },
         best_effort=False,
     )
     await db.commit()
