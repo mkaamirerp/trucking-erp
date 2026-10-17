@@ -26,15 +26,22 @@ from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
+from tests.support.demo_clone_integration import (
+    demo_clone_active,
+    demo_clone_tenant_id,
+    install_demo_clone_tenant_db_override,
+)
 from tests.support.integration_test_resources import integration_scope_context
 
 REQUIRES_DB = not os.environ.get("DATABASE_URL")
 REQUIRES_TENANT_DB = not (os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL"))
 AUTH_HEADERS = {"host": "pytest.truckerp.me"}
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
+# Placeholder platform URL is allowed when a real tenant DB is configured (demo clone E2E).
+_SKIP_WITHOUT_TENANT = _PLACEHOLDER_PLATFORM_DB and REQUIRES_TENANT_DB
 
 pytestmark = [
-    pytest.mark.skipif(REQUIRES_DB or _PLACEHOLDER_PLATFORM_DB, reason="DATABASE_URL not configured"),
+    pytest.mark.skipif(REQUIRES_DB or _SKIP_WITHOUT_TENANT, reason="DATABASE_URL not configured"),
     pytest.mark.skipif(REQUIRES_TENANT_DB, reason="TENANT_DATABASE_URL not configured"),
 ]
 
@@ -67,6 +74,7 @@ def test_bypass_env():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_tenant_db_override(app)
     yield
     clear_current_user_and_tenant_overrides(app)
 
@@ -106,6 +114,29 @@ class TestPodFileValidation:
         with pytest.raises(Exception) as exc:
             classify_pod_bytes(b"not-a-pod")
         assert getattr(exc.value, "code", None) == "INVALID_POD_FILE_TYPE"
+
+    def test_demo_clone_data_and_pod_schema(self) -> None:
+        if not demo_clone_active():
+            pytest.skip("demo clone E2E only")
+
+        async def _check() -> None:
+            pod_table = await _scalar(
+                "select count(*) from information_schema.tables "
+                "where table_schema = 'public' and table_name = 'load_pod_evidence'",
+                {},
+            )
+            assert int(pod_table or 0) == 1
+            loads = await _scalar(
+                "select count(*) from loads where tenant_id = :t",
+                {"t": demo_clone_tenant_id()},
+            )
+            assert int(loads or 0) >= 200
+            links = await _scalar("select count(*) from trip_loads", {})
+            assert int(links or 0) > 0
+
+        import asyncio
+
+        asyncio.run(_check())
 
 
 @contextmanager

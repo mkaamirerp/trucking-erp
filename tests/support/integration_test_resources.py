@@ -54,7 +54,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.db_url import to_async_pg_url
 from app.core.integration_db_guard import IntegrationIsolationError
+from tests.support.demo_clone_integration import demo_clone_active, demo_clone_tenant_id
 from tests.support.integration_isolation import (
+    allowed_integration_db_names,
     assert_mutating_integration_allowed,
     database_name_from_url,
     integration_tenant_db_name,
@@ -129,6 +131,14 @@ class IntegrationTestScope:
     async def activate(self) -> None:
         self.tenant_url = require_integration_tenant_database_url(context=self.context)
         db_name = database_name_from_url(self.tenant_url)
+        if demo_clone_active():
+            allowed = allowed_integration_db_names()
+            if db_name not in allowed:
+                raise IntegrationIsolationError(
+                    f"demo clone database {db_name!r} is not allowed ({sorted(allowed)})."
+                )
+            self.tenant_id = demo_clone_tenant_id()
+            return
         expected = integration_tenant_db_name()
         if db_name != expected:
             raise IntegrationIsolationError(

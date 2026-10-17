@@ -930,6 +930,9 @@ class LiveCommands:
                     "TRUCKERP_INTEGRATION_ALLOWED_DB_NAMES": (env or {}).get(
                         "TRUCKERP_INTEGRATION_ALLOWED_DB_NAMES", database
                     ),
+                    "TRUCKERP_INTEGRATION_TENANT_DB": database,
+                    "TRUCKERP_DEMO_CLONE_TENANT_ID": "53",
+                    "TEST_BYPASS_AUTH": "1",
                 }
             )
             assert_isolated_target(child["TENANT_DATABASE_URL"])
