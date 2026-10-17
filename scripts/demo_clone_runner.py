@@ -99,7 +99,7 @@ DISABLED_SIDE_EFFECTS = {
     "TWILIO_AUTH_TOKEN": "",
     "SENDGRID_API_KEY": "",
     "DATABASE_URL": "postgresql://test:test@db.example.invalid:5432/test",
-    "POSTGRES_ADMIN_URL": "postgresql://test:test@db.example.invalid:5432/postgres",
+    "POSTGRES_ADMIN_URL": "postgresql://test:test@db.example.invalid:5432/test",
 }
 CREDENTIAL_MARKERS = (
     "SMTP",
