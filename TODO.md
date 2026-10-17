@@ -1,20 +1,21 @@
 # TruckERP TODO
 
-## Module onboarding / isolation architecture audit — deferred follow-up (2026-10-17)
+## AGY architecture audit + API runtime safety — implementation handoff (2026-10-17)
 
-**Status:** AUDIT PUBLISHED; implementation pending separate owner review and approval. Do not interrupt active Casbin or Load/Dispatch development.
+**Status:** AUDIT / PLAN SAVED; code changes, migrations, deployment and implementation commits remain **not started** in this documentation update. AGY quota was exhausted before its revised security plan could be executed.
 
-**Canonical audit:** [docs/module_onboarding_audit.md](docs/module_onboarding_audit.md)  
-**Frozen publication:** [commit 19822b3](https://github.com/mkaamirerp/trucking-erp/blob/19822b3a9b95ab7f842b6112ce9d9149ab70ff9d/docs/module_onboarding_audit.md)
+**Implementation handoff / prioritized work register:** [docs/AGY_AUDIT_IMPLEMENTATION_HANDOFF.md](docs/AGY_AUDIT_IMPLEMENTATION_HANDOFF.md)  
+**Original AGY audit (historical evidence):** [docs/module_onboarding_audit.md](docs/module_onboarding_audit.md) — [frozen publication](https://github.com/mkaamirerp/trucking-erp/blob/19822b3a9b95ab7f842b6112ce9d9149ab70ff9d/docs/module_onboarding_audit.md)
 
-Follow-up queue (not authorized for implementation):
-- **P0 — Tenant safety CI:** Verify and repair stale scan paths in `ci_tenant_safety_grep.sh` and `test_no_platform_db_in_tenant_code.py`; distinguish legitimate platform-DB uses from forbidden tenant-path dependencies. Add positive/negative CI regression proofs.
-- **P0 — Automated shared-core STOP gate:** Design a guard for changes to shared models, schemas, routing, authorization, and cross-module contracts. Require independent owner approval and regression/impact review; a self-written `CORE-CHANGE:` commit marker alone is insufficient, especially for direct pushes to `main`.
-- **P1 — Tenant migration orchestration:** Inventory actual active tenants and migration heads; design read-only/dry-run preflight and guarded sequential migrations with backups, failure isolation, and operator approval. Do not perform fleet-wide migrations or alter historical Alembic trees during this planning step.
-- **P2 — Frontend decoupling:** Use module-scoped API clients and lazy route loading for new modules; refactor existing `api.ts` / `App.tsx` incrementally with tests, not as a mass rewrite.
-- **Cross-cutting acceptance:** Explicitly distinguish change isolation, runtime failure isolation, and deployment isolation. Preserve existing behavior; do not claim that CI guards or lazy loading alone give independent backend deployments.
+**Next ordered work (one bounded slice at a time):**
+- [ ] **P0-A — Environment security gate:** Explicit environment-name allowlists; unknown names fail; strong JWT outside CI/test; safe password-reset/cookie fallbacks; `SSM_ENV=prod` identity and bypass checks **before platform migrations**; isolated subprocess tests. The AGY revised `api_boundary_runtime_safety_verification_plan.md` was a local plan artifact **not committed to docs/**; use the reconstructed handoff and revalidate exact diff.
+- [ ] **P0-B — Read-only tenant schema/revision inventory:** Check all ACTIVE/READY tenants, actual approved Alembic targets, branch/head state, missing columns/tables and compatibility. **Do not run a fleet upgrade.** `app/scripts/tenant_fleet_upgrade_head.py` already exists, and `scripts/tenant_upgrade_head.sh` refuses multi-head `upgrade head`; do not create a duplicate or assume the audit's single-head model.
+- [ ] **P0-C — Silent-green tenant safety CI:** Replace dead-path scanning with live-code coverage, explicit reviewed exceptions and negative tests that prove the gate fails on an actual violation.
+- [ ] **P0-D — Schema/data propagation impact audit:** Map field ownership, relational consumers, alternate write paths, duplicated projections, and reconciliation requirements (begin People → Drivers → Dispatch/Payroll). Migration of schema **does not** automatically sync business values.
+- [ ] **P1 — Provisioning READY validation, migration dry-run/backup/stop policy, Alembic metadata separation, real shared-core owner-approval gate, route/import tests.**
+- [ ] **P2 / HOLD — Fuel cross-DB transaction consistency, multi-worker outbox/SSE, incremental frontend/Casbin navigation.** Do not automatically rewrite Payroll `drivers.id` FKs, bulk rename routes, delete legacy Alembic, or loosen mandatory security settings.
 
-**Next action:** Prepare a bounded P0 implementation proposal and regression matrix for owner review before any code/config/migration changes. Follow `AGENTS.md` STOP rule. No production deployment.
+**STOP:** Preserve `AGENTS.md`, active Casbin and Load/Dispatch contracts. No code writes or migrations without separate owner approval. Update statuses only after evidence and regression results are recorded in the handoff.
 
 ---
 
