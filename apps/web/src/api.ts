@@ -116,6 +116,13 @@ export type LoadWorkspaceDraft = {
   updated_by_platform_user_id: string | null;
   created_at: string;
   updated_at: string;
+  pdf_upload_state?: string;
+  pdf_filename?: string | null;
+  pdf_sha256?: string | null;
+  pdf_size_bytes?: number | null;
+  accepted_parse_json?: Record<string, unknown> | null;
+  accepted_parse_schema_version?: string | null;
+  accepted_parse_pdf_sha256?: string | null;
 };
 
 export type LoadWorkspaceDraftPromoteResult = {
@@ -1378,6 +1385,45 @@ export async function parseLoadWorkspaceDocument(
     body: fd,
   });
   return handle<LoadDocumentParseResponse>(res);
+}
+
+export type LoadWorkspaceDraftParseResult = {
+  draft: LoadWorkspaceDraft;
+  parse: LoadDocumentParseResponse;
+};
+
+/** Parse + persist rate-confirmation PDF on a workspace draft (does not create a Load). */
+export async function parseLoadWorkspaceDraftDocument(
+  draftId: string,
+  file: File,
+  opts?: { expectedConcurrencyVersion?: number },
+) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (opts?.expectedConcurrencyVersion != null) {
+    fd.append("expected_concurrency_version", String(opts.expectedConcurrencyVersion));
+  }
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/parse-document`,
+    { method: "POST", body: fd },
+  );
+  return handle<LoadWorkspaceDraftParseResult>(res);
+}
+
+/** Object URL for the saved draft PDF (caller must revoke when done). */
+export async function fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(
+  draftId: string,
+): Promise<string | null> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/rate-confirmation-pdf`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    await handle(res);
+    return null;
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 /** Load Lab — persisted extraction run (tenant DB). */

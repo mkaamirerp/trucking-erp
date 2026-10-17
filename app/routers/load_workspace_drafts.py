@@ -4,21 +4,29 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.authz.enforce import require_pilot_capability
+from app.core.storage import download_response
 from app.deps.auth import CurrentUser, get_current_user
-from app.deps.tenant import require_tenant
+from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load_workspace_draft import (
     LoadWorkspaceDraftCreate,
     LoadWorkspaceDraftOut,
+    LoadWorkspaceDraftParseOut,
     LoadWorkspaceDraftPromote,
     LoadWorkspaceDraftPromoteOut,
     LoadWorkspaceDraftUpdate,
 )
 from app.services import load_workspace_draft as draft_service
+from app.services.load_workspace_draft_document import (
+    LOAD_WORKSPACE_DRAFT_PDF_MODULE,
+    get_workspace_draft_pdf_row,
+    parse_and_attach_workspace_draft_pdf,
+)
 from app.services.load_workspace_draft_promotion import promote_workspace_draft
 
 router = APIRouter(prefix="/load-workspace-drafts", tags=["load-workspace-drafts"])
@@ -73,6 +81,50 @@ async def update_load_workspace_draft(
         updated_by_platform_user_id=_platform_user_id(user),
     )
     return LoadWorkspaceDraftOut.model_validate(row)
+
+
+@router.post("/{draft_id}/parse-document", response_model=LoadWorkspaceDraftParseOut)
+async def parse_workspace_draft_document(
+    draft_id: uuid.UUID,
+    file: UploadFile = File(...),
+    expected_concurrency_version: int | None = Form(None),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> LoadWorkspaceDraftParseOut:
+    """Parse a rate-confirmation PDF, persist file + accepted parse on the draft (no Load row)."""
+    draft, parse = await parse_and_attach_workspace_draft_pdf(
+        db,
+        tenant_id,
+        tenant_slug,
+        draft_id,
+        file,
+        updated_by_platform_user_id=_platform_user_id(user),
+        expected_concurrency_version=expected_concurrency_version,
+    )
+    return LoadWorkspaceDraftParseOut(
+        draft=LoadWorkspaceDraftOut.model_validate(draft),
+        parse=parse,
+    )
+
+
+@router.get("/{draft_id}/rate-confirmation-pdf")
+async def download_workspace_draft_rate_confirmation_pdf(
+    draft_id: uuid.UUID,
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    _user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> Response:
+    row = await get_workspace_draft_pdf_row(db, tenant_id, draft_id)
+    return download_response(
+        row.pdf_storage_key,
+        module=LOAD_WORKSPACE_DRAFT_PDF_MODULE,
+        tenant_slug=tenant_slug,
+        content_type="application/pdf",
+        filename=row.pdf_filename or "rate-confirmation.pdf",
+    )
 
 
 @router.post("/{draft_id}/promote", response_model=LoadWorkspaceDraftPromoteOut)

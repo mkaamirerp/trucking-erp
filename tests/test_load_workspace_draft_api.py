@@ -293,6 +293,89 @@ async def test_service_promote_creates_one_load_with_origin_link() -> None:
 
 
 @pytest.mark.asyncio
+async def test_promote_creates_commercial_evidence_when_pdf_ready() -> None:
+    engine, factory = _session()
+    draft_id = None
+    load_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"EV-{uuid.uuid4().hex[:8]}"},
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+            await db.execute(
+                text(
+                    """
+                    UPDATE load_workspace_drafts
+                    SET pdf_upload_state = 'ready',
+                        pdf_storage_key = 'pytest/fake-rate-con.pdf',
+                        pdf_sha256 = 'abc123',
+                        pdf_filename = 'rate-con.pdf',
+                        accepted_parse_json = '{"document":{"filename":"rate-con.pdf"},"extracted":{},"raw_text":"line1","warnings":[]}'::jsonb,
+                        accepted_parse_schema_version = 'load_document_parse_response_v1',
+                        accepted_parse_pdf_sha256 = 'abc123'
+                    WHERE tenant_id = :tenant_id AND id = :id
+                    """
+                ),
+                {"tenant_id": tenant_id, "id": draft_id},
+            )
+            await db.commit()
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=f"ev-{uuid.uuid4().hex}",
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+
+        async with factory() as db:
+            count = await db.scalar(
+                text(
+                    "SELECT COUNT(*) FROM load_commercial_evidence WHERE load_id = :lid AND workspace_draft_id = :did"
+                ),
+                {"lid": load_id, "did": draft_id},
+            )
+            assert int(count or 0) == 1
+    finally:
+        if load_id is not None or draft_id is not None:
+            async with factory() as db:
+                if load_id is not None:
+                    await db.execute(text("DELETE FROM load_stops WHERE load_id = :id"), {"id": load_id})
+                    await db.execute(
+                        text("DELETE FROM load_commercial_evidence WHERE load_id = :id"),
+                        {"id": load_id},
+                    )
+                    await db.execute(
+                        text(
+                            "UPDATE loads SET promotion_origin_workspace_draft_id = NULL WHERE id = :id"
+                        ),
+                        {"id": load_id},
+                    )
+                    await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
+                if draft_id is not None:
+                    await db.execute(
+                        text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                        {"id": draft_id},
+                    )
+                await db.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_promotion_idempotency_key_conflict_across_drafts() -> None:
     engine, factory = _session()
     draft_a_id = draft_b_id = None

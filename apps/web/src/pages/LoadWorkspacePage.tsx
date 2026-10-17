@@ -12,7 +12,9 @@ import {
   confirmLoadDocumentSnapshot,
   createPlannedTrip,
   createLoadWorkspaceDraft,
+  fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
   getLoadWorkspaceDraft,
+  parseLoadWorkspaceDraftDocument,
   promoteLoadWorkspaceDraft,
   parseLoadWorkspaceDraftVersionConflict,
   updateLoadWorkspaceDraft,
@@ -68,6 +70,11 @@ import {
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
+import {
+  draftHasReadyRateConfirmationPdf,
+  workspacePdfHydrationUxFromDraft,
+  workspaceReferenceTextFromDraft,
+} from "@/loadWorkspace/workspaceDraftPdfRestore";
 import {
   createEmptyParseHydrationState,
   registerManualParseFieldEdit,
@@ -424,6 +431,8 @@ export default function LoadWorkspacePage() {
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
+  const [workspaceReferenceText, setWorkspaceReferenceText] = useState("");
+  const [workspacePdfPreviewUrl, setWorkspacePdfPreviewUrl] = useState<string | null>(null);
   const parseHydrationRef = useRef<ParseHydrationState>(createEmptyParseHydrationState());
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
@@ -441,10 +450,39 @@ export default function LoadWorkspacePage() {
   }, [load?.id]);
 
   const docLines = useMemo(() => {
-    const raw = internalNotes || "";
+    const raw = workspaceReferenceText.trim() ? workspaceReferenceText : internalNotes || "";
     if (!raw.trim()) return [];
     return raw.split(/\r?\n/);
-  }, [internalNotes]);
+  }, [workspaceReferenceText, internalNotes]);
+
+  const replaceWorkspacePdfPreviewUrl = useCallback((next: string | null) => {
+    setWorkspacePdfPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (workspacePdfPreviewUrl) URL.revokeObjectURL(workspacePdfPreviewUrl);
+    };
+  }, [workspacePdfPreviewUrl]);
+
+  const restoreDraftPdfArtifacts = useCallback(
+    async (draft: LoadWorkspaceDraft) => {
+      setWorkspaceReferenceText(workspaceReferenceTextFromDraft(draft));
+      const ux = workspacePdfHydrationUxFromDraft(draft);
+      setParseWarnings(ux.warnings);
+      setLastParseAppliedLabels(ux.appliedLabels);
+      if (draftHasReadyRateConfirmationPdf(draft)) {
+        const url = await fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(draft.id);
+        replaceWorkspacePdfPreviewUrl(url);
+      } else {
+        replaceWorkspacePdfPreviewUrl(null);
+      }
+    },
+    [replaceWorkspacePdfPreviewUrl],
+  );
 
   const focusDoc = useCallback(
     (opts: { tokens: string[]; fallbackToken?: string }) => {
@@ -514,11 +552,14 @@ export default function LoadWorkspacePage() {
   }, []);
 
   const applyWorkspaceDraft = useCallback(
-    (draft: LoadWorkspaceDraft) => {
+    (draft: LoadWorkspaceDraft, opts?: { restorePdf?: boolean }) => {
       setWorkspaceDraft(draft);
       hydrateFromWorkspaceFields(workspaceFieldsFromDraftJson(draft.draft_json ?? {}));
+      if (opts?.restorePdf) {
+        void restoreDraftPdfArtifacts(draft);
+      }
     },
-    [hydrateFromWorkspaceFields],
+    [hydrateFromWorkspaceFields, restoreDraftPdfArtifacts],
   );
 
   const hydrateFromLoad = useCallback((l: Load) => {
@@ -780,12 +821,57 @@ export default function LoadWorkspacePage() {
   const onParseWorkspacePdf = useCallback(
     async (file: File) => {
       if (!canWorkspaceParsePdf) return;
+      if (isDraftWorkspace && (!draftIdFromRoute || !workspaceDraft)) return;
       // Load Lab / parser: hydrate commercial fields only — no trip creation, assignment, dispatch_trips, or dispatched status.
       setParseBusy(true);
       setParseWarnings([]);
       setToolbarMessage(null);
       setLastParseAppliedLabels(null);
       try {
+        if (isDraftWorkspace && draftIdFromRoute && workspaceDraft) {
+          const persisted = await parseLoadWorkspaceDraftDocument(file, draftIdFromRoute, {
+            expectedConcurrencyVersion: workspaceDraft.concurrency_version,
+          });
+          const res = persisted.parse;
+          setWorkspaceDraft(persisted.draft);
+          setWorkspaceReferenceText(res.raw_text || "");
+          replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
+          const hydration = await hydrateLoadWorkspaceFromParseResponse(
+            res,
+            {
+              setBrokerNameSnapshot,
+              setBrokerId,
+              setBrokerContactId,
+              setBrokerContacts,
+              setBrokerContactNameSnapshot,
+              setBrokerContactPhoneSnapshot,
+              setBrokerContactEmailSnapshot,
+              setBrokerLoadReference,
+              setLoadReferences,
+              setFreightMode,
+              setEquipmentType,
+              setTrailerType,
+              setTrailerSize,
+              setCommodity,
+              setEstimatedWeight,
+              setTemperatureRequirement,
+              setRate,
+              setCustomerRate,
+              setMiles,
+              setInternalNotes,
+              existingInternalNotes: internalNotes,
+              setDraftStops,
+            },
+            parseHydrationRef.current,
+          );
+          parseHydrationRef.current = hydration.parseHydrationState;
+          setParseWarnings(hydration.warnings);
+          setToolbarMessage({ text: hydration.toolbar.text, tone: hydration.toolbar.tone });
+          setLastParseAppliedLabels(hydration.appliedLabels);
+          setDraftConflict(null);
+          return;
+        }
+
         const res = await parseLoadWorkspaceDocument(file, {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
@@ -824,14 +910,34 @@ export default function LoadWorkspacePage() {
         setToolbarMessage({ text: hydration.toolbar.text, tone });
         setLastParseAppliedLabels(hydration.appliedLabels);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "PDF parse failed";
-        setToolbarMessage({ text: msg, tone: "error" });
+        const c = parseLoadWorkspaceDraftVersionConflict(e);
+        if (c && isDraftWorkspace) {
+          setDraftConflict({ serverVersion: c.server_version });
+          setToolbarMessage({
+            text: "Draft was modified elsewhere — reload before parsing again.",
+            tone: "warning",
+          });
+        } else {
+          const msg = e instanceof Error ? e.message : "PDF parse failed";
+          setToolbarMessage({ text: msg, tone: "error" });
+        }
         setLastParseAppliedLabels(null);
       } finally {
         setParseBusy(false);
       }
     },
-    [canWorkspaceParsePdf, hasIntakeThread, intakeThreadId, internalNotes, isManual, loadIdFromRoute],
+    [
+      canWorkspaceParsePdf,
+      hasIntakeThread,
+      intakeThreadId,
+      internalNotes,
+      isManual,
+      loadIdFromRoute,
+      isDraftWorkspace,
+      draftIdFromRoute,
+      workspaceDraft,
+      replaceWorkspacePdfPreviewUrl,
+    ],
   );
 
   useOperationalRefresh({
@@ -881,7 +987,7 @@ export default function LoadWorkspacePage() {
             setWorkspaceDraft(draft);
             return;
           }
-          applyWorkspaceDraft(draft);
+          applyWorkspaceDraft(draft, { restorePdf: true });
           setCustomsBrokers(customsPaged.items || []);
           setFreightBrokers(brPaged.items || []);
           setDrivers(dr);
@@ -1108,7 +1214,7 @@ export default function LoadWorkspacePage() {
         setError("This workspace draft is no longer editable.");
         return;
       }
-      applyWorkspaceDraft(remote);
+      applyWorkspaceDraft(remote, { restorePdf: true });
       setToolbarMessage({ text: "Loaded latest draft from server.", tone: "neutral" });
     } catch (e: unknown) {
       setToolbarMessage({ text: formatApiErrorMessage(e, "Could not reload draft"), tone: "error" });
@@ -1560,7 +1666,13 @@ export default function LoadWorkspacePage() {
             <Button
               variant="secondary"
               type="button"
-              disabled={saving || markReadyBusy || parseBusy || loading}
+              disabled={
+                saving ||
+                markReadyBusy ||
+                parseBusy ||
+                loading ||
+                (isDraftWorkspace && !workspaceDraft)
+              }
               onClick={() => pdfInputRef.current?.click()}
             >
               {parseBusy ? "Parsing…" : "Upload & parse PDF"}
@@ -1782,15 +1894,32 @@ export default function LoadWorkspacePage() {
             />
             </div>
           ) : (
+            <div className="space-y-2">
+            {workspacePdfPreviewUrl ? (
+              <div className="overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)]">
+                <div className="border-b border-[var(--trk-border)] px-3 py-2">
+                  <span className={wsSectionTitle}>Rate confirmation PDF</span>
+                </div>
+                <iframe
+                  title="Rate confirmation PDF"
+                  src={workspacePdfPreviewUrl}
+                  className="h-[min(42vh,320px)] w-full bg-white"
+                />
+              </div>
+            ) : null}
             <div className="overflow-hidden rounded-lg border border-[var(--trk-border)]">
             <ReferenceTextRail
               title={workspaceMode === "manual" ? "Rate confirmation" : "Source document"}
               hint={
                 workspaceMode === "manual" ? (
-                  <>
-                    Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
-                    Tab fields to highlight lines.
-                  </>
+                  workspaceReferenceText.trim() ? (
+                    <>Extracted PDF text for verification. Tab fields in the form to highlight matching lines.</>
+                  ) : (
+                    <>
+                      Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
+                      Tab fields to highlight lines.
+                    </>
+                  )
                 ) : (
                   <>
                     Text from <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
@@ -1802,6 +1931,7 @@ export default function LoadWorkspacePage() {
               docLineRefs={docLineRefs}
               activeDocLine={activeDocLine}
             />
+            </div>
             </div>
           )}
           {sectionConfig.visible.includes("Notes") ? (

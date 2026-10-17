@@ -8,7 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.load_workspace_draft import LOAD_WORKSPACE_DRAFT_STATUSES
+from app.models.load_workspace_draft import LOAD_WORKSPACE_DRAFT_STATUSES, LOAD_WORKSPACE_PDF_UPLOAD_STATES
+from app.schemas.load_document_parse import LoadDocumentParseResponse
 
 MAX_DRAFT_JSON_BYTES = 512_000
 ALLOWED_SOURCE_CHANNELS = frozenset({"manual", "email_intake", "document_parse"})
@@ -74,6 +75,13 @@ class LoadWorkspaceDraftOut(BaseModel):
     updated_by_platform_user_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    pdf_upload_state: str = "idle"
+    pdf_filename: str | None = None
+    pdf_sha256: str | None = None
+    pdf_size_bytes: int | None = None
+    accepted_parse_json: dict[str, Any] | None = None
+    accepted_parse_schema_version: str | None = None
+    accepted_parse_pdf_sha256: str | None = None
 
     @field_validator("status")
     @classmethod
@@ -81,6 +89,18 @@ class LoadWorkspaceDraftOut(BaseModel):
         if value not in LOAD_WORKSPACE_DRAFT_STATUSES:
             raise ValueError("unexpected draft status")
         return value
+
+    @field_validator("pdf_upload_state")
+    @classmethod
+    def _pdf_upload_state_known(cls, value: str) -> str:
+        if value not in LOAD_WORKSPACE_PDF_UPLOAD_STATES:
+            raise ValueError("unexpected pdf_upload_state")
+        return value
+
+
+class LoadWorkspaceDraftParseOut(BaseModel):
+    draft: LoadWorkspaceDraftOut
+    parse: LoadDocumentParseResponse
 
 
 class LoadWorkspaceDraftPromoteOut(BaseModel):
