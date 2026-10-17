@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "i14_load_pod_evidence"
-down_revision: Union[str, Sequence[str], None] = "dw1c_composite_fk_set_null_optional_columns"
+down_revision: Union[str, Sequence[str], None] = "dw1d_load_commercial_evidence_retention_varchar32"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
