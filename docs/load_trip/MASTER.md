@@ -47,6 +47,23 @@ After an approved architecture change:
 
 # IMPLEMENTATION STATUS / WORK ORDER
 
+## Development checkpoint — 2026-10-17 (gpt-review; NOT DEPLOYED)
+
+**Source of truth for this checkpoint:** reported isolated operator acceptance and reviewed commits; do not confuse code acceptance with production rollout.
+
+| Work | Development status | Evidence | Remaining |
+|---|---|---|---|
+| DW-1 workspace drafts | **CODE COMPLETE / OPERATOR ACCEPTED IN ISOLATION** | CRUD `dfd6333`; promotion `3499036` and `299b06b`; UI `9b15b7f`; original PDF/parse evidence `ef4f38e`; discard/expiry `387b732`; import fix `3281553`; retention-class correction `7241d83`. Reported **10/10** operator steps pass on an isolated copy of demo data after the correction | Production migration/deployment **not authorized**; live product acceptance outstanding |
+| I14 custody / stops / unloading / POD | **IMPLEMENTED IN REPO; LIVE ACCEPTANCE OPEN** | Custody `6ac67fa`, final delivery `f2c9762`, stop execution `4560245`, unloading `41dde67`, POD `2f60200`; integrated with gpt-review in `738743f` | No production deployment; live I14 operator/POD verification still needed |
+| I5 commercial cancellation | **CODE FIX REVIEW ACCEPTED; POLICY PARTIAL** | `7a5a820` closes open TripLoad memberships with `removed_at` while retaining rows/history; does not automatically cancel Trip or rewrite custody | Driver-started edge cases and TONU/deadhead/AR decisions remain owner-owned; live verification pending |
+| I9 Load audit integrity | **IN PROGRESS** | Existing audit hooks and I26 foundations | Cursor working on confirmed mutation/audit gaps; no result claimed yet |
+
+**Git policy:** sole development worktree `/home/admin/trucking_erp` on `gpt-review`; Cursor pushes to `origin/gpt-review`; reviewed integration to `main` requires owner approval. Do not change production data or deploy implicitly.
+
+**Testing rule:** use isolated copies of real `tenant_demo` business data; never write to `tenant_demo`. No new test infrastructure unless separately approved.
+
+
+
 Status vocabulary:
 
 | Mark | Meaning |
@@ -93,7 +110,7 @@ Status vocabulary:
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Next Integrity work (integrated `gpt-review`):** Close acceptance gaps for I14 (custody, stop execution, unloading, POD), **DW-1** workspace draft operator flow, and remaining partial items (I5 cancel policy, I9 audit, I8 decimal, I18–I22 parser/inbox). Continue Casbin/RBAC inspection as a **separate** track (default-off pilot on `main`). **Load Integrity is not complete.** **0B migration and 0C operator-surface retirement are not authorized.** **No production tenant migration or deploy** without owner approval.
+**Next Integrity work (integrated `gpt-review`):** I9 audit integrity is in progress. DW-1 is code complete and isolated operator-accepted (not deployed); I14 remains implemented but awaits live acceptance. Other partial items: I5 cancel policy, I8 decimal, I18–I22 parser/inbox. Continue Casbin/RBAC inspection as a **separate** track (default-off pilot on `main`). **Load Integrity is not complete.** **0B migration and 0C operator-surface retirement are not authorized.** **No production tenant migration or deploy** without owner approval.
 
 ---
 
