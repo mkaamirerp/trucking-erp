@@ -12,10 +12,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.storage import get_storage
 from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_workspace_draft import LoadWorkspaceDraft
-from app.services.load_workspace_draft import get_workspace_draft
-from app.services.load_workspace_draft_document import LOAD_WORKSPACE_DRAFT_PDF_MODULE
+
+# Storage module name — keep in sync with load_workspace_draft_document.LOAD_WORKSPACE_DRAFT_PDF_MODULE
+_LOAD_WORKSPACE_DRAFT_PDF_MODULE = "load_workspace_draft"
 
 MUTABLE_BEFORE_DISCARD = frozenset({"draft", "expired"})
+
+
+async def _fetch_workspace_draft(
+    db: AsyncSession, tenant_id: int, draft_id: uuid.UUID
+) -> LoadWorkspaceDraft | None:
+    return await db.scalar(
+        select(LoadWorkspaceDraft).where(
+            LoadWorkspaceDraft.tenant_id == tenant_id,
+            LoadWorkspaceDraft.id == draft_id,
+        )
+    )
 
 
 def _utc_now() -> datetime:
@@ -106,7 +118,7 @@ async def delete_ephemeral_workspace_draft_pdf(
         return
     if await storage_key_referenced_by_commercial_evidence(db, tenant_id, key):
         return
-    get_storage().delete(key, module=LOAD_WORKSPACE_DRAFT_PDF_MODULE, tenant_slug=tenant_slug)
+    get_storage().delete(key, module=_LOAD_WORKSPACE_DRAFT_PDF_MODULE, tenant_slug=tenant_slug)
 
 
 async def discard_workspace_draft(
@@ -163,7 +175,7 @@ async def discard_workspace_draft(
 async def get_workspace_draft_with_lifecycle(
     db: AsyncSession, tenant_id: int, draft_id: uuid.UUID
 ) -> LoadWorkspaceDraft | None:
-    draft = await get_workspace_draft(db, tenant_id, draft_id)
+    draft = await _fetch_workspace_draft(db, tenant_id, draft_id)
     if draft is None:
         return None
     if await apply_expiry_if_overdue(db, draft):
