@@ -93,10 +93,13 @@ def main() -> None:
         sys.exit(2)
 
     _print_legacy_stderr_notice()
-    tenant_url = asyncio.run(_get_tenant_db_url(slug))
-    os.chdir(PROJECT_ROOT)
-    asyncio.run(_run_tenant_migrations(tenant_url, "head"))
-    print(f"Tenant '{slug}' migrations upgraded to head.")
+    print(
+        "Refusing upgrade head. Tenant graph may have two POD heads. "
+        "Use scripts/tenant_upgrade_revision.sh with i14_load_pod_evidence_x5 or "
+        "i14_load_pod_evidence. See docs/load_trip/POD_MIGRATION_TARGETS.md",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -102,14 +102,23 @@ if ! HEADS_OUT="$(cd /app && alembic -c alembic_tenant.ini heads 2>&1)"; then
   exit 1
 fi
 
-HEAD_COUNT=$(printf "%s\n" "$HEADS_OUT" | grep -c '(head)')
-if [ "${HEAD_COUNT:-0}" -ne 1 ]; then
-  echo "Preflight failed: tenant Alembic must have exactly one head (got: $HEAD_COUNT). Create a merge revision."
+HEAD_IDS="$(printf "%s\n" "$HEADS_OUT" | sed -n 's/^\([A-Za-z0-9_]*\) (head).*/\1/p' | sort)"
+HEAD_COUNT=$(printf "%s\n" "$HEAD_IDS" | grep -c . || true)
+APPROVED_POD_HEADS="$(printf '%s\n' i14_load_pod_evidence i14_load_pod_evidence_x5 | sort)"
+if [ "${HEAD_COUNT:-0}" -eq 1 ]; then
+  echo "  tenant heads: 1"
+elif [ "$HEAD_IDS" = "$APPROVED_POD_HEADS" ]; then
+  echo "  tenant heads: 2 (approved I14 POD split: i14_load_pod_evidence + i14_load_pod_evidence_x5)"
+  echo "  upgrade head is forbidden. Pin the revision:"
+  echo "    x5 (no DW-1):  i14_load_pod_evidence_x5"
+  echo "    dw1c (no POD): i14_load_pod_evidence"
+  echo "    already i14:  do not apply i14_load_pod_evidence_x5"
+else
+  echo "Preflight failed: tenant Alembic heads are not the single head or the approved POD pair (got: $HEAD_COUNT)."
   echo "$HEADS_OUT"
   echo "$STOP_BANNER"
   exit 1
 fi
-echo "  tenant heads: 1"
 
 # 5) Critical read-only safety checks (psql)
 run_count() {

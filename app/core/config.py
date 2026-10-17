@@ -64,8 +64,9 @@ class Settings(BaseSettings):
     # Tenant DB app user credentials (shared, no per-tenant secrets stored in DB)
     tenant_db_app_user: str | None = None
     tenant_db_app_password: str | None = None
-    # Tenant alembic target revision for provisioning; use "head" to always run current migrations
-    tenant_alembic_target_rev: str = "head"
+    # New tenant databases stop at the x5 POD revision so provisioning does not apply DW-1.
+    # Do not set this back to "head" while i14_load_pod_evidence and i14_load_pod_evidence_x5 are both heads.
+    tenant_alembic_target_rev: str = "i14_load_pod_evidence_x5"
     # Auth. No hardcoded JWT default — production/staging fail closed in enforce_jwt_secret_policy().
     jwt_secret: str | None = None
     jwt_algorithm: str = "HS256"

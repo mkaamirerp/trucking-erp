@@ -59,9 +59,8 @@ export TRUCKERP_INTEGRATION_TENANT_SLUG="${TRUCKERP_INTEGRATION_TENANT_SLUG:-pyt
 echo "Fuel pytest: ENVIRONMENT=$ENVIRONMENT TENANT_DATABASE_URL db=$(python3 -c "from urllib.parse import urlparse; import os; print(urlparse(os.environ['TENANT_DATABASE_URL']).path.lstrip('/'))")" >&2
 
 if [[ "${RUN_FUEL_TENANT_MIGRATE:-0}" == "1" ]]; then
-  echo "Running alembic tenant upgrade head on integration DB..." >&2
-  export ALEMBIC_TENANT_DATABASE_URL="${TENANT_URL}"
-  (cd "$REPO_ROOT" && PYTHONPATH="$REPO_ROOT" "$VENV_PY" -m alembic -c alembic_tenant.ini upgrade head) >&2
+  echo "Refusing alembic upgrade head (I14 POD branches are split). See docs/load_trip/POD_MIGRATION_TARGETS.md" >&2
+  exit 1
 fi
 
 exec "$VENV_PY" -m pytest "$@"
