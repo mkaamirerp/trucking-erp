@@ -26,6 +26,8 @@ DW1_REVISION = "dw1f2a3b4c5d6"
 DW1B_REVISION = "dw1b_tenant_scope_dw1_foreign_keys"
 DW1C_REVISION = "dw1c_composite_fk_set_null_optional_columns"
 MERGE_REVISION = "dw0_merge_tenant_heads_a1b2_x5"
+X5_REVISION = "x5y6z7a8b9c0"
+POD_DW1_REVISION = "i14_load_pod_evidence"
 
 
 def _sync_tenant_url() -> str:
@@ -43,6 +45,8 @@ def _alembic_env() -> dict[str, str]:
 
 
 def _run_alembic(*args: str) -> None:
+    if any(arg in {"head", "heads"} for arg in args):
+        raise AssertionError("DW-1 integration tests must pin an explicit revision, never head.")
     cmd = [sys.executable, "-m", "alembic", "-c", "alembic_tenant.ini", *args]
     proc = subprocess.run(
         cmd,
@@ -55,6 +59,40 @@ def _run_alembic(*args: str) -> None:
         raise AssertionError(
             f"alembic {' '.join(args)} failed:\nstdout={proc.stdout}\nstderr={proc.stderr}"
         )
+
+
+def _current_revision() -> str:
+    with create_engine(_sync_tenant_url(), future=True).connect() as conn:
+        row = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    if not row:
+        raise AssertionError("integration tenant has no alembic_version row")
+    return str(row)
+
+
+def _ensure_revision(target: str) -> None:
+    current = _current_revision()
+    if current == target:
+        return
+    if target == DW1C_REVISION and current == POD_DW1_REVISION:
+        _run_alembic("downgrade", DW1C_REVISION)
+        return
+    _run_alembic("upgrade", target)
+
+
+def _entity_count_snapshot(conn: Connection) -> dict[str, int]:
+    insp = inspect(conn)
+    snap = {
+        "loads": int(conn.execute(text("SELECT COUNT(*) FROM loads")).scalar_one()),
+        "trips": int(conn.execute(text("SELECT COUNT(*) FROM trips")).scalar_one()),
+        "trip_loads": int(conn.execute(text("SELECT COUNT(*) FROM trip_loads")).scalar_one()),
+    }
+    if insp.has_table("load_commercial_evidence"):
+        snap["load_commercial_evidence"] = int(
+            conn.execute(text("SELECT COUNT(*) FROM load_commercial_evidence")).scalar_one()
+        )
+    else:
+        snap["load_commercial_evidence"] = 0
+    return snap
 
 
 def _expect_sql_failure(conn: Connection, fn: Callable[[Connection], None]) -> None:
@@ -70,7 +108,7 @@ def tenant_engine():
     url = _sync_tenant_url()
     assert_integration_db_name_allowed(database_name_from_url(url), context="test_load_workspace_draft_schema_dw1")
     engine = create_engine(url, future=True)
-    _run_alembic("upgrade", "head")
+    _ensure_revision(DW1C_REVISION)
     yield engine
     engine.dispose()
 
@@ -102,6 +140,46 @@ def test_existing_load_rows_unchanged_promotion_origin_null(tenant_engine) -> No
         ).one()
     assert row.with_origin == 0
     assert row.total >= 0
+
+
+def test_loads_trips_and_commercial_evidence_integrity_after_dw1(tenant_engine) -> None:
+    with tenant_engine.connect() as conn:
+        snap = _entity_count_snapshot(conn)
+        orphaned_trip_loads = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM trip_loads tl
+                LEFT JOIN loads l ON l.id = tl.load_id AND l.tenant_id = tl.tenant_id
+                WHERE l.id IS NULL
+                """
+            )
+        ).scalar_one()
+        orphaned_commercial = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM load_commercial_evidence ce
+                LEFT JOIN loads l ON l.id = ce.load_id AND l.tenant_id = ce.tenant_id
+                WHERE ce.load_id IS NOT NULL AND l.id IS NULL
+                """
+            )
+        ).scalar_one()
+    assert orphaned_trip_loads == 0
+    assert orphaned_commercial == 0
+    assert snap["loads"] >= 0
+    assert snap["trips"] >= 0
+
+
+def test_x5_to_dw1c_migration_preserves_entity_counts(tenant_engine) -> None:
+    try:
+        _run_alembic("downgrade", X5_REVISION)
+        with tenant_engine.connect() as conn:
+            before = _entity_count_snapshot(conn)
+        _run_alembic("upgrade", DW1C_REVISION)
+        with tenant_engine.connect() as conn:
+            after = _entity_count_snapshot(conn)
+        assert before == after
+    finally:
+        _ensure_revision(DW1C_REVISION)
 
 
 def _resolve_tenant_id(conn: Connection) -> int:
@@ -431,7 +509,7 @@ def test_dw1c_downgrade_upgrade_preserves_column_specific_set_null(tenant_engine
         _run_alembic("downgrade", DW1B_REVISION)
         _run_alembic("upgrade", DW1C_REVISION)
     finally:
-        _run_alembic("upgrade", "head")
+        _ensure_revision(DW1C_REVISION)
 
 
 def test_downgrade_upgrade_dw1_on_isolated_revision(tenant_engine) -> None:
@@ -441,20 +519,40 @@ def test_downgrade_upgrade_dw1_on_isolated_revision(tenant_engine) -> None:
         assert not insp.has_table("load_workspace_drafts")
         _run_alembic("upgrade", DW1C_REVISION)
     finally:
-        _run_alembic("upgrade", "head")
+        _ensure_revision(DW1C_REVISION)
 
 
-def test_alembic_single_head() -> None:
-    proc = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "alembic_tenant.ini", "heads"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert proc.returncode == 0, proc.stderr
-    lines = [ln for ln in proc.stdout.strip().splitlines() if ln.strip()]
-    assert len(lines) == 1
-    assert DW1C_REVISION in lines[0]
+def test_dw1c_to_i14_pod_upgrade_adds_load_pod_evidence(tenant_engine) -> None:
+    try:
+        _run_alembic("upgrade", POD_DW1_REVISION)
+        assert inspect(tenant_engine).has_table("load_pod_evidence")
+    finally:
+        _ensure_revision(DW1C_REVISION)
+
+
+def test_load_orm_maps_existing_rows_at_dw1c(tenant_engine) -> None:
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from app.models.load import Load
+
+    with Session(tenant_engine) as session:
+        tenant_id = _resolve_tenant_id(session.connection())
+        load = session.scalar(select(Load).where(Load.tenant_id == tenant_id).limit(1))
+    if load is None:
+        pytest.skip("no loads in integration tenant")
+    assert load.load_number
+
+
+def test_dw1c_is_dw1_pod_parent_and_tenant_heads_are_split() -> None:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic_tenant.ini")))
+    pod = script.get_revision(POD_DW1_REVISION)
+    assert pod is not None
+    assert pod.down_revision == DW1C_REVISION
+    assert set(script.get_heads()) == {POD_DW1_REVISION, "i14_load_pod_evidence_x5"}
 
 
 def test_integration_db_guard_rejects_demo() -> None:
