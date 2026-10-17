@@ -61,16 +61,73 @@ exists=$(psql_postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '${db_nam
   exit 1
 }
 dropped=0
-if [ "$exists" = "1" ]; then
-  # Reject new API pool checkouts before terminate, then force-drop leftovers.
-  psql_postgres -c "ALTER DATABASE \"${db_name}\" ALLOW_CONNECTIONS false;"
-  psql_postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_name}' AND pid <> pg_backend_pid();"
-  psql_postgres -c "DROP DATABASE \"${db_name}\" WITH (FORCE);"
-  still=$(psql_postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '${db_name}'") || still="1"
-  if [ "$still" = "1" ]; then
-    echo "Database drop failed for '${db_name}'. Registry row ${registry_id} was not removed." >&2
+allow_changed=0
+original_allow=""
+
+# Restore the prior ALLOW_CONNECTIONS value only when this script changed it
+# and the database is still present. A dropped database is never recreated.
+restore_allow_connections() {
+  if [ "$allow_changed" != "1" ]; then
+    return 0
+  fi
+  present=$(psql_postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '${db_name}'") || {
+    echo "Recovery failure: could not tell whether '${db_name}' still exists. ALLOW_CONNECTIONS was not restored. Registry row ${registry_id} was not removed." >&2
+    return 1
+  }
+  if [ "$present" != "1" ]; then
+    echo "Database '${db_name}' is already absent. It was not recreated. Registry row ${registry_id} was not removed." >&2
+    allow_changed=0
+    return 0
+  fi
+  if ! psql_postgres -c "ALTER DATABASE \"${db_name}\" ALLOW_CONNECTIONS ${original_allow};"; then
+    echo "Recovery failure: could not restore ALLOW_CONNECTIONS ${original_allow} on '${db_name}'. The database may still reject connections. Registry row ${registry_id} was not removed." >&2
+    return 1
+  fi
+  echo "Restored ALLOW_CONNECTIONS ${original_allow} on '${db_name}'. Registry row ${registry_id} was not removed." >&2
+  allow_changed=0
+  return 0
+}
+
+fail_before_drop() {
+  if ! restore_allow_connections; then
     exit 1
   fi
+  echo "$1" >&2
+  exit 1
+}
+
+if [ "$exists" = "1" ]; then
+  original_allow=$(psql_postgres -Atc "SELECT CASE WHEN datallowconn THEN 'true' ELSE 'false' END FROM pg_database WHERE datname = '${db_name}'") || {
+    echo "Could not read ALLOW_CONNECTIONS for '${db_name}'. Connections were not changed. Registry row ${registry_id} was not removed." >&2
+    exit 1
+  }
+  case "$original_allow" in
+    true|false) ;;
+    *)
+      echo "Refusing unexpected ALLOW_CONNECTIONS value for '${db_name}'. Connections were not changed. Registry row ${registry_id} was not removed." >&2
+      exit 1
+      ;;
+  esac
+
+  # Reject new API pool checkouts before terminate, then force-drop leftovers.
+  if ! psql_postgres -c "ALTER DATABASE \"${db_name}\" ALLOW_CONNECTIONS false;"; then
+    echo "Could not set ALLOW_CONNECTIONS false on '${db_name}'. Connections were left unchanged. Registry row ${registry_id} was not removed." >&2
+    exit 1
+  fi
+  allow_changed=1
+
+  if ! psql_postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${db_name}' AND pid <> pg_backend_pid();"; then
+    fail_before_drop "Could not terminate sessions on '${db_name}'. Database was not dropped. Registry row ${registry_id} was not removed."
+  fi
+  if ! psql_postgres -c "DROP DATABASE \"${db_name}\" WITH (FORCE);"; then
+    fail_before_drop "Database drop failed for '${db_name}'. Registry row ${registry_id} was not removed."
+  fi
+  still=$(psql_postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '${db_name}'") || still="1"
+  if [ "$still" = "1" ]; then
+    fail_before_drop "Database drop failed for '${db_name}'. Registry row ${registry_id} was not removed."
+  fi
+  # Drop is verified. Do not restore connections and do not recreate the database.
+  allow_changed=0
   dropped=1
 fi
 

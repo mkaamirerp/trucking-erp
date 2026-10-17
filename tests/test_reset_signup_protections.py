@@ -70,12 +70,21 @@ def test_script_refuses_protected_slug_without_calling_docker(tmp_path: Path) ->
     assert not called.exists()
 
 
-def _compose_stub(tmp_path: Path, *, drop_ok: bool, still_present: bool, delete_ok: bool = True) -> Path:
+def _compose_stub(
+    tmp_path: Path,
+    *,
+    drop_ok: bool,
+    still_present: bool,
+    delete_ok: bool = True,
+    restore_ok: bool = True,
+    original_allow: str = "true",
+) -> Path:
     log = tmp_path / "sql.log"
     stub = tmp_path / "compose"
     still = "1" if still_present else ""
     drop_status = "0" if drop_ok else "1"
     delete_status = "0" if delete_ok else "1"
+    restore_status = "0" if restore_ok else "1"
     stub.write_text(
         f"""#!/bin/sh
 printf '%s\\n' "$*" >> '{log}'
@@ -85,6 +94,18 @@ case "$*" in
     ;;
   *'FROM platform_tenants WHERE slug'*)
     printf '%s\\n' '9|ACTIVE|tenant_flowtest_abc'
+    ;;
+  *datallowconn*)
+    printf '%s\\n' '{original_allow}'
+    ;;
+  *'ALLOW_CONNECTIONS true'*|*'ALLOW_CONNECTIONS false'*)
+    case "$*" in
+      *'ALLOW_CONNECTIONS {original_allow}'*)
+        if grep -q 'ALLOW_CONNECTIONS false' '{log}'; then
+          exit {restore_status}
+        fi
+        ;;
+    esac
     ;;
   *'DROP DATABASE'*)
     exit {drop_status}
@@ -160,6 +181,35 @@ def test_registry_delete_runs_only_after_verified_drop(tmp_path: Path) -> None:
     assert drop_at < delete_at
     assert "ALLOW_CONNECTIONS false" in log
     assert "WITH (FORCE)" in log
+
+
+def test_failed_drop_restores_original_allow_connections(tmp_path: Path) -> None:
+    stub = _compose_stub(tmp_path, drop_ok=False, still_present=True, original_allow="true")
+    result = _run_reset(tmp_path, stub, allow_active="flowtest-abc")
+    log = (tmp_path / "sql.log").read_text(encoding="utf-8")
+    assert result.returncode != 0
+    assert "Restored ALLOW_CONNECTIONS true" in result.stderr
+    assert "Registry row" in result.stderr
+    assert "DELETE FROM platform_tenants" not in log
+    assert "CREATE DATABASE" not in log
+    false_at = log.index("ALLOW_CONNECTIONS false")
+    drop_at = log.index("DROP DATABASE")
+    restore_at = log.index("ALLOW_CONNECTIONS true")
+    assert false_at < drop_at < restore_at
+
+
+def test_allow_connections_restore_failure_is_reported(tmp_path: Path) -> None:
+    stub = _compose_stub(
+        tmp_path, drop_ok=False, still_present=True, restore_ok=False, original_allow="true"
+    )
+    result = _run_reset(tmp_path, stub, allow_active="flowtest-abc")
+    log = (tmp_path / "sql.log").read_text(encoding="utf-8")
+    assert result.returncode != 0
+    assert "Recovery failure" in result.stderr
+    assert "ALLOW_CONNECTIONS true" in result.stderr
+    assert "removed registry" not in result.stdout
+    assert "DELETE FROM platform_tenants" not in log
+    assert "CREATE DATABASE" not in log
 
 
 def test_registry_delete_failure_after_drop_is_partial(tmp_path: Path) -> None:
