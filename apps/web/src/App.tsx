@@ -244,6 +244,7 @@ function App() {
         }
       />
       <Route path="/loads/new" element={<LoadWorkspacePage />} />
+      <Route path="/loads/draft/:draftId" element={<LoadWorkspacePage />} />
       <Route path="/loads/:id" element={<LoadWorkspacePage />} />
       <Route
         path="/trips"

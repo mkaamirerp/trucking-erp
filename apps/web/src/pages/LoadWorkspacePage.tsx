@@ -10,8 +10,13 @@ import Button from "@/components/Button";
 import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
-  createLoad,
   createPlannedTrip,
+  createLoadWorkspaceDraft,
+  getLoadWorkspaceDraft,
+  promoteLoadWorkspaceDraft,
+  parseLoadWorkspaceDraftVersionConflict,
+  updateLoadWorkspaceDraft,
+  type LoadWorkspaceDraft,
   getEmailThread,
   getEmailThreadMessages,
   getLoad,
@@ -46,8 +51,10 @@ import { sortedStops as sortStops } from "@/utils/loadStops";
 import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
   baselineSignatureFromLoad,
-  buildLoadCreatePayload,
   buildLoadPersistPayload,
+  buildWorkspaceDraftJson,
+  workspaceFieldsFromDraftJson,
+  type WorkspaceDraftFields,
   buildVerificationTabIndexMap,
   type LoadPersistParams,
   emptyIntakeProposed,
@@ -302,16 +309,21 @@ function formatApiErrorMessage(err: unknown, fallback: string): string {
 export default function LoadWorkspacePage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { id: idParam } = useParams<{ id: string }>();
+  const { id: idParam, draftId: draftIdParam } = useParams<{ id?: string; draftId?: string }>();
   const [searchParams] = useSearchParams();
 
-  const isManual = location.pathname === OPS.LOAD_NEW || location.pathname.endsWith("/loads/new");
+  const draftIdFromRoute = draftIdParam ?? null;
+  const isDraftWorkspace = draftIdFromRoute != null;
+  const isManualCreate =
+    location.pathname === OPS.LOAD_NEW || location.pathname.endsWith("/loads/new");
+  const isManual = isManualCreate || isDraftWorkspace;
   const intakeThreadRaw = searchParams.get(OPS.LOAD_INTAKE_THREAD_QUERY);
   const intakeThreadId =
     intakeThreadRaw != null && intakeThreadRaw !== "" ? Number(intakeThreadRaw) : Number.NaN;
   const hasIntakeThread = Number.isFinite(intakeThreadId) && intakeThreadId > 0;
 
-  const loadIdFromRoute = !isManual && idParam ? Number(idParam) : Number.NaN;
+  const loadIdFromRoute =
+    !isManualCreate && !isDraftWorkspace && idParam ? Number(idParam) : Number.NaN;
   const modeParam = searchParams.get("mode");
   const workspaceMode: LoadWorkspaceMode = isManual
     ? "manual"
@@ -348,6 +360,8 @@ export default function LoadWorkspacePage() {
     serverVersion: number | null;
     serverSnapshot: Load | null;
   } | null>(null);
+  const [workspaceDraft, setWorkspaceDraft] = useState<LoadWorkspaceDraft | null>(null);
+  const [draftConflict, setDraftConflict] = useState<{ serverVersion: number | null } | null>(null);
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
   const onCreatePlannedTrip = useCallback(async () => {
@@ -465,6 +479,46 @@ export default function LoadWorkspacePage() {
       });
     },
     [docLines],
+  );
+
+  const hydrateFromWorkspaceFields = useCallback((fields: WorkspaceDraftFields) => {
+    setStatus(fields.status);
+    setLoadNumber(fields.loadNumber);
+    setBrokerId(fields.brokerId);
+    setBrokerContactId(fields.brokerContactId);
+    setBrokerNameSnapshot(fields.brokerNameSnapshot);
+    setBrokerContactNameSnapshot(fields.brokerContactNameSnapshot);
+    setBrokerContactPhoneSnapshot(fields.brokerContactPhoneSnapshot);
+    setBrokerContactExtensionSnapshot(fields.brokerContactExtensionSnapshot);
+    setBrokerContactEmailSnapshot(fields.brokerContactEmailSnapshot);
+    setBrokerLoadReference(fields.brokerLoadReference);
+    setLoadReferences(fields.loadReferences);
+    setFreightMode(fields.freightMode);
+    setEquipmentType(fields.equipmentType);
+    setTrailerType(fields.trailerType);
+    setTrailerSize(fields.trailerSize);
+    setCommodity(fields.commodity);
+    setEstimatedWeight(fields.estimatedWeight);
+    setHazmat(fields.hazmat);
+    setTemperatureRequirement(fields.temperatureRequirement);
+    setPalletCaseCount(fields.palletCaseCount);
+    setRate(fields.rate);
+    setCustomerRate(fields.customerRate);
+    setMiles(fields.miles);
+    setDriverId(null);
+    setTruckId(null);
+    setTrailerId(null);
+    setCustomsBrokerId(fields.customsBrokerId);
+    setInternalNotes(fields.internalNotes);
+    setDraftStops(fields.draftStops);
+  }, []);
+
+  const applyWorkspaceDraft = useCallback(
+    (draft: LoadWorkspaceDraft) => {
+      setWorkspaceDraft(draft);
+      hydrateFromWorkspaceFields(workspaceFieldsFromDraftJson(draft.draft_json ?? {}));
+    },
+    [hydrateFromWorkspaceFields],
   );
 
   const hydrateFromLoad = useCallback((l: Load) => {
@@ -788,26 +842,61 @@ export default function LoadWorkspacePage() {
   });
 
   useEffect(() => {
-    if (workspaceMode === "manual") {
+    if (workspaceMode === "manual" && isManualCreate) {
+      let cancelled = false;
       setLoading(true);
       setError(null);
+      createLoadWorkspaceDraft({ source_channel: "manual", draft_json: {} })
+        .then((draft) => {
+          if (!cancelled) navigate(OPS.LOAD_DRAFT(draft.id), { replace: true });
+        })
+        .catch((e) => {
+          if (!cancelled) setError((e as Error)?.message || "Could not start workspace draft");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (workspaceMode === "manual" && isDraftWorkspace && draftIdFromRoute) {
+      let cancelled = false;
+      setLoading(true);
+      setError(null);
+      const draftId = draftIdFromRoute;
       Promise.all([
+        getLoadWorkspaceDraft(draftId),
         listCustomsBrokers({ page: 1, size: 200, include_inactive: false }),
         listBrokers({ page: 1, size: 200, sort: "name_asc" }),
         listDrivers({ limit: 500, include_inactive: false }),
         listTrucks({ page: 1, size: 200, status: ["active"] }),
         listTrailers({ page: 1, size: 200, status: ["active"] }),
       ])
-        .then(([customsPaged, brPaged, dr, trk, trl]) => {
+        .then(([draft, customsPaged, brPaged, dr, trk, trl]) => {
+          if (cancelled) return;
+          if (draft.status !== "draft") {
+            setError("This workspace draft is no longer editable.");
+            setWorkspaceDraft(draft);
+            return;
+          }
+          applyWorkspaceDraft(draft);
           setCustomsBrokers(customsPaged.items || []);
           setFreightBrokers(brPaged.items || []);
           setDrivers(dr);
           setTrucks(trk.items || []);
           setTrailers(trl.items || []);
         })
-        .catch((e) => setError(e?.message || "Failed to load workspace"))
-        .finally(() => setLoading(false));
-      return;
+        .catch((e) => {
+          if (!cancelled) setError((e as Error)?.message || "Failed to load workspace draft");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (!Number.isFinite(loadIdFromRoute)) {
@@ -850,7 +939,16 @@ export default function LoadWorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceMode, loadIdFromRoute, hydrateFromLoad]);
+  }, [
+    workspaceMode,
+    loadIdFromRoute,
+    hydrateFromLoad,
+    isManualCreate,
+    isDraftWorkspace,
+    draftIdFromRoute,
+    navigate,
+    applyWorkspaceDraft,
+  ]);
 
   useEffect(() => {
     if (workspaceMode !== "intake" || !hasIntakeThread) {
@@ -962,14 +1060,95 @@ export default function LoadWorkspacePage() {
     (workspaceMode === "detail" || workspaceMode === "intake") &&
     (load.status || "").toLowerCase() === "draft";
 
-  async function onCreate() {
+  async function onSaveDraft() {
+    if (!draftIdFromRoute || !workspaceDraft) return;
+    const stopErr = validateDraftStopsClassifiedForSave(draftStops);
+    if (stopErr) {
+      setToolbarMessage({ text: stopErr, tone: "warning" });
+      return;
+    }
     setSaving(true);
     setToolbarMessage(null);
+    setDraftConflict(null);
     try {
-      const created = await createLoad(buildLoadCreatePayload(workspacePersistParams()));
-      navigate(OPS.LOAD_DETAIL(created.id), { replace: true });
+      const updated = await updateLoadWorkspaceDraft(draftIdFromRoute, {
+        expected_concurrency_version: workspaceDraft.concurrency_version,
+        draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
+      });
+      applyWorkspaceDraft(updated);
+      setToolbarMessage({ text: "Draft saved.", tone: "success" });
     } catch (e: unknown) {
-      setToolbarMessage({ text: (e as Error)?.message || "Could not create load", tone: "error" });
+      const c = parseLoadWorkspaceDraftVersionConflict(e);
+      if (c) {
+        setDraftConflict({ serverVersion: c.server_version });
+        setToolbarMessage({
+          text: "Draft was modified elsewhere — see conflict details above.",
+          tone: "warning",
+        });
+      } else {
+        setToolbarMessage({ text: formatApiErrorMessage(e, "Could not save draft"), tone: "error" });
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onReloadDraftVersion() {
+    if (!draftIdFromRoute) return;
+    const confirmed = window.confirm(
+      "Reload the server draft? Unsaved changes in this tab will be replaced with the server version.",
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setToolbarMessage(null);
+    setDraftConflict(null);
+    try {
+      const remote = await getLoadWorkspaceDraft(draftIdFromRoute);
+      if (remote.status !== "draft") {
+        setError("This workspace draft is no longer editable.");
+        return;
+      }
+      applyWorkspaceDraft(remote);
+      setToolbarMessage({ text: "Loaded latest draft from server.", tone: "neutral" });
+    } catch (e: unknown) {
+      setToolbarMessage({ text: formatApiErrorMessage(e, "Could not reload draft"), tone: "error" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onPromoteDraft() {
+    if (!draftIdFromRoute || !workspaceDraft) return;
+    const stopErr = validateDraftStopsClassifiedForSave(draftStops);
+    if (stopErr) {
+      setToolbarMessage({ text: stopErr, tone: "warning" });
+      return;
+    }
+    setSaving(true);
+    setToolbarMessage(null);
+    setDraftConflict(null);
+    try {
+      const saved = await updateLoadWorkspaceDraft(draftIdFromRoute, {
+        expected_concurrency_version: workspaceDraft.concurrency_version,
+        draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
+      });
+      applyWorkspaceDraft(saved);
+      const result = await promoteLoadWorkspaceDraft(draftIdFromRoute, {
+        expected_concurrency_version: saved.concurrency_version,
+        promotion_idempotency_key: crypto.randomUUID(),
+      });
+      navigate(OPS.LOAD_DETAIL(result.load_id), { replace: true });
+    } catch (e: unknown) {
+      const c = parseLoadWorkspaceDraftVersionConflict(e);
+      if (c) {
+        setDraftConflict({ serverVersion: c.server_version });
+        setToolbarMessage({
+          text: "Draft was modified elsewhere — save or reload before creating the load.",
+          tone: "warning",
+        });
+      } else {
+        setToolbarMessage({ text: formatApiErrorMessage(e, "Could not create load"), tone: "error" });
+      }
     } finally {
       setSaving(false);
     }
@@ -1210,7 +1389,7 @@ export default function LoadWorkspacePage() {
     setCustomsBrokerId(v === "" ? null : Number(v));
   };
 
-  if (!isManual && (!idParam || !Number.isFinite(loadIdFromRoute))) {
+  if (!isManual && !isDraftWorkspace && (!idParam || !Number.isFinite(loadIdFromRoute))) {
     return (
       <div className="p-4">
         <p className="text-sm text-red-600">Invalid load ID</p>
@@ -1387,16 +1566,26 @@ export default function LoadWorkspacePage() {
               {parseBusy ? "Parsing…" : "Upload & parse PDF"}
             </Button>
           ) : null}
-          {workspaceMode === "manual" ? (
-            <Button
-              variant="primary"
-              type="button"
-              disabled={saving || markReadyBusy}
-              onClick={() => void onCreate()}
-            >
-              {saving ? "Creating…" : "Create load"}
-            </Button>
-          ) : (
+          {workspaceMode === "manual" && isDraftWorkspace ? (
+            <>
+              <Button
+                variant="secondary"
+                type="button"
+                disabled={saving || markReadyBusy || !workspaceDraft}
+                onClick={() => void onSaveDraft()}
+              >
+                {saving ? "Saving…" : "Save draft"}
+              </Button>
+              <Button
+                variant="primary"
+                type="button"
+                disabled={saving || markReadyBusy || !workspaceDraft}
+                onClick={() => void onPromoteDraft()}
+              >
+                {saving ? "Creating…" : "Create load"}
+              </Button>
+            </>
+          ) : workspaceMode === "manual" ? null : (
             <>
               <Button
                 variant="primary"
@@ -1488,6 +1677,26 @@ export default function LoadWorkspacePage() {
         ) : null}
         {workspaceMode === "detail" && load && createPlannedTripError ? (
           <p className="border-t border-[var(--trk-border)] px-4 py-1 text-[11px] text-red-700">{createPlannedTripError}</p>
+        ) : null}
+        {draftConflict && isDraftWorkspace ? (
+          <div className="border-t border-amber-900/50 bg-amber-950/25 px-4 py-2.5">
+            <div className="mx-auto flex max-w-[1600px] flex-wrap items-start justify-between gap-3">
+              <p className="flex-1 text-xs text-amber-100/95">
+                <span className="font-semibold">Conflict:</span> Workspace draft was modified elsewhere
+                {draftConflict.serverVersion != null ? (
+                  <span className="text-amber-200/85"> (server version {draftConflict.serverVersion})</span>
+                ) : null}. Your open edits were not overwritten.
+              </p>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button type="button" variant="secondary" onClick={() => setDraftConflict(null)}>
+                  Dismiss
+                </Button>
+                <Button type="button" onClick={() => void onReloadDraftVersion()}>
+                  Reload server draft
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : null}
         {serverConflict && workspaceMode !== "manual" ? (
           <div className="border-t border-amber-900/50 bg-amber-950/25 px-4 py-2.5">

@@ -30,6 +30,8 @@ export const OPS = {
   LOAD_LAB: "/loads/lab",
   /** Manual load creation — canonical workspace in create mode; then continue at LOAD_DETAIL. */
   LOAD_NEW: "/loads/new",
+  /** Pre-promotion commercial workspace (DW-1 draft). */
+  LOAD_DRAFT: (draftId: string) => `/loads/draft/${draftId}`,
   LOAD_DETAIL: (id: number | string) => `/loads/${id}`,
   /** Query param on `/loads/:id` for intake email side panel (thread id). */
   LOAD_INTAKE_THREAD_QUERY: "intakeThread",

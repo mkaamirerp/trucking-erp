@@ -75,6 +75,99 @@ export function parseLoadVersionConflict(err: unknown): LoadVersionConflictDetai
   return null;
 }
 
+export const LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT = "LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT" as const;
+
+export type LoadWorkspaceDraftVersionConflictDetail = {
+  code: typeof LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT;
+  draft_id: string;
+  client_version: number;
+  server_version: number | null;
+};
+
+export function parseLoadWorkspaceDraftVersionConflict(
+  err: unknown,
+): LoadWorkspaceDraftVersionConflictDetail | null {
+  if (!(err instanceof Error) || !err.message) return null;
+  try {
+    const outer = JSON.parse(err.message) as { detail?: unknown };
+    const d = outer.detail;
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const rec = d as Record<string, unknown>;
+      if (rec.code === LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT) {
+        return d as LoadWorkspaceDraftVersionConflictDetail;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export type LoadWorkspaceDraft = {
+  id: string;
+  tenant_id: number;
+  concurrency_version: number;
+  status: string;
+  draft_schema_version: number;
+  draft_json: Record<string, unknown>;
+  source_channel: string;
+  expires_at: string;
+  created_by_platform_user_id: string | null;
+  updated_by_platform_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LoadWorkspaceDraftPromoteResult = {
+  draft: LoadWorkspaceDraft;
+  load_id: number;
+  idempotent_replay: boolean;
+};
+
+export async function createLoadWorkspaceDraft(payload?: {
+  source_channel?: string;
+  draft_json?: Record<string, unknown>;
+}) {
+  const res = await fetchWithTenant(`${API_BASE}/load-workspace-drafts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+  });
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function getLoadWorkspaceDraft(draftId: string) {
+  const res = await fetchWithTenant(`${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}`);
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function updateLoadWorkspaceDraft(
+  draftId: string,
+  payload: { expected_concurrency_version: number; draft_json: Record<string, unknown> },
+) {
+  const res = await fetchWithTenant(`${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handle<LoadWorkspaceDraft>(res);
+}
+
+export async function promoteLoadWorkspaceDraft(
+  draftId: string,
+  payload: { expected_concurrency_version: number; promotion_idempotency_key: string },
+) {
+  const res = await fetchWithTenant(
+    `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/promote`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+  return handle<LoadWorkspaceDraftPromoteResult>(res);
+}
+
 export async function getPayPeriods() {
   const res = await fetchWithTenant(`${API_BASE}/payroll/pay-periods`);
   return handle<PayPeriod[]>(res);
