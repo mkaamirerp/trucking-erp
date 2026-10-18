@@ -430,7 +430,15 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
     return data
 
 
-async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> Load:
+async def create_load(
+    db: AsyncSession,
+    tenant_id: int,
+    payload: LoadCreate,
+    *,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    source: str = "api",
+) -> Load:
     _guard_create_payload(payload)
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
@@ -457,8 +465,10 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
     db.add(load)
     await db.flush()
 
+    stop_create_diff: dict[str, object] | None = None
     if payload.stops:
         _validate_stops_write_payload(payload.stops)
+        added: list[dict[str, object]] = []
         for i, s in enumerate(payload.stops):
             stop_data = s.model_dump(exclude={"id"}, exclude_unset=False)
             for k in list(stop_data.keys()):
@@ -467,30 +477,56 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
             stop_data["sequence"] = s.sequence if s.sequence is not None else i
             stop = LoadStop(tenant_id=tenant_id, load_id=load.id, **stop_data)
             db.add(stop)
+            await db.flush()
+            added.append({"stop_id": int(stop.id), "after": _stop_commercial_snapshot(stop)})
+        stop_create_diff = {"removed": [], "updated": [], "added": added}
 
-    await db.commit()
-    created_id = load.id
-    # Session uses expire_on_commit=False; expire so get_load re-reads row (e.g. concurrency_version).
-    db.expire_all()
-    # Re-fetch with relationships for LoadResponse (avoids async lazy-load). Do not touch `load` after expire_all.
-    out = await get_load(db, tenant_id, created_id)
+    await db.flush()
+    out = await get_load(db, tenant_id, int(load.id))
     if out is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
 
+    corr = request_id
     await _write_load_audit(
         db,
         tenant_id=tenant_id,
         load=out,
         action="load_created",
-        actor_user_id=None,
-        request_id=None,
-        correlation_id=None,
-        source="ui",
-        changed_fields=None,
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+        correlation_id=corr,
+        source=source,
+        changed_fields={"status": {"before": None, "after": "draft"}},
+        context_json={"load_number": out.load_number},
+        best_effort=False,
     )
-    # Persist audit row (load already committed above).
+    if stop_create_diff is not None:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_stops_changed",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields={"stops": stop_create_diff},
+            context_json={
+                "load_id": int(out.id),
+                "tenant_id": int(tenant_id),
+                "stop_change_summary": stop_create_diff,
+                "on_create": True,
+            },
+            best_effort=False,
+        )
+
+    created_id = int(out.id)
     await db.commit()
-    return out
+    db.expire_all()
+    final = await get_load(db, tenant_id, created_id)
+    if final is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
+    return final
 
 
 async def get_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | None:
@@ -732,7 +768,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields=audit_changed,
-            best_effort=not money_audit_required,
+            best_effort=False,
         )
 
     if stop_audit_diff is not None:
@@ -765,6 +801,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields={"status": {"before": old_status or None, "after": (out.status or "").strip().lower() or None}},
+            best_effort=False,
         )
         if (out.status or "").strip().lower() == "dispatched":
             await _write_load_audit(
@@ -777,6 +814,7 @@ async def update_load(
                 correlation_id=corr,
                 source=source,
                 changed_fields=None,
+                best_effort=False,
             )
 
     if old_driver_id != out.driver_id:
@@ -790,6 +828,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields={"driver_id": {"before": old_driver_id, "after": out.driver_id}},
+            best_effort=False,
         )
 
     if old_customs_broker_id != out.customs_broker_id:
@@ -803,6 +842,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields={"customs_broker_id": {"before": old_customs_broker_id, "after": out.customs_broker_id}},
+            best_effort=False,
         )
 
     await db.commit()
@@ -1139,8 +1179,7 @@ async def add_load_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
     note = LoadNote(tenant_id=tenant_id, load_id=load_id, body=body.strip(), author_user_id=author_user_id)
     db.add(note)
-    await db.commit()
-    await db.refresh(note)
+    await db.flush()
 
     await _write_load_audit(
         db,
@@ -1153,8 +1192,10 @@ async def add_load_note(
         source=source,
         changed_fields={"note_id": {"before": None, "after": int(note.id)}},
         context_json={"note_preview": (note.body[:120] if note.body else "")},
+        best_effort=False,
     )
     await db.commit()
+    await db.refresh(note)
     return note
 
 
@@ -1175,6 +1216,8 @@ async def confirm_load_customs_document_snapshot(
     *,
     confirming_user_id: str | None,
     expected_concurrency_version: int,
+    request_id: str | None = None,
+    source: str = "ui",
 ) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -1259,10 +1302,11 @@ async def confirm_load_customs_document_snapshot(
             load=out,
             action="document_snapshot_confirmed",
             actor_user_id=int(confirming_user_id) if confirming_user_id and str(confirming_user_id).isdigit() else None,
-            request_id=None,
-            correlation_id=None,
-            source="ui",
+            request_id=request_id,
+            correlation_id=request_id,
+            source=source,
             changed_fields={"document_snapshot_confirmed_at": {"before": None, "after": now.isoformat()}},
+            best_effort=False,
         )
     await db.commit()
     db.expire_all()

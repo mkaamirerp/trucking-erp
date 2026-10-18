@@ -54,10 +54,14 @@ async def create_load(
     user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    # Slice 5: request/user captured for future audit correlation; create_load audit currently best-effort.
-    _ = getattr(request.state, "request_id", None) if request else None
-    _ = getattr(user, "user_id", None)
-    load = await loads_service.create_load(db, tenant_id, payload)
+    load = await loads_service.create_load(
+        db,
+        tenant_id,
+        payload,
+        actor_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+    )
     return LoadResponse.model_validate(load)
 
 
@@ -189,6 +193,8 @@ async def confirm_document_snapshot(
         load_id,
         confirming_user_id=getattr(user, "user_id", None),
         expected_concurrency_version=body.expected_concurrency_version,
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
     )
     return LoadResponse.model_validate(load)
 
