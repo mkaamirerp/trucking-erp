@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 
 import pytest
@@ -42,3 +43,33 @@ def test_parse_extracted_fields_coerce_rate() -> None:
     ex = LoadParseExtractedFields.model_validate({"rate": 1800, "customer_rate": "2100.55"})
     assert ex.rate == Decimal("1800.00")
     assert ex.customer_rate == Decimal("2100.55")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        "NaN",
+        "Infinity",
+    ],
+)
+def test_parse_rate_rejects_non_finite(bad: object) -> None:
+    with pytest.raises(ValueError, match="finite monetary amount"):
+        parse_load_rate(bad)
+
+
+def test_load_create_rejects_nan_rate_via_pydantic() -> None:
+    with pytest.raises(ValueError, match="finite monetary amount"):
+        LoadCreate.model_validate({"status": "draft", "rate": math.nan})
+
+
+def test_load_update_rejects_infinite_customer_rate_via_pydantic() -> None:
+    with pytest.raises(ValueError, match="finite monetary amount"):
+        LoadUpdate.model_validate(
+            {"expected_concurrency_version": 1, "customer_rate": Decimal("Infinity")}
+        )

@@ -24,6 +24,8 @@ def parse_optional_load_commercial_money(
         raise ValueError(f"{field} must be a monetary amount")
     if isinstance(value, Decimal):
         amount = value
+        if not amount.is_finite():
+            raise ValueError(f"{field} must be a finite monetary amount")
     elif isinstance(value, int):
         amount = Decimal(value)
     elif isinstance(value, float):
@@ -41,10 +43,16 @@ def parse_optional_load_commercial_money(
     else:
         raise ValueError(f"{field} must be a monetary amount")
 
+    if not amount.is_finite():
+        raise ValueError(f"{field} must be a finite monetary amount")
+
     if amount < 0:
         raise ValueError(f"{field} must be >= 0")
 
-    quantized = amount.quantize(LOAD_COMMERCIAL_MONEY_QUANT, rounding=ROUND_HALF_UP)
+    try:
+        quantized = amount.quantize(LOAD_COMMERCIAL_MONEY_QUANT, rounding=ROUND_HALF_UP)
+    except InvalidOperation as exc:
+        raise ValueError(f"{field} must be a monetary amount") from exc
     cap = max_magnitude if max_magnitude is not None else _CUSTOMER_RATE_MAX
     if quantized.copy_abs() > cap:
         raise ValueError(f"{field} exceeds allowed magnitude")
