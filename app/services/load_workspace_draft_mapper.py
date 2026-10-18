@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from decimal import Decimal
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
 from app.schemas.load import LoadCreate, LoadStopCreate
 from app.schemas.load_document_parse import LoadParseReferenceItem
+from app.utils.load_commercial_money import parse_load_customer_rate, parse_load_rate
 
 
 class DraftJsonMappingError(ValueError):
@@ -52,17 +54,19 @@ def _parse_optional_nonneg_int(value: Any, field: str) -> int | None:
     return parsed
 
 
-def _parse_optional_nonneg_float(value: Any, field: str) -> float | None:
+def _parse_optional_commercial_money(
+    value: Any,
+    field: str,
+    *,
+    parser: Callable[[Any], Decimal | None],
+) -> Decimal | None:
     if _is_empty(value):
         return None
-    text = _text(value)
+    raw = value if isinstance(value, (int, float, Decimal)) else _text(value)
     try:
-        parsed = float(text)
-    except (TypeError, ValueError) as exc:
-        raise DraftJsonMappingError(field, "must be a non-negative number") from exc
-    if parsed < 0:
-        raise DraftJsonMappingError(field, "must be a non-negative number")
-    return parsed
+        return parser(raw)
+    except ValueError as exc:
+        raise DraftJsonMappingError(field, "must be a non-negative monetary amount") from exc
 
 
 def _hazmat_flag(draft_json: dict[str, Any]) -> bool | None:
@@ -225,10 +229,11 @@ def draft_json_to_load_create(draft_json: dict[str, Any]) -> LoadCreate:
         )
         or None,
         pallet_case_count=_text(draft_json.get("palletCaseCount") or draft_json.get("pallet_case_count")) or None,
-        rate=_parse_optional_nonneg_float(draft_json.get("rate"), "rate"),
-        customer_rate=_parse_optional_nonneg_float(
+        rate=_parse_optional_commercial_money(draft_json.get("rate"), "rate", parser=parse_load_rate),
+        customer_rate=_parse_optional_commercial_money(
             draft_json.get("customerRate") or draft_json.get("customer_rate"),
             "customerRate",
+            parser=parse_load_customer_rate,
         ),
         miles=_parse_optional_nonneg_int(draft_json.get("miles"), "miles"),
         customs_broker_id=_parse_optional_id(

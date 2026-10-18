@@ -22,6 +22,7 @@ from app.constants.trip_dispatch import (
     TRIP_LOAD_STATUS_WITHIN_COMPLETED,
     TRIP_LOAD_STATUS_WITHIN_PLANNED,
     TRIP_LOAD_STATUS_WITHIN_REMOVED,
+    LOAD_COMMERCIALLY_CANCELLED,
     LOAD_NOT_READY_FOR_TRIP,
     TRIP_ASSIGNMENT_LOCKED_IN_PROGRESS,
     TRIP_ASSIGNMENT_SCHEDULE_OVERLAP,
@@ -671,6 +672,37 @@ async def remove_load_from_trip(
     return detail
 
 
+async def close_open_trip_load_memberships_for_commercial_cancel(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+) -> int:
+    """Mark OPEN TripLoad rows removed for a commercially cancelled Load.
+
+    Preserves trip_loads rows and Trip/custody history. Does not cancel the Trip.
+    """
+    trows = (
+        await db.scalars(
+            select(TripLoad).where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.load_id == load_id,
+                _trip_load_is_open_clause(),
+            )
+        )
+    ).all()
+    if not trows:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    for tl in trows:
+        tl.status_within_trip = TRIP_LOAD_STATUS_WITHIN_REMOVED
+        tl.removed_at = now
+        tl.completed_at = None
+    await db.flush()
+    await _sync_load_active_trip_pointer(db, tenant_id, load_id)
+    return len(trows)
+
+
 def raise_membership_transition_requires_custody(*, action: str) -> None:
     """Public bare /activate and /complete are closed after Custody Slice 2."""
     raise HTTPException(
@@ -746,6 +778,23 @@ async def _activate_trip_load_membership_locked(
     """planned → active. Assumes Trip and Load rows are already locked (Trip then Load)."""
     trip_id = int(trip.id)
     load_id = int(load.id)
+    load_status = (load.status or "").strip().lower()
+    if load_status == "cancelled":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Commercially cancelled loads cannot be activated on a Trip",
+                "code": LOAD_COMMERCIALLY_CANCELLED,
+            },
+        )
+    if load_status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Load must be ready before membership activation",
+                "code": LOAD_NOT_READY_FOR_TRIP,
+            },
+        )
     _raise_if_trip_already_completed(trip)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
         raise HTTPException(

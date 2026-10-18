@@ -20,6 +20,7 @@ from app.constants.load_integrity import (
     LOAD_STOP_TYPE_UNRESOLVED,
     WRITABLE_LOAD_STOP_TYPES,
 )
+from app.constants.custody import CUSTODY_OWNER_DELIVERED, CUSTODY_OWNER_UNKNOWN
 from app.constants.trip_dispatch import (
     LEGACY_LOAD_ASSIGNMENT_DEPRECATED,
     LEGACY_LOAD_OPERATIONAL_STATUSES,
@@ -30,13 +31,21 @@ from app.constants.trip_dispatch import (
     LOAD_STATUS_NOT_WRITABLE,
     LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT,
     LOAD_WRITABLE_STATUSES,
+    TRIP_CONTAINER_STATUS_ASSIGNED,
+    TRIP_CONTAINER_STATUS_IN_PROGRESS,
+    TRIP_LOAD_STATUS_WITHIN_ACTIVE,
 )
 from app.models.broker import Broker, BrokerContact
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
 from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
+from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.load_operational_references import sanitize_load_operational_references
+from app.services.trips import (
+    _lock_load_for_membership,
+    close_open_trip_load_memberships_for_commercial_cancel,
+)
 from app.utils.pagination import paginate
 
 # Commercial money fields audited on PATCH (Issue 26).
@@ -182,6 +191,12 @@ def _guard_create_payload(payload: LoadCreate) -> None:
 
 def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
     _reject_load_assignment_fields(payload)
+    old_status = (load.status or "").strip().lower()
+    if old_status == LOAD_COMMERCIAL_STATUS_CANCELLED:
+        raise _legacy_write_conflict(
+            LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED,
+            "Cancelled loads cannot be edited or reactivated via PATCH. Use append-only notes if needed.",
+        )
     if "status" not in payload.model_fields_set:
         return
     new_status = (payload.status or "").strip().lower()
@@ -191,7 +206,6 @@ def _guard_update_payload(load: Load, payload: LoadUpdate) -> None:
             LOAD_STATUS_NOT_WRITABLE,
             "Load status must be draft or ready when provided. Omit status to keep the current value.",
         )
-    old_status = (load.status or "").strip().lower()
     if old_status in LEGACY_LOAD_OPERATIONAL_STATUSES:
         raise _legacy_write_conflict(
             LEGACY_LOAD_STATUS_TRANSITION_BLOCKED,
@@ -339,6 +353,60 @@ def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
     return u in ("DROP", "DELIVERY")
 
 
+async def _ready_requirements_violation(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+) -> str | None:
+    row = (
+        await db.execute(
+            select(
+                Load.broker_id,
+                Load.broker_name_snapshot,
+                Load.broker_load_reference,
+            ).where(
+                Load.id == load_id,
+                Load.tenant_id == tenant_id,
+            )
+        )
+    ).one_or_none()
+
+    if row is None:
+        return "Load not found"
+
+    if not (
+        row.broker_id
+        or (row.broker_name_snapshot or "").strip()
+    ):
+        return "Broker or broker name is required"
+
+    if not (row.broker_load_reference or "").strip():
+        return "Broker load reference is required"
+
+    stop_types = [
+        (value or "").strip().upper()
+        for value in (
+            await db.scalars(
+                select(LoadStop.stop_type).where(
+                    LoadStop.tenant_id == tenant_id,
+                    LoadStop.load_id == load_id,
+                )
+            )
+        ).all()
+    ]
+
+    if "PICKUP" not in stop_types:
+        return "At least one pickup is required"
+
+    if not any(
+        _stop_is_delivery_or_drop(value)
+        for value in stop_types
+    ):
+        return "At least one delivery or drop is required"
+
+    return None
+
+
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
     stmt = select(Load).where(Load.tenant_id == tenant_id, Load.load_number == load_number)
     if exclude_id:
@@ -362,7 +430,15 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
     return data
 
 
-async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> Load:
+async def create_load(
+    db: AsyncSession,
+    tenant_id: int,
+    payload: LoadCreate,
+    *,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    source: str = "api",
+) -> Load:
     _guard_create_payload(payload)
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
@@ -389,8 +465,10 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
     db.add(load)
     await db.flush()
 
+    stop_create_diff: dict[str, object] | None = None
     if payload.stops:
         _validate_stops_write_payload(payload.stops)
+        added: list[dict[str, object]] = []
         for i, s in enumerate(payload.stops):
             stop_data = s.model_dump(exclude={"id"}, exclude_unset=False)
             for k in list(stop_data.keys()):
@@ -399,30 +477,56 @@ async def create_load(db: AsyncSession, tenant_id: int, payload: LoadCreate) -> 
             stop_data["sequence"] = s.sequence if s.sequence is not None else i
             stop = LoadStop(tenant_id=tenant_id, load_id=load.id, **stop_data)
             db.add(stop)
+            await db.flush()
+            added.append({"stop_id": int(stop.id), "after": _stop_commercial_snapshot(stop)})
+        stop_create_diff = {"removed": [], "updated": [], "added": added}
 
-    await db.commit()
-    created_id = load.id
-    # Session uses expire_on_commit=False; expire so get_load re-reads row (e.g. concurrency_version).
-    db.expire_all()
-    # Re-fetch with relationships for LoadResponse (avoids async lazy-load). Do not touch `load` after expire_all.
-    out = await get_load(db, tenant_id, created_id)
+    await db.flush()
+    out = await get_load(db, tenant_id, int(load.id))
     if out is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
 
+    corr = request_id
     await _write_load_audit(
         db,
         tenant_id=tenant_id,
         load=out,
         action="load_created",
-        actor_user_id=None,
-        request_id=None,
-        correlation_id=None,
-        source="ui",
-        changed_fields=None,
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+        correlation_id=corr,
+        source=source,
+        changed_fields={"status": {"before": None, "after": "draft"}},
+        context_json={"load_number": out.load_number},
+        best_effort=False,
     )
-    # Persist audit row (load already committed above).
+    if stop_create_diff is not None:
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_stops_changed",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields={"stops": stop_create_diff},
+            context_json={
+                "load_id": int(out.id),
+                "tenant_id": int(tenant_id),
+                "stop_change_summary": stop_create_diff,
+                "on_create": True,
+            },
+            best_effort=False,
+        )
+
+    created_id = int(out.id)
     await db.commit()
-    return out
+    db.expire_all()
+    final = await get_load(db, tenant_id, created_id)
+    if final is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
+    return final
 
 
 async def get_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | None:
@@ -523,6 +627,7 @@ async def update_load(
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
+    _reject_commercial_mutation_if_cancelled(load)
     _guard_update_payload(load, payload)
 
     expected = payload.expected_concurrency_version
@@ -605,6 +710,29 @@ async def update_load(
 
     # Issue 26: keep Load mutation and audit in one transaction (no commit before audit).
     await db.flush()
+
+    ready_relevant_fields = {
+        "broker_id",
+        "broker_name_snapshot",
+        "broker_load_reference",
+    }
+    if (
+        old_status == "ready"
+        and (
+            bool(ready_relevant_fields.intersection(data))
+            or "stops" in payload.model_fields_set
+        )
+    ):
+        violation = await _ready_requirements_violation(
+            db, tenant_id, load_id
+        )
+        if violation:
+            await db.rollback()
+            raise _legacy_write_conflict(
+                "LOAD_READY_REQUIREMENTS_VIOLATED",
+                f"Ready Load would become invalid: {violation}",
+            )
+
     # CAS uses synchronize_session=False; refresh this row so audit before/after sees DB values.
     await db.refresh(load)
     out = load
@@ -640,7 +768,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields=audit_changed,
-            best_effort=not money_audit_required,
+            best_effort=False,
         )
 
     if stop_audit_diff is not None:
@@ -673,6 +801,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields={"status": {"before": old_status or None, "after": (out.status or "").strip().lower() or None}},
+            best_effort=False,
         )
         if (out.status or "").strip().lower() == "dispatched":
             await _write_load_audit(
@@ -685,6 +814,7 @@ async def update_load(
                 correlation_id=corr,
                 source=source,
                 changed_fields=None,
+                best_effort=False,
             )
 
     if old_driver_id != out.driver_id:
@@ -698,6 +828,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields={"driver_id": {"before": old_driver_id, "after": out.driver_id}},
+            best_effort=False,
         )
 
     if old_customs_broker_id != out.customs_broker_id:
@@ -711,6 +842,7 @@ async def update_load(
             correlation_id=corr,
             source=source,
             changed_fields={"customs_broker_id": {"before": old_customs_broker_id, "after": out.customs_broker_id}},
+            best_effort=False,
         )
 
     await db.commit()
@@ -719,6 +851,167 @@ async def update_load(
 
 
 LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED = "LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED"
+
+LOAD_COMMERCIAL_STATUS_CANCELLED = "cancelled"
+LOAD_CANCELLABLE_COMMERCIAL_STATUSES = frozenset({"draft", "ready"})
+LOAD_ALREADY_CANCELLED = "LOAD_ALREADY_CANCELLED"
+LOAD_CANCEL_STATUS_NOT_ALLOWED = "LOAD_CANCEL_STATUS_NOT_ALLOWED"
+LOAD_CANCEL_ACTIVE_TRIP_EXECUTION = "LOAD_CANCEL_ACTIVE_TRIP_EXECUTION"
+LOAD_CANCEL_UNRESOLVED_CUSTODY = "LOAD_CANCEL_UNRESOLVED_CUSTODY"
+LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED = "LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED"
+
+
+def _reject_commercial_mutation_if_cancelled(load: Load) -> None:
+    if (load.status or "").strip().lower() == LOAD_COMMERCIAL_STATUS_CANCELLED:
+        raise _legacy_write_conflict(
+            LOAD_COMMERCIALLY_CANCELLED_MUTATION_BLOCKED,
+            "Cancelled loads cannot be commercially modified. Append-only notes are still allowed.",
+        )
+
+
+async def _load_has_open_active_on_executing_trip(
+    db: AsyncSession, tenant_id: int, load_id: int
+) -> bool:
+    """OPEN ACTIVE membership on assigned or in_progress Trip blocks commercial cancel."""
+    n = await db.scalar(
+        select(func.count())
+        .select_from(TripLoad)
+        .join(
+            Trip,
+            (Trip.id == TripLoad.trip_id) & (Trip.tenant_id == TripLoad.tenant_id),
+        )
+        .where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.load_id == load_id,
+            TripLoad.status_within_trip == TRIP_LOAD_STATUS_WITHIN_ACTIVE,
+            TripLoad.completed_at.is_(None),
+            TripLoad.removed_at.is_(None),
+            Trip.status.in_(
+                (TRIP_CONTAINER_STATUS_ASSIGNED, TRIP_CONTAINER_STATUS_IN_PROGRESS)
+            ),
+        )
+    )
+    return int(n or 0) > 0
+
+
+async def cancel_load(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    expected_concurrency_version: int,
+    reason: str,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    source: str = "api",
+) -> Load:
+    """Commercial cancel — preserves Load row, TripLoad history, Trip, and custody.
+
+    OPEN TripLoad memberships are closed (removed_at) without cancelling the Trip.
+    Lock order: Load FOR UPDATE (same row trips use via _lock_load_for_membership) so cancel
+    serializes with TripLoad insert/activate on this load_id.
+    """
+    load = await _lock_load_for_membership(db, tenant_id, load_id)
+
+    status_now = (load.status or "").strip().lower()
+    if status_now == LOAD_COMMERCIAL_STATUS_CANCELLED:
+        existing = await get_load(db, tenant_id, load_id)
+        return existing if existing is not None else load
+
+    if status_now not in LOAD_CANCELLABLE_COMMERCIAL_STATUSES:
+        if status_now in LEGACY_LOAD_OPERATIONAL_STATUSES:
+            raise _legacy_write_conflict(
+                LOAD_CANCEL_STATUS_NOT_ALLOWED,
+                f"Load in legacy operational status '{load.status}' cannot be cancelled via this endpoint.",
+            )
+        raise _legacy_write_conflict(
+            LOAD_CANCEL_STATUS_NOT_ALLOWED,
+            f"Load status '{load.status}' cannot be cancelled.",
+        )
+
+    if await _load_has_open_active_on_executing_trip(db, tenant_id, load_id):
+        raise _legacy_write_conflict(
+            LOAD_CANCEL_ACTIVE_TRIP_EXECUTION,
+            "Load has an active TripLoad on an assigned or in-progress Trip. "
+            "Close operational custody/membership on the Trip before commercial cancel.",
+        )
+
+    custody_owner = (load.custody_owner or CUSTODY_OWNER_UNKNOWN).strip().lower()
+    if custody_owner not in (CUSTODY_OWNER_UNKNOWN, CUSTODY_OWNER_DELIVERED):
+        raise _legacy_write_conflict(
+            LOAD_CANCEL_UNRESOLVED_CUSTODY,
+            f"Load custody is held by '{custody_owner}'. Resolve custody before commercial cancel.",
+        )
+
+    rate_before = load.rate
+    customer_rate_before = load.customer_rate
+
+    stmt = (
+        update(Load)
+        .where(
+            Load.id == load_id,
+            Load.tenant_id == tenant_id,
+            Load.concurrency_version == expected_concurrency_version,
+            Load.status.in_(tuple(LOAD_CANCELLABLE_COMMERCIAL_STATUSES)),
+        )
+        .values(
+            status=LOAD_COMMERCIAL_STATUS_CANCELLED,
+            concurrency_version=Load.concurrency_version + 1,
+            updated_at=func.now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    result = await db.execute(stmt)
+    if result.rowcount != 1:
+        await db.rollback()
+        current_load = await get_load(db, tenant_id, load_id)
+        if current_load and (current_load.status or "").strip().lower() == LOAD_COMMERCIAL_STATUS_CANCELLED:
+            replay = await get_load(db, tenant_id, load_id)
+            return replay if replay is not None else current_load
+        server_snapshot = (
+            LoadResponse.model_validate(current_load).model_dump(mode="json")
+            if current_load
+            else None
+        )
+        raise load_version_conflict_exception(
+            load_id=load_id,
+            client_version=expected_concurrency_version,
+            server_version=current_load.concurrency_version if current_load else None,
+            server_snapshot=server_snapshot,
+        )
+
+    await db.flush()
+    memberships_closed = await close_open_trip_load_memberships_for_commercial_cancel(
+        db, tenant_id, load_id
+    )
+    refreshed = await get_load(db, tenant_id, load_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+
+    await _write_load_audit(
+        db,
+        tenant_id=tenant_id,
+        load=refreshed,
+        action="load_cancelled",
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+        correlation_id=request_id,
+        source=source,
+        changed_fields={
+            "status": {"before": status_now, "after": LOAD_COMMERCIAL_STATUS_CANCELLED},
+        },
+        context_json={
+            "cancel_reason": reason.strip(),
+            "open_trip_load_memberships_closed": memberships_closed,
+        },
+        best_effort=False,
+    )
+    await db.commit()
+    db.expire_all()
+    out = await get_load(db, tenant_id, load_id)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    return out
 
 
 async def delete_load(
@@ -803,34 +1096,21 @@ async def mark_load_ready(
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
 
+    _reject_commercial_mutation_if_cancelled(load)
+
     if load.status != "draft":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Only draft loads can be marked ready; current status is {load.status}",
         )
 
-    if not (load.broker_id or load.broker_name_snapshot):
+    violation = await _ready_requirements_violation(
+        db, tenant_id, load_id
+    )
+    if violation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Broker or broker name must be set before marking ready",
-        )
-    if not load.broker_load_reference:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Broker load reference must be set before marking ready",
-        )
-
-    pickups = [s for s in load.stops if (s.stop_type or "").strip().upper() == "PICKUP"]
-    deliveries = [s for s in load.stops if _stop_is_delivery_or_drop(s.stop_type)]
-    if not pickups:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one pickup stop is required before marking ready",
-        )
-    if not deliveries:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one delivery or drop stop is required before marking ready",
+            detail=violation,
         )
 
     stmt = (
@@ -899,8 +1179,7 @@ async def add_load_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
     note = LoadNote(tenant_id=tenant_id, load_id=load_id, body=body.strip(), author_user_id=author_user_id)
     db.add(note)
-    await db.commit()
-    await db.refresh(note)
+    await db.flush()
 
     await _write_load_audit(
         db,
@@ -913,8 +1192,10 @@ async def add_load_note(
         source=source,
         changed_fields={"note_id": {"before": None, "after": int(note.id)}},
         context_json={"note_preview": (note.body[:120] if note.body else "")},
+        best_effort=False,
     )
     await db.commit()
+    await db.refresh(note)
     return note
 
 
@@ -935,10 +1216,13 @@ async def confirm_load_customs_document_snapshot(
     *,
     confirming_user_id: str | None,
     expected_concurrency_version: int,
+    request_id: str | None = None,
+    source: str = "ui",
 ) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    _reject_commercial_mutation_if_cancelled(load)
     if load.document_snapshot_confirmed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1018,10 +1302,11 @@ async def confirm_load_customs_document_snapshot(
             load=out,
             action="document_snapshot_confirmed",
             actor_user_id=int(confirming_user_id) if confirming_user_id and str(confirming_user_id).isdigit() else None,
-            request_id=None,
-            correlation_id=None,
-            source="ui",
+            request_id=request_id,
+            correlation_id=request_id,
+            source=source,
             changed_fields={"document_snapshot_confirmed_at": {"before": None, "after": now.isoformat()}},
+            best_effort=False,
         )
     await db.commit()
     db.expire_all()

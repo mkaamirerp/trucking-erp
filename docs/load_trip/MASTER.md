@@ -34,12 +34,43 @@ After an approved architecture change:
 ## Production Integrity release record — 2026-10-15 (reported)
 
 - **Reported live application release:** isolated Load Integrity-only code at [`6919ec0323742345a84968ae4f5cc9f26b930d69`](https://github.com/mkaamirerp/trucking-erp/commit/6919ec0323742345a84968ae4f5cc9f26b930d69), assembled from production baseline `7fbd69c2eec3fee384676886cd8c675fe7773933`. Cursor reports API/nginx images tagged `integrity-6919ec0-20261015`; **live image content and authenticated product smoke checks have not been independently verified here**.
-- **GitHub `main`:** `99df0453abf935a340d18aacda81684afd57436a` contains the broader integrity fixes **and** DW-1 ORM/migration changes; **do not equate `main` with the running isolated release**. The production release commit is separately reachable on GitHub. No new permanent development branch is authorized by this note.
-- **Database scope:** Cursor reports `tenant_demo` remains at `x5y6z7a8b9c0` with 249 Loads, and **no migrations accompanied the isolated release**. Five `tenant_beartest_*` databases had previously been migrated to `dw1c` during the halted full-main deployment attempt; the other 102 intended tenant migrations remain paused. No automatic downgrades or DW development.
-- **Candidate regression evidence:** Cursor reported **55 passed, 59 skipped, 0 failed** in the configured backend suite, **10 frontend Vitest passed**, and a successful frontend build. Old-schema integration verification and final end-to-end Load→Trip→Custody acceptance are **not yet complete**.
-- **Status convention for rows below:** `LIVE CODE REPORTED — ACCEPTANCE PENDING` means included in the reported isolated release, **not** independently demonstrated correct in production. `PARTIAL` means the full work-item acceptance contract is still open. Keep owner-blocked and unimplemented items open. **Load Integrity is not Gold.**
+- **GitHub `main`:** carries broader integrity fixes, **DW-1** workspace draft/promote, and **I14** custody/stop/POD code through `7241d83` (retention-class fix); **do not equate `main` or integrated `gpt-review` with the running isolated release** until owner deploys and verifies.
+- **Active development branch:** `gpt-review` after merging `origin/main` (DW-1 + I14 backend from `main`; gpt-review **I5 commercial cancel** and Trip Workspace UI retained where compatible). **Not production-live.**
+- **Database scope:** Cursor reports `tenant_demo` remains at `x5y6z7a8b9c0` for the isolated release; tenant DW-1/I14 migrations are **not** authorized on production tenants without separate owner approval.
+- **Status convention for rows below:** `LIVE CODE REPORTED — ACCEPTANCE PENDING` means included in the reported isolated release, **not** independently demonstrated correct in production. `PARTIAL` means the full work-item acceptance contract is still open. **Load Integrity is not Gold.**
+
+## WORKSTREAM NOTE — Casbin/RBAC (paused, not superseded)
+
+**Owner decision (2026-10-15):** Investigate application-wide authorization and establish a reusable Casbin permission foundation **in parallel with** remaining Load Integrity gaps. Default-off Casbin Loads pilot exists on `main`; full RBAC rollout is **not** verified. Authentication alone is not authorization. **No deploy** without separate owner approval.
+
+---
 
 # IMPLEMENTATION STATUS / WORK ORDER
+
+## Development checkpoint — 2026-10-18 (PR #65 / `gpt-review` → `main`; NOT DEPLOYED)
+
+**Integration intent:** [Draft PR #65](https://github.com/mkaamirerp/trucking-erp/pull/65) merges `gpt-review` (`e3e7634` baseline) into `main` (`7241d83`) for DW / Load Integrity deltas only. **Merging to `main` is not production deployment.** Live `tenant_demo` remains on `x5y6z7a8b9c0` until owner-approved tenant migration and API image rebuild. Parser/Casbin and other local WIP must not ride this PR.
+
+**Pre-merge corrections (same branch, no app redesign):** tenant Alembic CI guard aligned with `scripts/tenant_migrate_preflight.sh` (approved I14 POD two-head pair); `scripts/demo_clone_runner.py` clone upgrade uses authenticated `clone_database_url`; this master reconciles **I8** status with committed code.
+
+**Source of truth for this checkpoint:** reported isolated operator acceptance and reviewed commits; do not confuse code acceptance with production rollout.
+
+| Work | Development status | Evidence | Remaining |
+|---|---|---|---|
+| DW-1 workspace drafts | **CODE COMPLETE / OPERATOR ACCEPTED IN ISOLATION** | CRUD `dfd6333`; promotion `3499036` and `299b06b`; UI `9b15b7f`; original PDF/parse evidence `ef4f38e`; discard/expiry `387b732`; import fix `3281553`; retention-class correction `7241d83`. Reported **10/10** operator steps pass on an isolated copy of demo data after the correction | Production migration/deployment **not authorized**; live product acceptance outstanding |
+| I14 custody / stops / unloading / POD | **IMPLEMENTED IN REPO; LIVE ACCEPTANCE OPEN** | Custody `6ac67fa`, final delivery `f2c9762`, stop execution `4560245`, unloading `41dde67`, POD `2f60200`; integrated with gpt-review in `738743f` | No production deployment; live I14 operator/POD verification still needed |
+| I5 commercial cancellation | **CODE FIX REVIEW ACCEPTED; POLICY PARTIAL** | `7a5a820` closes open TripLoad memberships with `removed_at` while retaining rows/history; does not automatically cancel Trip or rewrite custody | Driver-started edge cases and TONU/deadhead/AR decisions remain owner-owned; live verification pending |
+| I9 Load audit integrity | **DEVELOPMENT ACCEPTED; ISOLATED TESTS PASSED** | `b5b9371`: strict transactional audit writes; 2026-10-18 isolated sanitized demo-data clone at `dw1d` reported 11 passed / 0 failed / 0 skipped, including required-audit rollback | Production deployment and live verification not authorized |
+| I8 Decimal commercial money | **CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED** | `0448545`, `e3e7634`: `rate` / `customer_rate` as `Decimal` through schemas, parser, DW mapper (`app/utils/load_commercial_money.py`); `tests/test_load_commercial_money_issue8.py` | Production deploy + live verification not authorized; finance downstream contract proof still owner-owned |
+
+**Git policy:** sole development worktree `/home/admin/trucking_erp` on `gpt-review`; Cursor pushes to `origin/gpt-review`; reviewed integration to `main` requires owner approval. Do not change production data or deploy implicitly.
+
+**Testing rule:** use isolated copies of real `tenant_demo` business data; never write to `tenant_demo`. No new test infrastructure unless separately approved.
+
+**I9 testing follow-up resolved (`0e877db`, 2026-10-18):** `scripts/demo_clone_runner.py` now defaults disposable clones to explicit DW-1 revision `dw1d_load_commercial_evidence_retention_varchar32` (overridable; `--baseline-only` skips upgrade; `head`/`heads` refused) and passes both `TENANT_DATABASE_URL` and `ALEMBIC_TENANT_DATABASE_URL` to tests. Reported: 23 clone-runner tests and 11 I9/I26 tests pass on a sanitized disposable demo-data clone; clone dropped; source `tenant_demo` unchanged. Other module/POD migration targets must still be selected explicitly when needed. No deployment.
+
+
+
 
 Status vocabulary:
 
@@ -68,26 +99,26 @@ Status vocabulary:
 | 8 | 0C-IMPL | Retire `/dispatch` as ops authority; Trip-first nav/readers | ⬜ NOT IMPLEMENTED | **On hold by owner decision.** Slice 1 (F1/F2 nav → Trip Container) shipped separately; broader 0C UI retirement not active | No further 0C implementation until owner lifts hold |
 | 9 | 0D | Legacy mirror / backfill safety (`dispatch_trips`, Load.trip_number, active_dispatch_trip_id, payroll readers) | 🟠 PARTIAL | Tenant-safe mirror joins included in reported release; historical mirror/backfill retirement and downstream reader proof remain open. | Complete tenant/reader checks before changing mirrors |
 | 10 | I1 | New-write `Load.status` commercial boundary | ✅ DONE / SHIPPED | Covered by accepted 0A (`26621fe…` / mainline `7fbd69c…`): create=`draft`; writable PATCH statuses `draft`/`ready`; legacy ops rejected | Watch for residual holes only |
-| 11 | I3 | Mark Ready bypass / draft→ready authority | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Mark Ready guard included in reported isolated release 6919ec0; code reviewed; live authenticated behavior not yet confirmed. | Verify ready bypass rejected and authorized mark-ready works |
-| 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Ready-gated planned TripLoad insertion implemented and included in reported 6919ec0 release; integrated regression evidence; live verification pending. | Verify planning membership behavior |
-| 13 | I2 | Full stop replacement destroys stop/action/history | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Stable-ID stop synchronization, audited removal and history-protected 409 included in reported release; implementation tests reported. | Verify stop history and audit remain intact |
-| 14 | I5 | Hard DELETE unsafe for commercial/history Loads | 🟠 PARTIAL | API physical DELETE blocked in reported 6919ec0 release; final cancel/never-used-draft deletion policy and audit contract unresolved. | Owner decision on cancellation policy and final tests |
-| 15 | I9 | Load audit trail incomplete | 🟠 PARTIAL | Stop/commercial audit hooks and I26 atomic money audit implemented; full mutation/actor/request coverage not proven. | Finish audit matrix and required gaps |
-| 16 | I10 | Unknown `Load.status` → Ready on legacy board | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Unknown legacy statuses moved to explicit unknown bucket in reported release. | Verify no unknown status appears Ready |
-| 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Open planned Trip lookup and Load UI discoverability included in reported release. | Verify live planned Trip navigation |
-| 18 | I14 | Custody → Trip close operator workflow | 🟠 PARTIAL | Slice 1 — yard handoff and Trip completion UI: implemented and code-reviewed (`6ac67fa`). Slice 2 — final customer delivery: implemented and code-reviewed through `f2c9762`. Per-Load custody transitions and TripLoad membership closure are implemented. Trip completion remains a separate action. `Load.status` remains unchanged. No automatic next-Trip activation. **Stop execution:** arrival/departure implemented and code-reviewed at `4560245` (existing PICKUP/DROP/DELIVERY stops; once-only timestamps and required atomic audit), not production-deployed. **Unloading V1:** start/completion code-reviewed at `41dde673` using `load_stop_actions`, required atomic audit, and no schema migration. **Still open:** production deployment, live operator verification, and POD evidence. | Do not treat I14 as production-live. Next product gap is POD evidence; stop execution and unloading need live verification. |
-| 19 | I15 | Block silent assignment swap on `in_progress` | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | In-progress assignment-change guard included in reported release; test evidence exists. | Verify lock and controlled exceptions |
-| 20 | I16 | Decision 10 future-assignment conflict guard | 🟠 PARTIAL | Decision 10 overlap guard implemented for bounded time windows; truck-only/trailer-only and tenant-isolation coverage remains thin. | Complete assignment overlap cases |
-| 21 | I17 | Current/open TripLoad row selection contract | 🟠 PARTIAL | Current/open TripLoad selection improvements included; broader lifecycle membership resolution remains unproven. | Complete lifecycle scenario and tests |
+| 11 | I3 | Mark Ready bypass / draft→ready authority | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Mark Ready guard on `main` / integrated `gpt-review`; live authenticated behavior not confirmed on running release. | Verify ready bypass rejected and authorized mark-ready works |
+| 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Ready-gated planned TripLoad on `main`; live verification pending. | Verify planning membership behavior |
+| 13 | I2 | Full stop replacement destroys stop/action/history | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Stable-ID stop sync and history-protected removal on `main`; live verification pending. | Verify stop history and audit remain intact |
+| 14 | I5 | Hard DELETE unsafe for commercial/history Loads | 🟠 PARTIAL | DELETE blocked on 6919ec0; **POST `/loads/{id}/cancel`** and mutation guards on integrated `gpt-review`; AR/payroll cancel block and draft policy still open. | Owner decision on cancellation policy; live verification |
+| 15 | I9 | Load audit trail incomplete | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | `b5b9371` strict transaction/audit changes; isolated sanitized demo-data clone migrated to `dw1d`: 11 passed, 0 failed, 0 skipped (I9 + I26), including rollback checks. | Production deployment/live verification requires separate approval |
+| 16 | I10 | Unknown `Load.status` → Ready on legacy board | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Unknown legacy statuses bucketed on `main`. | Verify no unknown status appears Ready |
+| 17 | I13 | Planned Trip discoverability from Load (`active_trip_id` gap) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Open planned Trip lookup and Load UI on `main`. | Verify live planned Trip navigation |
+| 18 | I14 | Custody → Trip close operator workflow | 🟠 PARTIAL | **Backend (`main`):** custody handoff through `f2c9762`, stop execution `4560245`, unloading `41dde67`, POD evidence `2f60200`. **UI:** Trip Container panels on integrated `gpt-review` aligned to `main` API names. **Not production-deployed.** | Live operator verification; POD acceptance |
+| 19 | I15 | Block silent assignment swap on `in_progress` | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | In-progress assignment guard on `main`. | Verify lock and controlled exceptions |
+| 20 | I16 | Decision 10 future-assignment conflict guard | 🟠 PARTIAL | Overlap guard on `main`; edge cases thin. | Complete assignment overlap cases |
+| 21 | I17 | Current/open TripLoad row selection contract | 🟠 PARTIAL | Selection improvements on `main`; lifecycle scenarios unproven. | Complete lifecycle scenario and tests |
 | 22 | I6 | Rate Confirmation evidence/classification gate | ☑ AUDIT / DESIGN COMPLETE | Agriculture classified as model quality (gpt-4o-mini); not hydration corruption | Parser quality track (not Trip ops) |
 | 23 | I7 | Raw PDF overwrites Internal Notes | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Parser no longer injects full PDF raw_text into operator Internal Notes in reported release. | Verify existing notes retained across reparse |
 | 24 | I11 | Parse context API drift | 🟠 PARTIAL | Parse context forwarding improvements included in orchestrator, but public contract/caller coverage not fully closed. | Validate context API contract |
-| 25 | I8 | Load money float at API/parser boundary | ⬜ NOT IMPLEMENTED | DB NUMERIC; Pydantic/parser still float | Decimal end-to-end |
+| 25 | I8 | Load money float at API/parser boundary | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | `0448545` / `e3e7634` on integrated `gpt-review` (PR #65): Decimal at API/parser/DW mapper; DB NUMERIC unchanged; host `test_load_commercial_money_issue8.py` passed (2026-10-18) | Production deploy/live verification; confirm AR/settlement readers if owner expands scope |
 | 26 | I18–I22 | Parser hydration / stop coercion / field contract / exclusion / inbox hydration | 🟠 PARTIAL | Scalar parse ownership, unresolved stop classification and exclusion warnings included in reported release; manual stop edits on reparse, I20 field length and I22 inbox hydration remain open. | Define stop-ownership policy; complete I20/I22 and regression proof |
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Next Integrity work:** Verify the reported isolated production release and close outstanding Integrity acceptance gaps. I14 custody handoff, per-Load final delivery, and separate Trip completion are code-reviewed on `main` through `f2c9762`; stop arrival/departure are code-reviewed on `main` at `4560245` (required audit in the timestamp transaction). Unloading V1 is code-reviewed at `41dde673` (start/completion with required audit). Production deployment and live operator verification remain open, as does POD evidence. I5 cancellation, I6 Rate Confirmation evidence gate, I8 Decimal money boundary, I9 audit completeness, I16/I17 edge cases, and I18–I22 parser/inbox remain open or partial. **Load Integrity is not complete.** **0B data migration and 0C operator-surface retirement are not authorized.** No resumption of the 107-tenant DW migration.
+**Next Integrity work (integrated `gpt-review` / PR #65):** Complete PR #65 merge to `main` after green CI and disposable-clone regression (I9/I26/DW at `dw1d`). I8 code complete on branch (not live). I9 accepted in isolation (`b5b9371`). DW-1 operator-accepted in isolation (not deployed). I14 awaits live acceptance. Partial: I5 cancel policy, I18–I22 parser/inbox, F1 duplicate Load-create paths (separate owner one-shot). Casbin/RBAC is a **separate** track. **Load Integrity is not Gold.** **0B migration and 0C retirement are not authorized.** **No production tenant migration or deploy** without owner approval.
 
 ---
 
@@ -1483,6 +1514,20 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 6. **11** targeted regression tests passed (Issue 26 suite + `test_load_audit_events_unittest.py`).
 7. Accepted commits: `ede7ba80d0154f39db5a4f23813b7eaceae99030`, `e7ab68ddbea4106aca891455a7b094ebb5277ae3`.
 8. **Production deployment and live verification remain pending** — do not treat as shipped in runtime until API reload + operator verification.
+
+### Claude findings (unresolved — not fixed by correction pass 1)
+
+- RBAC permission gates on Load/Trip mutations
+- Audit actor / request identity on all Load writes
+- Best-effort audit transaction handling edge cases
+- Parser rate limits and tenant context on parse-document
+- Decimal-safe money contract end-to-end (API/parser)
+- Duplicate `load_number` race under concurrency
+- Explicit frontend write payload / field contract drift
+- Nonfunctional pickup date filters on list/board
+- `LoadResponse.references` ORM serialization quirks
+- Legacy read-model / dispatch mirror issues (0C/0D)
+- Other cross-module security findings from integrity audit
 
 ### Gates
 

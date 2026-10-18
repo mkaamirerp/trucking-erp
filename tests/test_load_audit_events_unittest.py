@@ -32,6 +32,7 @@ class TestLoadAuditEvents(unittest.TestCase):
 
       async with Session() as db:
         # Create load
+        req_id = f"test-req-create-{suffix}"
         created = await loads_service.create_load(
           db,
           tenant_id,
@@ -45,6 +46,9 @@ class TestLoadAuditEvents(unittest.TestCase):
               {"stop_type": "DROP", "sequence": 1, "city": "B", "state_or_province": "TX"},
             ],
           ),
+          actor_user_id=42,
+          request_id=req_id,
+          source="ui",
         )
         load_id = int(created.id)
 
@@ -66,11 +70,14 @@ class TestLoadAuditEvents(unittest.TestCase):
           tenant_id,
           load_id,
           expected_concurrency_version=int(updated.concurrency_version),
+          actor_user_id=42,
+          request_id=f"test-req-ready-{suffix}",
+          source="ui",
         )
 
       async with Session() as db:
         rows = (await db.execute(text("""
-          select action
+          select action, actor_user_id, request_id
           from audit_events
           where tenant_id=:tid and entity_type='load' and entity_id=:eid
           order by event_at desc, id desc
@@ -78,7 +85,16 @@ class TestLoadAuditEvents(unittest.TestCase):
         """), {"tid": tenant_id, "eid": str(load_id)})).all()
         actions = [r[0] for r in rows]
         assert "load_created" in actions
-        assert "load_updated" in actions or "load_status_changed" in actions
+        assert "load_stops_changed" in actions
+        assert "load_updated" in actions
+        assert "load_marked_ready" in actions
+        created_row = next(
+          (r for r in rows if r[0] == "load_created"),
+          None,
+        )
+        assert created_row is not None
+        assert created_row[1] == 42
+        assert created_row[2] == req_id
 
       await engine.dispose()
 

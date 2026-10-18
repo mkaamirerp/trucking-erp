@@ -31,6 +31,7 @@ import {
   listTrailers,
   listTrucks,
   listAuditEventsByEntity,
+  cancelLoad,
   markLoadReady,
   parseLoadVersionConflict,
   parseLoadWorkspaceDocument,
@@ -372,6 +373,7 @@ export default function LoadWorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [markReadyBusy, setMarkReadyBusy] = useState(false);
+  const [cancelLoadBusy, setCancelLoadBusy] = useState(false);
   const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
   const [createPlannedTripError, setCreatePlannedTripError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1181,6 +1183,84 @@ export default function LoadWorkspacePage() {
     (workspaceMode === "detail" || workspaceMode === "intake") &&
     (load.status || "").toLowerCase() === "draft";
 
+  const showCancelLoadAction =
+    load != null &&
+    (workspaceMode === "detail" || workspaceMode === "intake") &&
+    ["draft", "ready"].includes((load.status || "").toLowerCase());
+
+  function formatLoadCancelError(err: unknown): string {
+    if (!(err instanceof Error)) return "Could not cancel load.";
+    const raw = err.message?.trim() || "";
+    try {
+      const parsed = JSON.parse(raw) as { detail?: unknown };
+      const detail = parsed.detail;
+      if (detail && typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+        const code = (detail as { code?: string }).code;
+        switch (code) {
+          case "LOAD_CANCEL_ACTIVE_TRIP_EXECUTION":
+            return "This load is active on an assigned or in-progress trip. Close custody on the trip before cancelling commercially.";
+          case "LOAD_CANCEL_UNRESOLVED_CUSTODY":
+            return "Custody must be resolved (unknown or delivered) before commercial cancel.";
+          case "LOAD_CANCEL_STATUS_NOT_ALLOWED":
+            return "This load status cannot be cancelled from here.";
+          default:
+            break;
+        }
+        const msg =
+          typeof (detail as { detail?: unknown }).detail === "string"
+            ? (detail as { detail: string }).detail
+            : null;
+        if (msg) return msg;
+      }
+    } catch {
+      /* use raw */
+    }
+    if (raw.length > 0 && raw.length < 400) return raw;
+    return "Could not cancel load.";
+  }
+
+  async function onCancelLoad() {
+    if (!load) return;
+    const reason = window.prompt("Cancellation reason (required):");
+    if (reason == null) return;
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setToolbarMessage({ text: "Cancellation reason is required.", tone: "warning" });
+      return;
+    }
+    const ok = window.confirm(
+      "Cancel this commercial load?\n\nThe load record, trip memberships, and custody history are preserved. This does not delete the load or post payroll adjustments.\n\nContinue?",
+    );
+    if (!ok) return;
+    const expectedVersion = load.concurrency_version ?? 1;
+    setCancelLoadBusy(true);
+    setToolbarMessage(null);
+    setError(null);
+    try {
+      const updated = await cancelLoad(load.id, expectedVersion, trimmed);
+      setLoad(updated);
+      hydrateFromLoad(updated);
+      setToolbarMessage({ text: "Load cancelled.", tone: "success" });
+    } catch (e: unknown) {
+      const mc = parseLoadVersionConflict(e);
+      if (mc) {
+        setServerConflict({
+          serverVersion: mc.server_version,
+          serverSnapshot: mc.server_snapshot,
+        });
+        setToolbarMessage({ text: "Cancel conflicted — reload and retry.", tone: "warning" });
+        if (mc.server_snapshot) {
+          setLoad(mc.server_snapshot);
+          hydrateFromLoad(mc.server_snapshot);
+        }
+      } else {
+        setToolbarMessage({ text: formatLoadCancelError(e), tone: "error" });
+      }
+    } finally {
+      setCancelLoadBusy(false);
+    }
+  }
+
   async function onDiscardDraft() {
     if (!draftIdFromRoute || !isDraftEditable) return;
     const confirmed = window.confirm(
@@ -1702,6 +1782,7 @@ export default function LoadWorkspacePage() {
               disabled={
                 saving ||
                 markReadyBusy ||
+                cancelLoadBusy ||
                 parseBusy ||
                 loading ||
                 (isDraftWorkspace && !isDraftEditable)
@@ -1743,7 +1824,7 @@ export default function LoadWorkspacePage() {
               <Button
                 variant="primary"
                 type="button"
-                disabled={saving || markReadyBusy}
+                disabled={saving || markReadyBusy || cancelLoadBusy}
                 onClick={() => void onSave()}
               >
                 {saving ? "Saving…" : "Save load"}
@@ -1753,11 +1834,22 @@ export default function LoadWorkspacePage() {
                   variant="secondary"
                   type="button"
                   className="!border-[var(--trk-btn-primary)] !bg-[var(--trk-btn-primary)] !text-[var(--trk-btn-text)] hover:!bg-amber-400"
-                  disabled={saving || markReadyBusy || loading || parseBusy}
+                  disabled={saving || markReadyBusy || cancelLoadBusy || loading || parseBusy}
                   title="Saves your edits, then marks this load ready when broker, load reference, and pickup + delivery stops are set."
                   onClick={() => void onMarkReady()}
                 >
                   {markReadyBusy ? "Marking ready…" : "Mark ready"}
+                </Button>
+              ) : null}
+              {showCancelLoadAction ? (
+                <Button
+                  variant="secondary"
+                  type="button"
+                  data-testid="load-workspace-cancel-load"
+                  disabled={saving || markReadyBusy || cancelLoadBusy || loading}
+                  onClick={() => void onCancelLoad()}
+                >
+                  {cancelLoadBusy ? "Cancelling…" : "Cancel load"}
                 </Button>
               ) : null}
             </>

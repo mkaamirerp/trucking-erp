@@ -5,7 +5,8 @@ Mechanical validation continues to operate on LoadParseExtractedFields names.
 
 from __future__ import annotations
 
-from typing import Any
+from decimal import Decimal
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -18,6 +19,7 @@ from app.schemas.load_document_parse_semantic import (
     SemanticExtractedFields,
     coerce_semantic_extracted,
 )
+from app.utils.load_commercial_money import parse_load_customer_rate, parse_load_rate
 
 
 def map_semantic_extracted_to_product(
@@ -48,8 +50,8 @@ def map_semantic_extracted_to_product(
         commodity=_opt_str(semantic.commodity),
         estimated_weight=_opt_int(semantic.estimated_weight),
         temperature_requirement=_opt_str(semantic.temperature_requirement),
-        rate=_opt_float(semantic.rate),
-        customer_rate=_opt_float(semantic.customer_rate),
+        rate=_opt_commercial_money(semantic.rate, parser=parse_load_rate),
+        customer_rate=_opt_commercial_money(semantic.customer_rate, parser=parse_load_customer_rate),
         miles=_opt_float(semantic.miles),
         customs_broker_name=_opt_str(semantic.customs_broker_name),
         references=_map_references(semantic.references),
@@ -82,6 +84,19 @@ def _opt_float(value: Any) -> float | None:
     if isinstance(value, float):
         return value
     return None
+
+
+def _opt_commercial_money(
+    value: Any,
+    *,
+    parser: Callable[[Any], Decimal | None],
+) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return parser(value)
+    except ValueError:
+        return None
 
 
 def _map_references(items: Any) -> list[LoadParseReferenceItem]:

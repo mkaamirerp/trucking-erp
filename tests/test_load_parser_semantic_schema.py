@@ -163,7 +163,9 @@ def test_translator_maps_every_semantic_field_to_product() -> None:
     assert product.commodity == "Poly Grind"
     assert product.estimated_weight == 43000
     assert product.temperature_requirement is None
-    assert product.rate == 1800.0
+    from decimal import Decimal
+
+    assert product.rate == Decimal("1800.00")
     assert product.customer_rate is None
     assert product.miles is None
     assert product.customs_broker_name == "Customs Co"

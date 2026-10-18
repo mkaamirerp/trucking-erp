@@ -1,0 +1,557 @@
+# TruckERP — Load workspace draft API (design sketch)
+# Status: DESIGN ONLY — not registered in app/main.py
+# Authority: docs/load_trip/DRAFT_WORKSPACE_SPEC.md
+openapi: 3.0.3
+info:
+  title: TruckERP Load Workspace Drafts
+  version: 0.4.0-design
+  description: |
+    Tenant-scoped temporary drafts before commercial Load promotion.
+    Official loads are created only via promote (status=ready).
+    Internal storage keys are never exposed in API responses.
+servers:
+  - url: /api/v1
+tags:
+  - name: load-workspace-drafts
+    description: Temporary workspace drafts (not loads)
+
+paths:
+  /load-workspace-drafts:
+    get:
+      tags: [load-workspace-drafts]
+      summary: List workspace drafts
+      operationId: listLoadWorkspaceDrafts
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, promoted, discarded, expired]
+          description: Default active list uses draft only.
+        - name: mine
+          in: query
+          schema:
+            type: boolean
+        - name: email_thread_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated drafts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftListResponse'
+
+    post:
+      tags: [load-workspace-drafts]
+      summary: Create workspace draft
+      operationId: createLoadWorkspaceDraft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /load-workspace-drafts/{draft_id}:
+    get:
+      tags: [load-workspace-drafts]
+      summary: Retrieve draft (resume)
+      operationId: getLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200':
+          description: Draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [load-workspace-drafts]
+      summary: Save / update draft fields (deep merge)
+      operationId: updateLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+  /load-workspace-drafts/{draft_id}/pdf:
+    get:
+      tags: [load-workspace-drafts]
+      summary: Download committed PDF for left-pane verification
+      operationId: getLoadWorkspaceDraftPdf
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200':
+          description: Active committed PDF bytes (not pending upload)
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No committed PDF yet (upload in progress only)
+
+  /load-workspace-drafts/{draft_id}/pdf-uploads:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Begin PDF upload (Transaction A)
+      operationId: beginLoadWorkspaceDraftPdfUpload
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspacePdfUploadBeginRequest'
+      responses:
+        '201':
+          description: Upload session reserved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspacePdfUploadSessionResponse'
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+  /load-workspace-drafts/{draft_id}/pdf-uploads/{upload_session_id}:
+    put:
+      tags: [load-workspace-drafts]
+      summary: Upload PDF bytes (no DB transaction)
+      operationId: uploadLoadWorkspaceDraftPdfBytes
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/UploadSessionId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '204':
+          description: Bytes stored to pending object
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+    delete:
+      tags: [load-workspace-drafts]
+      summary: Abort PDF upload (retain last committed PDF)
+      operationId: abortLoadWorkspaceDraftPdfUpload
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/UploadSessionId'
+      responses:
+        '204':
+          description: Lease cleared
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /load-workspace-drafts/{draft_id}/pdf-uploads/{upload_session_id}/commit:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Commit PDF upload (Transaction B)
+      operationId: commitLoadWorkspaceDraftPdfUpload
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/UploadSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspacePdfUploadCommitRequest'
+      responses:
+        '200':
+          description: PDF activated; parse acceptance invalidated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+  /load-workspace-drafts/{draft_id}/discard:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Discard workspace draft
+      operationId: discardLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftDiscardRequest'
+      responses:
+        '204':
+          description: Discarded
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+
+  /load-workspace-drafts/{draft_id}/promote:
+    post:
+      tags: [load-workspace-drafts]
+      summary: Promote to official Load (ready)
+      operationId: promoteLoadWorkspaceDraft
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadWorkspaceDraftPromoteRequest'
+      responses:
+        '200':
+          description: Promoted or idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadWorkspaceDraftPromoteResponse'
+        '400':
+          description: Mark-ready validation failed
+        '409':
+          $ref: '#/components/responses/DraftConflict'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    DraftId:
+      name: draft_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Size:
+      name: size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 25
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+    UploadSessionId:
+      name: upload_session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDetail'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDetail'
+    DraftConflict:
+      description: Concurrency, state, or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DraftConflictDetail'
+
+  schemas:
+    ErrorDetail:
+      type: object
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/ErrorDetailObject'
+
+    ErrorDetailObject:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    DraftConflictDetail:
+      type: object
+      properties:
+        detail:
+          type: object
+          properties:
+            code:
+              type: string
+              enum:
+                - LOAD_WORKSPACE_DRAFT_VERSION_CONFLICT
+                - LOAD_WORKSPACE_DRAFT_NOT_EDITABLE
+                - LOAD_WORKSPACE_ALREADY_PROMOTED
+                - LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS
+                - LOAD_WORKSPACE_PDF_UPLOAD_LEASE_EXPIRED
+                - LOAD_WORKSPACE_PDF_UPLOAD_SESSION_MISMATCH
+            message:
+              type: string
+            client_version:
+              type: integer
+            server_version:
+              type: integer
+            server_snapshot:
+              $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+            promoted_load_id:
+              type: integer
+              description: Present for ALREADY_PROMOTED idempotent guidance
+
+    LoadWorkspaceDraftCreate:
+      type: object
+      properties:
+        source_channel:
+          type: string
+          enum: [manual, email_intake]
+          default: manual
+        email_thread_id:
+          type: integer
+          nullable: true
+        draft_json:
+          type: object
+          additionalProperties: true
+
+    LoadWorkspaceDraftUpdate:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        draft_json:
+          type: object
+          additionalProperties: true
+          description: Deep merge per DRAFT_WORKSPACE_SPEC §1.2
+        reconfirm_parse_acceptance:
+          type: boolean
+          default: false
+          description: When true, keep accepted_parse if pdf sha matches
+
+    LoadWorkspaceDraftDiscardRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          maxLength: 2000
+
+    LoadWorkspacePdfUploadBeginRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        filename:
+          type: string
+          maxLength: 255
+          description: Hint for display only
+
+    LoadWorkspacePdfUploadSessionResponse:
+      type: object
+      required: [upload_session_id, lease_expires_at, concurrency_version]
+      properties:
+        upload_session_id:
+          type: string
+          format: uuid
+          description: Opaque session handle; not a storage key.
+        lease_expires_at:
+          type: string
+          format: date-time
+        concurrency_version:
+          type: integer
+          description: Unchanged until commit (B) succeeds.
+
+    LoadWorkspacePdfUploadCommitRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        content_sha256:
+          type: string
+          description: Optional client-supplied hex sha256 for verify
+
+    LoadWorkspaceDraftPromoteRequest:
+      type: object
+      required: [expected_concurrency_version]
+      properties:
+        expected_concurrency_version:
+          type: integer
+          minimum: 1
+        load_number:
+          type: string
+          maxLength: 50
+          nullable: true
+
+    LoadWorkspaceDraftResponse:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - status
+        - concurrency_version
+        - draft_schema_version
+        - draft_json
+        - expires_at
+        - created_at
+        - updated_at
+        - parse_acceptance_valid
+        - pdf_upload_state
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: integer
+        status:
+          type: string
+          enum: [draft, promoted, discarded, expired]
+        concurrency_version:
+          type: integer
+        draft_schema_version:
+          type: integer
+        draft_json:
+          type: object
+          additionalProperties: true
+        source_channel:
+          type: string
+        email_thread_id:
+          type: integer
+          nullable: true
+        pdf_sha256:
+          type: string
+          nullable: true
+        pdf_filename:
+          type: string
+          nullable: true
+        has_pdf:
+          type: boolean
+        pdf_upload_state:
+          type: string
+          enum: [idle, uploading, ready]
+        pdf_upload_lease_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set only while uploading; not a storage key.
+        accepted_parse_json:
+          type: object
+          nullable: true
+        parse_acceptance_valid:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+        promoted_load_id:
+          type: integer
+          nullable: true
+        promoted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LoadWorkspaceDraftListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoadWorkspaceDraftResponse'
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    LoadWorkspaceDraftPromoteResponse:
+      type: object
+      required: [load, evidence_id, workspace_draft_id]
+      properties:
+        workspace_draft_id:
+          type: string
+          format: uuid
+        load:
+          type: object
+          description: LoadResponse shape; status must be ready.
+          additionalProperties: true
+        evidence_id:
+          type: integer

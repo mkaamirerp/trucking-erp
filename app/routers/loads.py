@@ -12,6 +12,7 @@ from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load import (
+    LoadCancelBody,
     LoadCreate,
     LoadMutationConcurrencyBody,
     LoadNoteCreate,
@@ -53,10 +54,14 @@ async def create_load(
     user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    # Slice 5: request/user captured for future audit correlation; create_load audit currently best-effort.
-    _ = getattr(request.state, "request_id", None) if request else None
-    _ = getattr(user, "user_id", None)
-    load = await loads_service.create_load(db, tenant_id, payload)
+    load = await loads_service.create_load(
+        db,
+        tenant_id,
+        payload,
+        actor_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+    )
     return LoadResponse.model_validate(load)
 
 
@@ -109,7 +114,7 @@ async def parse_load_workspace_document(
     Uses the Rate Confirmation v2 product parser (acquisition + clean OpenAI handoff +
     mechanical validation); no PRODUCT_PARSE_DIAGNOSTICS fallback.
     """
-    data = await file.read()
+    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
     if len(data) > _MAX_PARSE_PDF_BYTES:
@@ -188,6 +193,8 @@ async def confirm_document_snapshot(
         load_id,
         confirming_user_id=getattr(user, "user_id", None),
         expected_concurrency_version=body.expected_concurrency_version,
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
     )
     return LoadResponse.model_validate(load)
 
@@ -217,6 +224,29 @@ async def mark_load_ready(
             update={"open_planned_trip_id": planned[0], "open_planned_trip_number": planned[1]}
         )
     return resp
+
+
+@router.post("/{load_id}/cancel", response_model=LoadResponse)
+async def cancel_load(
+    load_id: int,
+    body: LoadCancelBody,
+    request: Request,
+    tenant_id: int = Depends(require_tenant),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Commercial cancel — preserves load row and history; closes OPEN TripLoads (Issue I5)."""
+    load = await loads_service.cancel_load(
+        db,
+        tenant_id,
+        load_id,
+        expected_concurrency_version=body.expected_concurrency_version,
+        reason=body.reason,
+        actor_user_id=getattr(user, "user_id", None),
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+    )
+    return LoadResponse.model_validate(load)
 
 
 @router.get("/{load_id}/custody", response_model=LoadCustodySnapshotResponse)

@@ -34,6 +34,9 @@ from app.core.integration_db_guard import (  # noqa: E402
 )
 
 SOURCE_DATABASE = "tenant_demo"
+# Explicit Alembic target for disposable clones (never head/heads). See docs/DEMO_CLONE_TENANT_SCHEMA.md.
+DEFAULT_DEMO_CLONE_TENANT_REVISION = "dw1d_load_commercial_evidence_retention_varchar32"
+ENV_DEMO_CLONE_TENANT_REVISION = "DEMO_CLONE_TENANT_REVISION"
 CLONE_NAME_RE = re.compile(r"^tenant_clone_[0-9]{8}t[0-9]{6}z_[a-z0-9]{6}$")
 IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 REFUSED_REVISIONS = frozenset({"", "head", "heads"})
@@ -231,6 +234,25 @@ def assert_revision(revision: str | None) -> str | None:
     if cleaned.lower() in REFUSED_REVISIONS or " " in cleaned or ";" in cleaned:
         raise CloneError("Refusing Alembic target. Pass one explicit revision, never head.")
     return cleaned
+
+
+def resolve_demo_clone_tenant_revision(
+    *,
+    baseline_only: bool,
+    explicit_revision: str = "",
+) -> str | None:
+    """Choose the tenant Alembic revision applied to the clone after restore.
+
+    tenant_demo stays at its live revision; only the disposable clone is upgraded.
+    """
+    if baseline_only:
+        return None
+    if explicit_revision.strip():
+        return assert_revision(explicit_revision.strip())
+    override = (os.environ.get(ENV_DEMO_CLONE_TENANT_REVISION) or "").strip()
+    if override:
+        return assert_revision(override)
+    return DEFAULT_DEMO_CLONE_TENANT_REVISION
 
 
 def _quote_ident(name: str) -> str:
@@ -605,9 +627,11 @@ def run_clone(
             upgrade_code = commands.run(
                 ["alembic", "-c", "alembic_tenant.ini", "upgrade", revision],
                 env={
-                    "ALEMBIC_TENANT_DATABASE_URL": (
-                        f"postgresql://{request.clone_host}/{request.clone_name}"
-                    )
+                    "ALEMBIC_TENANT_DATABASE_URL": clone_database_url(
+                        request.clone_host,
+                        request.clone_name,
+                        async_driver=True,
+                    ),
                 },
             )
             if upgrade_code != 0:
@@ -904,13 +928,11 @@ class LiveCommands:
                 raise CloneError("Refusing Alembic head.")
             logical_url = (env or {}).get("ALEMBIC_TENANT_DATABASE_URL", "")
             host, database = _host_and_database(logical_url)
-            child = isolated_child_env(
-                {
-                    "ALEMBIC_TENANT_DATABASE_URL": clone_database_url(
-                        host, database, async_driver=True
-                    )
-                }
-            )
+            if _url_has_credentials(logical_url):
+                alembic_url = logical_url
+            else:
+                alembic_url = clone_database_url(host, database, async_driver=True)
+            child = isolated_child_env({"ALEMBIC_TENANT_DATABASE_URL": alembic_url})
             assert_isolated_target(child["ALEMBIC_TENANT_DATABASE_URL"])
             completed = self.spawn(
                 [sys.executable, "-m", *argv],
@@ -924,9 +946,12 @@ class LiveCommands:
         if argv[0] == "pytest":
             logical_url = (env or {}).get("TENANT_DATABASE_URL", "")
             host, database = _host_and_database(logical_url)
+            sync_url = clone_database_url(host, database, async_driver=False)
+            async_url = clone_database_url(host, database, async_driver=True)
             child = isolated_child_env(
                 {
-                    "TENANT_DATABASE_URL": clone_database_url(host, database, async_driver=False),
+                    "TENANT_DATABASE_URL": sync_url,
+                    "ALEMBIC_TENANT_DATABASE_URL": async_url,
                     "TRUCKERP_INTEGRATION_ALLOWED_DB_NAMES": (env or {}).get(
                         "TRUCKERP_INTEGRATION_ALLOWED_DB_NAMES", database
                     ),
@@ -946,12 +971,19 @@ class LiveCommands:
         raise CloneError(f"Refusing unexpected command {argv[0]!r}.")
 
 
+def _url_has_credentials(url: str) -> bool:
+    after_scheme = (url or "").split("://", 1)[-1]
+    return "@" in after_scheme and ":" in after_scheme.split("@", 1)[0]
+
+
 def _host_and_database(url: str) -> tuple[str, str]:
-    match = re.fullmatch(r"postgresql(?:\+asyncpg)?://([^/]+)/([a-z0-9_]+)", url or "")
+    match = re.fullmatch(
+        r"postgresql(?:\+asyncpg)?://(?:[^@/]+@)?([^/:]+)(?::\d+)?/([a-z0-9_]+)",
+        url or "",
+    )
     if match is None:
         raise CloneError("Clone URL is missing a host or database name.")
-    host = match.group(1).split("@")[-1].split(":")[0]
-    return host, match.group(2)
+    return match.group(1), match.group(2)
 
 
 def run_approved_clone(request: CloneRequest) -> CloneReport:
@@ -974,8 +1006,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _request_from_args(args: argparse.Namespace) -> CloneRequest:
-    if bool(args.revision) == bool(args.baseline_only):
-        raise CloneError("Pass exactly one of --revision or --baseline-only.")
+    if args.baseline_only and (args.revision or "").strip():
+        raise CloneError("Pass --revision or --baseline-only, not both.")
     if not args.test:
         raise CloneError("Pass at least one --test path. The clone runs those tests against real rows.")
     if not args.schema:
@@ -991,7 +1023,10 @@ def _request_from_args(args: argparse.Namespace) -> CloneRequest:
         source=DbTarget(args.source_host, SOURCE_DATABASE),
         clone_host=args.clone_host,
         clone_name=name,
-        revision=None if args.baseline_only else args.revision,
+        revision=resolve_demo_clone_tenant_revision(
+            baseline_only=args.baseline_only,
+            explicit_revision=args.revision or "",
+        ),
         schema_contract=DEFAULT_SCHEMA + tuple(extra),
         run_tests=True,
         test_paths=tuple(args.test),

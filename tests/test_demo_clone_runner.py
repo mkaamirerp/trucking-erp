@@ -155,7 +155,8 @@ def test_refuses_protected_targets_before_any_sql() -> None:
     assert commands.argv == []
 
 
-def test_successful_clone_sanitizes_upgrades_and_drops() -> None:
+def test_successful_clone_sanitizes_upgrades_and_drops(monkeypatch) -> None:
+    monkeypatch.setenv("DEMO_CLONE_DB_PASSWORD", "test-clone-pass")
     sql = FakeSql(["x5y6z7a8b9c0", "x5y6z7a8b9c0", "x5y6z7a8b9c0", "i14_load_pod_evidence_x5", "x5y6z7a8b9c0"])
     commands = FakeCommands()
     report = run_clone(
@@ -182,8 +183,10 @@ def test_successful_clone_sanitizes_upgrades_and_drops() -> None:
     upgrade = commands.argv[2]
     assert upgrade[-2:] == ["upgrade", "i14_load_pod_evidence_x5"]
     assert "head" not in upgrade
-    assert commands.envs[2]["ALEMBIC_TENANT_DATABASE_URL"].endswith("/" + NAME)
-    assert "tenant_demo" not in commands.envs[2]["ALEMBIC_TENANT_DATABASE_URL"]
+    upgrade_url = commands.envs[2]["ALEMBIC_TENANT_DATABASE_URL"]
+    assert NAME in upgrade_url
+    assert "phase4c:test-clone-pass@" in upgrade_url
+    assert "tenant_demo" not in upgrade_url
     test_env = commands.envs[3]
     assert commands.argv[3] == ["pytest", "tests/test_module.py"]
     assert test_env["STORAGE_PROVIDER"] == "local"
@@ -353,6 +356,8 @@ def test_live_commands_keep_secrets_out_of_argv(monkeypatch: pytest.MonkeyPatch,
     assert "super-secret" not in child.values()
     assert "trucking_erp" not in child["DATABASE_URL"]
     assert child["TENANT_DATABASE_URL"].endswith("/" + NAME)
+    assert child["ALEMBIC_TENANT_DATABASE_URL"].startswith("postgresql+asyncpg://")
+    assert child["ALEMBIC_TENANT_DATABASE_URL"].endswith("/" + NAME)
     assert "clone-pass" not in recorded[1][0]
     assert child["DEMO_CLONE_EXTERNAL_EFFECTS"] == "disabled"
     assert child["GOOGLE_CLIENT_SECRET"] == ""
@@ -431,6 +436,58 @@ def test_sensitive_replacements_respect_constraints() -> None:
 
 def test_cli_requires_module_schema() -> None:
     assert main(["--plan-only", "--revision", "i14_load_pod_evidence_x5", "--test", "tests/test_module.py", "--name", NAME]) == 2
+
+
+def test_default_clone_revision_matches_app_orm() -> None:
+    request = runner._request_from_args(
+        runner._parse_args(
+            [
+                "--test",
+                "tests/test_module.py",
+                "--schema",
+                "audit_events.id",
+                "--name",
+                NAME,
+            ]
+        )
+    )
+    assert request.revision == runner.DEFAULT_DEMO_CLONE_TENANT_REVISION
+
+
+def test_baseline_only_skips_clone_upgrade() -> None:
+    request = runner._request_from_args(
+        runner._parse_args(
+            [
+                "--baseline-only",
+                "--test",
+                "tests/test_module.py",
+                "--schema",
+                "audit_events.id",
+                "--name",
+                NAME,
+            ]
+        )
+    )
+    assert request.revision is None
+
+
+def test_baseline_only_and_explicit_revision_conflict() -> None:
+    with pytest.raises(CloneError, match="not both"):
+        runner._request_from_args(
+            runner._parse_args(
+                [
+                    "--baseline-only",
+                    "--revision",
+                    "i14_load_pod_evidence_x5",
+                    "--test",
+                    "tests/test_module.py",
+                    "--schema",
+                    "audit_events.id",
+                    "--name",
+                    NAME,
+                ]
+            )
+        )
 
 
 def _query_without_people_email(sql: FakeSql):

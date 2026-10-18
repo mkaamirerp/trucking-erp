@@ -171,3 +171,18 @@ async def complete_via_custody(
     return await yard_handoff(
         client, headers, trip_id, load_id, terminal_id=tid, placement=placement
     )
+
+
+async def final_delivery(
+    client: AsyncClient,
+    headers: dict,
+    trip_id: int,
+    load_id: int,
+    *,
+    body: dict | None = None,
+) -> Response:
+    return await client.post(
+        f"/api/v1/trips/{trip_id}/loads/{load_id}/final-delivery",
+        headers=headers,
+        json=body or {},
+    )
