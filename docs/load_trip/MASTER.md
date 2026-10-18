@@ -47,7 +47,11 @@ After an approved architecture change:
 
 # IMPLEMENTATION STATUS / WORK ORDER
 
-## Development checkpoint — 2026-10-17 (gpt-review; NOT DEPLOYED)
+## Development checkpoint — 2026-10-18 (PR #65 / `gpt-review` → `main`; NOT DEPLOYED)
+
+**Integration intent:** [Draft PR #65](https://github.com/mkaamirerp/trucking-erp/pull/65) merges `gpt-review` (`e3e7634` baseline) into `main` (`7241d83`) for DW / Load Integrity deltas only. **Merging to `main` is not production deployment.** Live `tenant_demo` remains on `x5y6z7a8b9c0` until owner-approved tenant migration and API image rebuild. Parser/Casbin and other local WIP must not ride this PR.
+
+**Pre-merge corrections (same branch, no app redesign):** tenant Alembic CI guard aligned with `scripts/tenant_migrate_preflight.sh` (approved I14 POD two-head pair); `scripts/demo_clone_runner.py` clone upgrade uses authenticated `clone_database_url`; this master reconciles **I8** status with committed code.
 
 **Source of truth for this checkpoint:** reported isolated operator acceptance and reviewed commits; do not confuse code acceptance with production rollout.
 
@@ -57,6 +61,7 @@ After an approved architecture change:
 | I14 custody / stops / unloading / POD | **IMPLEMENTED IN REPO; LIVE ACCEPTANCE OPEN** | Custody `6ac67fa`, final delivery `f2c9762`, stop execution `4560245`, unloading `41dde67`, POD `2f60200`; integrated with gpt-review in `738743f` | No production deployment; live I14 operator/POD verification still needed |
 | I5 commercial cancellation | **CODE FIX REVIEW ACCEPTED; POLICY PARTIAL** | `7a5a820` closes open TripLoad memberships with `removed_at` while retaining rows/history; does not automatically cancel Trip or rewrite custody | Driver-started edge cases and TONU/deadhead/AR decisions remain owner-owned; live verification pending |
 | I9 Load audit integrity | **DEVELOPMENT ACCEPTED; ISOLATED TESTS PASSED** | `b5b9371`: strict transactional audit writes; 2026-10-18 isolated sanitized demo-data clone at `dw1d` reported 11 passed / 0 failed / 0 skipped, including required-audit rollback | Production deployment and live verification not authorized |
+| I8 Decimal commercial money | **CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED** | `0448545`, `e3e7634`: `rate` / `customer_rate` as `Decimal` through schemas, parser, DW mapper (`app/utils/load_commercial_money.py`); `tests/test_load_commercial_money_issue8.py` | Production deploy + live verification not authorized; finance downstream contract proof still owner-owned |
 
 **Git policy:** sole development worktree `/home/admin/trucking_erp` on `gpt-review`; Cursor pushes to `origin/gpt-review`; reviewed integration to `main` requires owner approval. Do not change production data or deploy implicitly.
 
@@ -108,12 +113,12 @@ Status vocabulary:
 | 22 | I6 | Rate Confirmation evidence/classification gate | ☑ AUDIT / DESIGN COMPLETE | Agriculture classified as model quality (gpt-4o-mini); not hydration corruption | Parser quality track (not Trip ops) |
 | 23 | I7 | Raw PDF overwrites Internal Notes | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Parser no longer injects full PDF raw_text into operator Internal Notes in reported release. | Verify existing notes retained across reparse |
 | 24 | I11 | Parse context API drift | 🟠 PARTIAL | Parse context forwarding improvements included in orchestrator, but public contract/caller coverage not fully closed. | Validate context API contract |
-| 25 | I8 | Load money float at API/parser boundary | ⬜ NOT IMPLEMENTED | DB NUMERIC; Pydantic/parser still float | Decimal end-to-end |
+| 25 | I8 | Load money float at API/parser boundary | ✅ CODE COMPLETE / REVIEW ACCEPTED — NOT DEPLOYED | `0448545` / `e3e7634` on integrated `gpt-review` (PR #65): Decimal at API/parser/DW mapper; DB NUMERIC unchanged; host `test_load_commercial_money_issue8.py` passed (2026-10-18) | Production deploy/live verification; confirm AR/settlement readers if owner expands scope |
 | 26 | I18–I22 | Parser hydration / stop coercion / field contract / exclusion / inbox hydration | 🟠 PARTIAL | Scalar parse ownership, unresolved stop classification and exclusion warnings included in reported release; manual stop edits on reparse, I20 field length and I22 inbox hydration remain open. | Define stop-ownership policy; complete I20/I22 and regression proof |
 | 27 | PKG | Driver dispatch package (former Decision 8) | ⚠ OWNER DECISION REQUIRED | Schema still **DRAFT / NOT LOCKED** | Owner lock package before build |
 | 28 | UI-SALVAGE | DeprecatedDispatch visual salvage vs Trip Container parity | ⬜ NOT IMPLEMENTED | Routes still split; 000/001 rules absorbed below | Product UI iteration under Trip Container |
 
-**Next Integrity work (integrated `gpt-review`):** I9 code accepted (`b5b9371`); 11/11 focused tests passed on an isolated demo-data clone (not production-live). DW-1 is code complete and isolated operator-accepted (not deployed); I14 remains implemented but awaits live acceptance. Other partial items: I5 cancel policy, I8 decimal, I18–I22 parser/inbox. Continue Casbin/RBAC inspection as a **separate** track (default-off pilot on `main`). **Load Integrity is not complete.** **0B migration and 0C operator-surface retirement are not authorized.** **No production tenant migration or deploy** without owner approval.
+**Next Integrity work (integrated `gpt-review` / PR #65):** Complete PR #65 merge to `main` after green CI and disposable-clone regression (I9/I26/DW at `dw1d`). I8 code complete on branch (not live). I9 accepted in isolation (`b5b9371`). DW-1 operator-accepted in isolation (not deployed). I14 awaits live acceptance. Partial: I5 cancel policy, I18–I22 parser/inbox, F1 duplicate Load-create paths (separate owner one-shot). Casbin/RBAC is a **separate** track. **Load Integrity is not Gold.** **0B migration and 0C retirement are not authorized.** **No production tenant migration or deploy** without owner approval.
 
 ---
 

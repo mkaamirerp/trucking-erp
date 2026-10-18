@@ -627,9 +627,11 @@ def run_clone(
             upgrade_code = commands.run(
                 ["alembic", "-c", "alembic_tenant.ini", "upgrade", revision],
                 env={
-                    "ALEMBIC_TENANT_DATABASE_URL": (
-                        f"postgresql://{request.clone_host}/{request.clone_name}"
-                    )
+                    "ALEMBIC_TENANT_DATABASE_URL": clone_database_url(
+                        request.clone_host,
+                        request.clone_name,
+                        async_driver=True,
+                    ),
                 },
             )
             if upgrade_code != 0:
@@ -926,13 +928,11 @@ class LiveCommands:
                 raise CloneError("Refusing Alembic head.")
             logical_url = (env or {}).get("ALEMBIC_TENANT_DATABASE_URL", "")
             host, database = _host_and_database(logical_url)
-            child = isolated_child_env(
-                {
-                    "ALEMBIC_TENANT_DATABASE_URL": clone_database_url(
-                        host, database, async_driver=True
-                    )
-                }
-            )
+            if _url_has_credentials(logical_url):
+                alembic_url = logical_url
+            else:
+                alembic_url = clone_database_url(host, database, async_driver=True)
+            child = isolated_child_env({"ALEMBIC_TENANT_DATABASE_URL": alembic_url})
             assert_isolated_target(child["ALEMBIC_TENANT_DATABASE_URL"])
             completed = self.spawn(
                 [sys.executable, "-m", *argv],
@@ -971,12 +971,19 @@ class LiveCommands:
         raise CloneError(f"Refusing unexpected command {argv[0]!r}.")
 
 
+def _url_has_credentials(url: str) -> bool:
+    after_scheme = (url or "").split("://", 1)[-1]
+    return "@" in after_scheme and ":" in after_scheme.split("@", 1)[0]
+
+
 def _host_and_database(url: str) -> tuple[str, str]:
-    match = re.fullmatch(r"postgresql(?:\+asyncpg)?://([^/]+)/([a-z0-9_]+)", url or "")
+    match = re.fullmatch(
+        r"postgresql(?:\+asyncpg)?://(?:[^@/]+@)?([^/:]+)(?::\d+)?/([a-z0-9_]+)",
+        url or "",
+    )
     if match is None:
         raise CloneError("Clone URL is missing a host or database name.")
-    host = match.group(1).split("@")[-1].split(":")[0]
-    return host, match.group(2)
+    return match.group(1), match.group(2)
 
 
 def run_approved_clone(request: CloneRequest) -> CloneReport:

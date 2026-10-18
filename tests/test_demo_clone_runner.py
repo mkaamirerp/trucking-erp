@@ -155,7 +155,8 @@ def test_refuses_protected_targets_before_any_sql() -> None:
     assert commands.argv == []
 
 
-def test_successful_clone_sanitizes_upgrades_and_drops() -> None:
+def test_successful_clone_sanitizes_upgrades_and_drops(monkeypatch) -> None:
+    monkeypatch.setenv("DEMO_CLONE_DB_PASSWORD", "test-clone-pass")
     sql = FakeSql(["x5y6z7a8b9c0", "x5y6z7a8b9c0", "x5y6z7a8b9c0", "i14_load_pod_evidence_x5", "x5y6z7a8b9c0"])
     commands = FakeCommands()
     report = run_clone(
@@ -182,8 +183,10 @@ def test_successful_clone_sanitizes_upgrades_and_drops() -> None:
     upgrade = commands.argv[2]
     assert upgrade[-2:] == ["upgrade", "i14_load_pod_evidence_x5"]
     assert "head" not in upgrade
-    assert commands.envs[2]["ALEMBIC_TENANT_DATABASE_URL"].endswith("/" + NAME)
-    assert "tenant_demo" not in commands.envs[2]["ALEMBIC_TENANT_DATABASE_URL"]
+    upgrade_url = commands.envs[2]["ALEMBIC_TENANT_DATABASE_URL"]
+    assert NAME in upgrade_url
+    assert "phase4c:test-clone-pass@" in upgrade_url
+    assert "tenant_demo" not in upgrade_url
     test_env = commands.envs[3]
     assert commands.argv[3] == ["pytest", "tests/test_module.py"]
     assert test_env["STORAGE_PROVIDER"] == "local"

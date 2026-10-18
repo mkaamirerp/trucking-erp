@@ -69,17 +69,26 @@ jobs:
           fi
           echo "Platform Alembic single head: $OUT"
 
-      - name: Check single head (tenant)
+      - name: Check tenant heads (single or approved I14 POD pair)
         run: |
-          OUT=$(python -m alembic -c alembic_tenant.ini heads 2>&1)
-          HEAD_COUNT=$(echo "$OUT" | grep -c "(head)" || echo "0")
-          HEAD_COUNT=$(echo "$HEAD_COUNT" | xargs)
-          if [ "$HEAD_COUNT" != "1" ]; then
-            echo "Tenant Alembic must have exactly one head (found: $HEAD_COUNT)"
+          OUT=$(python -m alembic -c alembic_tenant.ini heads 2>&1) || {
+            echo "Tenant Alembic heads command failed."
+            echo "$OUT"
+            exit 1
+          }
+          HEAD_IDS=$(printf "%s\n" "$OUT" | sed -n 's/^\([A-Za-z0-9_]*\) (head).*/\1/p' | sort)
+          HEAD_COUNT=$(printf "%s\n" "$HEAD_IDS" | grep -c . || true)
+          APPROVED_POD_HEADS="$(printf '%s\n' i14_load_pod_evidence i14_load_pod_evidence_x5 | sort)"
+          if [ "${HEAD_COUNT:-0}" -eq 1 ]; then
+            echo "Tenant Alembic single head: $OUT"
+          elif [ "$HEAD_IDS" = "$APPROVED_POD_HEADS" ]; then
+            echo "Tenant Alembic approved I14 POD split (2 heads; upgrade head forbidden — pin revision per docs/load_trip/POD_MIGRATION_TARGETS.md):"
+            echo "$OUT"
+          else
+            echo "Tenant Alembic must have exactly one head or the approved POD pair (found: ${HEAD_COUNT})"
             echo "$OUT"
             exit 1
           fi
-          echo "Tenant Alembic single head: $OUT"
 
       - name: Python compile check
         run: |
