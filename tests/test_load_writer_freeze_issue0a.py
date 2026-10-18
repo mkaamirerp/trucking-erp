@@ -104,6 +104,99 @@ class TestCreateFreezeUnit:
         assert _code(ei.value) == LEGACY_LOAD_ASSIGNMENT_DEPRECATED
 
 
+class _StagingOnlyDb:
+    """Records staging calls; commit/rollback mean the shared insertion took transaction ownership."""
+
+    def __init__(self) -> None:
+        self.added: list[object] = []
+        self.flushes = 0
+        self._next_id = 100
+
+    async def scalar(self, _stmt):
+        return None
+
+    def add(self, obj) -> None:
+        self.added.append(obj)
+
+    async def flush(self) -> None:
+        self.flushes += 1
+        for obj in self.added:
+            if getattr(obj, "id", None) is None:
+                obj.id = self._next_id
+                self._next_id += 1
+
+    async def commit(self) -> None:
+        raise AssertionError("shared Load insertion must not commit")
+
+    async def rollback(self) -> None:
+        raise AssertionError("shared Load insertion must not roll back")
+
+
+class TestSharedCommercialInsertionUnit:
+    """API create and DW promotion share one Load insertion primitive (F1 duplicate-create)."""
+
+    def test_promotion_has_no_private_insertion_copy(self) -> None:
+        from app.services import load_workspace_draft_promotion as promotion
+
+        assert not hasattr(promotion, "_insert_load_from_create")
+        assert promotion._insert_commercial_load_uncommitted is loads_service._insert_commercial_load_uncommitted
+
+    @pytest.mark.parametrize("legacy_status", ["assigned", "dispatched", "ready"])
+    async def test_shared_insert_guards_status_before_db(self, legacy_status: str) -> None:
+        with pytest.raises(HTTPException) as ei:
+            await loads_service._insert_commercial_load_uncommitted(
+                _UntouchableDb(), 1, LoadCreate(status=legacy_status)
+            )
+        assert ei.value.status_code == 409
+
+    @pytest.mark.parametrize("field", ASSIGNMENT_FIELDS)
+    async def test_shared_insert_guards_assignment_before_db(self, field: str) -> None:
+        with pytest.raises(HTTPException) as ei:
+            await loads_service._insert_commercial_load_uncommitted(
+                _UntouchableDb(), 1, LoadCreate(**{field: 7}), promotion_origin_workspace_draft_id=uuid.uuid4()
+            )
+        assert _code(ei.value) == LEGACY_LOAD_ASSIGNMENT_DEPRECATED
+
+    async def test_shared_insert_stages_without_commit_or_audit(self, monkeypatch) -> None:
+        from app.models.load import Load, LoadStop
+
+        async def _no_audit(*_a, **_k):
+            raise AssertionError("shared Load insertion must not write audit")
+
+        monkeypatch.setattr(loads_service, "_write_load_audit", _no_audit)
+        origin = uuid.uuid4()
+        db = _StagingOnlyDb()
+        payload = LoadCreate(
+            stops=[
+                {"stop_type": "PICKUP", "city": "Toronto"},
+                {"stop_type": "DELIVERY", "city": "Boston", "sequence": 5},
+            ],
+        )
+        load, stop_diff = await loads_service._insert_commercial_load_uncommitted(
+            db, 7, payload, promotion_origin_workspace_draft_id=origin
+        )
+        assert isinstance(load, Load)
+        assert load.tenant_id == 7
+        assert load.status == "draft"
+        assert load.load_number.startswith("DRAFT-")
+        assert load.promotion_origin_workspace_draft_id == origin
+        stops = [o for o in db.added if isinstance(o, LoadStop)]
+        assert [(s.tenant_id, s.load_id, s.sequence, s.city) for s in stops] == [
+            (7, load.id, 0, "Toronto"),
+            (7, load.id, 5, "Boston"),
+        ]
+        assert [a["stop_id"] for a in stop_diff["added"]] == [s.id for s in stops]
+        assert stop_diff["removed"] == [] and stop_diff["updated"] == []
+
+    async def test_shared_insert_without_stops_returns_no_diff(self) -> None:
+        load, stop_diff = await loads_service._insert_commercial_load_uncommitted(
+            _StagingOnlyDb(), 3, LoadCreate(load_number="API-1")
+        )
+        assert load.load_number == "API-1"
+        assert load.promotion_origin_workspace_draft_id is None
+        assert stop_diff is None
+
+
 class TestUpdateFreezeUnit:
     @pytest.fixture
     def stored(self, monkeypatch):

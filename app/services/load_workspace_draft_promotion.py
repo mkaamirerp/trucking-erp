@@ -10,22 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.concurrency.draft_conflicts import workspace_draft_version_conflict_exception
-from app.models.load import Load, LoadStop
 from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_workspace_draft import LoadWorkspaceDraft
-from app.schemas.load import LoadCreate
 from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
 from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.loads import (
-    _COMMERCIAL_STOP_ATTRS,
-    _ensure_unique_load_number,
-    _get_broker,
-    _get_broker_contact,
-    _get_customs_broker,
-    _guard_create_payload,
-    _load_data_from_payload,
-    _validate_stops_write_payload,
+    _insert_commercial_load_uncommitted,
     _write_load_audit,
     get_load,
 )
@@ -66,59 +57,6 @@ async def _idempotent_replay(
             },
         )
     return None
-
-
-async def _insert_load_from_create(
-    db: AsyncSession,
-    tenant_id: int,
-    payload: LoadCreate,
-    *,
-    promotion_origin_workspace_draft_id: uuid.UUID,
-) -> Load:
-    _guard_create_payload(payload)
-    if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
-    if payload.broker_contact_id is not None:
-        contact = await _get_broker_contact(db, tenant_id, payload.broker_contact_id)
-        if not contact:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker contact not found")
-        if payload.broker_id is not None and contact.broker_id != payload.broker_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Broker contact must belong to the selected broker",
-            )
-    if payload.customs_broker_id is not None and not await _get_customs_broker(
-        db, tenant_id, payload.customs_broker_id
-    ):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
-
-    load_number = payload.load_number or f"DRAFT-{uuid.uuid4().hex[:8].upper()}"
-    await _ensure_unique_load_number(db, tenant_id, load_number)
-
-    data = _load_data_from_payload(payload)
-    data["load_number"] = load_number
-    data["status"] = "draft"
-
-    load = Load(
-        **data,
-        tenant_id=tenant_id,
-        promotion_origin_workspace_draft_id=promotion_origin_workspace_draft_id,
-    )
-    db.add(load)
-    await db.flush()
-
-    if payload.stops:
-        _validate_stops_write_payload(payload.stops)
-        for i, stop_in in enumerate(payload.stops):
-            stop_data = stop_in.model_dump(exclude={"id"}, exclude_unset=False)
-            for k in list(stop_data.keys()):
-                if k not in _COMMERCIAL_STOP_ATTRS and k != "sequence":
-                    stop_data.pop(k, None)
-            stop_data["sequence"] = stop_in.sequence if stop_in.sequence is not None else i
-            db.add(LoadStop(tenant_id=tenant_id, load_id=load.id, **stop_data))
-
-    await db.flush()
-    return load
 
 
 def _maybe_commercial_evidence_row(
@@ -191,7 +129,7 @@ async def promote_workspace_draft(
         ) from exc
     now = datetime.now(timezone.utc)
 
-    load = await _insert_load_from_create(
+    load, _stop_create_diff = await _insert_commercial_load_uncommitted(
         db,
         tenant_id,
         load_create,
@@ -228,9 +166,14 @@ async def promote_workspace_draft(
         actor_user_id=None,
         request_id=None,
         correlation_id=None,
-        source="workspace_draft_promotion",
+        source="ui",
         changed_fields=None,
-        context_json={"workspace_draft_id": str(draft.id), "promotion_idempotency_key": payload.promotion_idempotency_key},
+        context_json={
+            "origin": "workspace_draft_promotion",
+            "workspace_draft_id": str(draft.id),
+            "promotion_idempotency_key": payload.promotion_idempotency_key,
+        },
+        best_effort=False,
     )
 
     await db.commit()

@@ -430,15 +430,19 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
     return data
 
 
-async def create_load(
+async def _insert_commercial_load_uncommitted(
     db: AsyncSession,
     tenant_id: int,
     payload: LoadCreate,
     *,
-    actor_user_id: int | None = None,
-    request_id: str | None = None,
-    source: str = "api",
-) -> Load:
+    promotion_origin_workspace_draft_id: uuid.UUID | None = None,
+) -> tuple[Load, dict[str, object] | None]:
+    """Validate and stage one draft Load plus commercial stops.
+
+    Flushes only; never commits, rolls back or writes audit. The caller owns the
+    transaction and its audit. Returns the Load and the on-create stop diff (None
+    when no stops were supplied).
+    """
     _guard_create_payload(payload)
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
@@ -461,7 +465,11 @@ async def create_load(
     data["load_number"] = load_number
     data["status"] = "draft"
 
-    load = Load(**data, tenant_id=tenant_id)
+    load = Load(
+        **data,
+        tenant_id=tenant_id,
+        promotion_origin_workspace_draft_id=promotion_origin_workspace_draft_id,
+    )
     db.add(load)
     await db.flush()
 
@@ -482,6 +490,19 @@ async def create_load(
         stop_create_diff = {"removed": [], "updated": [], "added": added}
 
     await db.flush()
+    return load, stop_create_diff
+
+
+async def create_load(
+    db: AsyncSession,
+    tenant_id: int,
+    payload: LoadCreate,
+    *,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    source: str = "api",
+) -> Load:
+    load, stop_create_diff = await _insert_commercial_load_uncommitted(db, tenant_id, payload)
     out = await get_load(db, tenant_id, int(load.id))
     if out is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")

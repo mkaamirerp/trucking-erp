@@ -552,6 +552,353 @@ async def test_promotion_idempotency_key_conflict_across_drafts() -> None:
         await engine.dispose()
 
 
+async def _delete_promoted_load_and_draft(factory, load_id: int | None, draft_id) -> None:
+    async with factory() as db:
+        if load_id is not None:
+            await db.execute(text("DELETE FROM load_stops WHERE load_id = :id"), {"id": load_id})
+            await db.execute(text("DELETE FROM load_commercial_evidence WHERE load_id = :id"), {"id": load_id})
+            await db.execute(
+                text("UPDATE loads SET promotion_origin_workspace_draft_id = NULL WHERE id = :id"),
+                {"id": load_id},
+            )
+        if draft_id is not None:
+            await db.execute(text("DELETE FROM load_workspace_drafts WHERE id = :id"), {"id": draft_id})
+        if load_id is not None:
+            await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
+        await db.commit()
+
+
+async def _create_draft(factory, draft_json: dict):
+    async with factory() as db:
+        tenant_id = await _resolve_tenant_id(db)
+        draft = await create_workspace_draft(
+            db,
+            tenant_id,
+            LoadWorkspaceDraftCreate(source_channel="manual", draft_json=draft_json),
+            created_by_platform_user_id="integration-test-user",
+        )
+        return tenant_id, draft.id
+
+
+async def _assert_rejected_promotion_left_draft_promotable(factory, tenant_id: int, draft_id, loads_before: int):
+    async with factory() as db:
+        assert await db.scalar(text("SELECT COUNT(*) FROM loads")) == loads_before
+        row = (
+            await db.execute(
+                text(
+                    "SELECT status, concurrency_version, promoted_load_id FROM load_workspace_drafts "
+                    "WHERE tenant_id = :t AND id = :id"
+                ),
+                {"t": tenant_id, "id": draft_id},
+            )
+        ).one()
+        assert (row.status, int(row.concurrency_version), row.promoted_load_id) == ("draft", 1, None)
+
+
+@pytest.mark.asyncio
+async def test_promote_persists_commercial_stops_through_shared_insert() -> None:
+    engine, factory = _session()
+    draft_id = load_id = None
+    try:
+        draft_json = {
+            **SAMPLE_DRAFT_JSON,
+            "loadNumber": f"PROMO-STOPS-{uuid.uuid4().hex[:8]}",
+            "draftStops": [
+                {"stopType": "PICKUP", "city": "Toronto", "facilityName": "Origin DC"},
+                {"stopType": "DELIVERY", "city": "Boston", "sequence": 4},
+            ],
+        }
+        tenant_id, draft_id = await _create_draft(factory, draft_json)
+        async with factory() as db:
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=f"promo-stops-{uuid.uuid4().hex}",
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+
+        async with factory() as db:
+            load_row = (
+                await db.execute(
+                    text("SELECT status, tenant_id, promotion_origin_workspace_draft_id FROM loads WHERE id = :id"),
+                    {"id": load_id},
+                )
+            ).one()
+            assert load_row.status == "draft"
+            assert int(load_row.tenant_id) == tenant_id
+            assert str(load_row.promotion_origin_workspace_draft_id) == str(draft_id)
+            stops = (
+                await db.execute(
+                    text(
+                        "SELECT tenant_id, stop_type, sequence, city, facility_name FROM load_stops "
+                        "WHERE load_id = :id ORDER BY sequence"
+                    ),
+                    {"id": load_id},
+                )
+            ).all()
+            assert [(int(s.tenant_id), s.stop_type, s.sequence, s.city, s.facility_name) for s in stops] == [
+                (tenant_id, "PICKUP", 0, "Toronto", "Origin DC"),
+                (tenant_id, "DELIVERY", 4, "Boston", None),
+            ]
+    finally:
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_rejects_unknown_broker_without_load_or_draft_change() -> None:
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            missing_broker_id = int(await db.scalar(text("SELECT COALESCE(MAX(id), 0) + 100000 FROM brokers")))
+            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+        tenant_id, draft_id = await _create_draft(
+            factory,
+            {**SAMPLE_DRAFT_JSON, "loadNumber": f"PROMO-BRK-{uuid.uuid4().hex[:8]}", "brokerId": missing_broker_id},
+        )
+        async with factory() as db:
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"promo-brk-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 400
+            assert exc.value.detail == "Broker not found"
+            await db.rollback()
+        await _assert_rejected_promotion_left_draft_promotable(factory, tenant_id, draft_id, loads_before)
+    finally:
+        await _delete_promoted_load_and_draft(factory, None, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_rejects_contact_of_other_broker_like_api_create() -> None:
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            pair = (
+                await db.execute(
+                    text(
+                        "SELECT bc.id AS contact_id, b.id AS other_broker_id FROM broker_contacts bc "
+                        "JOIN brokers b ON b.tenant_id = bc.tenant_id AND b.id <> bc.broker_id "
+                        "WHERE bc.tenant_id = :t ORDER BY bc.id, b.id LIMIT 1"
+                    ),
+                    {"t": tenant_id},
+                )
+            ).one_or_none()
+            if pair is None:
+                pytest.skip("tenant has no broker contact plus a second broker")
+            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+        _, draft_id = await _create_draft(
+            factory,
+            {
+                **SAMPLE_DRAFT_JSON,
+                "loadNumber": f"PROMO-CON-{uuid.uuid4().hex[:8]}",
+                "brokerId": int(pair.other_broker_id),
+                "brokerContactId": int(pair.contact_id),
+            },
+        )
+        async with factory() as db:
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"promo-con-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 400
+            assert exc.value.detail == "Broker contact must belong to the selected broker"
+            await db.rollback()
+        await _assert_rejected_promotion_left_draft_promotable(factory, tenant_id, draft_id, loads_before)
+    finally:
+        await _delete_promoted_load_and_draft(factory, None, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_rejects_duplicate_load_number_without_promoting() -> None:
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            existing_number = await db.scalar(
+                text("SELECT load_number FROM loads WHERE tenant_id = :t ORDER BY id LIMIT 1"), {"t": tenant_id}
+            )
+            if existing_number is None:
+                pytest.skip("tenant has no existing Load")
+            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+        _, draft_id = await _create_draft(factory, {**SAMPLE_DRAFT_JSON, "loadNumber": existing_number})
+        async with factory() as db:
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"promo-dup-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 400
+            assert exc.value.detail == "A load with this load_number already exists"
+            await db.rollback()
+        await _assert_rejected_promotion_left_draft_promotable(factory, tenant_id, draft_id, loads_before)
+    finally:
+        await _delete_promoted_load_and_draft(factory, None, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_writes_one_load_created_audit_and_replay_adds_none() -> None:
+    engine, factory = _session()
+    draft_id = load_id = None
+    try:
+        tenant_id, draft_id = await _create_draft(
+            factory, {**SAMPLE_DRAFT_JSON, "loadNumber": f"PROMO-AUD-{uuid.uuid4().hex[:8]}"}
+        )
+        promo_key = f"promo-aud-{uuid.uuid4().hex}"
+        promote_payload = LoadWorkspaceDraftPromote(expected_concurrency_version=1, promotion_idempotency_key=promo_key)
+        async with factory() as db:
+            result = await promote_workspace_draft(
+                db, tenant_id, draft_id, promote_payload, promoted_by_platform_user_id="integration-test-user"
+            )
+            load_id = result.load_id
+            replay = await promote_workspace_draft(
+                db, tenant_id, draft_id, promote_payload, promoted_by_platform_user_id="integration-test-user"
+            )
+            assert replay.idempotent_replay is True
+
+        async with factory() as db:
+            rows = (
+                await db.execute(
+                    text(
+                        "SELECT source, context_json FROM audit_events WHERE tenant_id = :t AND module = 'loads' "
+                        "AND entity_type = 'load' AND entity_id = :e AND action = 'load_created'"
+                    ),
+                    {"t": tenant_id, "e": str(load_id)},
+                )
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].source == "ui"
+            assert rows[0].context_json == {
+                "origin": "workspace_draft_promotion",
+                "workspace_draft_id": str(draft_id),
+                "promotion_idempotency_key": promo_key,
+            }
+    finally:
+        async with factory() as db:
+            if load_id is not None:
+                await db.execute(
+                    text("DELETE FROM audit_events WHERE tenant_id = :t AND module = 'loads' AND entity_id = :e"),
+                    {"t": tenant_id, "e": str(load_id)},
+                )
+                await db.commit()
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_audit_failure_rolls_back_load_and_keeps_draft_promotable(monkeypatch) -> None:
+    import app.services.audit_events as audit_events
+
+    engine, factory = _session()
+    draft_id = None
+    load_number = f"PROMO-AUDFAIL-{uuid.uuid4().hex[:8]}"
+    try:
+        async with factory() as db:
+            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+        tenant_id, draft_id = await _create_draft(
+            factory,
+            {**SAMPLE_DRAFT_JSON, "loadNumber": load_number, "draftStops": [{"stopType": "PICKUP", "city": "Albany"}]},
+        )
+
+        async def _failing_audit(*_a, **_k):
+            raise RuntimeError("audit store unavailable")
+
+        monkeypatch.setattr(audit_events, "write_audit_event", _failing_audit)
+        async with factory() as db:
+            with pytest.raises(RuntimeError, match="audit store unavailable"):
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"promo-audfail-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            await db.rollback()
+        monkeypatch.undo()
+
+        await _assert_rejected_promotion_left_draft_promotable(factory, tenant_id, draft_id, loads_before)
+        async with factory() as db:
+            assert await db.scalar(
+                text("SELECT COUNT(*) FROM loads WHERE tenant_id = :t AND load_number = :n"),
+                {"t": tenant_id, "n": load_number},
+            ) == 0
+            assert await db.scalar(
+                text("SELECT COUNT(*) FROM load_commercial_evidence WHERE workspace_draft_id = :id"),
+                {"id": draft_id},
+            ) == 0
+    finally:
+        await _delete_promoted_load_and_draft(factory, None, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_shared_insert_leaves_nothing_when_caller_rolls_back() -> None:
+    from app.schemas.load import LoadCreate
+    from app.services.loads import _insert_commercial_load_uncommitted
+
+    engine, factory = _session()
+    load_number = f"SHARED-RB-{uuid.uuid4().hex[:8]}"
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            load, stop_diff = await _insert_commercial_load_uncommitted(
+                db,
+                tenant_id,
+                LoadCreate(load_number=load_number, stops=[{"stop_type": "PICKUP", "city": "Albany"}]),
+            )
+            assert load.id is not None
+            assert len(stop_diff["added"]) == 1
+            await db.rollback()
+        async with factory() as db:
+            assert await db.scalar(
+                text("SELECT COUNT(*) FROM loads WHERE load_number = :n"), {"n": load_number}
+            ) == 0
+    finally:
+        async with factory() as db:
+            await db.execute(
+                text("DELETE FROM load_stops WHERE load_id IN (SELECT id FROM loads WHERE load_number = :n)"),
+                {"n": load_number},
+            )
+            await db.execute(text("DELETE FROM loads WHERE load_number = :n"), {"n": load_number})
+            await db.commit()
+        await engine.dispose()
+
+
 async def _scalar_count(sql: str) -> int:
     engine, factory = _session()
     try:
