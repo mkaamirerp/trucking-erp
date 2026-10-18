@@ -353,6 +353,8 @@ def test_live_commands_keep_secrets_out_of_argv(monkeypatch: pytest.MonkeyPatch,
     assert "super-secret" not in child.values()
     assert "trucking_erp" not in child["DATABASE_URL"]
     assert child["TENANT_DATABASE_URL"].endswith("/" + NAME)
+    assert child["ALEMBIC_TENANT_DATABASE_URL"].startswith("postgresql+asyncpg://")
+    assert child["ALEMBIC_TENANT_DATABASE_URL"].endswith("/" + NAME)
     assert "clone-pass" not in recorded[1][0]
     assert child["DEMO_CLONE_EXTERNAL_EFFECTS"] == "disabled"
     assert child["GOOGLE_CLIENT_SECRET"] == ""
@@ -431,6 +433,58 @@ def test_sensitive_replacements_respect_constraints() -> None:
 
 def test_cli_requires_module_schema() -> None:
     assert main(["--plan-only", "--revision", "i14_load_pod_evidence_x5", "--test", "tests/test_module.py", "--name", NAME]) == 2
+
+
+def test_default_clone_revision_matches_app_orm() -> None:
+    request = runner._request_from_args(
+        runner._parse_args(
+            [
+                "--test",
+                "tests/test_module.py",
+                "--schema",
+                "audit_events.id",
+                "--name",
+                NAME,
+            ]
+        )
+    )
+    assert request.revision == runner.DEFAULT_DEMO_CLONE_TENANT_REVISION
+
+
+def test_baseline_only_skips_clone_upgrade() -> None:
+    request = runner._request_from_args(
+        runner._parse_args(
+            [
+                "--baseline-only",
+                "--test",
+                "tests/test_module.py",
+                "--schema",
+                "audit_events.id",
+                "--name",
+                NAME,
+            ]
+        )
+    )
+    assert request.revision is None
+
+
+def test_baseline_only_and_explicit_revision_conflict() -> None:
+    with pytest.raises(CloneError, match="not both"):
+        runner._request_from_args(
+            runner._parse_args(
+                [
+                    "--baseline-only",
+                    "--revision",
+                    "i14_load_pod_evidence_x5",
+                    "--test",
+                    "tests/test_module.py",
+                    "--schema",
+                    "audit_events.id",
+                    "--name",
+                    NAME,
+                ]
+            )
+        )
 
 
 def _query_without_people_email(sql: FakeSql):
