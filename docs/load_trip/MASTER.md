@@ -62,6 +62,9 @@ After an approved architecture change:
 
 **Testing rule:** use isolated copies of real `tenant_demo` business data; never write to `tenant_demo`. No new test infrastructure unless separately approved.
 
+**I9 testing follow-up resolved (`0e877db`, 2026-10-18):** `scripts/demo_clone_runner.py` now defaults disposable clones to explicit DW-1 revision `dw1d_load_commercial_evidence_retention_varchar32` (overridable; `--baseline-only` skips upgrade; `head`/`heads` refused) and passes both `TENANT_DATABASE_URL` and `ALEMBIC_TENANT_DATABASE_URL` to tests. Reported: 23 clone-runner tests and 11 I9/I26 tests pass on a sanitized disposable demo-data clone; clone dropped; source `tenant_demo` unchanged. Other module/POD migration targets must still be selected explicitly when needed. No deployment.
+
+
 
 
 Status vocabulary:
