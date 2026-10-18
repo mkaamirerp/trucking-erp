@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, Sequence
+from decimal import Decimal
+from typing import Any, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.utils.load_commercial_money import parse_load_customer_rate, parse_load_rate
 
 from app.schemas.broker import BrokerContactOut
 from app.schemas.customs_broker import CustomsBrokerSummary, LoadCustomsSnapshotOut
@@ -16,6 +19,14 @@ DISPATCH_STATUSES = {
     "arrived_delivery", "delivered", "issue_hold",
 }
 ALLOWED_STATUSES = DISPATCH_STATUSES
+
+
+def _coerce_load_rate_field(v: Any) -> Decimal | None:
+    return parse_load_rate(v)
+
+
+def _coerce_load_customer_rate_field(v: Any) -> Decimal | None:
+    return parse_load_customer_rate(v)
 
 
 # --- LoadStop ---
@@ -98,12 +109,22 @@ class LoadBase(BaseModel):
     temperature_requirement: Optional[str] = Field(default=None, max_length=50)
     pallet_case_count: Optional[str] = Field(default=None, max_length=50)
     internal_notes: Optional[str] = None
-    rate: Optional[float] = Field(default=None, ge=0)
-    customer_rate: Optional[float] = Field(default=None, ge=0)
+    rate: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    customer_rate: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     miles: Optional[int] = Field(default=None, ge=0)
     status: str = Field(default="draft", max_length=32)
     #: Public API collection. ORM/DB column is ``operational_references``.
     references: list[LoadParseReferenceItem] = Field(default_factory=list, max_length=40)
+
+    @field_validator("rate", mode="before")
+    @classmethod
+    def _validate_rate(cls, v: Any) -> Decimal | None:
+        return _coerce_load_rate_field(v)
+
+    @field_validator("customer_rate", mode="before")
+    @classmethod
+    def _validate_customer_rate(cls, v: Any) -> Decimal | None:
+        return _coerce_load_customer_rate_field(v)
 
 
 class LoadCreate(LoadBase):
@@ -156,8 +177,8 @@ class LoadUpdate(BaseModel):
     temperature_requirement: Optional[str] = Field(default=None, max_length=50)
     pallet_case_count: Optional[str] = Field(default=None, max_length=50)
     internal_notes: Optional[str] = None
-    rate: Optional[float] = Field(default=None, ge=0)
-    customer_rate: Optional[float] = Field(default=None, ge=0)
+    rate: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    customer_rate: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
     miles: Optional[int] = Field(default=None, ge=0)
     status: Optional[str] = Field(default=None, max_length=32)
     stops: Optional[Sequence[LoadStopCreate]] = None
@@ -177,6 +198,16 @@ class LoadUpdate(BaseModel):
             if "references" in data and data["references"] is None:
                 raise ValueError("references cannot be null; send [] to clear")
         return data
+
+    @field_validator("rate", mode="before")
+    @classmethod
+    def _validate_rate(cls, v: Any) -> Decimal | None:
+        return _coerce_load_rate_field(v)
+
+    @field_validator("customer_rate", mode="before")
+    @classmethod
+    def _validate_customer_rate(cls, v: Any) -> Decimal | None:
+        return _coerce_load_customer_rate_field(v)
 
     @field_validator("status")
     @classmethod

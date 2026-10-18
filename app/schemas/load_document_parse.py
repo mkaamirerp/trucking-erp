@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.utils.load_commercial_money import parse_load_customer_rate, parse_load_rate
 
 
 class LoadParseDocumentMeta(BaseModel):
@@ -117,12 +120,22 @@ class LoadParseExtractedFields(BaseModel):
     commodity: Optional[str] = None
     estimated_weight: Optional[int] = None
     temperature_requirement: Optional[str] = None
-    rate: Optional[float] = None
-    customer_rate: Optional[float] = None
+    rate: Optional[Decimal] = None
+    customer_rate: Optional[Decimal] = None
     miles: Optional[float] = None
     customs_broker_name: Optional[str] = None
     references: list[LoadParseReferenceItem] = Field(default_factory=list)
     stops: list[LoadParseStopItem] = Field(default_factory=list)
+
+    @field_validator("rate", mode="before")
+    @classmethod
+    def _validate_rate(cls, v: object) -> Decimal | None:
+        return parse_load_rate(v)
+
+    @field_validator("customer_rate", mode="before")
+    @classmethod
+    def _validate_customer_rate(cls, v: object) -> Decimal | None:
+        return parse_load_customer_rate(v)
 
 
 class LoadDocumentParseResponse(BaseModel):

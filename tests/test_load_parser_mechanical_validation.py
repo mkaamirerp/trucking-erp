@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib
 import math
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -214,36 +215,26 @@ def test_named_contact_person_email_preserved() -> None:
 
 def test_valid_positive_rate_preserved() -> None:
     out = apply_load_parser_mechanical_validation(_base_response())
-    assert out.extracted.rate == 1800.0
+    assert out.extracted.rate == Decimal("1800.00")
 
 
 def test_zero_and_negative_rate_rejected() -> None:
+    from app.services.load_parser_mechanical_validation import _validate_numerics
+
     out0 = apply_load_parser_mechanical_validation(_base_response(extracted={"rate": 0}))
     assert out0.extracted.rate is None
-    out_neg = apply_load_parser_mechanical_validation(_base_response(extracted={"rate": -5}))
-    assert out_neg.extracted.rate is None
+    cleaned, warnings, _fc = _validate_numerics({"rate": -5})
+    assert cleaned.get("rate") is None
+    assert "invalid_number: rate" in warnings
 
 
 def test_nan_inf_rate_rejected() -> None:
-    # Bypass pydantic construction by dumping and re-validating after patch is hard;
-    # use model_construct for non-finite then run validator.
-    res = _base_response()
-    payload = res.model_dump(mode="json")
-    payload["extracted"]["rate"] = float("nan")
-    # model_validate may reject NaN — construct manually then call validator internals via dump path
-    from app.schemas.load_document_parse import LoadParseExtractedFields, LoadParseDocumentMeta
+    from app.services.load_parser_mechanical_validation import _validate_numerics
 
-    bad = LoadDocumentParseResponse(
-        document=LoadParseDocumentMeta(filename="x.pdf"),
-        extracted=LoadParseExtractedFields.model_construct(rate=float("inf")),
-        raw_text="x",
-        warnings=[],
-        field_confidence={},
-        context={},
-    )
-    out = apply_load_parser_mechanical_validation(bad)
-    assert out.extracted.rate is None
-    assert "invalid_number: rate" in out.warnings
+    for bad_value in (float("nan"), float("inf")):
+        cleaned, warnings, _fc = _validate_numerics({"rate": bad_value})
+        assert cleaned.get("rate") is None
+        assert "invalid_number: rate" in warnings
 
 
 def test_negative_miles_and_weight_rejected() -> None:
@@ -258,7 +249,7 @@ def test_customer_rate_not_copied_to_rate() -> None:
     res = _base_response(extracted={"rate": None, "customer_rate": 900.0})
     out = apply_load_parser_mechanical_validation(res)
     assert out.extracted.rate is None
-    assert out.extracted.customer_rate == 900.0
+    assert out.extracted.customer_rate == Decimal("900.00")
 
 
 # --- Load reference ---

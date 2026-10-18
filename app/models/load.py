@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from datetime import date, datetime
 from typing import Any
 
@@ -99,8 +100,8 @@ class Load(Base):
     pallet_case_count: Mapped[str | None] = mapped_column(String(50), nullable=True)
     internal_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    rate: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
-    customer_rate: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    customer_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     miles: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")

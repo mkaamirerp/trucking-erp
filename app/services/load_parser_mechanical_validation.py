@@ -18,10 +18,12 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from app.schemas.load_document_parse import LoadDocumentParseResponse, LoadParseExtractedFields
 from app.services.load_parser_rate_con_field_rules import LOAD_RATE_CON_FIELD_RULES
+from app.utils.load_commercial_money import parse_load_customer_rate, parse_load_rate
 from app.services.load_parser_tenant_identity_exclusion import (
     normalize_authority_id,
     normalize_email,
@@ -411,8 +413,19 @@ def _enforce_tenant_identity_exclusion(
 def _is_bad_number(value: Any) -> bool:
     if isinstance(value, bool):
         return True
+    if isinstance(value, Decimal):
+        return False
     if isinstance(value, (int, float)):
         return not math.isfinite(float(value))
+    return True
+
+
+def _commercial_money_non_positive(value: Any) -> bool:
+    if isinstance(value, Decimal):
+        return value <= 0
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        f = float(value)
+        return not math.isfinite(f) or f <= 0
     return True
 
 
@@ -427,7 +440,12 @@ def _validate_numerics(
         val = out.get(field)
         if val is None:
             continue
-        if _is_bad_number(val) or float(val) <= 0:
+        parser = parse_load_rate if field == "rate" else parse_load_customer_rate
+        try:
+            coerced = parser(val)
+        except ValueError:
+            coerced = None
+        if coerced is None or coerced <= 0:
             warnings.extend(
                 _null_field(
                     out,
@@ -436,6 +454,8 @@ def _validate_numerics(
                     field_confidence=fc,
                 )
             )
+        else:
+            out[field] = coerced
 
     miles = out.get("miles")
     if miles is not None:
@@ -654,12 +674,19 @@ def _validate_stops(
     return out, warnings, fc
 
 
-def _normalize_money_token(amount: float) -> set[str]:
+def _normalize_money_token(amount: float | int | Decimal) -> set[str]:
     """Comparable digit tokens for weak rate presence (no semantic linehaul pick)."""
-    if not math.isfinite(amount):
+    if isinstance(amount, Decimal):
+        cents = int((amount * 100).to_integral_value())
+        whole = cents // 100
+        frac = cents % 100
+        tokens = {str(whole), f"{whole}.{frac:02d}", f"{whole:d}"}
+        return tokens
+    value = float(amount)
+    if not math.isfinite(value):
         return set()
     # Integer cents path when close to two decimals.
-    cents = int(round(amount * 100))
+    cents = int(round(value * 100))
     whole = cents // 100
     frac = cents % 100
     tokens = {
@@ -707,15 +734,17 @@ def _literal_presence_warnings(
                 warnings.append("value_not_found_in_source: broker_contact_phone_snapshot")
 
     rate = out.get("rate")
-    if isinstance(rate, (int, float)) and not isinstance(rate, bool) and math.isfinite(float(rate)):
+    tokens: set[str] | None = None
+    if isinstance(rate, Decimal) and not isinstance(rate, bool):
+        tokens = _normalize_money_token(rate)
+    elif isinstance(rate, (int, float)) and not isinstance(rate, bool) and math.isfinite(float(rate)):
         tokens = _normalize_money_token(float(rate))
-        # Search in digit-stripped form and plain text.
+    if tokens:
         found = False
         for tok in tokens:
             if tok in hay or tok in hay_digits:
                 found = True
                 break
-            # Comma form e.g. 1,800
             if "." not in tok and len(tok) > 3:
                 with_comma = f"{int(tok):,}"
                 if with_comma in hay:
