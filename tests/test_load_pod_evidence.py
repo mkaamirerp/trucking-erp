@@ -27,9 +27,10 @@ from tests.support.integration_auth import (
     install_host_aligned_current_user_and_tenant,
 )
 from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
     demo_clone_active,
     demo_clone_tenant_id,
-    install_demo_clone_tenant_db_override,
+    install_demo_clone_http_test_overrides,
 )
 from tests.support.integration_test_resources import integration_scope_context
 
@@ -74,9 +75,10 @@ def test_bypass_env():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
-    install_demo_clone_tenant_db_override(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 @pytest.fixture

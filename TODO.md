@@ -267,4 +267,27 @@ On a tenant-scoped broker load number or optional barcode match, pause import an
 
 **Finance:** **NOT APPLICABLE** for F1 — no shipped Finance code path depends on shared Load insertion (verify again when Finance posts from Loads).
 
-**F1 complete vs Integrity Gold:** F1 covers §6 duplicate insertion + Opus §14 rows exercised in harness (DW/API/I26/I0A/I5/I12/I3/TripLoad/parser money unit). **Still outside F1:** production deploy, live JWT/Casbin certification, I14/custody/POD live acceptance, full-repo clone green, optional custody slice2 harness on disposable DB.
+**F1 complete vs Integrity Gold:** F1 covers §6 duplicate insertion + Opus §14 rows exercised in harness (DW/API/I26/I0A/I5/I12/I3/TripLoad/parser money unit). **Still outside F1:** production deploy, live JWT/Casbin certification.
+
+---
+
+## Load Integrity Gold — operational verification (`a06d559` baseline)
+
+**Status:** **OPEN** (F1 closed in dev; Gold not certified).
+
+**Evidence (2026-10-19 fix pass):** `/home/admin/backups/integrity_gold_fix_20261019T1135Z/` — POD clone `--revision i14_load_pod_evidence`; `tenant_demo` preserved.
+
+| MASTER workflow | Result | Notes |
+|---|---|---|
+| Custody + yard + terminal handoff | **PASS** 14 + 12 | slice1 + slice2 |
+| Repower-style (one Load, Trip A → yard → Trip B) | **PASS** 1/1 | `test_acme_flow` only; no test named “repower” |
+| Final delivery (trip + per-load + idem) | **PASS** 9 + 3 + 7 | |
+| POD HTTP | **PASS** 7/7 | Requires disposable clone at `i14_load_pod_evidence` |
+| TripLoad A + planned B; I5 cancel; legacy dispatch | **PASS** | per prior F1 + legacy 2/2 |
+| POD migration graph (host) | **PASS** 9/9 | `tenant_revision_plan` + tests aligned to `dw1d` parent |
+| Real JWT/Casbin | **NOT RUN** | |
+| Payroll / Finance | **N/A** | |
+
+**Uncommitted changes (owner review):** custody/legacy harness, final-delivery test codes, `tenant_revision_plan.py`, `test_i14_pod_migration_graph.py`, `POD_MIGRATION_TARGETS.md`, MASTER I14 row.
+
+**Gold still OPEN:** production deploy, live operator acceptance, JWT/Casbin certification.

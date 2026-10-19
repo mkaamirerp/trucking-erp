@@ -10,6 +10,7 @@ from alembic.script import ScriptDirectory
 
 from scripts.tenant_revision_plan import (
     DW1C,
+    DW1D,
     POD_DW1,
     POD_X5,
     X5,
@@ -17,6 +18,7 @@ from scripts.tenant_revision_plan import (
     assert_target_matches_history,
     fuel_test_migrate_target,
     migration_target_for_request,
+    pod_dw1_direct_parent,
     upgrade_plan,
 )
 
@@ -52,9 +54,16 @@ def test_empty_database_x5_target_does_not_include_dw1_pod(script: ScriptDirecto
     assert plan.count(POD_X5) == 1
 
 
-def test_dw1c_plan_creates_pod_once_without_x5_revision(script: ScriptDirectory) -> None:
-    plan = assert_target_matches_history(script, DW1C, POD_DW1)
+def test_dw1d_plan_creates_pod_once_without_x5_revision(script: ScriptDirectory) -> None:
+    assert pod_dw1_direct_parent(script) == DW1D
+    plan = assert_target_matches_history(script, DW1D, POD_DW1)
     assert plan == [POD_DW1]
+    assert POD_X5 not in plan
+
+
+def test_dw1c_plan_steps_through_dw1d_to_pod(script: ScriptDirectory) -> None:
+    plan = assert_target_matches_history(script, DW1C, POD_DW1)
+    assert plan == [DW1D, POD_DW1]
     assert POD_X5 not in plan
 
 
@@ -78,7 +87,7 @@ def test_upgrade_heads_from_x5_would_run_both_pod_revisions(script: ScriptDirect
 
 def test_explicit_tenant_targets_stay_usable_and_head_fails_closed(script: ScriptDirectory) -> None:
     assert migration_target_for_request(script, X5, POD_X5) == POD_X5
-    assert migration_target_for_request(script, DW1C, POD_DW1) == POD_DW1
+    assert migration_target_for_request(script, DW1D, POD_DW1) == POD_DW1
     assert migration_target_for_request(script, POD_DW1, POD_DW1) == POD_DW1
     assert migration_target_for_request(script, POD_X5, POD_X5) == POD_X5
     with pytest.raises(RevisionPlanError, match="refusing upgrade head"):
@@ -94,13 +103,16 @@ def test_explicit_tenant_targets_stay_usable_and_head_fails_closed(script: Scrip
 def test_fuel_migrate_picks_one_branch_and_rejects_the_other(script: ScriptDirectory) -> None:
     assert fuel_test_migrate_target(script, X5) == POD_X5
     assert fuel_test_migrate_target(script, None) == POD_X5
+    assert fuel_test_migrate_target(script, DW1D) == POD_DW1
     assert fuel_test_migrate_target(script, DW1C) == POD_DW1
     assert fuel_test_migrate_target(script, POD_DW1) == POD_DW1
     assert fuel_test_migrate_target(script, POD_X5) == POD_X5
     x5_plan = upgrade_plan(script, X5, fuel_test_migrate_target(script, X5))
-    dw1_plan = upgrade_plan(script, DW1C, fuel_test_migrate_target(script, DW1C))
+    dw1_plan = upgrade_plan(script, DW1D, fuel_test_migrate_target(script, DW1D))
+    dw1c_plan = upgrade_plan(script, DW1C, fuel_test_migrate_target(script, DW1C))
     assert x5_plan == [POD_X5]
     assert dw1_plan == [POD_DW1]
+    assert dw1c_plan == [DW1D, POD_DW1]
     assert POD_DW1 not in x5_plan
     assert POD_X5 not in dw1_plan
     with pytest.raises(RevisionPlanError):

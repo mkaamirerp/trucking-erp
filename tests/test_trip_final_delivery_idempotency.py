@@ -19,6 +19,12 @@ if not os.environ.get("DATABASE_URL"):
 from app.constants.trip_dispatch import TRIP_CONTAINER_STATUS_COMPLETED, TRIP_CONTAINER_STATUS_IN_PROGRESS
 from app.main import app
 from tests.support.custody_http import activate_via_custody, final_delivery
+from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
+    demo_clone_active,
+    demo_clone_tenant_id,
+    install_demo_clone_http_test_overrides,
+)
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
@@ -62,8 +68,10 @@ def test_bypass_env():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 @pytest.fixture
@@ -274,7 +282,11 @@ class TestFinalDeliveryIdempotencyRegression:
         self, client: AsyncClient, locked_prefix: str, integration_scope, test_bypass_env
     ):
         trip_id, load_id = await _ready_trip_with_active_load(client, integration_scope)
-        real_tid = await platform_tenant_id_for_slug("pytest")
+        real_tid = (
+            demo_clone_tenant_id()
+            if demo_clone_active()
+            else await platform_tenant_id_for_slug("pytest")
+        )
         holder = {"tenant_id": real_tid}
         install_mutable_tenant_current_user_and_tenant(app, holder)
         try:
@@ -284,6 +296,7 @@ class TestFinalDeliveryIdempotencyRegression:
         finally:
             clear_current_user_and_tenant_overrides(app)
             install_host_aligned_current_user_and_tenant(app)
+            install_demo_clone_http_test_overrides(app)
 
     async def test_membership_complete_failure_rolls_back_custody(
         self, client: AsyncClient, locked_prefix: str, integration_scope

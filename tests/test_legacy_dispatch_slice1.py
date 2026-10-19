@@ -18,6 +18,10 @@ if not os.environ.get("DATABASE_URL"):
 from app.constants.trip_dispatch import LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
 from app.core.db_url import to_async_pg_url
 from app.main import app
+from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
+    install_demo_clone_http_test_overrides,
+)
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
@@ -66,8 +70,10 @@ async def client():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")

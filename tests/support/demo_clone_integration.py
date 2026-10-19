@@ -50,13 +50,14 @@ def install_demo_clone_tenant_db_override(app: Any) -> None:
         await engine.dispose()
 
     app.dependency_overrides[get_tenant_db] = _tenant_db
+    # Clone tenant (e.g. id=53) has no platform_phase4c subscription row; tests still use TENANT_ADMIN role.
+    if demo_clone_active():
+        app.dependency_overrides[require_admin_sensitive_entitlement] = lambda: None
 
 
 def install_demo_clone_http_test_overrides(app: Any) -> None:
     """Tenant DB routing + admin_sensitive bypass for disposable clone HTTP tests."""
     install_demo_clone_tenant_db_override(app)
-    if demo_clone_active():
-        app.dependency_overrides[require_admin_sensitive_entitlement] = lambda: None
 
 
 def clear_demo_clone_http_test_overrides(app: Any) -> None:

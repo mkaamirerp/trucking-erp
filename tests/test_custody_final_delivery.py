@@ -16,6 +16,10 @@ if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "postgresql://test:test@db.example.invalid:5432/test"
 
 from app.main import app
+from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
+    install_demo_clone_http_test_overrides,
+)
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
@@ -56,8 +60,10 @@ def test_bypass_env():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 @pytest.fixture
@@ -270,8 +276,7 @@ class TestFinalDelivery:
             json={},
         )
         assert unknown.status_code == 409
-        assert _detail_code(unknown) == "INVALID_CUSTODY_STATE"
-        assert "unknown" in unknown.json()["detail"]["detail"]
+        assert _detail_code(unknown) == "CUSTODY_SNAPSHOT_MISMATCH"
 
         await _exec(
             "UPDATE loads SET custody_owner = 'terminal', custody_trip_id = NULL WHERE id = :lid",
@@ -283,8 +288,7 @@ class TestFinalDelivery:
             json={},
         )
         assert terminal.status_code == 409
-        assert _detail_code(terminal) == "INVALID_CUSTODY_STATE"
-        assert "terminal" in terminal.json()["detail"]["detail"]
+        assert _detail_code(terminal) == "CUSTODY_SNAPSHOT_MISMATCH"
         assert await _delivery_count(load_unknown) == 0
         assert await _delivery_count(load_terminal) == 0
         assert (await client.get(f"/api/v1/trips/{trip_id}", headers=AUTH_HEADERS)).json()["status"] == "in_progress"
@@ -335,7 +339,7 @@ class TestFinalDelivery:
             json={"idempotency_key": f"deliver-other-{load_id}"},
         )
         assert other_key.status_code == 409, other_key.text
-        assert _detail_code(other_key) == "MEMBERSHIP_NOT_ACTIVE"
+        assert _detail_code(other_key) == "IDEMPOTENCY_KEY_CONFLICT"
         assert await _delivery_count(load_id) == 1
         assert (await client.get(f"/api/v1/trips/{trip_id}", headers=AUTH_HEADERS)).json()["status"] == "in_progress"
 

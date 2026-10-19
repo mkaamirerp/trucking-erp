@@ -12,6 +12,7 @@ POD_DW1 = "i14_load_pod_evidence"
 APPROVED_POD_TARGETS = frozenset({POD_X5, POD_DW1})
 X5 = "x5y6z7a8b9c0"
 DW1C = "dw1c_composite_fk_set_null_optional_columns"
+DW1D = "dw1d_load_commercial_evidence_retention_varchar32"
 
 
 class RevisionPlanError(Exception):
@@ -89,6 +90,20 @@ def on_dw1_line(script: ScriptDirectory, current: str) -> bool:
     )
 
 
+def pod_dw1_direct_parent(script: ScriptDirectory) -> str:
+    rev = script.get_revision(POD_DW1)
+    if rev is None:
+        raise RevisionPlanError(f"unknown revision {POD_DW1}")
+    parent = rev.down_revision
+    if isinstance(parent, (list, tuple)):
+        if len(parent) != 1:
+            raise RevisionPlanError("unexpected merge parent for DW-1 POD revision")
+        parent = parent[0]
+    if not parent:
+        raise RevisionPlanError("DW-1 POD revision has no down_revision")
+    return str(parent)
+
+
 def approved_heads_are_split(script: ScriptDirectory) -> bool:
     return set(script.get_heads()) == set(APPROVED_POD_TARGETS)
 
@@ -142,7 +157,7 @@ def assert_target_matches_history(script: ScriptDirectory, current: str | None, 
 
     Approved histories:
     - empty or x5 -> i14_load_pod_evidence_x5 (no DW-1 POD revision)
-    - dw1c -> i14_load_pod_evidence (no x5 POD revision)
+    - DW-1 lineage -> i14_load_pod_evidence (direct parent is dw1d; no x5 POD revision)
     """
     if current in APPROVED_POD_TARGETS:
         raise RevisionPlanError(
@@ -152,19 +167,28 @@ def assert_target_matches_history(script: ScriptDirectory, current: str | None, 
         raise RevisionPlanError(
             f"i14_load_pod_evidence_x5 is only for base or {X5}; current is {current}"
         )
-    if target == POD_DW1 and current != DW1C:
-        raise RevisionPlanError(
-            f"i14_load_pod_evidence is only for {DW1C}; current is {current}"
-        )
     plan = upgrade_plan(script, current, target)
     if target == POD_X5 and any(
         rev.startswith("dw0") or rev.startswith("dw1") or rev == POD_DW1 for rev in plan
     ):
         raise RevisionPlanError("x5 POD plan would apply DW-1 revisions")
-    if target == POD_DW1 and (
-        POD_X5 in plan or any(rev.startswith("dw0") or rev.startswith("dw1") for rev in plan)
-    ):
-        raise RevisionPlanError("DW-1 POD plan would re-apply DW-1 or the x5 POD revision")
+    if target == POD_DW1:
+        parent = pod_dw1_direct_parent(script)
+        if POD_X5 in plan:
+            raise RevisionPlanError("DW-1 POD plan includes the x5 POD revision")
+        if plan.count(POD_DW1) != 1:
+            raise RevisionPlanError(f"DW-1 POD plan must apply {POD_DW1} exactly once; got {plan}")
+        if current == parent:
+            if plan != [POD_DW1]:
+                raise RevisionPlanError(
+                    "DW-1 POD plan would re-apply DW-1 revisions from the direct parent"
+                )
+        elif current is None or not on_dw1_line(script, current):
+            raise RevisionPlanError(
+                f"i14_load_pod_evidence requires DW-1 lineage (parent {parent}); current is {current}"
+            )
+        if plan[-1] != POD_DW1:
+            raise RevisionPlanError(f"DW-1 POD plan must end at {POD_DW1}; got {plan}")
     assert_pod_plan_safe(plan, current=current, target=target)
     if target not in plan:
         raise RevisionPlanError(f"target {target} is not pending from {current}")
