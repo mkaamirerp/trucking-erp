@@ -173,7 +173,9 @@ async def test_uses_injected_openai_callable_and_returns_mapped_fields() -> None
     assert "role_hint" not in calls[0]["user_text"]
     assert "tenant_identity_exclusion" in calls[0]["user_text"]
     assert "field_rules" in calls[0]["user_text"]
-    assert "document.pages" in calls[0]["user_text"] or '"pages"' in calls[0]["user_text"]
+    handoff = json.loads(calls[0]["user_text"].split("\n\n")[-1])
+    assert handoff["document"]["pages"] == []
+    assert len(out.raw_text) > 0
     assert calls[0]["schema"]["type"] == "object"
     assert calls[0]["schema_name"] == "load_document_parse_guarded_truckerjson_v1"
     assert calls[0]["input_file_bytes"] == _FIXTURE_PDF.read_bytes()
@@ -426,7 +428,7 @@ def test_guarded_module_is_thin_reexport_only() -> None:
 def test_v2_system_prompt_is_exclusion_and_field_rules_based() -> None:
     from app.services.load_parser_openai_handoff_v2 import build_v2_openai_system_prompt
 
-    system = build_v2_openai_system_prompt().casefold()
+    system = build_v2_openai_system_prompt(pdf_bytes_attached=True).casefold()
     assert "tenant_identity_exclusion" in system
     assert "field_rules" in system
     assert "product_parse_diagnostics" not in system
@@ -467,7 +469,7 @@ def test_v2_user_message_has_no_product_parse_diagnostics() -> None:
         pages=["STOP DETAIL\nPU 05/29/25\n09:00"],
         filename="rc.pdf",
     )
-    text = build_v2_openai_user_message(handoff)
+    text = build_v2_openai_user_message(handoff, pdf_bytes_attached=False)
     assert "PRODUCT_PARSE_DIAGNOSTICS" not in text
     assert "tenant_identity_exclusion" in text
     assert "field_rules" in text

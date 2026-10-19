@@ -3,9 +3,12 @@
 Wired as the product ``parse_pdf_bytes_to_load_document_response`` implementation.
 Does **not** embed PRODUCT_PARSE_DIAGNOSTICS or run semantic guardrail repairs.
 
-Digital PDFs: original bytes + existing v2 JSON rules/schema → OpenAI (unchanged).
-Image-only/scanned PDFs: OCR pages, then OCR text + the same JSON rules/schema → OpenAI
-(no original PDF attachment). Mixed PDFs remain blocked.
+Digital PDFs: original PDF bytes + v2 JSON rules/schema → OpenAI. Locally extracted page
+text is kept for ``raw_text`` / mechanical validation but is **not** duplicated into the
+OpenAI user-message handoff when PDF bytes are attached.
+
+Image-only/scanned PDFs: OCR pages, then OCR text in ``document.pages`` + the same JSON
+rules/schema → OpenAI (no original PDF attachment). Mixed PDFs remain blocked.
 """
 
 from __future__ import annotations
@@ -126,6 +129,7 @@ async def parse_pdf_bytes_to_load_document_response(
     )
     base_warnings.extend(excl_warnings)
 
+    page_count = int(acquisition.get("page_count") or len(handoff_pages) or 0)
     handoff = build_load_rate_con_openai_handoff_v2_payload(
         tenant_identity_exclusion=_strip_exclusion_internal_keys(exclusion),
         pages=handoff_pages,
@@ -134,6 +138,8 @@ async def parse_pdf_bytes_to_load_document_response(
         content_type="application/pdf",
         size_bytes=len(pdf_bytes),
         acquisition_method=str(acquisition.get("pdf_type") or "digital_text"),
+        include_page_text_in_ai_handoff=False,
+        page_count=page_count,
     )
 
     api_key = (settings.openai_api_key or "").strip()
@@ -157,8 +163,8 @@ async def parse_pdf_bytes_to_load_document_response(
     ai_payload = await client(
         api_key=api_key,
         model=(settings.openai_extraction_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
-        system=build_v2_openai_system_prompt(),
-        user_text=build_v2_openai_user_message(handoff),
+        system=build_v2_openai_system_prompt(pdf_bytes_attached=True),
+        user_text=build_v2_openai_user_message(handoff, pdf_bytes_attached=True),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
         input_file_bytes=pdf_bytes,
@@ -258,8 +264,8 @@ async def _parse_scanned_image_with_ocr(
     ai_payload = await client(
         api_key=api_key,
         model=(settings.openai_extraction_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
-        system=build_v2_openai_system_prompt(),
-        user_text=build_v2_openai_user_message(handoff),
+        system=build_v2_openai_system_prompt(pdf_bytes_attached=False),
+        user_text=build_v2_openai_user_message(handoff, pdf_bytes_attached=False),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
         input_file_bytes=None,
