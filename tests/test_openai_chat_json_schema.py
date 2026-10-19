@@ -103,6 +103,32 @@ async def test_openai_chat_json_schema_raw_200_returns_wire_json() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_chat_json_schema_raw_omits_temperature_for_gpt5() -> None:
+    wire = {"choices": [{"message": {"content": "{}"}}]}
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = wire
+    post = AsyncMock(return_value=resp)
+    mock_client = _mock_async_client(post)
+
+    with patch(
+        "app.document_platform.capabilities.openai.chat_json_schema.httpx.AsyncClient",
+        return_value=mock_client,
+    ):
+        await openai_chat_json_schema_raw(
+            api_key="k",
+            model="gpt-5-mini",
+            system="system",
+            user_text="user",
+            schema={"type": "object"},
+            schema_name="load_schema",
+        )
+
+    body = post.await_args.kwargs["json"]
+    assert "temperature" not in body
+    assert body["model"] == "gpt-5-mini"
+
+
+@pytest.mark.asyncio
 async def test_openai_chat_json_schema_raw_attaches_pdf_as_file_input() -> None:
     wire = {"choices": [{"message": {"content": "{}"}}]}
     resp = MagicMock(status_code=200)

@@ -15,6 +15,14 @@ DEFAULT_OPENAI_CHAT_TIMEOUT_S = 120.0
 OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 
 
+def _completion_sampling_kwargs(model: str) -> dict[str, float]:
+    """GPT-5 chat models reject non-default temperature (OpenAI: use default only)."""
+    name = (model or "").strip().lower()
+    if name.startswith("gpt-5"):
+        return {}
+    return {"temperature": 0.1}
+
+
 class OpenAIChatCompletionError(Exception):
     """Base for chat completion response handling errors."""
 
@@ -81,7 +89,7 @@ async def openai_chat_json_schema_raw(
     )
     body_schema: dict[str, Any] = {
         "model": model,
-        "temperature": 0.1,
+        **_completion_sampling_kwargs(model),
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
@@ -106,7 +114,7 @@ async def openai_chat_json_schema_raw(
             )
             body_obj = {
                 "model": model,
-                "temperature": 0.1,
+                **_completion_sampling_kwargs(model),
                 "messages": [
                     {"role": "system", "content": system + " Respond with a single JSON object only."},
                     {
