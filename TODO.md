@@ -19,6 +19,44 @@
 
 ---
 
+## Load parser — side-by-side PDF evidence verification
+
+**Status:** TODO — locked product requirement; implement after current GPT-5-mini / parser architecture validation.
+
+**Design reference:** `docs/load_parser/TruckERP_Load_Rate_Confirmation_Semantic_Parser_Design.md` — section **"Human verification / temporary PDF evidence review — LOCKED"**.
+
+**Reason:** Visible source evidence is required because even a single wrong ZIP/postal code, address, appointment time, or operational reference can materially misroute or disrupt a shipment.
+
+**Checklist:**
+
+- [ ] Temporary two-pane review UI
+- [ ] Left pane displays exact original uploaded PDF
+- [ ] Right pane displays editable parsed TruckERP fields
+- [ ] Preserve AI-original value when operator changes a parsed field
+- [ ] Record operator correction / accepted value
+- [ ] Support Save Draft from verified result
+- [ ] Support Create Load from verified result
+- [ ] Preserve/attach original PDF to resulting Load
+- [ ] Close/remove temporary verification workspace after Save/Create
+- [ ] Subsequent edits occur through normal Load page
+- [ ] Original PDF remains accessible as Load evidence
+- [ ] Define correction audit persistence/schema in implementation slice
+- [ ] Regression test that parser output cannot silently overwrite an operator correction
+
+Do **not** implement this UI in the current parser-architecture validation slice.
+
+---
+
+## Load parser — digital PDF OpenAI handoff (no duplicate page text)
+
+**Status:** INCOMPLETE — not on `main`; do not treat as shipped.
+
+**Intent:** For digital rate confirmations, OpenAI receives the original PDF bytes plus rules/schema; locally extracted page text stays in `raw_text` / mechanical validation but must **not** be duplicated into `document.pages` in the AI user message (see reconciliation backup `gpt_review_reconcile_20261019_0150Z` and prior `gpt-review` worktree WIP).
+
+**Remaining before merge to `main`:** land `load_parser_openai_handoff_v2.py`, `load_document_parse_rate_con.py`, guarded + digital handoff tests; TQLRC regression; owner review. **Do not** label parser module Gold until batch results are reviewed.
+
+---
+
 ## BVD import staging — hardening (post-rollout)
 
 **Status:** TODO — follow-up only; do not side-track staging rollout.
@@ -172,12 +210,55 @@ On a tenant-scoped broker load number or optional barcode match, pause import an
 
 ---
 
-## RBAC — Casbin permission engine
+## RBAC — Casbin authorization (`app/authz/`)
 
-**Status:** TODO — engine selected for the start of RBAC work; implementation not started.
+**Authority:** `docs/load_trip/MASTER.md` — *WORKSTREAM NOTE — Casbin/RBAC (paused, not superseded)*. Operational contracts: `app/authz/STARTUP_AND_ROLLBACK.md`, `app/authz/DECISION_REPORT.md`.
 
-**Decision (2026-10-14):** Start with Casbin (Python/PyCasbin) as TruckERP's backend permission engine. Keep the existing TruckERP user-management UI, authentication, and tenant memberships; extend TruckERP with a tenant-admin Roles & Access page rather than adopting Casdoor or Keycloak.
+| Layer | Status on `main` (`3e3bdab`) |
+|-------|------------------------------|
+| **Implementation** | **Done (foundation + pilot code).** Casbin 1.41.0; Phase 0 loader/model/policies; capability catalog; shadow comparison; simulated decision matrix; route inventory; **default-off** Loads pilot (`CASBIN_LOAD_PILOT_ENFORCEMENT`, four `/api/v1/loads` routes). Primary landing commit: `c46490f`. |
+| **Integration** | **Partial.** Pilot is wired but **off by default**; legacy role/entitlement gates remain authoritative for almost all routes. Full module enforcement and UI are not rolled out. |
+| **Verification** | **Partial.** Substantial unit coverage on `main` (`tests/test_authz_phase0.py` … `test_authz_phase4c.py`, `test_authz_shadow.py`, `test_authz_matrix.py`, etc.). Live pilot-on regression and production-image proof are **open** (separate from Load Integrity F1). |
+| **Future enhancements** | Tenant-admin Roles & Access UI; custom tenant roles; expand enforcement beyond Loads pilot; resolve pending cells in `DECISION_REPORT.md`; AGY P2-C frontend/navigation alignment — **product backlog**, not missing core implementation. |
 
-Initial scope: database-backed role permissions; tenant-scoped member role assignments; a shared permission-check interface for protected backend operations; fixed starter roles and a read-only permission view; audited role changes; last-admin protection; explicit role-assignment permissions; immediate enforcement of role changes and policy refresh across workers. Custom tenant roles can follow later.
+**Remote branches (historical / integration candidates — do not auto-merge):**
 
-Before implementation, inspect current authentication, access levels, membership tables, callers, and tenant scoping. Define the permission catalog and migration from FULL_ACCESS/READ_ONLY, and follow AGENTS.md approval and regression gates for shared contracts. Keep record-level tenant/ownership scoping and financial workflow validation in TruckERP. Test cross-tenant denial, role changes, privilege escalation, and last-admin protection.
+- `origin/casbin-integration` — 16 commits not on `main` (e.g. Load audit-identity alignment, FastAPI pilot auth tests, `docs(authz)` contract notes). **Diverged below `main`** on Load/F1 (`loads.py` / router differ); needs owner replay onto current `main`, not a wholesale merge.
+- `origin/casbin` — earlier Casbin line (14 commits not on `main`; largely superseded by the port in `c46490f`).
+- `origin/casbin-prod-6919ec0` — isolated release `6919ec0` line + `f9c9067` production-schema Casbin candidate; not the current `main` integration target.
+
+**Historical review markdown** (`docs/reviews/CASBIN_RBAC_*.md` in local WIP or backup) is **inspection evidence**, not a second implementation. Do not treat proposed permissions or matrix `pending` rows as “Casbin not built.”
+
+---
+
+## AUTH SECURITY HARDENING — PARKED
+
+**Status:** **SECURITY AUDIT RECORDED — REMEDIATION DEFERRED** (not scheduled; not Auth Gold).
+
+**Owning documentation:** `docs/auth/AUTH_SECURITY_REVIEW_BACKLOG.md` (findings A1–A8; **audit baseline:** § *Independent Security Review — Audit Baseline*, commit `ede7ba80d0154f39db5a4f23813b7eaceae99030`). **Architecture authority:** `docs/auth/LOGIN_IDENTITY_ARCHITECTURE_LOCK.md`.
+
+**Rules:**
+
+- Not currently scheduled for implementation.
+- Requires **issue-by-issue owner approval** before any Auth code change.
+- **Do not mix** with Load/Trip integrity remediation (0A–0D, Issue 26, parser slices, etc.).
+- **Production verification pending** (cookies, reset URLs, EC2 effective config).
+
+**Checklist (priority order — all unchecked):**
+
+- [ ] **A1 (P1)** — Production cookie `Secure` / `SECURE_COOKIES` effective config; reset-token URL logging exposure
+- [ ] **A2 (P1)** — Password-reset token consumption atomicity (concurrent reset; `session_version`)
+- [ ] **A3 (P1)** — Credential sync / authority (tenant vs platform mirror) per identity lock
+- [ ] **A4 (P2)** — Workspace reset routing / `tenant_id=null` on public allowlist path
+- [ ] **A5 (P2)** — Logout vs JWT/refresh revocation policy
+- [ ] **A6 (P2)** — bcrypt 72-byte truncation; compatibility-preserving fix
+- [ ] **A7 (P3)** — JWT decode required claims (`exp`, `sub`, type, `sv`, tenant binding)
+- [ ] **A8** — Invite acceptance may reactivate suspended users
+
+---
+
+## F1 — commercial Load insertion dedup (`3e3bdab`)
+
+**Status:** Code on `main`; **acceptance UNVERIFIED** (Opus §14 / Load Integrity not Gold). See `docs/load_trip/MASTER.md` and `docs/audits/OPUS_GROK_CONTRACT_VERIFICATION_20261018.md`.
+
+**Remaining:** disposable-clone §14 matrix (HTTP `loads_v1` harness, concurrent DW promote test, I5 cancel with platform tenant, real-auth certification where required). Evidence logs: `/home/admin/backups/f1_dev_verify_20261019/`, `/home/admin/backups/gpt_review_reconcile_20261019_0150Z/`.

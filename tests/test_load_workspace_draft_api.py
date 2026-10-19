@@ -454,23 +454,30 @@ async def test_promote_creates_commercial_evidence_when_pdf_ready() -> None:
         if load_id is not None or draft_id is not None:
             async with factory() as db:
                 if load_id is not None:
+                    if await db.scalar(text("SELECT to_regclass('public.load_pod_evidence')")):
+                        await db.execute(
+                            text("DELETE FROM load_pod_evidence WHERE load_id = :id"),
+                            {"id": load_id},
+                        )
                     await db.execute(text("DELETE FROM load_stops WHERE load_id = :id"), {"id": load_id})
                     await db.execute(
                         text("DELETE FROM load_commercial_evidence WHERE load_id = :id"),
                         {"id": load_id},
                     )
+                if load_id is not None:
                     await db.execute(
                         text(
                             "UPDATE loads SET promotion_origin_workspace_draft_id = NULL WHERE id = :id"
                         ),
                         {"id": load_id},
                     )
-                    await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
                 if draft_id is not None:
                     await db.execute(
                         text("DELETE FROM load_workspace_drafts WHERE id = :id"),
                         {"id": draft_id},
                     )
+                if load_id is not None:
+                    await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
                 await db.commit()
         await engine.dispose()
 
