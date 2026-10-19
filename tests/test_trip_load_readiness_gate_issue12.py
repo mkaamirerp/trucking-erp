@@ -26,12 +26,19 @@ from app.core.db_url import to_async_pg_url
 from app.core.integration_db_guard import IntegrationIsolationError, integration_tenant_db_name
 from app.main import app
 from app.services.trips import _insert_trip_load_row
+from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
+    demo_clone_active,
+    demo_clone_tenant_id,
+    install_demo_clone_http_test_overrides,
+)
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
 from tests.support.integration_isolation import (
     AUTH_HEADERS,
+    allowed_integration_db_names,
     assert_mutating_integration_allowed,
     database_name_from_url,
     require_integration_tenant_database_url,
@@ -82,8 +89,10 @@ async def client():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 @pytest.fixture
@@ -93,22 +102,29 @@ def issue12_integration_gate():
     except IntegrationIsolationError as exc:
         pytest.skip(f"Issue I12 HTTP tests require isolated tenant DB: {exc}")
     db_name = database_name_from_url(tenant_url)
-    expected = integration_tenant_db_name()
-    if db_name != expected:
-        pytest.skip(
-            f"Issue I12 HTTP tests require database {expected!r}, got {db_name!r}."
-        )
+    if demo_clone_active():
+        if db_name not in allowed_integration_db_names():
+            pytest.skip(f"Issue I12 demo clone database {db_name!r} is not allowed.")
+    else:
+        expected = integration_tenant_db_name()
+        if db_name != expected:
+            pytest.skip(
+                f"Issue I12 HTTP tests require database {expected!r}, got {db_name!r}."
+            )
     return {"tenant_database_url": tenant_url, "tenant_db_name": db_name}
 
 
 @pytest.fixture
 async def issue12_http(client, override_auth_tenant, issue12_integration_gate):
-    tenant_id = await platform_tenant_id_for_slug()
-    await assert_mutating_integration_allowed(
-        tenant_id=tenant_id,
-        host=AUTH_HEADERS["host"],
-        context="issue12_readiness_gate",
-    )
+    if demo_clone_active():
+        tenant_id = demo_clone_tenant_id()
+    else:
+        tenant_id = await platform_tenant_id_for_slug()
+        await assert_mutating_integration_allowed(
+            tenant_id=tenant_id,
+            host=AUTH_HEADERS["host"],
+            context="issue12_readiness_gate",
+        )
     gate = issue12_integration_gate
     created_load_ids: list[int] = []
     created_trip_ids: list[int] = []

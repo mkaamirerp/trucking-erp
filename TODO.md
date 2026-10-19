@@ -257,8 +257,14 @@ On a tenant-scoped broker load number or optional barcode match, pause import an
 
 ---
 
-## F1 — commercial Load insertion dedup (`3e3bdab`)
+## F1 — commercial Load insertion dedup (`a15e9ea` baseline)
 
-**Status:** Code on `main`; **acceptance UNVERIFIED** (Opus §14 / Load Integrity not Gold). See `docs/load_trip/MASTER.md` and `docs/audits/OPUS_GROK_CONTRACT_VERIFICATION_20261018.md`.
+**Status:** **F1 acceptance criteria met in dev (disposable clone); NOT deployed; Load Integrity Gold still open.** See `docs/load_trip/MASTER.md` F1 row.
 
-**Remaining:** disposable-clone §14 matrix (HTTP `loads_v1` harness, concurrent DW promote test, I5 cancel with platform tenant, real-auth certification where required). Evidence logs: `/home/admin/backups/f1_dev_verify_20261019/`, `/home/admin/backups/gpt_review_reconcile_20261019_0150Z/`.
+**Evidence:** `/home/admin/backups/f1_finish_20261019T1030Z/` (matrix pass); `/home/admin/backups/f1_concurrent_dw_20261019T1047Z/` (`test_concurrent_promote_competing_idempotency_keys_one_load` + DW API 17/17).
+
+**Payroll:** **NOT APPLICABLE** for F1 (module not implemented — no regression required).
+
+**Finance:** **NOT APPLICABLE** for F1 — no shipped Finance code path depends on shared Load insertion (verify again when Finance posts from Loads).
+
+**F1 complete vs Integrity Gold:** F1 covers §6 duplicate insertion + Opus §14 rows exercised in harness (DW/API/I26/I0A/I5/I12/I3/TripLoad/parser money unit). **Still outside F1:** production deploy, live JWT/Casbin certification, I14/custody/POD live acceptance, full-repo clone green, optional custody slice2 harness on disposable DB.

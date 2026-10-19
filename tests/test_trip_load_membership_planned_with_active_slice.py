@@ -24,6 +24,10 @@ from app.models.dispatch_trip import DispatchTrip
 from app.models.load import Load
 from app.services.dispatch_trips import _upsert_trip_and_membership
 from app.services.trips import _insert_trip_load_row
+from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
+    install_demo_clone_http_test_overrides,
+)
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
@@ -65,8 +69,10 @@ def test_bypass_env():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 

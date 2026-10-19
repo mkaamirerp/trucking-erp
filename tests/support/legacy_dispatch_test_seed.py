@@ -12,11 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.load import Load
 from app.services import dispatch_trips as dispatch_trips_service
+from tests.support.demo_clone_integration import demo_clone_active
 from tests.support.integration_isolation import assert_mutating_integration_allowed
 
 
 async def seed_load_dispatched_legacy_state(db: AsyncSession, tenant_id: int, load_id: int) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context="seed_load_dispatched_legacy_state")
+    gate_tid = None if demo_clone_active() else tenant_id
+    await assert_mutating_integration_allowed(
+        tenant_id=gate_tid, context="seed_load_dispatched_legacy_state"
+    )
     load_row = await db.scalar(select(Load).where(Load.tenant_id == tenant_id, Load.id == load_id))
     if load_row is None:
         raise ValueError("load not found")

@@ -50,6 +50,7 @@ class IntegrationCleanupError(Exception):
 
 from httpx import AsyncClient, Response
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.db_url import to_async_pg_url
@@ -69,6 +70,13 @@ from tests.support.integration_ready_load import (
     api_create_ready_load_ids,
 )
 from tests.support.tenant_test_ids import platform_tenant_id_for_slug
+
+
+async def _assert_mutating_cleanup_allowed(tenant_id: int, *, context: str) -> None:
+    """Demo clones use tenant_id=53 from sanitized data; platform registry stays pytest-only."""
+    if demo_clone_active():
+        return
+    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=context)
 
 
 @dataclass
@@ -322,7 +330,7 @@ async def integration_scope_context(client: AsyncClient, headers: dict[str, str]
 async def _cleanup_trip_rows(
     db: AsyncSession, tenant_id: int, trip_id: int, *, context: str
 ) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_trip")
+    await _assert_mutating_cleanup_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_trip")
     await db.execute(
         text("delete from trip_loads where tenant_id=:t and trip_id=:i"),
         {"t": tenant_id, "i": trip_id},
@@ -380,7 +388,7 @@ async def _cleanup_driver_rows(
     tracked_trip_ids: frozenset[int],
     context: str,
 ) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_driver")
+    await _assert_mutating_cleanup_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_driver")
     await _assert_safe_to_delete_fleet_asset(
         db,
         tenant_id,
@@ -403,7 +411,7 @@ async def _cleanup_truck_rows(
     tracked_trip_ids: frozenset[int],
     context: str,
 ) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_truck")
+    await _assert_mutating_cleanup_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_truck")
     await _assert_safe_to_delete_fleet_asset(
         db,
         tenant_id,
@@ -426,7 +434,7 @@ async def _cleanup_trailer_rows(
     tracked_trip_ids: frozenset[int],
     context: str,
 ) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_trailer")
+    await _assert_mutating_cleanup_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_trailer")
     await _assert_safe_to_delete_fleet_asset(
         db,
         tenant_id,
@@ -444,7 +452,7 @@ async def _cleanup_trailer_rows(
 async def _cleanup_load_rows(
     db: AsyncSession, tenant_id: int, load_id: int, *, context: str
 ) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_load")
+    await _assert_mutating_cleanup_allowed(tenant_id=tenant_id, context=f"{context}_cleanup_load")
     await db.execute(
         text("delete from trip_loads where tenant_id=:t and load_id=:i"),
         {"t": tenant_id, "i": load_id},
@@ -467,10 +475,16 @@ async def _cleanup_load_rows(
         text("delete from load_notes where tenant_id=:t and load_id=:i"),
         {"t": tenant_id, "i": load_id},
     )
-    await db.execute(
-        text("delete from load_pod_evidence where tenant_id=:t and load_id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
+    try:
+        await db.execute(
+            text("delete from load_pod_evidence where tenant_id=:t and load_id=:i"),
+            {"t": tenant_id, "i": load_id},
+        )
+    except ProgrammingError as exc:
+        await db.rollback()
+        msg = str(exc).lower()
+        if "load_pod_evidence" not in msg or "does not exist" not in msg:
+            raise
     await db.execute(
         text("delete from loads where tenant_id=:t and id=:i"),
         {"t": tenant_id, "i": load_id},

@@ -12,6 +12,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+from tests.support.demo_clone_integration import install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
@@ -75,6 +76,7 @@ async def client():
 def override_auth_tenant(test_bypass_env):
     """Bypass JWT; CurrentUser.tenant_id matches Host-resolved workspace (see integration_auth)."""
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_tenant_db_override(app)
     yield
     clear_current_user_and_tenant_overrides(app)
 

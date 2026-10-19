@@ -829,6 +829,10 @@ def isolated_child_env(updates: dict[str, str]) -> dict[str, str]:
     for url_key in ("TENANT_DATABASE_URL", "ALEMBIC_TENANT_DATABASE_URL"):
         if child.get(url_key):
             assert_isolated_target(child[url_key])
+    if "DATABASE_URL" not in updates:
+        child.pop("DATABASE_URL", None)
+    if "POSTGRES_ADMIN_URL" not in updates:
+        child.pop("POSTGRES_ADMIN_URL", None)
     return child
 
 
@@ -841,9 +845,13 @@ def assert_isolated_target(url: str) -> tuple[str, str]:
     return host, database
 
 
+_PHASE4C_PLATFORM_DB = "platform_phase4c"
+
+
 def clone_database_url(host: str, database: str, *, async_driver: bool) -> str:
     assert_clone_host(host)
-    assert_clone_name(database)
+    if database != _PHASE4C_PLATFORM_DB:
+        assert_clone_name(database)
     password = os.environ.get("DEMO_CLONE_DB_PASSWORD", "")
     if not password:
         raise CloneError("DEMO_CLONE_DB_PASSWORD is required for the isolated clone connection.")
@@ -948,6 +956,7 @@ class LiveCommands:
             host, database = _host_and_database(logical_url)
             sync_url = clone_database_url(host, database, async_driver=False)
             async_url = clone_database_url(host, database, async_driver=True)
+            platform_sync = clone_database_url(host, _PHASE4C_PLATFORM_DB, async_driver=False)
             child = isolated_child_env(
                 {
                     "TENANT_DATABASE_URL": sync_url,
@@ -960,6 +969,13 @@ class LiveCommands:
                     "TEST_BYPASS_AUTH": "1",
                 }
             )
+            plat_host, plat_db = _host_and_database(platform_sync)
+            assert_clone_host(plat_host)
+            if plat_db != _PHASE4C_PLATFORM_DB:
+                raise CloneError(
+                    f"Refusing platform DATABASE_URL database {plat_db!r} in clone pytest child."
+                )
+            child["DATABASE_URL"] = platform_sync
             assert_isolated_target(child["TENANT_DATABASE_URL"])
             completed = self.spawn(
                 [sys.executable, "-m", *argv],

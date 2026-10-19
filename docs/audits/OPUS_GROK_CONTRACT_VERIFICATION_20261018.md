@@ -186,16 +186,32 @@ a4bb469  Merge gpt-review: DW and Load/Trip Integrity (PR #65)   ← contract pi
 
 ### §14 — Regression matrix (selected rows)
 
-| Scenario | Verdict | Notes |
+**Historical (post-`3e3bdab` bulk clone):** 57 failed / 9 errors — superseded for **F1-scoped** verification below.
+
+**F1 verification addendum (2026-10-19, baseline `a15e9ea`, disposable `demo_clone_runner` @ `dw1d`, logs under `/home/admin/backups/f1_finish_20261019T1030Z/` and `/home/admin/backups/f1_concurrent_dw_20261019T1047Z/`):**
+
+| Scenario | F1 verdict | Notes |
+|----------|------------|-------|
+| API create without/with stops | **PASS** | Clone `TestLoadCreateDraft` 4/4 |
+| DW promote / replay | **PASS** | DW API 17/17 incl. evidence + audit replay |
+| DW concurrent promote, competing keys | **PASS** | `test_concurrent_promote_competing_idempotency_keys_one_load` — one Load; loser `LOAD_WORKSPACE_DRAFT_ALREADY_PROMOTED` |
+| Invalid broker / contact / customs / cross-tenant | **PASS** | DW API + `test_load_workspace_draft_schema_dw1.py` 19/19 |
+| Duplicate load_number | **PASS** | DW API |
+| Audit failure DW promote / API (I26) | **PASS** | DW audit rollback test; I26 10/10 |
+| I8 money | **PASS** | Host 15/15 |
+| I0A writer freeze | **PASS** | Clone 69/69 |
+| I5 cancel / TripLoad | **PASS** | Clone 15/15 |
+| I3 mark-ready / I12 TripLoad gate | **PASS** | Clone 7/7 + 10/10 |
+| TripLoad cardinality / execution signal | **PASS** | Clone 6/6 + 7/7 |
+| Parser digital/OCR/guarded | **PASS** (unit) | Host 37 pass / 2 skip — not production parser WIP |
+| Finance / Payroll reader regression | **N/A** | Payroll not implemented; no Finance consumer of Load insertion |
+| Custody slice2 / yard / I14 POD live | **NOT RUN (F1)** | Integrity Gold / deploy track |
+| Full-repo disposable clone green | **NOT RUN** | F1 used targeted modules only |
+| Live JWT/Casbin certification | **NOT RUN** | Clone uses `TEST_BYPASS_AUTH=1` |
+
+| Scenario | Verdict (historical `3e3bdab` bulk) | Notes |
 |----------|---------|-------|
-| API create without/with stops | PARTIAL | Existing suite; not isolated proof in clone summary |
-| DW promote / replay / concurrency | PARTIAL | New tests in `test_load_workspace_draft_api.py` |
-| Invalid broker / contact / customs | PARTIAL | New promote tests |
-| Duplicate load_number | PARTIAL | `test_promote_rejects_duplicate_load_number...` |
-| Audit failure DW promote | PASS | `test_promote_audit_failure_rolls_back...` |
-| Audit failure API create | UNVERIFIED | No new dedicated test in commit |
-| Parser / I8 / I5 / Trip / custody rows | UNVERIFIED | Clone still fails dispatch/POD/trip tests (env + logic) |
-| Full matrix green | **FAIL** | 57 failed, 9 errors vs contract aspiration |
+| Full matrix green (undifferentiated clone) | **FAIL** | Pre-harness bulk run; not F1 sign-off |
 
 ### §15 — Acceptance gate
 

@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DW1_REVISION = "dw1f2a3b4c5d6"
 DW1B_REVISION = "dw1b_tenant_scope_dw1_foreign_keys"
 DW1C_REVISION = "dw1c_composite_fk_set_null_optional_columns"
+DW1D_REVISION = "dw1d_load_commercial_evidence_retention_varchar32"
 MERGE_REVISION = "dw0_merge_tenant_heads_a1b2_x5"
 X5_REVISION = "x5y6z7a8b9c0"
 POD_DW1_REVISION = "i14_load_pod_evidence"
@@ -551,7 +552,7 @@ def test_dw1c_is_dw1_pod_parent_and_tenant_heads_are_split() -> None:
     script = ScriptDirectory.from_config(Config(str(REPO_ROOT / "alembic_tenant.ini")))
     pod = script.get_revision(POD_DW1_REVISION)
     assert pod is not None
-    assert pod.down_revision == DW1C_REVISION
+    assert pod.down_revision == DW1D_REVISION
     assert set(script.get_heads()) == {POD_DW1_REVISION, "i14_load_pod_evidence_x5"}
 
 

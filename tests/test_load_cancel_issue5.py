@@ -26,6 +26,7 @@ from app.core.integration_db_guard import IntegrationIsolationError, integration
 from app.main import app
 from app.services.loads import LOAD_PHYSICAL_DELETE_TEMPORARILY_DISABLED
 from tests.support.custody_http import activate_via_custody, ensure_active_terminal
+from tests.support.demo_clone_integration import demo_clone_active, install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
@@ -101,6 +102,7 @@ def test_bypass_env():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_tenant_db_override(app)
     yield
     clear_current_user_and_tenant_overrides(app)
 
@@ -113,12 +115,14 @@ async def integration_scope(client, override_auth_tenant):
 
 @pytest.fixture
 async def issue5_cancel_http(client, override_auth_tenant, integration_scope):
-    tenant_id = await platform_tenant_id_for_slug()
-    await assert_mutating_integration_allowed(
-        tenant_id=tenant_id,
-        host=AUTH_HEADERS["host"],
-        context="issue5_cancel",
-    )
+    tenant_id = integration_scope.tenant_id
+    if not demo_clone_active():
+        tenant_id = await platform_tenant_id_for_slug()
+        await assert_mutating_integration_allowed(
+            tenant_id=tenant_id,
+            host=AUTH_HEADERS["host"],
+            context="issue5_cancel",
+        )
 
     async def new_draft(**extra) -> dict:
         r = await client.post(
@@ -378,7 +382,8 @@ class TestLoadCancelIssue5:
         ).status_code == 200
         r = await activate_via_custody(issue5_cancel_http.client, AUTH_HEADERS, trip_id, load_id)
         assert r.status_code == 409
-        assert _detail_code(r.json()) == "LOAD_COMMERCIALLY_CANCELLED"
+        # I5 closes open TripLoad memberships on cancel; accept-custody checks membership before activate.
+        assert _detail_code(r.json()) == "MEMBERSHIP_ALREADY_REMOVED"
 
     async def test_repeat_cancel_idempotent(self, issue5_cancel_http) -> None:
         load = await issue5_cancel_http.new_draft()

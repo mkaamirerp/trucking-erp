@@ -27,16 +27,24 @@ from app.constants.trip_dispatch import (
 from app.core.db_url import to_async_pg_url
 from app.core.integration_db_guard import IntegrationIsolationError, integration_tenant_db_name
 from app.main import app
+from tests.support.demo_clone_integration import (
+    clear_demo_clone_http_test_overrides,
+    demo_clone_active,
+    demo_clone_tenant_id,
+    install_demo_clone_http_test_overrides,
+)
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
 )
 from tests.support.integration_isolation import (
     AUTH_HEADERS,
+    allowed_integration_db_names,
     assert_mutating_integration_allowed,
     database_name_from_url,
     require_integration_tenant_database_url,
 )
+from tests.support.integration_test_resources import _cleanup_load_rows
 from tests.support.tenant_test_ids import platform_tenant_id_for_slug
 
 _VALID_STOPS = [
@@ -63,29 +71,6 @@ def _integration_db_configured() -> bool:
 
 _PLACEHOLDER_PLATFORM_DB = "db.example.invalid" in (os.environ.get("DATABASE_URL") or "")
 SKIP_ISSUE3_HTTP = _PLACEHOLDER_PLATFORM_DB or not _integration_db_configured()
-
-
-async def _cleanup_load_rows(db: AsyncSession, tenant_id: int, load_id: int) -> None:
-    await assert_mutating_integration_allowed(tenant_id=tenant_id, context="issue3_cleanup_load")
-    await db.execute(
-        text(
-            "delete from audit_events where tenant_id=:t and entity_type='load' and entity_id=:e"
-        ),
-        {"t": tenant_id, "e": str(load_id)},
-    )
-    await db.execute(
-        text("delete from load_stops where tenant_id=:t and load_id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.execute(
-        text("delete from load_notes where tenant_id=:t and load_id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.execute(
-        text("delete from loads where tenant_id=:t and id=:i"),
-        {"t": tenant_id, "i": load_id},
-    )
-    await db.commit()
 
 
 async def _assert_load_absent(db: AsyncSession, tenant_id: int, load_id: int) -> None:
@@ -116,8 +101,10 @@ async def client():
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
+    install_demo_clone_http_test_overrides(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+    clear_demo_clone_http_test_overrides(app)
 
 
 @pytest.fixture
@@ -128,12 +115,16 @@ def issue3_integration_gate():
     except IntegrationIsolationError as exc:
         pytest.skip(f"Issue 3 HTTP tests require isolated tenant DB: {exc}")
     db_name = database_name_from_url(tenant_url)
-    expected = integration_tenant_db_name()
-    if db_name != expected:
-        pytest.skip(
-            f"Issue 3 HTTP tests require database {expected!r}, got {db_name!r} "
-            f"(TENANT_DATABASE_URL path segment)."
-        )
+    if demo_clone_active():
+        if db_name not in allowed_integration_db_names():
+            pytest.skip(f"Issue 3 demo clone database {db_name!r} is not allowed.")
+    else:
+        expected = integration_tenant_db_name()
+        if db_name != expected:
+            pytest.skip(
+                f"Issue 3 HTTP tests require database {expected!r}, got {db_name!r} "
+                f"(TENANT_DATABASE_URL path segment)."
+            )
     ISSUE3_LAST_ISOLATION_EVIDENCE.clear()
     ISSUE3_LAST_ISOLATION_EVIDENCE.update(
         {
@@ -147,12 +138,15 @@ def issue3_integration_gate():
 @pytest.fixture
 async def issue3_http(client, override_auth_tenant, issue3_integration_gate):
     """Isolated HTTP context: tracks created load ids and deletes them in finally."""
-    tenant_id = await platform_tenant_id_for_slug()
-    await assert_mutating_integration_allowed(
-        tenant_id=tenant_id,
-        host=AUTH_HEADERS["host"],
-        context="issue3_mark_ready_gate",
-    )
+    if demo_clone_active():
+        tenant_id = demo_clone_tenant_id()
+    else:
+        tenant_id = await platform_tenant_id_for_slug()
+        await assert_mutating_integration_allowed(
+            tenant_id=tenant_id,
+            host=AUTH_HEADERS["host"],
+            context="issue3_mark_ready_gate",
+        )
     ISSUE3_LAST_ISOLATION_EVIDENCE["platform_tenant_id"] = tenant_id
     ISSUE3_LAST_ISOLATION_EVIDENCE["integration_host"] = AUTH_HEADERS["host"]
 
@@ -188,7 +182,7 @@ async def issue3_http(client, override_auth_tenant, issue3_integration_gate):
             try:
                 async with Session() as db:
                     for load_id in reversed(created_load_ids):
-                        await _cleanup_load_rows(db, tenant_id, load_id)
+                        await _cleanup_load_rows(db, tenant_id, load_id, context="issue3")
                     for load_id in created_load_ids:
                         await _assert_load_absent(db, tenant_id, load_id)
             finally:

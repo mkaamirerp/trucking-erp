@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 
@@ -28,7 +29,7 @@ from app.services.load_workspace_draft import (
 )
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.load_workspace_draft_lifecycle import discard_workspace_draft
-from app.services.load_workspace_draft_promotion import promote_workspace_draft
+from app.services.load_workspace_draft_promotion import PromotionResult, promote_workspace_draft
 from fastapi import HTTPException
 from tests.support.demo_clone_integration import demo_clone_active, install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
@@ -556,6 +557,113 @@ async def test_promotion_idempotency_key_conflict_across_drafts() -> None:
             if load_id is not None:
                 await db.execute(text("DELETE FROM loads WHERE id = :id"), {"id": load_id})
             await db.commit()
+            await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_promote_competing_idempotency_keys_one_load() -> None:
+    """Two simultaneous promotions on one draft with different keys: one Load, one 409."""
+    engine, factory = _session()
+    draft_id = None
+    load_id = None
+    tenant_id = 0
+    key_a = f"concurrent-a-{uuid.uuid4().hex}"
+    key_b = f"concurrent-b-{uuid.uuid4().hex}"
+    load_number = f"DW-CONC-{uuid.uuid4().hex[:10]}"
+    try:
+        tenant_id, draft_id = await _create_draft(
+            factory,
+            {**SAMPLE_DRAFT_JSON, "loadNumber": load_number},
+        )
+
+        async def _promote(key: str):
+            async with factory() as db:
+                return await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=key,
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+
+        outcomes = await asyncio.gather(_promote(key_a), _promote(key_b), return_exceptions=True)
+        successes = [o for o in outcomes if isinstance(o, PromotionResult)]
+        failures = [o for o in outcomes if isinstance(o, HTTPException)]
+        assert len(successes) == 1
+        assert len(failures) == 1
+        assert successes[0].idempotent_replay is False
+        load_id = int(successes[0].load_id)
+        assert failures[0].status_code == 409
+        assert failures[0].detail["code"] == "LOAD_WORKSPACE_DRAFT_ALREADY_PROMOTED"
+        assert int(failures[0].detail["promoted_load_id"]) == load_id
+
+        winning_key = key_a if successes[0].draft.promotion_idempotency_key == key_a else key_b
+        assert successes[0].draft.promotion_idempotency_key == winning_key
+        assert winning_key in (key_a, key_b)
+
+        async with factory() as db:
+            load_count = int(
+                await db.scalar(
+                    text(
+                        "SELECT count(*)::int FROM loads WHERE tenant_id = :t "
+                        "AND promotion_origin_workspace_draft_id = :d"
+                    ),
+                    {"t": tenant_id, "d": draft_id},
+                )
+                or 0
+            )
+            assert load_count == 1
+            trip_load_count = int(
+                await db.scalar(
+                    text(
+                        "SELECT count(*)::int FROM trip_loads tl "
+                        "INNER JOIN loads l ON l.tenant_id = tl.tenant_id AND l.id = tl.load_id "
+                        "WHERE l.tenant_id = :t AND l.promotion_origin_workspace_draft_id = :d"
+                    ),
+                    {"t": tenant_id, "d": draft_id},
+                )
+                or 0
+            )
+            assert trip_load_count == 0
+            evidence_count = int(
+                await db.scalar(
+                    text(
+                        "SELECT count(*)::int FROM load_commercial_evidence "
+                        "WHERE tenant_id = :t AND workspace_draft_id = :d"
+                    ),
+                    {"t": tenant_id, "d": draft_id},
+                )
+                or 0
+            )
+            assert evidence_count == 0
+            audit_count = int(
+                await db.scalar(
+                    text(
+                        "SELECT count(*)::int FROM audit_events WHERE tenant_id = :t AND module = 'loads' "
+                        "AND entity_type = 'load' AND entity_id = :e AND action = 'load_created'"
+                    ),
+                    {"t": tenant_id, "e": str(load_id)},
+                )
+                or 0
+            )
+            assert audit_count == 1
+            draft_status = await db.scalar(
+                text("SELECT status FROM load_workspace_drafts WHERE tenant_id = :t AND id = :d"),
+                {"t": tenant_id, "d": draft_id},
+            )
+            assert draft_status == "promoted"
+    finally:
+        async with factory() as db:
+            if load_id is not None:
+                await db.execute(
+                    text("DELETE FROM audit_events WHERE tenant_id = :t AND module = 'loads' AND entity_id = :e"),
+                    {"t": tenant_id, "e": str(load_id)},
+                )
+                await db.commit()
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
         await engine.dispose()
 
 

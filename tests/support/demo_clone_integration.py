@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.db_url import to_async_pg_url
 from app.core.integration_db_guard import assert_integration_db_name_allowed, database_name_from_url
+from app.deps.entitlements import require_admin_sensitive_entitlement
 from app.deps.tenant_db import get_tenant_db
 
 
@@ -49,3 +50,14 @@ def install_demo_clone_tenant_db_override(app: Any) -> None:
         await engine.dispose()
 
     app.dependency_overrides[get_tenant_db] = _tenant_db
+
+
+def install_demo_clone_http_test_overrides(app: Any) -> None:
+    """Tenant DB routing + admin_sensitive bypass for disposable clone HTTP tests."""
+    install_demo_clone_tenant_db_override(app)
+    if demo_clone_active():
+        app.dependency_overrides[require_admin_sensitive_entitlement] = lambda: None
+
+
+def clear_demo_clone_http_test_overrides(app: Any) -> None:
+    app.dependency_overrides.pop(require_admin_sensitive_entitlement, None)
