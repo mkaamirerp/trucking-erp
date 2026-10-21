@@ -22,6 +22,7 @@ from app.schemas.load import (
 )
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
+from app.services import future_movement_plans as fmp_service
 from app.services import loads as loads_service
 from app.services import trips as trips_service
 from app.services import load_custody as custody_service
@@ -150,10 +151,15 @@ async def get_load_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
     resp = LoadResponse.model_validate(load)
     planned = await trips_service.get_open_planned_trip_for_load(db, tenant_id, load_id)
+    updates: dict = {}
     if planned is not None:
-        resp = resp.model_copy(
-            update={"open_planned_trip_id": planned[0], "open_planned_trip_number": planned[1]}
-        )
+        updates["open_planned_trip_id"] = planned[0]
+        updates["open_planned_trip_number"] = planned[1]
+    fmp_id = await fmp_service.get_open_future_movement_plan_id(db, tenant_id, load_id)
+    if fmp_id is not None:
+        updates["open_future_movement_plan_id"] = fmp_id
+    if updates:
+        resp = resp.model_copy(update=updates)
     return resp
 
 
@@ -219,10 +225,15 @@ async def mark_load_ready(
     )
     resp = LoadResponse.model_validate(load)
     planned = await trips_service.get_open_planned_trip_for_load(db, tenant_id, load_id)
+    updates: dict = {}
     if planned is not None:
-        resp = resp.model_copy(
-            update={"open_planned_trip_id": planned[0], "open_planned_trip_number": planned[1]}
-        )
+        updates["open_planned_trip_id"] = planned[0]
+        updates["open_planned_trip_number"] = planned[1]
+    fmp_id = await fmp_service.get_open_future_movement_plan_id(db, tenant_id, load_id)
+    if fmp_id is not None:
+        updates["open_future_movement_plan_id"] = fmp_id
+    if updates:
+        resp = resp.model_copy(update=updates)
     return resp
 
 

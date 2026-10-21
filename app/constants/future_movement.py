@@ -1,0 +1,18 @@
+"""Future Movement Plan (§9A) — pre-Trip operational planning (not a Trip container)."""
+
+FMP_STATUS_DRAFT = "draft"
+FMP_STATUS_UNASSIGNED = "unassigned"
+FMP_STATUS_CONVERTING = "converting"
+FMP_STATUS_CONVERTED = "converted"
+FMP_STATUS_CANCELLED = "cancelled"
+
+FMP_OPEN_STATUSES = frozenset({FMP_STATUS_DRAFT, FMP_STATUS_UNASSIGNED})
+
+FMP_ORIGIN_FOLLOW_UP = "follow_up_inbound"
+FMP_ORIGIN_TERMINAL_POOL = "terminal_pool"
+FMP_ORIGIN_MANUAL = "manual"
+
+LOAD_FUTURE_MOVEMENT_RESERVED = "LOAD_FUTURE_MOVEMENT_RESERVED"
+LOAD_HAS_OPEN_FUTURE_MOVEMENT_PLAN = "LOAD_HAS_OPEN_FUTURE_MOVEMENT_PLAN"
+
+DISPATCH_INSTRUCTION_YARD_DROP = "yard_drop_instructed"

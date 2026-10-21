@@ -42,6 +42,8 @@ from app.models.extraction_field_learning import ExtractionFieldLearningEvent
 from app.models.platform_extraction_learning import PlatformExtractionSanitizedPattern
 from app.models.dispatch_trip import TenantDispatchNumbering, DispatchTrip
 from app.models.trip import Trip, TripLoad
+from app.models.future_movement_plan import FutureMovementPlan, FutureMovementPlanLoad
+from app.models.load_dispatch_instruction import LoadDispatchInstruction
 
 # Platform models (B3 onboarding)
 from app.models.platform import (

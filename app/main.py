@@ -36,6 +36,7 @@ from app.routers.loads import router as loads_router
 from app.routers.load_workspace_drafts import router as load_workspace_drafts_router
 from app.routers.terminals import router as terminals_router
 from app.routers.trips import router as trips_router
+from app.routers.future_movement_plans import router as future_movement_plans_router
 from app.routers.load_lab import router as load_lab_router
 from app.routers.audit_events import router as audit_events_router
 from app.routers.dispatch import router as dispatch_router
@@ -155,6 +156,7 @@ app.include_router(loads_router, prefix="/api/v1")
 app.include_router(load_workspace_drafts_router, prefix="/api/v1")
 app.include_router(terminals_router, prefix="/api/v1")
 app.include_router(trips_router, prefix="/api/v1")
+app.include_router(future_movement_plans_router, prefix="/api/v1")
 app.include_router(load_lab_router, prefix="/api/v1")
 app.include_router(audit_events_router, prefix="/api/v1")
 app.include_router(dispatch_router, prefix="/api/v1")

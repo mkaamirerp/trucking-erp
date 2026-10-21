@@ -285,6 +285,7 @@ class LoadResponse(LoadBase):
     #: Open PLANNED TripLoad mirror (Issue I13); not the ACTIVE-only active_trip_id pointer.
     open_planned_trip_id: Optional[int] = None
     open_planned_trip_number: Optional[str] = None
+    open_future_movement_plan_id: Optional[int] = None
     broker_match_method: Optional[str] = Field(default=None, max_length=32)
     broker_match_confidence_tier: Optional[str] = Field(default=None, max_length=8)
     broker_match_explanation: Optional[str] = None

@@ -21,6 +21,8 @@ export const OPS = {
   /** Trip Container = Dispatch Control Center — accordion operational home (first slice). */
   TRIP_CONTAINER: "/trips/container",
   TRIP_DETAIL: (id: number | string) => `/trips/${id}`,
+  FUTURE_MOVEMENT_PLANS: "/dispatch/future-plans",
+  FUTURE_MOVEMENT_PLAN_DETAIL: (id: number | string) => `/dispatch/future-plans/${id}`,
   FLEET: "/fleet",
   /** Freight brokers (MC / intake identity), not customs brokers. */
   BROKERS: "/brokers",

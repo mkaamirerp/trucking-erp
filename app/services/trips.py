@@ -10,6 +10,9 @@ from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.future_movement import (
+    LOAD_FUTURE_MOVEMENT_RESERVED,
+)
 from app.constants.trip_dispatch import (
     JOB_TYPE_FREIGHT_LOAD,
     TRIP_CONTAINER_STATUS_ASSIGNED,
@@ -28,6 +31,7 @@ from app.constants.trip_dispatch import (
     TRIP_ASSIGNMENT_SCHEDULE_OVERLAP,
 )
 from app.models.driver import Driver
+from app.models.future_movement_plan import FutureMovementPlanLoad
 from app.models.load import Load, LoadStop
 from app.models.trip import Trip, TripLoad
 from app.models.trailer import Trailer
@@ -68,6 +72,57 @@ def _trip_load_is_open_planned_clause():
         TripLoad.completed_at.is_(None),
         TripLoad.removed_at.is_(None),
     )
+
+
+def _fmpl_is_open_clause():
+    return and_(
+        FutureMovementPlanLoad.released_at.is_(None),
+        FutureMovementPlanLoad.converted_at.is_(None),
+    )
+
+
+async def assert_load_reservation_clear(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    converting_plan_id: int | None = None,
+) -> None:
+    """One open FMP reservation OR one open planned TripLoad — not both; not a foreign FMP."""
+    open_fmpl = await db.scalar(
+        select(FutureMovementPlanLoad).where(
+            FutureMovementPlanLoad.tenant_id == tenant_id,
+            FutureMovementPlanLoad.load_id == load_id,
+            _fmpl_is_open_clause(),
+        )
+    )
+    if open_fmpl is not None:
+        if converting_plan_id is not None and int(open_fmpl.plan_id) == int(converting_plan_id):
+            pass
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Load has an open future movement plan reservation",
+                    "code": LOAD_FUTURE_MOVEMENT_RESERVED,
+                },
+            )
+
+    other_planned = await db.scalar(
+        select(TripLoad).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.load_id == load_id,
+            _trip_load_is_open_planned_clause(),
+        )
+    )
+    if other_planned is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Load already has an open planned membership on another trip",
+                "code": "LOAD_PLANNED_ON_OTHER_TRIP",
+            },
+        )
 
 
 def _num(v: Any) -> float | None:
@@ -472,6 +527,7 @@ async def _insert_trip_load_row(
     load = await _lock_load_for_membership(db, tenant_id, load_id)
 
     if status_within == TRIP_LOAD_STATUS_WITHIN_PLANNED:
+        await assert_load_reservation_clear(db, tenant_id, load_id)
         if (load.status or "").strip().lower() != "ready":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -607,7 +663,8 @@ async def create_planned_trip(
     db.add(trip)
     await db.flush()
 
-    for lid in load_ids or []:
+    for lid in sorted(load_ids or [], key=int):
+        await assert_load_reservation_clear(db, tenant_id, int(lid))
         await _insert_trip_load_row(db, tenant_id, int(trip.id), int(lid), sequence_hint=None)
 
     detail = await get_trip_detail(db, tenant_id, int(trip.id))
@@ -1208,6 +1265,15 @@ async def update_trip_schedule(
     trip.expected_completion_at = body.expected_completion_at
     trip.updated_at = now
     await db.flush()
+
+    await _validate_decision10_schedule_overlap(
+        db,
+        tenant_id,
+        trip=trip,
+        driver_id=trip.driver_id,
+        truck_id=trip.truck_id,
+        trailer_id=trip.trailer_id,
+    )
 
     detail = await get_trip_detail(db, tenant_id, trip_id)
     assert detail is not None

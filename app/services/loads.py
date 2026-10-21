@@ -21,6 +21,7 @@ from app.constants.load_integrity import (
     WRITABLE_LOAD_STOP_TYPES,
 )
 from app.constants.custody import CUSTODY_OWNER_DELIVERED, CUSTODY_OWNER_UNKNOWN
+from app.constants.future_movement import LOAD_HAS_OPEN_FUTURE_MOVEMENT_PLAN
 from app.constants.trip_dispatch import (
     LEGACY_LOAD_ASSIGNMENT_DEPRECATED,
     LEGACY_LOAD_OPERATIONAL_STATUSES,
@@ -41,6 +42,7 @@ from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
 from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
+from app.services.future_movement_plans import load_has_open_future_movement_plan
 from app.services.load_operational_references import sanitize_load_operational_references
 from app.services.trips import (
     _lock_load_for_membership,
@@ -955,6 +957,12 @@ async def cancel_load(
             LOAD_CANCEL_ACTIVE_TRIP_EXECUTION,
             "Load has an active TripLoad on an assigned or in-progress Trip. "
             "Close operational custody/membership on the Trip before commercial cancel.",
+        )
+
+    if await load_has_open_future_movement_plan(db, tenant_id, load_id):
+        raise _legacy_write_conflict(
+            LOAD_HAS_OPEN_FUTURE_MOVEMENT_PLAN,
+            "Load has an open future movement plan. Cancel or convert the plan before commercial cancel.",
         )
 
     custody_owner = (load.custody_owner or CUSTODY_OWNER_UNKNOWN).strip().lower()

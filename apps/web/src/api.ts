@@ -1077,6 +1077,146 @@ export async function createPlannedTrip(body: CreatePlannedTripBody): Promise<Tr
   return handle<TripDetail>(res);
 }
 
+export type FutureMovementPlanLine = {
+  id?: number;
+  load_id: number;
+  sequence_hint?: number | null;
+  inbound_trip_id?: number | null;
+  load_number?: string | null;
+};
+
+export type FutureMovementPlan = {
+  id: number;
+  tenant_id: number;
+  status: string;
+  origin_kind: string;
+  pickup_terminal_id?: number | null;
+  planned_start_at?: string | null;
+  expected_completion_at?: string | null;
+  driver_id?: number | null;
+  truck_id?: number | null;
+  trailer_id?: number | null;
+  converted_trip_id?: number | null;
+  converted_trip_number?: string | null;
+  notes?: string | null;
+  concurrency_version: number;
+  created_at: string;
+  updated_at: string;
+  lines: FutureMovementPlanLine[];
+};
+
+export type FutureMovementPlanCreateBody = {
+  origin_kind?: string;
+  pickup_terminal_id?: number | null;
+  planned_start_at?: string | null;
+  expected_completion_at?: string | null;
+  driver_id?: number | null;
+  truck_id?: number | null;
+  trailer_id?: number | null;
+  notes?: string | null;
+  lines: { load_id: number; sequence_hint?: number | null; inbound_trip_id?: number | null }[];
+};
+
+export type FutureMovementPlanUpdateBody = {
+  pickup_terminal_id?: number | null;
+  planned_start_at?: string | null;
+  expected_completion_at?: string | null;
+  driver_id?: number | null;
+  truck_id?: number | null;
+  trailer_id?: number | null;
+  notes?: string | null;
+  lines?: { load_id: number; sequence_hint?: number | null; inbound_trip_id?: number | null }[];
+  concurrency_version: number;
+};
+
+export type FutureMovementConvertBody = {
+  driver_id: number;
+  truck_id?: number | null;
+  trailer_id?: number | null;
+  conversion_idempotency_key?: string | null;
+  concurrency_version: number;
+};
+
+export async function listFutureMovementPlans(params?: {
+  status?: string;
+  page?: number;
+  size?: number;
+}): Promise<{ items: FutureMovementPlan[]; page: number; size: number; total: number }> {
+  const url = new URL(`${API_BASE}/future-movement-plans`, window.location.origin);
+  if (params?.status) url.searchParams.set("status", params.status);
+  if (params?.page) url.searchParams.set("page", String(params.page));
+  if (params?.size) url.searchParams.set("size", String(params.size));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  return handle(res);
+}
+
+export async function getFutureMovementPlan(planId: number): Promise<FutureMovementPlan> {
+  const res = await fetchWithTenant(`${API_BASE}/future-movement-plans/${planId}`);
+  return handle<FutureMovementPlan>(res);
+}
+
+export async function createFutureMovementPlan(
+  body: FutureMovementPlanCreateBody,
+): Promise<FutureMovementPlan> {
+  const res = await fetchWithTenant(`${API_BASE}/future-movement-plans`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<FutureMovementPlan>(res);
+}
+
+export async function updateFutureMovementPlan(
+  planId: number,
+  body: FutureMovementPlanUpdateBody,
+): Promise<FutureMovementPlan> {
+  const res = await fetchWithTenant(`${API_BASE}/future-movement-plans/${planId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<FutureMovementPlan>(res);
+}
+
+export async function cancelFutureMovementPlan(
+  planId: number,
+  concurrency_version: number,
+): Promise<FutureMovementPlan> {
+  const res = await fetchWithTenant(`${API_BASE}/future-movement-plans/${planId}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ concurrency_version }),
+  });
+  return handle<FutureMovementPlan>(res);
+}
+
+export async function convertFutureMovementPlan(
+  planId: number,
+  body: FutureMovementConvertBody,
+): Promise<TripDetail> {
+  const res = await fetchWithTenant(`${API_BASE}/future-movement-plans/${planId}/convert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<TripDetail>(res);
+}
+
+export async function recordYardDropInstruction(
+  loadId: number,
+  body: { inbound_trip_id: number; terminal_id: number; notes?: string | null },
+): Promise<unknown> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/future-movement-plans/loads/${loadId}/yard-drop-instruction`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return handle(res);
+}
+
 /** POST /trips/{id}/loads — attach an existing load to the trip container. */
 export type AddTripLoadBody = {
   load_id: number;
@@ -4105,6 +4245,8 @@ export type Load = {
   /** Open PLANNED TripLoad (Issue I13); not the ACTIVE-only active_trip_id mirror. */
   open_planned_trip_id?: number | null;
   open_planned_trip_number?: string | null;
+  /** Open §9A Future Movement Plan (pre-Trip); not a trip number. */
+  open_future_movement_plan_id?: number | null;
   broker_match_method?: string | null;
   broker_match_confidence_tier?: string | null;
   broker_match_explanation?: string | null;

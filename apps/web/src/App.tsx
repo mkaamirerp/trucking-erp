@@ -24,6 +24,7 @@ import LoadWorkspacePage from "./pages/LoadWorkspacePage";
 import TripWorkspacePage from "./pages/TripWorkspacePage";
 import TripContainerPage from "./pages/trip-container/TripContainerPage";
 import TripsListPage from "./pages/TripsListPage";
+import FutureMovementPlansPage from "./pages/FutureMovementPlansPage";
 import LoadLabPage from "./pages/LoadLabPage";
 import DriverOnboardingAdminListPage from "./pages/DriverOnboardingAdminListPage";
 import DriverOnboardingAdminDetailPage from "./pages/DriverOnboardingAdminDetailPage";
@@ -267,6 +268,22 @@ function App() {
         element={
           <Layout>
             <TripWorkspacePage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/dispatch/future-plans"
+        element={
+          <Layout>
+            <FutureMovementPlansPage />
+          </Layout>
+        }
+      />
+      <Route
+        path="/dispatch/future-plans/:planId"
+        element={
+          <Layout>
+            <FutureMovementPlansPage />
           </Layout>
         }
       />

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import Button from "@/components/Button";
+import FollowUpDispatchDialog from "@/components/FollowUpDispatchDialog";
 import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
@@ -376,6 +377,7 @@ export default function LoadWorkspacePage() {
   const [cancelLoadBusy, setCancelLoadBusy] = useState(false);
   const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
   const [createPlannedTripError, setCreatePlannedTripError] = useState<string | null>(null);
+  const [followUpDispatchOpen, setFollowUpDispatchOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toolbarMessage, setToolbarMessage] = useState<WorkspaceToolbarMessage | null>(null);
   const [customsMessage, setCustomsMessage] = useState<string | null>(null);
@@ -389,7 +391,13 @@ export default function LoadWorkspacePage() {
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
   const onCreatePlannedTrip = useCallback(async () => {
-    if (!load || load.active_trip_id != null || load.open_planned_trip_id != null) return;
+    if (
+      !load ||
+      load.active_trip_id != null ||
+      load.open_planned_trip_id != null ||
+      load.open_future_movement_plan_id != null
+    )
+      return;
     const lid = load.id;
     setCreatePlannedTripBusy(true);
     setCreatePlannedTripError(null);
@@ -1877,13 +1885,40 @@ export default function LoadWorkspacePage() {
               )}
             </span>
             <span className="text-[var(--trk-border-strong)]">·</span>
-            {load.active_trip_id != null ? (
+            {load.open_future_movement_plan_id != null ? (
               <Link
-                to={OPS.TRIP_DETAIL(load.active_trip_id)}
+                to={OPS.FUTURE_MOVEMENT_PLAN_DETAIL(load.open_future_movement_plan_id)}
                 className="font-semibold text-[var(--trk-heading)] hover:underline"
               >
-                View / Assign on Trip →
+                Open future movement plan →
               </Link>
+            ) : null}
+            {load.open_future_movement_plan_id != null ? (
+              <span className="text-[var(--trk-border-strong)]">·</span>
+            ) : null}
+            {load.active_trip_id != null ? (
+              <>
+                <Link
+                  to={OPS.TRIP_DETAIL(load.active_trip_id)}
+                  className="font-semibold text-[var(--trk-heading)] hover:underline"
+                >
+                  View / Assign on Trip →
+                </Link>
+                {load.status === "ready" &&
+                load.open_planned_trip_id == null &&
+                load.open_future_movement_plan_id == null ? (
+                  <>
+                    <span className="text-[var(--trk-border-strong)]">·</span>
+                    <button
+                      type="button"
+                      className="font-semibold text-[var(--trk-heading)] hover:underline"
+                      onClick={() => setFollowUpDispatchOpen(true)}
+                    >
+                      Follow-up dispatch →
+                    </button>
+                  </>
+                ) : null}
+              </>
             ) : load.open_planned_trip_id != null ? (
               <Link
                 to={OPS.TRIP_DETAIL(load.open_planned_trip_id)}
@@ -1922,6 +1957,18 @@ export default function LoadWorkspacePage() {
         ) : null}
         {workspaceMode === "detail" && load && createPlannedTripError ? (
           <p className="border-t border-[var(--trk-border)] px-4 py-1 text-[11px] text-red-700">{createPlannedTripError}</p>
+        ) : null}
+        {workspaceMode === "detail" && load && followUpDispatchOpen ? (
+          <FollowUpDispatchDialog
+            load={load}
+            drivers={drivers}
+            trucks={trucks}
+            trailers={trailers}
+            onClose={() => setFollowUpDispatchOpen(false)}
+            onSaved={() => {
+              void getLoad(load.id).then((fresh) => setLoad(fresh));
+            }}
+          />
         ) : null}
         {draftConflict && isDraftWorkspace ? (
           <div className="border-t border-amber-900/50 bg-amber-950/25 px-4 py-2.5">
