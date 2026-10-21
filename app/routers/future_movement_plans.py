@@ -53,6 +53,18 @@ async def list_plans(
     )
 
 
+@router.get("/terminal-pool-loads")
+async def terminal_pool_loads(
+    terminal_id: int = Query(..., ge=1),
+    tenant_id: int = Depends(require_tenant),
+    _user: CurrentUser = Depends(require_pilot_capability("trips.records", "view")),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    return {
+        "items": await fmp_service.list_terminal_pool_ready_loads(db, tenant_id, terminal_id)
+    }
+
+
 @router.get("/{plan_id}", response_model=FutureMovementPlanOut)
 async def get_plan(
     plan_id: int,

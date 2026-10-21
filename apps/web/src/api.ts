@@ -1202,6 +1202,16 @@ export async function convertFutureMovementPlan(
   return handle<TripDetail>(res);
 }
 
+export async function fetchTerminalPoolLoadsForFmp(
+  terminalId: number,
+): Promise<{ load_id: number; load_number?: string | null }[]> {
+  const url = new URL(`${API_BASE}/future-movement-plans/terminal-pool-loads`, window.location.origin);
+  url.searchParams.set("terminal_id", String(terminalId));
+  const res = await fetchWithTenant(url.toString().replace(window.location.origin, ""));
+  const body = await handle<{ items: { load_id: number; load_number?: string | null }[] }>(res);
+  return body.items || [];
+}
+
 export async function recordYardDropInstruction(
   loadId: number,
   body: { inbound_trip_id: number; terminal_id: number; notes?: string | null },

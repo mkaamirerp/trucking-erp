@@ -17,7 +17,7 @@ from app.constants.future_movement import (
     FMP_STATUS_CONVERTED,
     FMP_STATUS_CONVERTING,
     FMP_STATUS_UNASSIGNED,
-    LOAD_HAS_OPEN_FUTURE_MOVEMENT_PLAN,
+    LOAD_NOT_ON_INBOUND_TRIP,
 )
 from app.constants.trip_dispatch import (
     JOB_TYPE_FREIGHT_LOAD,
@@ -28,7 +28,7 @@ from app.models.future_movement_plan import FutureMovementPlan, FutureMovementPl
 from app.models.load import Load
 from app.models.load_dispatch_instruction import LoadDispatchInstruction
 from app.models.terminal import Terminal
-from app.models.trip import Trip
+from app.models.trip import Trip, TripLoad
 from app.schemas.future_movement_plan import (
     FutureMovementConvertBody,
     FutureMovementPlanCreate,
@@ -61,6 +61,7 @@ async def _lock_plan(db: AsyncSession, tenant_id: int, plan_id: int) -> FutureMo
             FutureMovementPlan.tenant_id == tenant_id,
             FutureMovementPlan.id == plan_id,
         )
+        .options(selectinload(FutureMovementPlan.lines))
         .with_for_update()
     )
     if plan is None:
@@ -69,6 +70,39 @@ async def _lock_plan(db: AsyncSession, tenant_id: int, plan_id: int) -> FutureMo
             detail={"detail": "Future movement plan not found", "code": "FMP_NOT_FOUND"},
         )
     return plan
+
+
+async def _validate_inbound_trip_membership(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    inbound_trip_id: int,
+) -> None:
+    trip = await db.scalar(
+        select(Trip.id).where(Trip.tenant_id == tenant_id, Trip.id == inbound_trip_id)
+    )
+    if trip is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"detail": "Inbound trip not found", "code": "TRIP_NOT_FOUND"},
+        )
+    tl = await db.scalar(
+        select(TripLoad.id).where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.trip_id == inbound_trip_id,
+            TripLoad.load_id == load_id,
+            TripLoad.removed_at.is_(None),
+            TripLoad.completed_at.is_(None),
+        )
+    )
+    if tl is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": "Load is not an open member of the specified inbound trip",
+                "code": LOAD_NOT_ON_INBOUND_TRIP,
+            },
+        )
 
 
 async def _validate_terminal(db: AsyncSession, tenant_id: int, terminal_id: int | None) -> None:
@@ -115,6 +149,10 @@ async def _assert_loads_tenant_ready(
                     "detail": "Load must be ready for future movement planning",
                     "code": "LOAD_NOT_READY_FOR_PLAN",
                 },
+            )
+        if ln.inbound_trip_id is not None:
+            await _validate_inbound_trip_membership(
+                db, tenant_id, lid, int(ln.inbound_trip_id)
             )
 
 
@@ -192,6 +230,37 @@ async def _plan_to_out(db: AsyncSession, plan: FutureMovementPlan) -> FutureMove
         updated_at=plan.updated_at,
         lines=line_out,
     )
+
+
+async def list_terminal_pool_ready_loads(
+    db: AsyncSession,
+    tenant_id: int,
+    terminal_id: int,
+) -> list[dict[str, Any]]:
+    """Ready loads with terminal custody at the given yard (bulk manifest planning)."""
+    await _validate_terminal(db, tenant_id, terminal_id)
+    from app.constants.custody import CUSTODY_OWNER_TERMINAL
+
+    rows = (
+        await db.execute(
+            select(Load.id, Load.load_number)
+            .where(
+                Load.tenant_id == tenant_id,
+                Load.status == "ready",
+                Load.custody_owner == CUSTODY_OWNER_TERMINAL,
+                Load.custody_terminal_id == terminal_id,
+            )
+            .order_by(Load.id.asc())
+            .limit(200)
+        )
+    ).all()
+    out: list[dict[str, Any]] = []
+    for load_id, load_number in rows:
+        lid = int(load_id)
+        if await get_open_future_movement_plan_id(db, tenant_id, lid) is not None:
+            continue
+        out.append({"load_id": lid, "load_number": load_number})
+    return out
 
 
 async def get_open_future_movement_plan_id(
@@ -494,13 +563,13 @@ async def convert_future_movement_plan(
     pid = int(plan.id)
     for ln in sorted(open_lines, key=lambda x: int(x.load_id)):
         lid = int(ln.load_id)
-        await assert_load_reservation_clear(db, tenant_id, lid, converting_plan_id=pid)
         await _insert_trip_load_row(
             db,
             tenant_id,
             int(trip.id),
             lid,
             sequence_hint=ln.sequence_hint,
+            converting_fmp_plan_id=pid,
         )
 
     now = _now()
@@ -543,6 +612,7 @@ async def record_yard_drop_instruction(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"detail": "Inbound trip not found", "code": "TRIP_NOT_FOUND"},
         )
+    await _validate_inbound_trip_membership(db, tenant_id, load_id, int(body.inbound_trip_id))
     row = LoadDispatchInstruction(
         tenant_id=tenant_id,
         load_id=load_id,

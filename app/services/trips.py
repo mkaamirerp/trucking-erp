@@ -514,7 +514,9 @@ async def _insert_trip_load_row(
     *,
     sequence_hint: int | None,
     status_within: str = TRIP_LOAD_STATUS_WITHIN_PLANNED,
+    converting_fmp_plan_id: int | None = None,
 ) -> None:
+    """Insert TripLoad. ``converting_fmp_plan_id`` may only be set by FMP convert (self-reservation)."""
     # Lock order: Trip then Load (serialize vs Trip /complete).
     trip = await _lock_trip_for_mutation(db, tenant_id, trip_id)
     if trip.status == TRIP_CONTAINER_STATUS_CANCELLED:
@@ -527,7 +529,12 @@ async def _insert_trip_load_row(
     load = await _lock_load_for_membership(db, tenant_id, load_id)
 
     if status_within == TRIP_LOAD_STATUS_WITHIN_PLANNED:
-        await assert_load_reservation_clear(db, tenant_id, load_id)
+        await assert_load_reservation_clear(
+            db,
+            tenant_id,
+            load_id,
+            converting_plan_id=converting_fmp_plan_id,
+        )
         if (load.status or "").strip().lower() != "ready":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

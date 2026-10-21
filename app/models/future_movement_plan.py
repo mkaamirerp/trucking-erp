@@ -24,6 +24,7 @@ from app.models.base import Base
 class FutureMovementPlan(Base):
     __tablename__ = "future_movement_plans"
     __table_args__ = (
+        Index("uq_fmp_tenant_id", "tenant_id", "id", unique=True),
         Index("ix_fmp_tenant_status", "tenant_id", "status"),
         Index(
             "uq_fmp_tenant_conversion_idem",
@@ -66,12 +67,23 @@ class FutureMovementPlan(Base):
     )
     created_by_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
-    lines = relationship("FutureMovementPlanLoad", back_populates="plan", cascade="all, delete-orphan")
+    lines = relationship(
+        "FutureMovementPlanLoad",
+        back_populates="plan",
+        foreign_keys="FutureMovementPlanLoad.plan_id",
+        cascade="all, delete-orphan",
+    )
 
 
 class FutureMovementPlanLoad(Base):
     __tablename__ = "future_movement_plan_loads"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "plan_id"],
+            ["future_movement_plans.tenant_id", "future_movement_plans.id"],
+            name="fk_fmpl_plan_tenant",
+            ondelete="CASCADE",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "load_id"],
             ["loads.tenant_id", "loads.id"],
@@ -105,4 +117,8 @@ class FutureMovementPlanLoad(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    plan = relationship("FutureMovementPlan", back_populates="lines")
+    plan = relationship(
+        "FutureMovementPlan",
+        back_populates="lines",
+        foreign_keys=[plan_id],
+    )
