@@ -473,6 +473,48 @@ Primary detail: Appendix H; §12 / §13A / §13C.
 
 ---
 
+## 9A. Follow-up Movement from an in-progress Load — OWNER-APPROVED 2026-10-21
+
+**Scope:** Dispatch scheduling of an onward leg while the same commercial Load is still moving on an inbound Trip. This is an operational planning action, **not a second commercial/broker Load**. This owner decision supplements §9, §12 and §13C; code/production behavior remains unverified.
+
+### Canonical example: Boston → Toronto yard → Markham
+
+- Commercial **Load #101** has an original broker Rate Confirmation (RC) for **Boston → Markham**.
+- Driver A carries #101 (and another independent commercial Load #102) on inbound **Trip #5001** from Boston. The Trip is **in_progress**; both Loads belong to Driver A's current movement.
+- Dispatch instructs Driver A to **drop at Toronto yard** instead of driving to the RC's final Markham receiver. Record **"Drop yard — instructed by Dispatch"** as an **operational instruction / stop disposition**, **not** as a new canonical `Load.status` value, commercial cancellation, final delivery, or rewritten RC destination.
+- **Before Driver A reaches the yard**, Dispatch opens Load #101 and chooses **Follow-up Dispatch / Create Future Movement**.
+- The Load-style follow-up window is prefilled with **pickup: Toronto yard** and **destination: Markham from the existing RC**. The dispatcher can adjust the proposed pickup date and either **Save Unassigned** or **Assign Driver & Save** (with appropriate driver, truck and trailer). Do not require a three-day minimum delay; schedules may need next-morning departure.
+- Dispatch can separately plan Load #102 for another destination/driver/trailer. These are **two distinct existing commercial Loads** with distinct onward operational movements; neither Load nor their broker contracts are merged or duplicated.
+- A saved unassigned follow-up is an **operational planning record linked to the existing Load**; it is **not** a new commercial Load and does **not** on its own create an active TripLoad, start movement, change custodian, or interrupt Trip #5001.
+- On assigning a driver, the follow-up becomes a future assigned onward Trip/TripLoad membership of **the same** commercial Load. While inbound Trip #5001 is still active, the onward membership remains **planned**, never simultaneously active. Trip number allocation and the exact conversion of an unassigned plan into a numbered Trip must be reconciled with the previously owner-approved *Trip numbered on driver assignment* rule before implementation (see lifecycle conflict note below).
+- A different onward trailer creates a **planned yard transfer instruction**. The actual trailer-to-trailer movement must later be confirmed and audited; selecting a trailer on the planning window does **not** assert physical transfer or custody.
+- Physical yard transfer may be performed by a dedicated warehouse/yard team **or by the owner of a small fleet** with appropriate authorization. The operational contract is the same for both sizes of company; no mandatory 24-hour staffed warehouse or dispatch login is presumed.
+- Driver A's original Trip retains its current `in_progress` state, active membership and responsibility throughout advance scheduling. The inbound drop/handoff, actual yard custody and outbound activation are **separate subsequent events** under §12/§13C. Neither saving a follow-up nor merely starting one outbound Trip automatically completes inbound Trip #5001.
+- Driver A and the outbound drivers do **not** need to create, split, or administratively dispatch commercial Loads as part of driving; Dispatch owns advance planning, and actual custody/transfer evidence must be recorded by an authorized process.
+- The broker RC's original destination, rate, source documents and commercial Load history remain unchanged. Display both **commercial destination** and **current instructed operational destination** without overwriting one with the other.
+
+### UI contract (product concept; not a claim of existing implementation)
+
+`Trip Details → Load #101 → Follow-up Dispatch → next movement window → pickup/date → Save Unassigned OR Assign Driver & Save`. The action is reachable from a Load **while its current Trip is in_progress**, not gated behind Trip completion. Show existing inbound Trip and existing commercial Load references. Driver/equipment availability and scheduling conflicts follow §10. Scheduling is not a freight handoff.
+
+### Preconditions / safeguards
+
+1. Tenant-scoped, authorized Dispatch action; use the **existing Load ID**, original commercial data and the structured yard identity.
+2. Enforce at most one open **planned** and one open **active** TripLoad membership per Load under §4; prevent duplicate future reservations/concurrent dispatcher races.
+3. Unassigned plans must be distinguishable from operational Trips so the planner can save them without pretending a driver, equipment, or Trip execution exists.
+4. Onward activation requires an actual eligibility/handoff decision; never silently set an active membership, trailer or custodian from a planned record.
+5. Preserve append-only change/assignment/transfer history and the prior inbound Trip's execution evidence.
+6. A trailer shared by two inbound Loads must not be assumed available to two outbound drivers at once; record/verify physical deconsolidation before incompatible departures.
+
+### Implementation boundary / outstanding reconciliations (STOP before code changes)
+
+- **Trip numbering conflict:** Existing §7 and Appendix A mint Trip numbers at *planned Trip creation*. The owner-approved planning-queue rule from the decision review requires **no numbered Trip until driver assignment**. The follow-up planning record must not be confused with a `Trip.status=planned` record under the old allocator. Reconcile §3, §7, Appendices A/B, APIs, consumers and tests through an explicit implementation plan before changing schema/code.
+- **Workspace boundary:** Existing §8 reserves operational assignment to Trip Workspace and forbids Load Workspace from owning new assignment authority. The new **Load-facing Follow-up Dispatch action is a navigation/entry point into the canonical Trip/Dispatch operational service**, not a second Load-level assignment system. Preserve that single ownership.
+- **Unattended yard drop / inbound completion trigger:** Not decided here. Small fleets can have no staff at the 11 PM drop and the owner can later perform the transfer. Do **not** infer that the next driver's 5 AM start alone completes Driver A's Trip or retroactively asserts yard custody. Existing completion guards and custody rules continue until a separate owner decision.
+- **Implementation status:** Architectural decision only. No assertion that UI, schema, endpoint, migration, audit or background behavior already implements this flow. STOP/report dependencies, migration/backfill, tenant isolation and regression impact before implementation.
+
+---
+
 ## 10. Driver / truck / trailer
 
 
