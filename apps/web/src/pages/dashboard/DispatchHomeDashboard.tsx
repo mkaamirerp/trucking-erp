@@ -70,12 +70,29 @@ export default function DispatchHomeDashboard() {
     drivers,
     inbound,
     assignQueue,
-    podGaps,
-    podNote,
+    podPanel,
     refetch,
   } = useDispatchHomeDashboard();
 
   const availableCount = drivers.filter((d) => d.status === "available").length;
+  const unverifiedCount = drivers.filter((d) => d.status === "unverified").length;
+
+  function driverBadge(status: (typeof drivers)[0]["status"]): { label: string; className: string } {
+    switch (status) {
+      case "available":
+        return { label: "Avail", className: "bg-emerald-50 text-emerald-700" };
+      case "executing":
+        return { label: "In prog", className: "bg-violet-50 text-violet-800" };
+      case "scheduled":
+        return { label: "Scheduled", className: "bg-sky-50 text-sky-700" };
+      case "unverified":
+        return { label: "Unverified", className: "bg-slate-100 text-slate-600" };
+      case "license_blocked":
+        return { label: "Lic block", className: "bg-amber-50 text-amber-800" };
+      default:
+        return { label: status, className: "bg-slate-100 text-slate-600" };
+    }
+  }
 
   return (
     <div
@@ -128,13 +145,9 @@ export default function DispatchHomeDashboard() {
                         </div>
                       </div>
                       <span
-                        className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase ${
-                          row.status === "available"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-sky-50 text-sky-700"
-                        }`}
+                        className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-semibold uppercase ${driverBadge(row.status).className}`}
                       >
-                        {row.status === "available" ? "Avail" : "On trip"}
+                        {driverBadge(row.status).label}
                       </span>
                     </div>
                     {row.licenseWarning ? (
@@ -145,7 +158,8 @@ export default function DispatchHomeDashboard() {
               </ul>
             )}
             <div className="border-t border-slate-100 px-2.5 py-1 text-[10px] text-slate-500">
-              {availableCount} available · from trips + driver roster
+              {availableCount} verified available
+              {unverifiedCount ? ` · ${unverifiedCount} unverified (trip list may be incomplete)` : ""}
             </div>
           </Panel>
 
@@ -189,7 +203,13 @@ export default function DispatchHomeDashboard() {
                       to={row.href}
                       primary={row.label}
                       secondary={`${row.sublabel} · ${row.loadCount} load(s)`}
-                      badge={row.kind === "fmp" ? "FMP" : "Trip"}
+                      badge={
+                        row.kind === "fmp"
+                          ? "FMP"
+                          : row.queueKind === "needs_driver"
+                            ? "Driver"
+                            : "Equip"
+                      }
                     />
                   </li>
                 ))}
@@ -208,34 +228,16 @@ export default function DispatchHomeDashboard() {
             </div>
           </Panel>
 
-          <Panel title="Delivered · POD not received" count={podGaps.length} className="flex-1 min-h-0">
-            {loading && !podGaps.length ? (
-              <p className="px-2.5 py-2 text-[11px] text-slate-500">Checking recent deliveries…</p>
-            ) : podGaps.length === 0 ? (
-              <p className="px-2.5 py-2 text-[11px] text-slate-500">
-                {podNote ?? "No missing POD in the sampled delivered loads."}
+          <Panel title="Delivered · POD not received" className="flex-1 min-h-0">
+            <div className="px-2.5 py-3 text-[11px] leading-relaxed text-slate-600">
+              <p className="font-medium text-slate-800">
+                {podPanel.connected ? "Connected" : "Not connected"}
               </p>
-            ) : (
-              <ul>
-                {podGaps.map((row) => (
-                  <li key={row.loadId}>
-                    <RowButton
-                      to={row.href}
-                      primary={row.loadNumber}
-                      secondary={
-                        row.podChecked
-                          ? "Delivered — open load for POD upload"
-                          : "Could not verify POD — open load"
-                      }
-                      badge="POD"
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-            {podNote ? (
-              <div className="border-t border-slate-100 px-2.5 py-1 text-[10px] text-slate-500">{podNote}</div>
-            ) : null}
+              <p className="mt-2 text-slate-500">{podPanel.message}</p>
+              <p className="mt-2 text-slate-500">
+                Open a load workspace to upload or review POD evidence for a specific delivery.
+              </p>
+            </div>
           </Panel>
         </main>
 
