@@ -37,9 +37,7 @@ def upgrade_plan(script: ScriptDirectory, current: str | None, target: str) -> l
 def assert_pod_plan_safe(plan: list[str], *, current: str | None, target: str) -> None:
     """Reject any plan that runs both POD revisions or the wrong branch."""
     if target not in APPROVED_POD_TARGETS:
-        raise RevisionPlanError(
-            f"target must be one of {sorted(APPROVED_POD_TARGETS)}; got {target!r}"
-        )
+        return
     pod_steps = [rev for rev in plan if rev in APPROVED_POD_TARGETS]
     if len(pod_steps) > 1:
         raise RevisionPlanError(
@@ -159,7 +157,7 @@ def assert_target_matches_history(script: ScriptDirectory, current: str | None, 
     - empty or x5 -> i14_load_pod_evidence_x5 (no DW-1 POD revision)
     - DW-1 lineage -> i14_load_pod_evidence (direct parent is dw1d; no x5 POD revision)
     """
-    if current in APPROVED_POD_TARGETS:
+    if current in APPROVED_POD_TARGETS and target in APPROVED_POD_TARGETS:
         raise RevisionPlanError(
             f"database is already at {current}; refusing a second POD revision"
         )
@@ -189,7 +187,8 @@ def assert_target_matches_history(script: ScriptDirectory, current: str | None, 
             )
         if plan[-1] != POD_DW1:
             raise RevisionPlanError(f"DW-1 POD plan must end at {POD_DW1}; got {plan}")
-    assert_pod_plan_safe(plan, current=current, target=target)
+    if target in APPROVED_POD_TARGETS:
+        assert_pod_plan_safe(plan, current=current, target=target)
     if target not in plan:
         raise RevisionPlanError(f"target {target} is not pending from {current}")
     return plan

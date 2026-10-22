@@ -6,17 +6,23 @@ alwaysApply: true
 
 # TruckERP — Rebuild / Restart / npm Commands
 
-**Compose:** Use **`docker compose -f docker-compose.yml`** only (single prod-oriented file).
+**Compose:** Use **`docker compose -f docker-compose.yml`** from **`/home/admin/trucking_erp`** (dev playground host).
 
 ## API — Full rebuild + restart (most common)
 
-Production API image rebuilds MUST use the protected script (locks worktree to prod-main, branch `main`, compose project `trucking_erp`):
-
 ```bash
-/home/admin/trucking_erp-prod-main/scripts/reload_api.sh
+/home/admin/trucking_erp/scripts/dev_reload_api.sh
 ```
 
-Do **not** `cd /home/admin/trucking_erp` or run `docker compose build truckerp-api` / `up -d truckerp-api` directly.
+Or manually:
+
+```bash
+cd /home/admin/trucking_erp
+docker compose -f docker-compose.yml build truckerp-api \
+  && docker compose -f docker-compose.yml up -d --no-deps truckerp-api
+```
+
+**Stricter** (clean `main` worktree only): `/home/admin/trucking_erp/scripts/reload_api.sh`
 
 ## API — Restart only (no code change, no rebuild needed)
 
@@ -46,13 +52,10 @@ docker compose -f docker-compose.yml build truckerp-nginx \
 
 ## Full stack — rebuild everything and bring up
 
-Do **not** `docker compose build` from `/home/admin/trucking_erp` (that rebuilds the API from the wrong tree). For the API image, use the protected script; nginx/frontend remain a separate path:
-
 ```bash
-/home/admin/trucking_erp-prod-main/scripts/reload_api.sh
+/home/admin/trucking_erp/scripts/dev_reload_api.sh
+/home/admin/trucking_erp/scripts/reload_nginx_web.sh
 ```
-
-Then rebuild nginx via `scripts/reload_nginx_web.sh` (not this API patch).
 
 ## Frontend (npm) — Build for production (output goes to apps/web/dist)
 
@@ -120,8 +123,8 @@ One-liner for Cursor: *Install psql in the truckerp-api Dockerfile (postgresql-c
 
 | Situation | Command |
 |---|---|
-| Changed Python code (model, router, schema, service) | `/home/admin/trucking_erp-prod-main/scripts/reload_api.sh` |
-| Changed `docker-compose*.yml` or `Dockerfile` | `/home/admin/trucking_erp-prod-main/scripts/reload_api.sh` |
+| Changed Python code (model, router, schema, service) | `scripts/dev_reload_api.sh` |
+| Changed `docker-compose*.yml` or `Dockerfile` | `scripts/dev_reload_api.sh` |
 | Changed frontend `.tsx`/`.ts`/`.css` | `npm run build` → **rebuild** `truckerp-nginx` image → `up -d` (see `scripts/reload_nginx_web.sh`) |
 | Changed `infra/nginx/default.conf` | restart nginx only |
 | Changed `package.json` dependencies | `npm install` → `npm run build` → rebuild `truckerp-nginx` image |
@@ -131,6 +134,6 @@ One-liner for Cursor: *Install psql in the truckerp-api Dockerfile (postgresql-c
 ## IMPORTANT
 
 - NEVER use `docker-compose` (v1 hyphenated). Always `docker compose` (v2 space).
-- **Standard deployment:** `docker compose -f docker-compose.yml` (single file).
-- Working directory for **API image rebuilds**: `/home/admin/trucking_erp-prod-main` via `scripts/reload_api.sh` only. Do not use `/home/admin/trucking_erp` as compose cwd for `truckerp-api` builds.
+- **Standard on this host:** `cd /home/admin/trucking_erp` + `docker compose -f docker-compose.yml`.
+- **Playground pytest:** `.cursor/rules/dev-playground-host.mdc` (`TRUCKERP_DEV_PLAYGROUND=1`).
 - Frontend build output: `apps/web/dist` (served by nginx as static files)

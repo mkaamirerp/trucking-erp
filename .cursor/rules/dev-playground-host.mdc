@@ -1,0 +1,41 @@
+---
+description: Dev playground host — explicit test opt-in for tenant_demo; main-only API reload.
+alwaysApply: true
+---
+
+# Dev playground host (this server)
+
+## Policy
+
+- **Not a live customer line.** Manual and targeted tests may use **`tenant_demo`** / slug **`demo`** / **`demo.truckerp.me`**.
+- **Canonical checkout:** `/home/admin/trucking_erp` on branch **`main`**, **clean worktree** before API image rebuild.
+- **Never** set **`TEST_BYPASS_AUTH=1`** on the running **`truckerp-api`** container (pytest-only).
+
+## Integration tests (explicit opt-in)
+
+**Do not** default `TRUCKERP_DEV_PLAYGROUND` in conftest. Export before pytest when intentionally using demo:
+
+```bash
+export TRUCKERP_DEV_PLAYGROUND=1
+export TRUCKERP_INTEGRATION_TENANT_SLUG=demo
+export TRUCKERP_INTEGRATION_TENANT_DB=tenant_demo
+export DATABASE_URL='postgresql+asyncpg://…@truckerp-postgres:5432/trucking_erp'
+export TENANT_DATABASE_URL='postgresql+asyncpg://…@truckerp-postgres:5432/tenant_demo'
+```
+
+CI and strict hosts: **`TRUCKERP_DEV_PLAYGROUND=0`** (or unset) + isolated `tenant_pytest` / phase4c.
+
+HTTP integration tests: **`Host: demo.truckerp.me`** when slug is `demo`.
+
+**FMP pytest on tenant_demo:** integration teardown does **not** track FMP plans or converted trips; do **not** run `test_future_movement_plan_integration.py` against `tenant_demo` until teardown is FMP-aware.
+
+## API / nginx reload
+
+```bash
+/home/admin/trucking_erp/scripts/reload_api.sh
+# or: scripts/dev_reload_api.sh (same guards)
+```
+
+Frontend: `npm run build` in `apps/web`, then `scripts/reload_nginx_web.sh`.
+
+Tenant FMP migrations: explicit revisions via `scripts/tenant_upgrade_revision.sh` (not `upgrade head`).

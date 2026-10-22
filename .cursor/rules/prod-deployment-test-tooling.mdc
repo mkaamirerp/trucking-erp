@@ -1,27 +1,23 @@
 ---
-description: Prod deployment vs host venv test tooling (terminology and defaults for this server)
+description: Dev playground host — deployment from trucking_erp worktree; pytest may use demo tenant/DB.
 alwaysApply: true
 ---
 
-# Production deployment vs test tooling
+# Dev playground deployment and test tooling
 
 ## Machine policy (this host)
 
-- **Strictly prod-only** for this server: runtime and deployment = production.
-- **Host venv pytest** = verification tooling only (not a dev environment or deployment mode change).
-- **Do not recommend** for this machine: non-prod SSM paths (`/truckerp/non-prod/...`) or phrasing that implies a **non-production** deployment—unless the user explicitly says this machine is not prod.
+- **Dev playground**, not a live customer line. Shared **`tenant_demo`** / **`demo.truckerp.me`** are intentional test targets.
+- Runtime uses **`docker-compose.yml`** and SSM-rendered secrets (`/truckerp/prod/...` paths on this stack are fine — they name the secret store, not “customer production”).
+- **Host venv pytest** may use the demo tenant only when **`TRUCKERP_DEV_PLAYGROUND=1`** is set explicitly (not defaulted in conftest).
 
-## Default for this project/server
+## Integration tests
 
-- **Runtime and deployment are production.** Use `docker-compose.yml` and `/truckerp/prod/...` SSM only for this host’s deployment unless the user explicitly says otherwise.
-- **Treat this server as prod-only** when giving operational guidance.
-
-## Manual pytest / host venv
-
-- Running **pytest** (or installing `pytest`, `pytest-asyncio`, etc.) in a **shell venv on the prod host** is **verification / test tooling only**. It is **not** “dev mode,” **not** switching the deployment to development, and **not** a second runtime environment.
-- **`requirements-dev.txt`** is a **pin list for test/verification packages**, not a signal to run dev compose or dev SSM profiles.
+- **`TRUCKERP_DEV_PLAYGROUND=1`:** platform URL may be `truckerp-postgres` / `trucking_erp`; tenant URL may be `tenant_demo`; Host may be `demo.truckerp.me`.
+- **`TRUCKERP_DEV_PLAYGROUND=0`:** strict isolation (phase4c / `tenant_pytest` only) — use in CI or when mimicking a guarded host.
+- See **`.cursor/rules/dev-playground-host.mdc`** for env examples.
 
 ## Wording
 
-- Prefer: *prod*, *production*, *host venv for manual checks*, *verification*, *test tooling*.
-- Avoid implying that installing test packages or running pytest changes **how the app is deployed** on this server.
+- Prefer: *dev playground*, *demo tenant*, *verification*, *reload API from worktree*.
+- Avoid implying this host is a locked-down production line with immutable customer data.

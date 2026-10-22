@@ -89,24 +89,27 @@ async def assert_load_reservation_clear(
     converting_plan_id: int | None = None,
 ) -> None:
     """One open FMP reservation OR one open planned TripLoad — not both; not a foreign FMP."""
-    open_fmpl = await db.scalar(
-        select(FutureMovementPlanLoad).where(
-            FutureMovementPlanLoad.tenant_id == tenant_id,
-            FutureMovementPlanLoad.load_id == load_id,
-            _fmpl_is_open_clause(),
-        )
-    )
-    if open_fmpl is not None:
-        if converting_plan_id is not None and int(open_fmpl.plan_id) == int(converting_plan_id):
-            pass
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "detail": "Load has an open future movement plan reservation",
-                    "code": LOAD_FUTURE_MOVEMENT_RESERVED,
-                },
+    from app.services.future_movement_plans import tenant_has_fmp_schema
+
+    if await tenant_has_fmp_schema(db):
+        open_fmpl = await db.scalar(
+            select(FutureMovementPlanLoad).where(
+                FutureMovementPlanLoad.tenant_id == tenant_id,
+                FutureMovementPlanLoad.load_id == load_id,
+                _fmpl_is_open_clause(),
             )
+        )
+        if open_fmpl is not None:
+            if converting_plan_id is not None and int(open_fmpl.plan_id) == int(converting_plan_id):
+                pass
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "detail": "Load has an open future movement plan reservation",
+                        "code": LOAD_FUTURE_MOVEMENT_RESERVED,
+                    },
+                )
 
     other_planned = await db.scalar(
         select(TripLoad).where(

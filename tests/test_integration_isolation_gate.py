@@ -28,7 +28,8 @@ class TestIntegrationDbGuardUnit:
         assert database_name_from_url("postgresql://u:p@host:5432/tenant_demo") == "tenant_demo"
         assert database_name_from_url("postgresql+asyncpg://u:p@h/tenant_pytest") == "tenant_pytest"
 
-    def test_tenant_demo_url_fails(self) -> None:
+    def test_tenant_demo_url_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         with pytest.raises(IntegrationIsolationError, match="tenant_demo"):
             assert_tenant_database_url_allowed(
                 "postgresql://u:p@db:5432/tenant_demo", context="unit"
@@ -39,16 +40,21 @@ class TestIntegrationDbGuardUnit:
         with pytest.raises(IntegrationIsolationError, match="production"):
             assert_environment_allows_integration_mutation(context="unit")
 
-    def test_demo_slug_fails(self) -> None:
+    def test_demo_slug_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         with pytest.raises(IntegrationIsolationError, match="demo"):
             assert_integration_tenant_slug_allowed("demo", context="unit")
 
-    def test_demo_host_fails(self) -> None:
+    def test_demo_host_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         with pytest.raises(IntegrationIsolationError, match="demo"):
             assert_integration_host_allowed("demo.truckerp.me", context="unit")
 
     def test_pytest_db_and_host_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
+        monkeypatch.setenv("TRUCKERP_INTEGRATION_TENANT_SLUG", "pytest")
+        monkeypatch.setenv("TRUCKERP_INTEGRATION_TENANT_DB", "tenant_pytest")
         assert_environment_allows_integration_mutation(context="unit")
         assert_integration_db_name_allowed("tenant_pytest", context="unit")
         assert_integration_tenant_slug_allowed("pytest", context="unit")
@@ -57,7 +63,23 @@ class TestIntegrationDbGuardUnit:
             "postgresql://u:p@db:5432/tenant_pytest", context="unit"
         )
 
-    def test_production_platform_url_fails(self) -> None:
+    def test_playground_demo_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "1")
+        monkeypatch.delenv("TRUCKERP_INTEGRATION_TENANT_SLUG", raising=False)
+        monkeypatch.delenv("TRUCKERP_INTEGRATION_TENANT_DB", raising=False)
+        assert_integration_db_name_allowed("tenant_demo", context="unit")
+        assert_integration_tenant_slug_allowed("demo", context="unit")
+        assert_integration_host_allowed("demo.truckerp.me", context="unit")
+        from app.core.integration_db_guard import assert_test_platform_database_url_allowed
+
+        assert_test_platform_database_url_allowed(
+            "postgresql+asyncpg://u:p@truckerp-postgres:5432/trucking_erp",
+            context="unit",
+        )
+
+    def test_production_platform_url_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         from app.core.integration_db_guard import assert_test_platform_database_url_allowed
 
         with pytest.raises(IntegrationIsolationError, match="production platform"):
@@ -92,7 +114,10 @@ class TestIntegrationDbGuardUnit:
             context="unit",
         )
 
-    def test_platform_alias_and_query_overrides_fail_closed(self) -> None:
+    def test_platform_alias_and_query_overrides_fail_closed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         from app.core.integration_db_guard import assert_test_platform_database_url_allowed
 
         refused = (
@@ -112,6 +137,7 @@ class TestIntegrationDbGuardUnit:
     def test_session_gate_refuses_production_platform_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from tests.support.integration_isolation import pytest_enforce_platform_database_env
 
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         monkeypatch.setenv(
             "DATABASE_URL",
             "postgresql+asyncpg://u:p@172.29.0.4:5432/trucking_erp",
@@ -134,12 +160,15 @@ class TestIntegrationDbGuardUnit:
 
     def test_require_url_rejects_demo(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
         monkeypatch.setenv("TENANT_DATABASE_URL", "postgresql://u:p@db:5432/tenant_demo")
         with pytest.raises(IntegrationIsolationError, match="tenant_demo"):
             require_integration_tenant_database_url(context="unit")
 
     def test_require_url_accepts_pytest(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
+        monkeypatch.setenv("TRUCKERP_INTEGRATION_TENANT_DB", "tenant_pytest")
         monkeypatch.setenv("TENANT_DATABASE_URL", "postgresql://u:p@db:5432/tenant_pytest")
         assert "tenant_pytest" in require_integration_tenant_database_url(context="unit")
 
@@ -147,6 +176,7 @@ class TestIntegrationDbGuardUnit:
 @pytest.mark.asyncio
 async def test_seed_helper_cannot_bypass_with_demo_tenant_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
     monkeypatch.setenv("TENANT_DATABASE_URL", "postgresql://u:p@db:5432/tenant_demo")
 
     db = AsyncMock()
@@ -160,6 +190,9 @@ async def test_seed_helper_rejects_demo_tenant_id_even_with_pytest_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
+    monkeypatch.setenv("TRUCKERP_INTEGRATION_TENANT_SLUG", "pytest")
+    monkeypatch.setenv("TRUCKERP_INTEGRATION_TENANT_DB", "tenant_pytest")
     monkeypatch.setenv("TENANT_DATABASE_URL", "postgresql://u:p@db:5432/tenant_pytest")
 
     fake_tenant = MagicMock()
@@ -180,8 +213,9 @@ async def test_seed_helper_rejects_demo_tenant_id_even_with_pytest_url(
 
 @pytest.mark.asyncio
 async def test_asgi_test_bypass_rejects_demo_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TEST_BYPASS_AUTH + Host demo.truckerp.me must not resolve to tenant 53."""
+    """TEST_BYPASS_AUTH + Host demo.truckerp.me blocked when strict isolation is on."""
     monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("TRUCKERP_DEV_PLAYGROUND", "0")
     monkeypatch.setenv("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
     monkeypatch.setenv("TEST_BYPASS_AUTH", "1")
     monkeypatch.delenv("TENANT_DATABASE_URL", raising=False)

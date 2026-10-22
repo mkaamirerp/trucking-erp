@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,6 +52,17 @@ from app.services.trips import (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def tenant_has_fmp_schema(db: AsyncSession) -> bool:
+    """True when fmp01+ tables exist on this tenant DB (§9A optional per-tenant rollout)."""
+    val = await db.scalar(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = 'future_movement_plan_loads')"
+        )
+    )
+    return bool(val)
 
 
 async def _lock_plan(db: AsyncSession, tenant_id: int, plan_id: int) -> FutureMovementPlan:
@@ -266,6 +277,8 @@ async def list_terminal_pool_ready_loads(
 async def get_open_future_movement_plan_id(
     db: AsyncSession, tenant_id: int, load_id: int
 ) -> int | None:
+    if not await tenant_has_fmp_schema(db):
+        return None
     row = await db.scalar(
         select(FutureMovementPlanLoad.plan_id).where(
             FutureMovementPlanLoad.tenant_id == tenant_id,

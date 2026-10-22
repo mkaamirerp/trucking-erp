@@ -105,6 +105,7 @@ fi
 HEAD_IDS="$(printf "%s\n" "$HEADS_OUT" | sed -n 's/^\([A-Za-z0-9_]*\) (head).*/\1/p' | sort)"
 HEAD_COUNT=$(printf "%s\n" "$HEAD_IDS" | grep -c . || true)
 APPROVED_POD_HEADS="$(printf '%s\n' i14_load_pod_evidence i14_load_pod_evidence_x5 | sort)"
+APPROVED_FMP_X5_HEADS="$(printf '%s\n' fmp02_fmp_tenant_scope i14_load_pod_evidence_x5 | sort)"
 if [ "${HEAD_COUNT:-0}" -eq 1 ]; then
   echo "  tenant heads: 1"
 elif [ "$HEAD_IDS" = "$APPROVED_POD_HEADS" ]; then
@@ -113,6 +114,9 @@ elif [ "$HEAD_IDS" = "$APPROVED_POD_HEADS" ]; then
   echo "    x5 (no DW-1):  i14_load_pod_evidence_x5"
   echo "    dw1c (no POD): i14_load_pod_evidence"
   echo "    already i14:  do not apply i14_load_pod_evidence_x5"
+elif [ "$HEAD_IDS" = "$APPROVED_FMP_X5_HEADS" ]; then
+  echo "  tenant heads: 2 (FMP line + x5 POD: fmp02_fmp_tenant_scope + i14_load_pod_evidence_x5)"
+  echo "  upgrade head is forbidden. Pin explicit revisions (e.g. fmp01_future_movement_plan)."
 else
   echo "Preflight failed: tenant Alembic heads are not the single head or the approved POD pair (got: $HEAD_COUNT)."
   echo "$HEADS_OUT"

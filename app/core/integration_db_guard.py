@@ -38,6 +38,19 @@ DEFAULT_INTEGRATION_TENANT_DB_NAME = "tenant_pytest"
 ENV_INTEGRATION_SLUG = "TRUCKERP_INTEGRATION_TENANT_SLUG"
 ENV_INTEGRATION_DB = "TRUCKERP_INTEGRATION_TENANT_DB"
 ENV_ALLOWED_DB_NAMES = "TRUCKERP_INTEGRATION_ALLOWED_DB_NAMES"
+ENV_DEV_PLAYGROUND = "TRUCKERP_DEV_PLAYGROUND"
+
+PLAYGROUND_DEFAULT_SLUG = "demo"
+PLAYGROUND_DEFAULT_DB = "tenant_demo"
+
+
+def dev_playground_enabled() -> bool:
+    """Owner dev host: mutate demo tenant/DB and use main platform DB in pytest."""
+    return (os.environ.get(ENV_DEV_PLAYGROUND) or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 class IntegrationIsolationError(RuntimeError):
@@ -45,11 +58,19 @@ class IntegrationIsolationError(RuntimeError):
 
 
 def integration_tenant_slug() -> str:
-    return (os.environ.get(ENV_INTEGRATION_SLUG) or DEFAULT_INTEGRATION_TENANT_SLUG).strip().lower()
+    if os.environ.get(ENV_INTEGRATION_SLUG):
+        return os.environ.get(ENV_INTEGRATION_SLUG, "").strip().lower()
+    if dev_playground_enabled():
+        return PLAYGROUND_DEFAULT_SLUG
+    return DEFAULT_INTEGRATION_TENANT_SLUG
 
 
 def integration_tenant_db_name() -> str:
-    return (os.environ.get(ENV_INTEGRATION_DB) or DEFAULT_INTEGRATION_TENANT_DB_NAME).strip().lower()
+    if os.environ.get(ENV_INTEGRATION_DB):
+        return os.environ.get(ENV_INTEGRATION_DB, "").strip().lower()
+    if dev_playground_enabled():
+        return PLAYGROUND_DEFAULT_DB
+    return DEFAULT_INTEGRATION_TENANT_DB_NAME
 
 
 def allowed_integration_db_names() -> frozenset[str]:
@@ -116,7 +137,20 @@ def assert_test_platform_database_url_allowed(url: str | None, *, context: str) 
 
     The placeholder ``db.example.invalid/test`` and the phase4c platform
     database are allowed. Any other host, alias, or database name fails closed.
+
+    When ``TRUCKERP_DEV_PLAYGROUND=1``, the shared playground platform DB
+    ``trucking_erp`` on ``truckerp-postgres`` is allowed for pytest.
     """
+    if dev_playground_enabled():
+        if not url or not str(url).strip():
+            return
+        hosts, names = _test_platform_connection_identity(str(url).strip())
+        for host in hosts:
+            for name in names:
+                if host in PRODUCTION_PLATFORM_HOSTS and name in PRODUCTION_PLATFORM_DB_NAMES:
+                    return
+        # Fall through to strict checks if URL is not the known playground platform.
+
     if not url or not str(url).strip():
         raise IntegrationIsolationError(
             f"Integration isolation: platform database URL missing ({context})."
@@ -162,7 +196,7 @@ def assert_integration_db_name_allowed(db_name: str | None, *, context: str) -> 
             f"Configure {ENV_INTEGRATION_DB} / TENANT_DATABASE_URL to "
             f"{DEFAULT_INTEGRATION_TENANT_DB_NAME}."
         )
-    if name in FORBIDDEN_INTEGRATION_TENANT_DB_NAMES:
+    if name in FORBIDDEN_INTEGRATION_TENANT_DB_NAMES and not dev_playground_enabled():
         raise IntegrationIsolationError(
             f"Integration isolation: refusing tenant DB {name!r} ({context}). "
             f"Mutating {sorted(FORBIDDEN_INTEGRATION_TENANT_DB_NAMES)} is forbidden. "
@@ -185,7 +219,7 @@ def assert_integration_tenant_slug_allowed(slug: str | None, *, context: str) ->
             f"Integration isolation: empty tenant slug ({context}). "
             f"Use Host {integration_tenant_slug()}.truckerp.me."
         )
-    if s in FORBIDDEN_INTEGRATION_TENANT_SLUGS:
+    if s in FORBIDDEN_INTEGRATION_TENANT_SLUGS and not dev_playground_enabled():
         raise IntegrationIsolationError(
             f"Integration isolation: refusing tenant slug {s!r} ({context}). "
             f"Host must not resolve to the live demo tenant. "
@@ -204,7 +238,7 @@ def assert_integration_host_allowed(host: str | None, *, context: str) -> None:
         raise IntegrationIsolationError(f"Integration isolation: empty Host ({context}).")
     # Strip port if present
     h = h.split(":", 1)[0]
-    if h == "demo.truckerp.me" or h.startswith("demo."):
+    if (h == "demo.truckerp.me" or h.startswith("demo.")) and not dev_playground_enabled():
         raise IntegrationIsolationError(
             f"Integration isolation: refusing Host {h!r} ({context}). "
             f"demo.truckerp.me maps to the live demo tenant. "

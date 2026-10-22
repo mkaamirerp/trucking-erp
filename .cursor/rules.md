@@ -47,7 +47,7 @@ The system uses strict platform DB vs tenant DB separation.
 
 ## DEV / REBUILD (MANDATORY)
 - **You must run the rebuild when backend/API changes need to be applied** (same turn when safe). Do not ask the user to run it.
-- **Public / production-shaped hosts:** `/home/admin/trucking_erp-prod-main/scripts/reload_api.sh` only. Do **not** `cd /home/admin/trucking_erp` or run `docker compose build` / `up -d truckerp-api` directly. Use **`docker-compose.yml` only** (no overlay compose files).
+- **This host (dev playground):** `/home/admin/trucking_erp/scripts/dev_reload_api.sh` from `/home/admin/trucking_erp` + **`docker-compose.yml` only**. Integration tests may use **`tenant_demo`** when `TRUCKERP_DEV_PLAYGROUND=1` (see `.cursor/rules/dev-playground-host.mdc`).
 - **`./scripts/dev-up.sh`** brings up **`docker-compose.yml` only** (prod-shaped stack on a dev machine).
 - Exception: if the user said they will handle deployment/restart, you may skip running commands.
 

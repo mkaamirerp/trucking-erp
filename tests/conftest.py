@@ -8,6 +8,7 @@ import os
 # would leave production and break TEST_BYPASS_AUTH platform tenant lookup in middleware.
 os.environ["ENVIRONMENT"] = "test"
 os.environ["ALLOW_TENANT_RESOLUTION_SHORTCUTS"] = "true"
+# Playground tenant_demo: set TRUCKERP_DEV_PLAYGROUND=1 explicitly before pytest (never defaulted here).
 # Settings() validates DATABASE_URL at import; many unit tests import app modules without a real DB.
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = "postgresql://test:test@db.example.invalid:5432/test"
