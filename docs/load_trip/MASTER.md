@@ -1044,6 +1044,38 @@ Do **NOT** implement this now.
 
 Do **NOT** weaken the current one-ACTIVE-per-Load constraint solely for normal LTL.
 
+### Owner wireframe intake — operational action dropdown and Split Loads (2026-10-21; DESIGN ONLY)
+
+**State: owner-requested UX direction recorded; backend workflow, persistence model, API contract, and acceptance tests are NOT yet approved or implemented.** This subsection preserves the requested behavior for the next Dispatch wireframe revision; it does **not** override the business locks of §4, §9A, §12, §13C or authorize schema/API changes. The exact layout remains iterative under the principle below.
+
+**Placement in current Dispatch wireframe:** reuse the selected Trip's **Next Action** area with (1) a compact **Operational action** dropdown and (2) a **Split Loads** button. The next wireframe should show these controls only; do not design the entire modal/popup yet.
+
+**Operational action dropdown — proposed options, not `Trip.status` values:**
+
+- **Drop trailer**: may record an operational instruction; an actual physical trailer drop, equipment handoff, freight custody change, or trip completion requires its own authorized, explicit event and evidence. Do not infer any of those simply from selecting a menu item.
+- **Bring to Yard A** and **Bring to Yard B**: target choices come from the tenant's **existing structured, configured yards/terminals**; show Yard B only if it exists and is available to this tenant. These denote the operational destination/instruction, not a rewrite of the broker RC's destination or a new commercial Load.
+- Other actions/status choices will be added during owner-led design. Do not invent new `Load.status` or `Trip.status` values for these menu labels.
+
+**Split Loads — owner examples and provisional interaction:**
+
+1. In a Trip containing **two distinct commercial Loads**, separating one Load creates two operational groups (one retained with the current movement, the selected one set aside for further planning); the user should not have to perform unnecessary repetitive work.
+2. In a Trip containing **four distinct commercial Loads**, clicking **Split Loads** opens a small selection window listing the **existing Load IDs with checkboxes**. The dispatcher can select **one**, **two**, or **three** Loads to separate, leaving the nonselected group in view. The principle generalizes to an N-Load Trip: choose a nonempty **proper subset**, not zero or all N for an ordinary manifest split.
+3. After confirming the intended selection, show a **new separated operational item/group** prominently, with its **original Load ID(s)**, where the dispatcher can subsequently decide what to do: retain pending, route to an existing configured yard, propose onward dispatch, or select another authorized workflow. The exact follow-on choices and commit timing are **owner-open**. The popup is **not** authorization to mint a new commercial Load, new Trip, or change custody on its own.
+4. **One commercial Load divided by pieces, pallets or quantity** is a different, future partial-freight problem; do not implement that under this ordinary multi-Load manifest split (§12 and §13C).
+
+**Locked safety invariants for later business-logic design:**
+
+- Each selected **commercial Load remains the same Load**, with unchanged rate confirmation, customer/broker, original commercial destination, rate/revenue, and audit history. Never create a second commercial Load or duplicate revenue because of a split. The operator's phrase “new load pops up” means a **new operational item to decide its next movement**, not a new commercial shipment record.
+- Source Trip and all **TripLoad** membership history remain traceable, tenant-scoped, and auditable. Do not erase old membership, silently reassign active membership, change `loads.active_trip_id` as a planning shortcut, or start a new active Trip merely by separating a selection.
+- **In-progress Trip:** split-for-planning must preserve original physical responsibility and ACTIVE memberships until explicit, authorized custody/handoff/unloading transitions. A separated item may be proposed or reserved as a future movement where existing FMP rules allow; it must **not** represent freight already dropped or transferred. **Planned Trip:** any actual planned-membership change needs separate validated, audited rules. Whether the initial split confirmation persists a plan or only stages a draft is **not yet decided**.
+- Do not bypass FMP reservation guards, assignment/schedule conflicts, readiness checks, Trip status gates, tenant boundaries, or idempotency. Concurrent split operations on the same membership must not produce duplicate movements, duplicate ACTIVE memberships, or lost Loads.
+- Structured yard identity, instructions versus physical events, custody, trailer association and final-delivery evidence must remain separate. Splitting the manifest does not automatically complete or cancel the source Trip, unload the trailer, deliver freight, or alter payroll/Finance.
+- Any implementation needing new shared schema, changed cross-module relationships/APIs, quantity-level custody, or different financial/payroll behavior is subject to the **STOP / dependency impact / owner approval** architecture rule before coding.
+
+**Required acceptance matrix before implementation can be accepted:** 1 Load (no ordinary split), 2 Loads (1 + 1), 4 Loads (1 + 3 / 2 + 2 / 3 + 1), 10 Loads (arbitrary valid subset), empty/all selection rejection, unassigned/planned/assigned/in-progress/completed source Trips, yard A present / yard B absent or present, active custody held by inbound driver, future FMP already reserved, conflicting planned TripLoad, concurrent operators/retries, insufficient permissions, cross-tenant references, partial request failures/rollback, original commercial totals unchanged, correct old/new TripLoad and custody audit history, and no duplicate Trip/Load numbers. Record observed results rather than claiming coverage without executed tests.
+
+**Owner design handoff:** accumulate further Dispatch UI feedback first. Update the *next* wireframe/mockup only when the owner requests another revision. **No code, database migration, deployment, or new module is authorized by this note.**
+
 ### Bulk operation principle — UI not locked
 
 Many Loads must **NOT** force many individual dispatcher workflow actions.
