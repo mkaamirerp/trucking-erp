@@ -126,6 +126,7 @@ async def test_openai_chat_json_schema_raw_omits_temperature_for_gpt5() -> None:
     body = post.await_args.kwargs["json"]
     assert "temperature" not in body
     assert body["model"] == "gpt-5-mini"
+    assert body.get("reasoning_effort") == "minimal"
 
 
 @pytest.mark.asyncio

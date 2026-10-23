@@ -13,6 +13,8 @@ rules/schema → OpenAI (no original PDF attachment). Mixed PDFs remain blocked.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -26,9 +28,17 @@ from app.schemas.load_document_parse import (
     LoadDocumentParseResponse,
     LoadParseDocumentMeta,
     LoadParseExtractedFields,
+    postgres_safe_load_document_parse_response,
 )
 from app.schemas.load_document_parse_semantic import ParseDocumentSemanticModelOutput
 from app.services.load_document_parse_openai import parse_document_openai_chat_json_schema
+from app.services.load_document_parse_semantic_llm import (
+    default_load_parser_semantic_client,
+    load_parser_semantic_api_key,
+    load_parser_semantic_configured,
+    load_parser_semantic_model,
+    load_parser_semantic_provider,
+)
 from app.services.load_parser_mechanical_validation import apply_load_parser_mechanical_validation
 from app.services.load_parser_semantic_to_product import map_semantic_extracted_to_product
 from app.services.load_parser_openai_handoff_v2 import (
@@ -44,9 +54,11 @@ from app.services.load_parser_tenant_identity_exclusion import (
 )
 from app.utils.broker_identity import normalize_alias
 
+logger = logging.getLogger(__name__)
+
 _PARSE_PATH = "load_rate_con_v2"
 _SCHEMA_NAME = "load_document_parse_guarded_truckerjson_v1"
-_SKIPPED_WARNING = "[rate_con_v2] OpenAI client not supplied; extraction skipped."
+_SKIPPED_WARNING = "[rate_con_v2] Semantic LLM not configured; extraction skipped."
 _OCR_REQUIRED_WARNING = (
     "ocr_required: mixed digital/scanned PDF; OCR fallback applies only to "
     "image-only PDFs with no usable embedded text — semantic parse was not attempted."
@@ -75,6 +87,7 @@ async def parse_pdf_bytes_to_load_document_response(
     """Parse a rate-confirmation PDF into ``LoadDocumentParseResponse`` (New Load hydration)."""
     _ = forensic_enabled
     fn = (filename or "upload.pdf")[:512]
+    parse_started = time.perf_counter()
 
     validate_load_parser_pdf(pdf_bytes)
     acquisition = acquire_load_parser_pdf_pages(pdf_bytes)
@@ -142,8 +155,7 @@ async def parse_pdf_bytes_to_load_document_response(
         page_count=page_count,
     )
 
-    api_key = (settings.openai_api_key or "").strip()
-    if openai_chat_json_schema is None and not api_key:
+    if openai_chat_json_schema is None and not load_parser_semantic_configured():
         return LoadDocumentParseResponse(
             document=LoadParseDocumentMeta(filename=fn),
             extracted=LoadParseExtractedFields(),
@@ -156,20 +168,27 @@ async def parse_pdf_bytes_to_load_document_response(
                 "pdf_type": acquisition.get("pdf_type"),
                 "page_count": acquisition.get("page_count"),
                 "semantic_outcome": "skipped_missing_client",
+                "llm_provider": load_parser_semantic_provider(),
             },
         )
 
-    client = openai_chat_json_schema or parse_document_openai_chat_json_schema
+    model = load_parser_semantic_model()
+    reasoning_effort = _load_parser_reasoning_effort()
+    client = openai_chat_json_schema or default_load_parser_semantic_client()
+    api_key = load_parser_semantic_api_key()
+    ai_started = time.perf_counter()
     ai_payload = await client(
         api_key=api_key,
-        model=(settings.openai_extraction_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
+        model=model,
         system=build_v2_openai_system_prompt(pdf_bytes_attached=True),
         user_text=build_v2_openai_user_message(handoff, pdf_bytes_attached=True),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
         input_file_bytes=pdf_bytes,
         input_filename=fn,
+        reasoning_effort=reasoning_effort,
     )
+    ai_ms = int((time.perf_counter() - ai_started) * 1000)
 
     response = _map_semantic_payload_to_response(
         filename=fn,
@@ -183,9 +202,31 @@ async def parse_pdf_bytes_to_load_document_response(
         tenant_identity_exclusion=_exclusion_for_mechanical_validation(exclusion),
         page_texts=[str(p.get("text") or "") for p in handoff_pages],
     )
-    return await _canonicalize_broker_snapshot_from_tenant_registry(
+    response = await _canonicalize_broker_snapshot_from_tenant_registry(
         db, tenant_id=int(tenant_id), response=response
     )
+    total_ms = int((time.perf_counter() - parse_started) * 1000)
+    payload = response.model_dump(mode="json")
+    ctx = dict(payload.get("context") or {})
+    ctx["openai_ms"] = ai_ms
+    ctx["semantic_ms"] = ai_ms
+    ctx["server_parse_ms"] = total_ms
+    if reasoning_effort:
+        ctx["reasoning_effort"] = reasoning_effort
+    ctx["llm_provider"] = load_parser_semantic_provider()
+    ctx["llm_model"] = model
+    payload["context"] = ctx
+    response = LoadDocumentParseResponse.model_validate(payload)
+    _log_parse_timing(
+        filename=fn,
+        pdf_type=str(acquisition.get("pdf_type") or ""),
+        page_count=int(acquisition.get("page_count") or 0),
+        model=model,
+        openai_ms=ai_ms,
+        total_ms=total_ms,
+        semantic_input="pdf_bytes",
+    )
+    return postgres_safe_load_document_parse_response(response)
 
 
 async def _parse_scanned_image_with_ocr(
@@ -199,6 +240,7 @@ async def _parse_scanned_image_with_ocr(
     openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None,
 ) -> LoadDocumentParseResponse:
     """Image-only PDF: OCR pages, then same v2 JSON rules/schema → OpenAI (no PDF bytes)."""
+    parse_started = time.perf_counter()
     ocr_pages, ocr_warnings = ocr_load_parser_pdf_pages(pdf_bytes)
     warnings = list(base_warnings) + list(ocr_warnings)
     if not ocr_pages:
@@ -242,8 +284,7 @@ async def _parse_scanned_image_with_ocr(
         acquisition_method="scanned_image_ocr",
     )
 
-    api_key = (settings.openai_api_key or "").strip()
-    if openai_chat_json_schema is None and not api_key:
+    if openai_chat_json_schema is None and not load_parser_semantic_configured():
         return LoadDocumentParseResponse(
             document=LoadParseDocumentMeta(filename=filename),
             extracted=LoadParseExtractedFields(),
@@ -257,20 +298,27 @@ async def _parse_scanned_image_with_ocr(
                 "page_count": acquisition.get("page_count"),
                 "ocr_engine": "tesseract+pdftoppm",
                 "semantic_outcome": "skipped_missing_client",
+                "llm_provider": load_parser_semantic_provider(),
             },
         )
 
-    client = openai_chat_json_schema or parse_document_openai_chat_json_schema
+    model = load_parser_semantic_model()
+    reasoning_effort = _load_parser_reasoning_effort()
+    client = openai_chat_json_schema or default_load_parser_semantic_client()
+    api_key = load_parser_semantic_api_key()
+    ai_started = time.perf_counter()
     ai_payload = await client(
         api_key=api_key,
-        model=(settings.openai_extraction_model or "gpt-4o-mini").strip() or "gpt-4o-mini",
+        model=model,
         system=build_v2_openai_system_prompt(pdf_bytes_attached=False),
         user_text=build_v2_openai_user_message(handoff, pdf_bytes_attached=False),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
         input_file_bytes=None,
         input_filename=filename,
+        reasoning_effort=reasoning_effort,
     )
+    ai_ms = int((time.perf_counter() - ai_started) * 1000)
 
     response = _map_semantic_payload_to_response(
         filename=filename,
@@ -284,6 +332,13 @@ async def _parse_scanned_image_with_ocr(
     context["requires_ocr"] = True
     context["ocr_engine"] = "tesseract+pdftoppm"
     context["semantic_input"] = "ocr_text"
+    context["openai_ms"] = ai_ms
+    context["semantic_ms"] = ai_ms
+    context["server_parse_ms"] = int((time.perf_counter() - parse_started) * 1000)
+    if reasoning_effort:
+        context["reasoning_effort"] = reasoning_effort
+    context["llm_provider"] = load_parser_semantic_provider()
+    context["llm_model"] = model
     payload["context"] = context
     response = LoadDocumentParseResponse.model_validate(payload)
     response = apply_load_parser_mechanical_validation(
@@ -291,8 +346,45 @@ async def _parse_scanned_image_with_ocr(
         tenant_identity_exclusion=_exclusion_for_mechanical_validation(exclusion),
         page_texts=[str(p.get("text") or "") for p in handoff_pages],
     )
-    return await _canonicalize_broker_snapshot_from_tenant_registry(
+    response = await _canonicalize_broker_snapshot_from_tenant_registry(
         db, tenant_id=int(tenant_id), response=response
+    )
+    _log_parse_timing(
+        filename=filename,
+        pdf_type=str(acquisition.get("pdf_type") or ""),
+        page_count=int(acquisition.get("page_count") or len(handoff_pages)),
+        model=model,
+        openai_ms=ai_ms,
+        total_ms=int((time.perf_counter() - parse_started) * 1000),
+        semantic_input="ocr_text",
+    )
+    return postgres_safe_load_document_parse_response(response)
+
+
+def _load_parser_reasoning_effort() -> str | None:
+    raw = (settings.load_parser_reasoning_effort or settings.openai_reasoning_effort or "").strip().lower()
+    return raw or None
+
+
+def _log_parse_timing(
+    *,
+    filename: str,
+    pdf_type: str,
+    page_count: int,
+    model: str,
+    openai_ms: int,
+    total_ms: int,
+    semantic_input: str,
+) -> None:
+    logger.info(
+        "load_parser_parse_complete filename=%s pdf_type=%s pages=%s model=%s openai_ms=%s total_ms=%s semantic_input=%s",
+        filename[:120],
+        pdf_type,
+        page_count,
+        model,
+        openai_ms,
+        total_ms,
+        semantic_input,
     )
 
 

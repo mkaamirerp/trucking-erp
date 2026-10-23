@@ -41,10 +41,15 @@ from app.services.load_pod_evidence import (
 router = APIRouter(prefix="/loads", tags=["loads"])
 
 
-def _pod_actor(user: CurrentUser) -> tuple[int | None, str | None]:
+def _load_audit_actor(user: CurrentUser) -> tuple[int | None, str | None]:
+    """Tenant audit_events.actor_user_id is tenant-scoped int — not platform UUID."""
     actor_user_id = int(user.tenant_user.id) if user.tenant_user else None
     actor_label = None if user.tenant_user else f"platform:{user.user.id}"
     return actor_user_id, actor_label
+
+
+def _pod_actor(user: CurrentUser) -> tuple[int | None, str | None]:
+    return _load_audit_actor(user)
 
 
 @router.post("", response_model=LoadResponse, status_code=status.HTTP_201_CREATED)
@@ -55,11 +60,12 @@ async def create_load(
     user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, _ = _load_audit_actor(user)
     load = await loads_service.create_load(
         db,
         tenant_id,
         payload,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -172,12 +178,13 @@ async def update_load(
     user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, _ = _load_audit_actor(user)
     load = await loads_service.update_load(
         db,
         tenant_id,
         load_id,
         payload,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -214,12 +221,13 @@ async def mark_load_ready(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, _ = _load_audit_actor(user)
     load = await loads_service.mark_load_ready(
         db,
         tenant_id,
         load_id,
         expected_concurrency_version=body.expected_concurrency_version,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -247,13 +255,14 @@ async def cancel_load(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Commercial cancel — preserves load row and history; closes OPEN TripLoads (Issue I5)."""
+    actor_user_id, _ = _load_audit_actor(user)
     load = await loads_service.cancel_load(
         db,
         tenant_id,
         load_id,
         expected_concurrency_version=body.expected_concurrency_version,
         reason=body.reason,
-        actor_user_id=getattr(user, "user_id", None),
+        actor_user_id=actor_user_id,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )

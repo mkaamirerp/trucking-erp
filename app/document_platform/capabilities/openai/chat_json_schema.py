@@ -23,6 +23,26 @@ def _completion_sampling_kwargs(model: str) -> dict[str, float]:
     return {"temperature": 0.1}
 
 
+def _reasoning_effort_kwargs(model: str, reasoning_effort: str | None = None) -> dict[str, str]:
+    """
+    GPT-5 defaults to medium reasoning (slow). Structured extraction uses minimal unless overridden.
+    """
+    if reasoning_effort is not None:
+        effort = reasoning_effort.strip().lower()
+        return {"reasoning_effort": effort} if effort else {}
+    try:
+        from app.core.config import settings
+
+        configured = (settings.openai_reasoning_effort or "").strip().lower()
+        if configured:
+            return {"reasoning_effort": configured}
+    except Exception:  # noqa: BLE001 — tests may import without full Settings
+        pass
+    if (model or "").strip().lower().startswith("gpt-5"):
+        return {"reasoning_effort": "minimal"}
+    return {}
+
+
 class OpenAIChatCompletionError(Exception):
     """Base for chat completion response handling errors."""
 
@@ -75,6 +95,7 @@ async def openai_chat_json_schema_raw(
     input_filename: str = "upload.pdf",
     url: str = OPENAI_CHAT_COMPLETIONS_URL,
     timeout_seconds: float = DEFAULT_OPENAI_CHAT_TIMEOUT_S,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """POST ``/v1/chat/completions`` with ``response_format`` json_schema.
 
@@ -90,6 +111,7 @@ async def openai_chat_json_schema_raw(
     body_schema: dict[str, Any] = {
         "model": model,
         **_completion_sampling_kwargs(model),
+        **_reasoning_effort_kwargs(model, reasoning_effort),
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
@@ -115,6 +137,7 @@ async def openai_chat_json_schema_raw(
             body_obj = {
                 "model": model,
                 **_completion_sampling_kwargs(model),
+                **_reasoning_effort_kwargs(model, reasoning_effort),
                 "messages": [
                     {"role": "system", "content": system + " Respond with a single JSON object only."},
                     {
@@ -147,6 +170,7 @@ async def openai_chat_json_schema_content(
     input_filename: str = "upload.pdf",
     url: str = OPENAI_CHAT_COMPLETIONS_URL,
     timeout_seconds: float = DEFAULT_OPENAI_CHAT_TIMEOUT_S,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """Raw completion then parse ``choices[0].message.content`` as JSON object."""
     raw = await openai_chat_json_schema_raw(
@@ -160,6 +184,7 @@ async def openai_chat_json_schema_content(
         input_filename=input_filename,
         url=url,
         timeout_seconds=timeout_seconds,
+        reasoning_effort=reasoning_effort,
     )
     return extract_chat_completion_content_json(raw)
 

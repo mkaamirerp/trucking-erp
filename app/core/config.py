@@ -129,8 +129,18 @@ class Settings(BaseSettings):
     # OpenAI (optional). Used for future Load Lab semantic mapping; see docs/OPENAI_SEMANTIC_EXTRACTION_INTEGRATION_REPORT.md.
     # SSM → /run/secrets/truckerp.env as OPENAI_API_KEY; must not be required for API startup.
     openai_api_key: str | None = None
+    # Anthropic / Claude (optional). SSM → /truckerp/prod/platform/ANTHROPIC_API_KEY; not required for API startup.
+    anthropic_api_key: str | None = None
+    anthropic_extraction_model: str = "claude-haiku-4-5-20251001"
+    # Load parser semantic LLM only: openai | anthropic (env LOAD_PARSER_LLM_PROVIDER). Pipeline unchanged.
+    load_parser_llm_provider: str = "openai"
+    load_parser_anthropic_model: str | None = "claude-haiku-4-5-20251001"
     # Chat model for Load Lab v2 structured extraction (optional override).
     openai_extraction_model: str = "gpt-4o-mini"
+    # GPT-5 chat only: minimal | low | medium | high. Unset → minimal for gpt-5* json_schema calls.
+    openai_reasoning_effort: str | None = None
+    # Rate-con / workspace PDF parse only (overrides openai_reasoning_effort for load parser).
+    load_parser_reasoning_effort: str | None = "high"
 
     # POST /loads/parse-document: when False (default), legacy regex parser only.
     # When True, semantic stateless path only — no silent regex fallback (Track B1).

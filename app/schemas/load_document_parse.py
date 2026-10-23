@@ -145,3 +145,21 @@ class LoadDocumentParseResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     field_confidence: dict[str, str] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
+
+
+def strip_nul_bytes_from_json_tree(value: Any) -> Any:
+    """PostgreSQL jsonb/text rejects U+0000; PDF text and model output may include NUL."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {k: strip_nul_bytes_from_json_tree(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [strip_nul_bytes_from_json_tree(v) for v in value]
+    return value
+
+
+def postgres_safe_load_document_parse_response(
+    response: LoadDocumentParseResponse,
+) -> LoadDocumentParseResponse:
+    payload = strip_nul_bytes_from_json_tree(response.model_dump(mode="json"))
+    return LoadDocumentParseResponse.model_validate(payload)
