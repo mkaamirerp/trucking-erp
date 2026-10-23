@@ -105,7 +105,7 @@ describe("parsed create soft notes", () => {
     expect(line).toContain(BROKER_LOAD_NUMBER_PO_LABEL);
   });
 
-  it("hasBrokerLoadNumberOrPo accepts PO reference row", () => {
+  it("hasBrokerLoadNumberOrPo requires brokerLoadReference only", () => {
     expect(
       hasBrokerLoadNumberOrPo(
         baseFields({
@@ -113,6 +113,7 @@ describe("parsed create soft notes", () => {
           loadReferences: [{ kind: "po_number", value: "4500123", label: "PO #" }],
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(hasBrokerLoadNumberOrPo(baseFields({ brokerLoadReference: "REF-9" }))).toBe(true);
   });
 });

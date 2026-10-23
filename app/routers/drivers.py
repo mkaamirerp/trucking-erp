@@ -25,6 +25,22 @@ from app.policies.people_first_operational_projection import (
 )
 
 router = APIRouter(prefix="/drivers", tags=["drivers"])
+
+
+def _normalize_load_stop_type(stop_type: str | None) -> str:
+    return (stop_type or "").strip().upper()
+
+
+def _find_load_stop(stops, *types: str, reverse: bool = False):
+    """First matching stop by type; null-safe when stops empty or stop_type is NULL."""
+    want = {t.upper() for t in types}
+    ordered = list(stops or [])
+    if reverse:
+        ordered = list(reversed(ordered))
+    for stop in ordered:
+        if _normalize_load_stop_type(stop.stop_type) in want:
+            return stop
+    return None
 # Operational dispatch roster: projection rows for dispatch (see people-first rule:
 # `app/policies/people_first_operational_projection.py` and `.cursor/rules/people-first-operational-projections.mdc`).
 # Materialized via onboarding/workflow or explicit POST; not a second master for person truth when person_id is set.
@@ -306,21 +322,21 @@ async def driver_summary(
     upcoming_loads = list(upcoming_result.scalars().unique().all())
 
     def _pickup_display(load):
-        pu = next((s for s in load.stops if s.stop_type.upper() == "PICKUP"), None)
+        pu = _find_load_stop(load.stops, "PICKUP")
         return pu.appointment_date if pu else None
 
     def _delivery_display(load):
-        dr = next((s for s in reversed(load.stops) if s.stop_type.upper() == "DROP"), None)
+        dr = _find_load_stop(load.stops, "DROP", reverse=True)
         return dr.appointment_date if dr else None
 
     def _pickup_loc(load):
-        pu = next((s for s in load.stops if s.stop_type.upper() == "PICKUP"), None)
+        pu = _find_load_stop(load.stops, "PICKUP")
         if pu and (pu.facility_name or pu.city):
             return pu.facility_name or f"{pu.city or ''}, {pu.state_or_province or ''}".strip(", ")
         return None
 
     def _delivery_loc(load):
-        dr = next((s for s in reversed(load.stops) if s.stop_type.upper() == "DROP"), None)
+        dr = _find_load_stop(load.stops, "DROP", reverse=True)
         if dr and (dr.facility_name or dr.city):
             return dr.facility_name or f"{dr.city or ''}, {dr.state_or_province or ''}".strip(", ")
         return None

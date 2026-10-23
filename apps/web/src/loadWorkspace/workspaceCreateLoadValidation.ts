@@ -45,8 +45,7 @@ export function firstStopOfTypes(stops: DraftStop[], types: string[]): DraftStop
 
 /** Broker's number from the rate con (not our internal TruckERP load number). */
 export function hasBrokerLoadNumberOrPo(fields: WorkspaceDraftFields): boolean {
-  if (fields.brokerLoadReference.trim()) return true;
-  return fields.loadReferences.some((r) => (r.value || "").trim().length > 0);
+  return fields.brokerLoadReference.trim().length > 0;
 }
 
 export function draftHasParsedPdf(
@@ -99,9 +98,6 @@ export function listCreateLoadSoftNotProvided(
   }
   if (!hasBrokerLoadNumberOrPo(fields)) {
     items.push(BROKER_LOAD_NUMBER_PO_LABEL);
-  }
-  if (!fields.loadNumber.trim()) {
-    items.push(INTERNAL_LOAD_NUMBER_LABEL);
   }
 
   const pickup = firstStopOfTypes(fields.draftStops, ["PICKUP"]);
