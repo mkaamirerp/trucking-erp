@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.deps.tenant_db import get_tenant_db
 from app.schemas.load_workspace_draft import (
     LoadWorkspaceDraftCreate,
     LoadWorkspaceDraftDiscard,
+    LoadWorkspaceDraftListOut,
     LoadWorkspaceDraftOut,
     LoadWorkspaceDraftParseOut,
     LoadWorkspaceDraftPromote,
@@ -55,6 +56,26 @@ async def create_load_workspace_draft(
         created_by_platform_user_id=_platform_user_id(user),
     )
     return LoadWorkspaceDraftOut.model_validate(row)
+
+
+@router.get("", response_model=LoadWorkspaceDraftListOut)
+async def list_load_workspace_drafts(
+    status: str = Query("draft", max_length=32),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=100),
+    tenant_id: int = Depends(require_tenant),
+    _user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> LoadWorkspaceDraftListOut:
+    items, total = await draft_service.list_workspace_drafts(
+        db, tenant_id, status=status, page=page, size=size
+    )
+    return LoadWorkspaceDraftListOut(
+        items=[LoadWorkspaceDraftOut.model_validate(row) for row in items],
+        total=total,
+        page=page,
+        size=size,
+    )
 
 
 @router.get("/{draft_id}", response_model=LoadWorkspaceDraftOut)

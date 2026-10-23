@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.concurrency.draft_conflicts import workspace_draft_version_conflict_exception
 from app.core.storage import get_storage
 from app.models.load_workspace_draft import LoadWorkspaceDraft
-from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.schemas.load_document_parse import (
+    LoadDocumentParseResponse,
+    strip_nul_bytes_from_json_tree,
+)
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError, validate_load_parser_pdf
 from app.services.load_workspace_draft_lifecycle import require_workspace_draft_open_for_mutation
@@ -45,7 +47,7 @@ async def _read_bounded_pdf(file: UploadFile) -> tuple[bytes, str]:
 
 
 def accepted_parse_from_response(parse: LoadDocumentParseResponse) -> dict:
-    return parse.model_dump(mode="json")
+    return strip_nul_bytes_from_json_tree(parse.model_dump(mode="json"))
 
 
 async def parse_and_attach_workspace_draft_pdf(

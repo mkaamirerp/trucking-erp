@@ -113,3 +113,10 @@ class LoadWorkspaceDraftPromoteOut(BaseModel):
     draft: LoadWorkspaceDraftOut
     load_id: int
     idempotent_replay: bool = False
+
+
+class LoadWorkspaceDraftListOut(BaseModel):
+    items: list[LoadWorkspaceDraftOut]
+    total: int
+    page: int
+    size: int

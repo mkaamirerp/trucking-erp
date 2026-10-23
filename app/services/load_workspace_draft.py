@@ -108,3 +108,36 @@ async def update_workspace_draft(
     await db.commit()
     await db.refresh(updated)
     return updated
+
+
+async def list_workspace_drafts(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    status: str = EDITABLE_STATUS,
+    page: int = 1,
+    size: int = 50,
+) -> tuple[list[LoadWorkspaceDraft], int]:
+    """List workspace drafts for a tenant (default: editable ``draft`` status)."""
+    normalized_status = (status or EDITABLE_STATUS).strip().lower()
+    page = max(1, int(page))
+    size = min(100, max(1, int(size)))
+    offset = (page - 1) * size
+
+    filters = (
+        LoadWorkspaceDraft.tenant_id == tenant_id,
+        LoadWorkspaceDraft.status == normalized_status,
+    )
+    total = int(
+        await db.scalar(select(func.count()).where(*filters)) or 0
+    )
+    rows = (
+        await db.scalars(
+            select(LoadWorkspaceDraft)
+            .where(*filters)
+            .order_by(LoadWorkspaceDraft.updated_at.desc())
+            .offset(offset)
+            .limit(size)
+        )
+    ).all()
+    return list(rows), total
