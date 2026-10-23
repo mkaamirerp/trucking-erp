@@ -114,6 +114,20 @@ HMAC secret for the familiar-browser httpOnly cookie. **Separate from `JWT_SECRE
 
 Put or rotate the parameter, then **restart the API container** so a fresh `/run/secrets/truckerp.env` is built.
 
+### Anthropic / Claude API key (optional)
+
+- **SSM parameter name:** `/truckerp/prod/platform/ANTHROPIC_API_KEY`
+- **Rendered env key:** `ANTHROPIC_API_KEY` (optional — API starts without it)
+- **App settings:** `settings.anthropic_api_key` (`app/core/config.py`)
+
+```bash
+read -rs ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+SSM_ENV=prod ./scripts/ssm_put_anthropic_api_key.sh
+docker compose -f docker-compose.yml restart truckerp-api
+```
+
+Do not commit the key or paste it into chat; use SSM only.
+
 ```bash
 export LOGIN_TRUST_COOKIE_SECRET="$(openssl rand -hex 32)"
 SSM_ENV=prod ./scripts/ssm_put_login_trust_cookie_secret.sh

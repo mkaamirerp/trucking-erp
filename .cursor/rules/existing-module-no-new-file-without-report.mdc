@@ -1,0 +1,55 @@
+---
+description: Before creating a new file for a bug or change in an established module, STOP and report—extend the existing owner file unless owner approves a new path.
+alwaysApply: true
+---
+
+# Existing module — no new file without explicit report
+
+When the task is a **bug fix**, **regression**, **security/validation hardening**, or **behavior change** in a module that **already exists**, you **must not** add a new production file (service, util, router, schema slice, `authz/*` module file, etc.) until you **STOP and report** to the owner.
+
+This complements `AGENTS.md` (scope-first, STOP before shared-contract changes). **Default: edit the module’s existing owner files.**
+
+## Established modules (extend in place first)
+
+| Area | Typical owners (not exhaustive) |
+|------|----------------------------------|
+| **Loads / workspace** | `app/services/loads.py`, `app/schemas/load.py`, `app/models/load.py`, `app/routers/loads.py` |
+| **Load parser / Lab** | `app/services/load_document_parse_*`, `load_parser_*`, `load_lab_*`, `app/schemas/load_document_parse.py` |
+| **Trips / Dispatch** | `app/services/trips.py`, trip routers/schemas, `docs/load_trip/MASTER.md` for architecture |
+| **Fuel** | `app/services/fuel_*.py`, `app/routers/fuel.py`, `app/schemas/fuel.py` |
+| **Tolls** | `app/services/toll_*.py`, `app/routers/tolls.py` |
+| **People / DL** | `app/services/applicant_dl_*`, people workspace routers/schemas |
+| **Assets / Fleet** | fleet/asset routers, models, services under those domains |
+| **Login / Auth** | `app/routers/auth.py`, `app/utils/password.py`, signup/auth docs |
+| **RBAC** | `app/authz/*` (extend matrix/enforce; do not spawn parallel permission paths) |
+| **Payroll / Finance** | respective `app/services/*`, schemas, routers for that module |
+
+Do **not** create `app/utils/<module>_<issue>.py` or another one-off helper to avoid touching the owner file unless the report below is approved.
+
+## Required STOP report (before any new file)
+
+1. **Module** and **defect/change** (one sentence).
+2. **Existing owner file(s)** you considered editing (with paths).
+3. **Why in-place edit is insufficient** (evidence: size, import cycles, test boundaries—not convenience).
+4. **Proposed new path** and **one alternative** that keeps a single owner.
+5. **Explicit ask:** “Approve new file `<path>` or require in-place change in `<owner>`?”
+
+**WAIT** for owner approval before creating the new file.
+
+## Allowed without that approval (still prefer minimal diff)
+
+- Edits to **existing** files in the module.
+- **Tests** for the change (`tests/…`) when tests are in scope.
+- **Migrations** only when schema change is already owner-approved.
+- **Docs** only when the user asked for documentation.
+
+## New module / greenfield feature
+
+If the work is **genuinely new product surface** (not fixing existing module behavior), say so in the report and cite what is new vs what is an extension. Still avoid duplicate parallel stacks (e.g. second money helper when `loads.py` / `schemas/load.py` already own commercial money).
+
+## Anti-pattern (do not repeat)
+
+- Bug in Load money → new `app/utils/load_commercial_money.py` **without** reporting that `schemas/load.py` and `services/loads.py` are the commercial owners.
+- Parser validation gap → new `load_parser_mechanical_validation.py` **without** reporting whether `load_document_parse_guarded.py` should own it.
+
+When approved, one new file is fine; **silent proliferation is not.**
