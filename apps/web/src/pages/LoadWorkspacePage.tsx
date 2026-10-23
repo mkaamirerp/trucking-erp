@@ -81,7 +81,8 @@ import {
   workspaceReferenceTextFromDraft,
 } from "@/loadWorkspace/workspaceDraftPdfRestore";
 import {
-  buildLoadPersistParamsFromParseResponse,
+  applyEmptyWorkspaceFieldsFromParseResponse,
+  persistWorkspaceDraftAfterParse,
   type ApplyLoadDocumentParseCallbacks,
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import {
@@ -89,7 +90,6 @@ import {
   resolveWorkspaceCommercialGatePrompt,
   type WorkspaceCommercialGateOutcome,
 } from "@/loadWorkspace/workspaceCreateLoadValidation";
-import { isWorkspaceCommercialSnapshotEmpty } from "@/loadWorkspace/workspaceDraftCommercialSnapshot";
 import {
   createEmptyParseHydrationState,
   registerManualParseFieldEdit,
@@ -647,19 +647,11 @@ export default function LoadWorkspacePage() {
         void restoreDraftPdfArtifacts(draft);
       }
       const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
-      if (accepted && isWorkspaceCommercialSnapshotEmpty(fields)) {
-        void (async () => {
-          const hydration = await hydrateLoadWorkspaceFromParseResponse(
-            accepted,
-            getParseHydrationCallbacks(),
-            createEmptyParseHydrationState(),
-          );
-          parseHydrationRef.current = hydration.parseHydrationState;
-          setParseWarnings(hydration.warnings);
-          setToolbarMessage({ text: hydration.toolbar.text, tone: hydration.toolbar.tone });
-          setLastParseAppliedLabels(hydration.appliedLabels);
-          setWorkspaceReferenceText(accepted.raw_text || "");
-        })();
+      if (accepted) {
+        applyEmptyWorkspaceFieldsFromParseResponse(fields, accepted, getParseHydrationCallbacks());
+        if (accepted.raw_text) {
+          setWorkspaceReferenceText(accepted.raw_text);
+        }
       }
     },
     [hydrateFromWorkspaceFields, restoreDraftPdfArtifacts, getParseHydrationCallbacks],
@@ -931,7 +923,6 @@ export default function LoadWorkspacePage() {
       setToolbarMessage(null);
       setLastParseAppliedLabels(null);
       setLastParseEngineAttribution(null);
-      let postParseDraftSave: (() => Promise<void>) | null = null;
       const parseWallStarted = performance.now();
       try {
         if (isDraftWorkspace && draftIdFromRoute && workspaceDraft) {
@@ -943,7 +934,6 @@ export default function LoadWorkspacePage() {
           setWorkspaceDraft(persisted.draft);
           setWorkspaceReferenceText(res.raw_text || "");
           replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
-          setParseBusy(false);
           const hydration = await hydrateLoadWorkspaceFromParseResponse(
             res,
             getParseHydrationCallbacks(),
@@ -963,29 +953,27 @@ export default function LoadWorkspacePage() {
           });
           setLastParseAppliedLabels(hydration.appliedLabels);
           setDraftConflict(null);
-          const draftId = draftIdFromRoute;
-          const draftVersion = persisted.draft.concurrency_version;
-          postParseDraftSave = async () => {
-            try {
-              const persistParams = buildLoadPersistParamsFromParseResponse(res, hydration.summary, {
-                loadNumber,
-                hazmat,
-                palletCaseCount,
-                customsBrokerId,
-                existingInternalNotes: internalNotes,
-              });
-              const saved = await updateLoadWorkspaceDraft(draftId, {
-                expected_concurrency_version: draftVersion,
-                draft_json: buildWorkspaceDraftJson({ ...persistParams, status }),
-              });
-              setWorkspaceDraft(saved);
-            } catch {
-              setToolbarMessage({
-                text: `${hydration.toolbar.text} (Form filled — use Save draft if fields disappear after refresh.)`,
-                tone: hydration.toolbar.tone,
-              });
-            }
-          };
+          const saved = await persistWorkspaceDraftAfterParse({
+            draftId: draftIdFromRoute,
+            draftVersion: persisted.draft.concurrency_version,
+            res,
+            summary: hydration.summary,
+            status,
+            seed: {
+              loadNumber,
+              hazmat,
+              palletCaseCount,
+              customsBrokerId,
+              existingInternalNotes: internalNotes,
+            },
+            updateDraft: updateLoadWorkspaceDraft,
+            buildDraftJson: buildWorkspaceDraftJson,
+          });
+          setWorkspaceDraft({
+            ...persisted.draft,
+            concurrency_version: saved.concurrency_version,
+            draft_json: saved.draft_json ?? persisted.draft.draft_json,
+          });
           return;
         }
 
@@ -1053,9 +1041,6 @@ export default function LoadWorkspacePage() {
       } finally {
         setParseBusy(false);
       }
-      if (postParseDraftSave) {
-        void postParseDraftSave();
-      }
     },
     [
       canWorkspaceParsePdf,
@@ -1073,6 +1058,7 @@ export default function LoadWorkspacePage() {
       hazmat,
       palletCaseCount,
       customsBrokerId,
+      status,
     ],
   );
 
@@ -2000,7 +1986,7 @@ export default function LoadWorkspacePage() {
               <Button
                 variant="secondary"
                 type="button"
-                disabled={saving || markReadyBusy || !isDraftEditable}
+                disabled={saving || markReadyBusy || parseBusy || !isDraftEditable}
                 onClick={() => void onSaveDraft()}
               >
                 {saving ? "Saving…" : "Save draft"}
@@ -2008,7 +1994,7 @@ export default function LoadWorkspacePage() {
               <Button
                 variant="primary"
                 type="button"
-                disabled={saving || markReadyBusy || !isDraftEditable}
+                disabled={saving || markReadyBusy || parseBusy || !isDraftEditable}
                 onClick={() => void onPromoteDraft()}
               >
                 {saving ? "Creating…" : "Create load"}

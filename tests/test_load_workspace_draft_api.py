@@ -29,7 +29,11 @@ from app.services.load_workspace_draft import (
 )
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.load_workspace_draft_lifecycle import discard_workspace_draft
+from app.core.integration_db_guard import database_name_from_url
+from app.models.load_workspace_draft import LoadWorkspaceDraft
+from app.services.loads import get_load
 from app.services.load_workspace_draft_promotion import PromotionResult, promote_workspace_draft
+from sqlalchemy import update as sa_update
 from fastapi import HTTPException
 from tests.support.demo_clone_integration import demo_clone_active, install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
@@ -46,6 +50,18 @@ SAMPLE_DRAFT_JSON = {
     "rate": "1200.00",
     "commodity": "General freight",
     "draftStops": [],
+}
+
+ACCEPTED_PARSE_BROKER_REF_ONLY = {
+    "document": {"filename": "ratecon.pdf"},
+    "raw_text": "",
+    "warnings": [],
+    "field_confidence": {},
+    "extracted": {
+        "broker_load_reference": "3872125-1",
+        "references": [],
+        "stops": [],
+    },
 }
 
 pytestmark = pytest.mark.skipif(REQUIRES_TENANT_DB, reason="TENANT_DATABASE_URL not configured")
@@ -206,6 +222,57 @@ def test_mapper_rejects_invalid_reference_entry() -> None:
     with pytest.raises(DraftJsonMappingError) as exc:
         draft_json_to_load_create({"loadReferences": [{"kind": "po"}]})
     assert exc.value.field.startswith("loadReferences")
+
+
+@pytest.mark.asyncio
+async def test_promote_fills_broker_load_reference_from_accepted_parse_json() -> None:
+    if database_name_from_url(_tenant_async_url()) == "tenant_demo":
+        pytest.skip("mutation tests must not run on tenant_demo")
+    engine, factory = _session()
+    draft_id = None
+    load_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={
+                        **SAMPLE_DRAFT_JSON,
+                        "loadNumber": f"REF-PARSE-{uuid.uuid4().hex[:8]}",
+                    },
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+            await db.execute(
+                sa_update(LoadWorkspaceDraft)
+                .where(LoadWorkspaceDraft.tenant_id == tenant_id, LoadWorkspaceDraft.id == draft_id)
+                .values(accepted_parse_json=ACCEPTED_PARSE_BROKER_REF_ONLY)
+            )
+            await db.commit()
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=f"promo-ref-{uuid.uuid4().hex}",
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+            load = await get_load(db, tenant_id, load_id)
+            assert load is not None
+            assert load.broker_load_reference == "3872125-1"
+    finally:
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

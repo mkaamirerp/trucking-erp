@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.concurrency.draft_conflicts import workspace_draft_version_conflict_exception
 from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_workspace_draft import LoadWorkspaceDraft
+from app.schemas.load import LoadCreate
 from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
 from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
@@ -27,6 +28,25 @@ class PromotionResult:
         self.draft = draft
         self.load_id = load_id
         self.idempotent_replay = idempotent_replay
+
+
+def merge_broker_load_reference_from_accepted_parse(
+    load_create: LoadCreate,
+    draft: LoadWorkspaceDraft,
+) -> LoadCreate:
+    """Fill broker_load_reference from accepted_parse_json when draft_json left it blank."""
+    if (load_create.broker_load_reference or "").strip():
+        return load_create
+    accepted = draft.accepted_parse_json
+    if not isinstance(accepted, dict):
+        return load_create
+    extracted = accepted.get("extracted")
+    if not isinstance(extracted, dict):
+        return load_create
+    ref = (extracted.get("broker_load_reference") or "").strip()
+    if not ref:
+        return load_create
+    return load_create.model_copy(update={"broker_load_reference": ref})
 
 
 async def _idempotent_replay(
@@ -122,6 +142,7 @@ async def promote_workspace_draft(
 
     try:
         load_create = draft_json_to_load_create(draft.draft_json or {})
+        load_create = merge_broker_load_reference_from_accepted_parse(load_create, draft)
     except DraftJsonMappingError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

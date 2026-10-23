@@ -13,8 +13,13 @@ import {
   createEmptyParseHydrationState,
   type ParseHydrationState,
 } from "@/loadWorkspace/loadParseHydrationState";
-import type { DraftStop, LoadPersistParams } from "@/loadWorkspace/loadWorkspaceShared";
+import type {
+  DraftStop,
+  LoadPersistParams,
+  WorkspaceDraftFields,
+} from "@/loadWorkspace/loadWorkspaceShared";
 import { initialManualCreateStops } from "@/loadWorkspace/loadWorkspaceShared";
+import { hasUsefulStopIdentity } from "@/loadWorkspace/loadParseStops";
 
 function mapParsedStopType(raw: string | null | undefined): {
   stop_type: DraftStop["stop_type"];
@@ -122,6 +127,112 @@ export interface ApplyLoadDocumentParseSummary {
 
 function trimmedOrEmpty(v: string | null | undefined): string {
   return (v ?? "").trim();
+}
+
+function workspaceFieldEmpty(value: string | null | undefined): boolean {
+  return !trimmedOrEmpty(value);
+}
+
+/** Reopen draft: merge parse into form only where persisted draft_json left a field blank. */
+export function applyEmptyWorkspaceFieldsFromParseResponse(
+  fields: WorkspaceDraftFields,
+  res: LoadDocumentParseResponse,
+  cbs: ApplyLoadDocumentParseCallbacks,
+): void {
+  const ex = res.extracted;
+  const fillString = (
+    current: string,
+    parsed: string | null | undefined,
+    set: (v: string) => void,
+  ) => {
+    if (!workspaceFieldEmpty(current)) return;
+    const next = trimmedOrEmpty(parsed);
+    if (next) set(next);
+  };
+
+  fillString(fields.brokerNameSnapshot, ex.broker_name_snapshot, cbs.setBrokerNameSnapshot);
+  fillString(fields.brokerLoadReference, ex.broker_load_reference, cbs.setBrokerLoadReference);
+  fillString(fields.brokerContactNameSnapshot, ex.broker_contact_name_snapshot, cbs.setBrokerContactNameSnapshot);
+  fillString(fields.brokerContactPhoneSnapshot, ex.broker_contact_phone_snapshot, cbs.setBrokerContactPhoneSnapshot);
+  fillString(fields.brokerContactEmailSnapshot, ex.broker_contact_email_snapshot, cbs.setBrokerContactEmailSnapshot);
+  fillString(fields.freightMode, ex.mode, cbs.setFreightMode);
+  fillString(fields.equipmentType, ex.equipment_type, cbs.setEquipmentType);
+  fillString(fields.trailerType, ex.trailer_type, cbs.setTrailerType);
+  fillString(fields.trailerSize, ex.trailer_size, cbs.setTrailerSize);
+  fillString(fields.commodity, ex.commodity, cbs.setCommodity);
+  fillString(fields.temperatureRequirement, ex.temperature_requirement, cbs.setTemperatureRequirement);
+
+  if (workspaceFieldEmpty(fields.estimatedWeight) && ex.estimated_weight != null) {
+    cbs.setEstimatedWeight(String(ex.estimated_weight));
+  }
+  if (workspaceFieldEmpty(fields.rate) && ex.rate != null) {
+    cbs.setRate(String(ex.rate));
+  }
+  if (workspaceFieldEmpty(fields.customerRate) && ex.customer_rate != null) {
+    cbs.setCustomerRate(String(ex.customer_rate));
+  }
+  if (workspaceFieldEmpty(fields.miles) && ex.miles != null) {
+    cbs.setMiles(String(Math.round(ex.miles)));
+  }
+
+  if ((fields.loadReferences?.length ?? 0) === 0) {
+    const refs = workspaceReferencesFromParse(ex.references);
+    if (refs.length > 0) cbs.setLoadReferences(refs);
+  }
+
+  const hasStopIdentity = fields.draftStops.some((s) => hasUsefulStopIdentity(s));
+  if (!hasStopIdentity) {
+    const meaningfulStops = filterMeaningfulParsedStops(ex.stops ?? []);
+    if (meaningfulStops.length > 0) {
+      cbs.setDraftStops(extractedStopsToDraft(meaningfulStops));
+    }
+  }
+
+  if (workspaceFieldEmpty(fields.internalNotes) && ex.customs_broker_name?.trim()) {
+    cbs.setInternalNotes(`Customs broker (from document): ${ex.customs_broker_name.trim()}`);
+  }
+}
+
+export type PersistWorkspaceDraftAfterParseInput = {
+  draftId: string;
+  draftVersion: number;
+  res: LoadDocumentParseResponse;
+  summary: ApplyLoadDocumentParseSummary;
+  status: string;
+  seed: {
+    loadNumber: string;
+    hazmat: LoadPersistParams["hazmat"];
+    palletCaseCount: string;
+    customsBrokerId: number | null;
+    existingInternalNotes: string;
+  };
+  updateDraft: (
+    draftId: string,
+    body: { expected_concurrency_version: number; draft_json: Record<string, unknown> },
+  ) => Promise<{ concurrency_version: number; draft_json?: Record<string, unknown> }>;
+  buildDraftJson: (params: LoadPersistParams & { status: string }) => Record<string, unknown>;
+};
+
+/** Persist draft_json after parse; throws on failure (no soft fallback). */
+export async function persistWorkspaceDraftAfterParse(
+  input: PersistWorkspaceDraftAfterParseInput,
+): Promise<{ concurrency_version: number; draft_json?: Record<string, unknown> }> {
+  const persistParams = buildLoadPersistParamsFromParseResponse(input.res, input.summary, {
+    loadNumber: input.seed.loadNumber,
+    hazmat: input.seed.hazmat,
+    palletCaseCount: input.seed.palletCaseCount,
+    customsBrokerId: input.seed.customsBrokerId,
+    existingInternalNotes: input.seed.existingInternalNotes,
+  });
+  try {
+    return await input.updateDraft(input.draftId, {
+      expected_concurrency_version: input.draftVersion,
+      draft_json: input.buildDraftJson({ ...persistParams, status: input.status }),
+    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Could not save draft after parse";
+    throw new Error(msg);
+  }
 }
 
 /** Build persist payload from parse output (for draft_json after parse — no React state round-trip). */

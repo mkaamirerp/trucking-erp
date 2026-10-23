@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyLoadDocumentParseResponse } from "./applyLoadDocumentParseResponse";
+import {
+  applyEmptyWorkspaceFieldsFromParseResponse,
+  applyLoadDocumentParseResponse,
+  persistWorkspaceDraftAfterParse,
+} from "./applyLoadDocumentParseResponse";
 import type { LoadDocumentParseResponse } from "@/api";
+import { createEmptyParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
+import { initialWorkspaceFieldsManual } from "@/loadWorkspace/loadWorkspaceShared";
 
 vi.mock("@/api", () => ({
   resolveBrokerIdentity: vi.fn(),
@@ -204,5 +210,133 @@ describe("applyLoadDocumentParseResponse references", () => {
       cbs,
     );
     expect(setInternalNotes).not.toHaveBeenCalled();
+  });
+});
+
+function mockParseCallbacks() {
+  return {
+    setBrokerNameSnapshot: vi.fn(),
+    setBrokerId: vi.fn(),
+    setBrokerContactId: vi.fn(),
+    setBrokerContacts: vi.fn(),
+    setBrokerContactNameSnapshot: vi.fn(),
+    setBrokerContactPhoneSnapshot: vi.fn(),
+    setBrokerContactEmailSnapshot: vi.fn(),
+    setBrokerLoadReference: vi.fn(),
+    setLoadReferences: vi.fn(),
+    setFreightMode: vi.fn(),
+    setEquipmentType: vi.fn(),
+    setTrailerType: vi.fn(),
+    setTrailerSize: vi.fn(),
+    setCommodity: vi.fn(),
+    setEstimatedWeight: vi.fn(),
+    setTemperatureRequirement: vi.fn(),
+    setRate: vi.fn(),
+    setCustomerRate: vi.fn(),
+    setMiles: vi.fn(),
+    setInternalNotes: vi.fn(),
+    setDraftStops: vi.fn(),
+  };
+}
+
+describe("applyEmptyWorkspaceFieldsFromParseResponse", () => {
+  it("fills broker load reference when draft_json left it empty but broker name is set", () => {
+    const cbs = mockParseCallbacks();
+    const fields = {
+      ...initialWorkspaceFieldsManual(),
+      brokerNameSnapshot: "Armstrong Transport",
+      brokerLoadReference: "",
+      rate: "1200",
+    };
+    applyEmptyWorkspaceFieldsFromParseResponse(
+      fields,
+      emptyRes({ broker_load_reference: "3872125-1" }),
+      cbs,
+    );
+    expect(cbs.setBrokerLoadReference).toHaveBeenCalledWith("3872125-1");
+    expect(cbs.setBrokerNameSnapshot).not.toHaveBeenCalled();
+    expect(cbs.setRate).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite an existing broker load reference", () => {
+    const cbs = mockParseCallbacks();
+    const fields = {
+      ...initialWorkspaceFieldsManual(),
+      brokerLoadReference: "KEEP-ME",
+    };
+    applyEmptyWorkspaceFieldsFromParseResponse(
+      fields,
+      emptyRes({ broker_load_reference: "3872125-1" }),
+      cbs,
+    );
+    expect(cbs.setBrokerLoadReference).not.toHaveBeenCalled();
+  });
+});
+
+describe("persistWorkspaceDraftAfterParse", () => {
+  it("awaits draft_json persist and surfaces failures", async () => {
+    const updateDraft = vi.fn().mockRejectedValue(new Error("network down"));
+    const buildDraftJson = vi.fn().mockReturnValue({ loadNumber: "X" });
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: createEmptyParseHydrationState(),
+    };
+    await expect(
+      persistWorkspaceDraftAfterParse({
+        draftId: "draft-1",
+        draftVersion: 2,
+        res: emptyRes({ broker_load_reference: "3872125-1" }),
+        summary,
+        status: "draft",
+        seed: {
+          loadNumber: "",
+          hazmat: "unset",
+          palletCaseCount: "",
+          customsBrokerId: null,
+          existingInternalNotes: "",
+        },
+        updateDraft,
+        buildDraftJson,
+      }),
+    ).rejects.toThrow("network down");
+    expect(updateDraft).toHaveBeenCalledOnce();
+  });
+
+  it("returns saved draft metadata on success", async () => {
+    const updateDraft = vi.fn().mockResolvedValue({
+      concurrency_version: 3,
+      draft_json: { brokerLoadReference: "3872125-1" },
+    });
+    const buildDraftJson = vi.fn().mockReturnValue({ brokerLoadReference: "3872125-1" });
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: createEmptyParseHydrationState(),
+    };
+    const saved = await persistWorkspaceDraftAfterParse({
+      draftId: "draft-1",
+      draftVersion: 2,
+      res: emptyRes({ broker_load_reference: "3872125-1" }),
+      summary,
+      status: "draft",
+      seed: {
+        loadNumber: "",
+        hazmat: "unset",
+        palletCaseCount: "",
+        customsBrokerId: null,
+        existingInternalNotes: "",
+      },
+      updateDraft,
+      buildDraftJson,
+    });
+    expect(saved.concurrency_version).toBe(3);
+    expect(saved.draft_json?.brokerLoadReference).toBe("3872125-1");
   });
 });
