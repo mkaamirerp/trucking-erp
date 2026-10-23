@@ -29,7 +29,7 @@ Applies to **every** TruckERP module (Auth, People, Payroll, Loads, Trips, Fuel,
 1. Run **relevant** tests for the change.
 2. **Commit** only the actual changed files (no secrets, private PDFs, credentials, env secrets, or unrelated dirty work).
 3. **Push** to `origin/gpt-review`.
-4. **Report** to the owner for ChatGPT review:
+4. **Report** to the owner for **Claude or ChatGPT** review:
    - Full commit SHA
    - Changed files
    - Exact behavior changed
@@ -42,7 +42,9 @@ Applies to **every** TruckERP module (Auth, People, Payroll, Loads, Trips, Fuel,
 
 If a checkpoint is incomplete or tests fail: say so, mark **NOT READY FOR MERGE**, push a reviewable commit only when safe, then **STOP**.
 
-ChatGPT review requires **pushed source on GitHub** — a Cursor summary alone is **not** sufficient evidence.
+**Claude or ChatGPT** review requires **pushed source on GitHub** — a Cursor summary alone is **not** sufficient evidence.
+
+**Deploy:** **Push to `origin/gpt-review` before deploy.** Deploy to shared/demo/production hosts **only with the owner's explicit approval** — never from unpushed local-only changes.
 
 ---
 

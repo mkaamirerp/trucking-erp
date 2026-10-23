@@ -4,9 +4,15 @@
 
 ## Trust / precedence rule
 
-**Load / Trip / TripLoad / Dispatch / Custody:** [`load_trip/MASTER.md`](./load_trip/MASTER.md) is the **sole** canonical architecture **and** remediation/work-order document. When any other document conflicts with that master on those domains: **STOP and report**.
+**Load / Trip / TripLoad / Dispatch / Custody:** [`load_trip/MASTER.md`](../../load_trip/MASTER.md) is the canonical architecture **and** remediation/work-order document.
+
+**Operator workflow (dispatch home, load-first assignment, workspace promote → ready):** [`.cursor/rules/owner-product-rules.mdc`](../../../.cursor/rules/owner-product-rules.mdc) **overrides** `MASTER.md`. Do **not** STOP solely for workflow conflicts between those two — implement per owner product rules and update `MASTER.md` when directed.
+
+When any other document conflicts with the master on **non-workflow** architecture: **STOP and report**.
 
 For other domains, prefer **current code + newer explicit locks/decisions**. Historical reports remain evidence but do not override current architecture.
+
+| **Owner product rules (workflow)** | [`.cursor/rules/owner-product-rules.mdc`](../../../.cursor/rules/owner-product-rules.mdc) | Dispatch home, loads-first assign, Create load → ready, Mark ready scope |
 
 ---
 
@@ -14,7 +20,7 @@ For other domains, prefer **current code + newer explicit locks/decisions**. His
 
 | Title | Path | Status / purpose |
 |---|---|---|
-| **Load / Trip Master Architecture** | [`load_trip/MASTER.md`](./load_trip/MASTER.md) | **Only** Load/Trip/TripLoad/Dispatch/custody architecture + implementation work order + absorbed appendices. |
+| **Load / Trip Master Architecture** | [`load_trip/MASTER.md`](../../load_trip/MASTER.md) | Load/Trip/TripLoad/Dispatch/custody architecture + work order (workflow overrides: owner-product-rules). |
 
 Former Decision 6–14, Phase3L, Trip Container 000/001, integrity tracker, trip-number rule, and related foundation/index MDs were consolidated into that master and removed.
 

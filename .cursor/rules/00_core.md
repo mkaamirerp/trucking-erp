@@ -2,7 +2,7 @@
 
 ## Non-negotiables
 - Small changes only; one concern at a time.
-- Never edit multiple files without asking first.
+- Inside an **approved task**, multiple files are fine; **list every changed file** in the report.
 - Prefer: plan → patch → run checks → summarize.
 - Never "clean up" or refactor unless asked.
 - If unsure, ask for the exact command/log/output rather than guessing.

@@ -9,7 +9,7 @@
 
 ## 0. Problem statement
 
-Today, **manual parse results live in React state** until **Create Load** inserts a permanent `loads` row (`status=draft`). Email intake **creates `loads` rows immediately**. Under the Issue 5 interim DELETE guard, unwanted commercial rows **accumulate** with no cancel path. Trip membership does **not** require `ready` (MASTER I12 open).
+Today, **manual parse** is held in a **workspace draft** until **Create load** (promote) inserts a permanent **`loads` row at `status=ready`** with **no completeness prerequisite validation** on promote. **Create load from parsed PDF** is **never field-blocked** for missing optional commercial fields (soft “not provided” UX allowed). Email intake may still **create `loads` rows immediately** as **`draft`**. Under the Issue 5 interim DELETE guard, unwanted commercial rows **accumulate** without cancel. Trip membership requires Load **`ready`** (I12).
 
 This spec defines a **tenant-scoped workspace draft** (distinct from `loads.id`), **promotion** to an official Load created **`ready`**, **immutable evidence** at promotion, and **forward-only** trip eligibility — without implementing code in this phase.
 
@@ -347,15 +347,14 @@ After successful B, `concurrency_version` increments — client must use new ver
 
 ### 5.1 Validation
 
-- Extract **`validate_load_ready_prerequisites(payload)`** from `mark_load_ready()` (broker, `broker_load_reference`, pickup + delivery/drop stops) — **single function** called by:
-  - `POST /loads/{id}/mark-ready` (legacy DB drafts)
-  - `POST /load-workspace-drafts/{id}/promote` (workspace)
+- **`validate_load_ready_prerequisites`** (broker, `broker_load_reference`, pickup + delivery/drop stops) is used by **`mark_load_ready()`** for **legacy `loads.status=draft`** rows only.
+- **`POST /load-workspace-drafts/{id}/promote` does not call** that validator (owner product rules / 4A): promotion inserts **`ready`** without completeness prerequisites.
 
-Do not duplicate rules.
+Do not duplicate rules between mark-ready and other paths.
 
 ### 5.2 Create Load as `ready`
 
-Promotion **must not** insert `status=draft`. All steps below occur **inside §5.6 transaction** (not separate commits).
+Promotion **must not** insert `status=draft`. Promotion inserts **`status=ready`** with **no completeness prerequisite gate**. All steps below occur **inside §5.6 transaction** (not separate commits).
 
 Issue 3: generic PATCH must still not set `ready`; only mark-ready (legacy) and promote endpoints.
 
@@ -391,7 +390,7 @@ Ordered steps:
 4. If active upload lease (`uploading` + lease valid) → rollback, 409 `LOAD_WORKSPACE_PDF_UPLOAD_IN_PROGRESS`.
 5. If commercial rules require RC PDF and (`pdf_upload_state != ready` or `pdf_storage_key` null) → rollback, 400.
 6. CAS `concurrency_version`; store `promotion_idempotency_key` if not already set for this successful attempt.
-7. `validate_load_ready_prerequisites(draft_json)` — on failure rollback, 400 (draft unchanged).
+7. **Skip** `validate_load_ready_prerequisites` on promote (owner product rules). Legacy **`mark_load_ready`** still validates before updating existing draft loads.
 8. `INSERT loads` (`status=ready`, `promotion_origin_workspace_draft_id=draft.id`, commercial fields).
 9. `INSERT load_stops` from draft_json.
 10. `INSERT load_commercial_evidence` (`workspace_draft_id`, same `storage_key`, `commercial_permanent`, frozen parse).

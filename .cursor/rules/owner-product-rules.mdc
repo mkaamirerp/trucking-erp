@@ -1,0 +1,45 @@
+---
+description: Owner (Amir) product rules for operator workflow — override MASTER.md on workflow conflicts
+alwaysApply: true
+---
+
+# Owner product rules (operator workflow)
+
+**Authority:** These rules **override** `docs/load_trip/MASTER.md` and other architecture docs on **operator workflow and UX intent** only. They do **not** override tenant isolation, financial immutability, Issue 0A legacy writer freeze, RBAC contracts, or schema/migration safety unless a separate owner decision says so.
+
+When implementing operator-facing Load / Trip / Dispatch behavior, follow this file. If `MASTER.md` conflicts on **workflow**, implement per **this file** and update `MASTER.md` when the owner directs — **do not STOP** solely for that workflow conflict.
+
+## Development and release
+
+- Develop on branch **`gpt-review`**; review on **GitHub** by **Claude or ChatGPT**; merge to **`main` only after owner approval**.
+- **Push to `origin/gpt-review` before deploy.** Deploy to any shared or demo host **only with the owner's explicit approval**; the running host must match a **pushed** commit on `gpt-review` (not unpushed local-only changes).
+
+## Load workspace (small-carrier flow)
+
+1. **Parse rate con → review → Create load** → the commercial row is **`ready`** and **available to dispatch** immediately. **No Mark ready** step on this path.
+2. **Workspace drafts** (`load_workspace_drafts`) are **save for later** for incomplete work only. Do not create a `loads` row until **Create load** (promote).
+3. **`POST /api/v1/loads`** and paths that already create **`loads.status=draft`** (e.g. email intake) **stay `draft`** until **`mark_load_ready`** (legacy). Do not remove that guard without owner approval.
+4. **Promotion** inserts **`status=ready` with no completeness prerequisites** (no broker / broker-load-# / stop gate). Dispatcher may fix gaps on the load page after create.
+5. **Create load from parsed PDF** is **never field-blocked** for missing optional commercial fields; soft “not provided” UX is allowed. Manual create may keep **pickup/delivery city+state** hard gates only where already approved in task scope.
+
+## `ready` meaning
+
+**`ready`** = dispatcher-reviewed load, **available to dispatch**; **no completeness prerequisites** on the **promotion** path. **`mark_load_ready`** on existing **`loads.status=draft`** (email/legacy) may still enforce prerequisites until the owner changes that path.
+
+**`ready` is not execution:** it does not assign a driver, create a trip, dispatch, or start movement by itself.
+
+## Dispatch home and assignment (target product)
+
+- **Dispatch home** = **`DispatchHomeDashboard`** at **`/dashboard`** (operator Dispatch landing). **`DeprecatedDispatchPage`** (`/dispatch`) is legacy salvage only — **not** the dispatch home.
+- **Loads-first assignment:** show **ready loads not on an open trip** on Dispatch home. Dispatcher **assigns a driver to a load** (e.g. drag driver onto load). The **Trip is created automatically** with that assignment. Dispatchers must **not** be required to use **Create Planned Trip** on the load page or search by load number on an empty trip as the primary first-leg flow.
+- **Trip Container** (`TripWorkspacePage` / `/trips/:id`) = **trip detail and execution** (membership, equipment, movement, custody) — not the primary “find a load to assign” surface.
+- **Follow-up / onward movement** (in-progress load, yard, FMP) remains a **separate** path per `MASTER.md` §9A; do not conflate with first-leg dispatch from the ready queue.
+
+## Commercial fields
+
+- **`rate` (linehaul):** carrier/broker pay on the rate confirmation — primary commercial rate.
+- **`customer_rate`:** optional auxiliary field; not a primary parser target; **do not** copy `rate` into `customer_rate` unless a separate customer/shipper price is explicit on the document.
+
+## Stored rate confirmation PDF
+
+Loads promoted from workspace should retain a **viewable RC PDF** (`load_commercial_evidence`). Missing PDF on the load detail page after promote is a **product gap** to fix, not an acceptable operator workaround.

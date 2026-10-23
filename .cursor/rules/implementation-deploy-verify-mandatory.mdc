@@ -8,7 +8,9 @@ alwaysApply: true
 
 ## Rule
 
-When you **finish changing or implementing** code that affects **Docker surfaces** (API image, nginx-baked `apps/web/dist`, compose):
+**Deploy only after the owner approves deployment.** **Code must be pushed to `origin/gpt-review` first** (never deploy unpushed local-only changes). Merge to `main` and production deploy are separate owner approvals.
+
+When you **finish changing or implementing** code that affects **Docker surfaces** (API image, nginx-baked `apps/web/dist`, compose) **and deployment is owner-approved**:
 
 1. **Do not** tell the user the work is “complete,” “live,” or “deployed” based only on the **git working tree**.
 2. **Do** run the reload path and **prove** the **running** API container and **running** nginx bundle contain the change (grep route in container, grep UI string in `/usr/share/nginx/html/assets/*.js`, or equivalent).

@@ -6,7 +6,7 @@ TruckERP is one proprietary application with a shared core (FastAPI routers/APIs
 ## Scope first — mandatory before editing
 1. Read the relevant module documentation, current code, tests, migrations and repository instructions. Respect locked business rules and existing contracts.
 2. Record the intended module, allowed files, dependencies, affected APIs/tables, and baseline tests. Inspect callers and consumers, not just the new feature.
-3. Work on `main` only, following the repository's existing change controls. Do not deploy, migrate production, or change production configuration without explicit authorization.
+3. Develop on **`gpt-review`**; push for review on **GitHub** (Claude or ChatGPT per `.cursor/rules/gpt-review-gates.mdc`); merge to **`main` only after owner approval**. Do not deploy, migrate production, or change production configuration without explicit authorization.
 
 ## Load / Trip architecture — read before write
 Before changing code, schema, APIs, UI, migrations, or business rules that touch **Load**, **Trip**, **TripLoad**, **Dispatch**, Trip Container, Load/Trip Workspace, assignment, `Load.status`, `Trip.status`, trip number, `dispatch_trips`, `active_trip_id`, custody, terminal/yard, handoff, recovery/repower, operational board/planning queue, or payroll/read-models that depend on Load/Trip:

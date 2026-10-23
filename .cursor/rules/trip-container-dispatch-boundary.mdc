@@ -8,8 +8,9 @@ alwaysApply: true
 
 ## Locked identity
 
-- **Trip page = Trip Container = Dispatch Control Center** — **one** operational surface (today: `TripWorkspacePage` / `/trips/:id`). Do **not** describe these as separate products, competing pages, or a “dispatch product” built apart from the Trip page.
-- **No separate active DispatchPage.** The legacy **`Load.status`** board is **`DeprecatedDispatchPage`** only (visual salvage / retire later).
+- **Trip page = Trip Container** — **trip detail and execution** (today: `TripWorkspacePage` / `/trips/:id`). Do **not** describe Trip Container as a separate product from the Trip backend.
+- **Dispatch home** = **`DispatchHomeDashboard`** at **`/dashboard`** — primary dispatcher landing; **loads-first** assignment (ready loads not on an open trip; assign driver → **Trip created automatically** per `owner-product-rules.mdc`).
+- **No separate active legacy dispatch board.** **`DeprecatedDispatchPage`** (`/dispatch`) is **visual salvage / retire later** — not dispatch home.
 - **Load workspace** (`LoadWorkspacePage`) = **load directory** + **commercial / readiness / document** detail — not the execution control center.
 
 ## Rule summary
@@ -33,6 +34,7 @@ alwaysApply: true
 
 ## Reference
 
-- **Sole authority:** `docs/load_trip/MASTER.md` (architecture + work order + UI identity appendix)
+- **Architecture authority:** `docs/load_trip/MASTER.md` (architecture + work order + UI identity appendix)
+- **Operator workflow authority:** `.cursor/rules/owner-product-rules.mdc` overrides `MASTER.md` on dispatch-home / load-first assignment UX.
 
-If this rule conflicts with that master: **STOP and report**. Do not choose independently.
+If this rule conflicts with `MASTER.md` on **workflow**: follow **owner-product-rules**. On **non-workflow** architecture: **STOP and report**.

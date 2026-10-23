@@ -161,7 +161,7 @@ These are **separate but reconcilable** truths.
 | Value | Meaning |
 |-------|---------|
 | **`draft`** | Incomplete / unverified commercial Load |
-| **`ready`** | Commercially verified enough for **dispatch planning** |
+| **`ready`** | **Dispatcher-reviewed** load, **available to dispatch**; **no completeness prerequisites** on the workspace **promotion** path (owner product rules). Not execution — does not assign driver or create a trip by itself. |
 | **`cancelled`** | Commercial Load itself is cancelled / no longer worked |
 
 **Owner carve-out (2026-10):** `POST /load-workspace-drafts/{id}/promote` inserts **`ready`** (not `draft`) with **no broker / broker-load-# / stop completeness gate** — dispatcher completes on the load page. **`mark_load_ready()`** keeps prerequisites for legacy/email draft loads. **`POST /api/v1/loads`** and direct `create_load` **still** create **`draft`** only.
@@ -418,11 +418,19 @@ Owns:
 - completion / cancellation
 - operational context
 
-**Locked product identity:** Trip = Trip Container = Dispatch Control Center — one Trip-backed operational world. Operator language may say “Dispatch”; backend may say “Trip.” That must **not** imply a second lifecycle from `Load.status` lanes.
+**Locked product identity:** Trip Container = **trip detail / execution** (`TripWorkspacePage`). Operator language may say “Dispatch”; backend may say “Trip.” That must **not** imply a second lifecycle from `Load.status` lanes.
+
+### Dispatch home (`/dashboard`)
+
+**Dispatch home** = **`DispatchHomeDashboard`** at **`/dashboard`** — dispatcher landing and **loads-first** assignment surface (owner product rules; see `.cursor/rules/owner-product-rules.mdc`).
+
+**Target operator flow:** **ready** loads **not on an open trip** appear on Dispatch home; dispatcher **assigns a driver to a load** (e.g. drag driver onto load); **Trip is created automatically**. Trip Container remains where execution, equipment, and movement are managed.
+
+**Implementation note:** Until that queue and assign API ship, code may still expose trip-first or manual “Create Planned Trip” paths — treat those as **gaps**, not the owner workflow.
 
 ### Legacy `/dispatch` board
 
-`DeprecatedDispatchPage` / `/dispatch` is **compatibility / visual salvage** during retirement — **not** current operational authority.
+`DeprecatedDispatchPage` / `/dispatch` is **compatibility / visual salvage** during retirement — **not** dispatch home and **not** current operational authority.
 
 Do **not** build a second Load page pretending to be Trip execution.
 
@@ -438,12 +446,13 @@ Primary detail: Appendix J (UI); §2 / Issue 0A–0C work order.
 
 ### Load planning queue
 
-Based on **commercial Load readiness**.
+Based on **`loads.status = ready`** and **no open trip membership** (owner product rules).
 
-- Ready Loads not yet committed to current execution
-- Used for: planning, combining, splitting, holding, adding to new/existing Trip
+- **Ready loads not on an open trip** are shown on **Dispatch home** (`DispatchHomeDashboard` / `/dashboard`).
+- Dispatcher **assigns a driver to a load** (e.g. drag driver onto load); **Trip is created automatically** with that assignment.
+- Also used for: combining, splitting, holding, onward/FMP flows per §9A (separate from first-leg ready queue).
 
-**Save Ready** (without a Trip action) does **not** by itself: create Trip, assign equipment, send package, start `in_progress`, set `Load.status = dispatched`, start custody, or start payroll.
+**Mark ready / Create load → ready** (without dispatch assignment) does **not** by itself: assign equipment, send package, start `in_progress`, set `Load.status = dispatched`, start custody, or start payroll.
 
 ### Trip operational board / container
 
