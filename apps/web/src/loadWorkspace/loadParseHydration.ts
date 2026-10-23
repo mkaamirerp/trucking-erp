@@ -10,6 +10,7 @@ import {
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import type { ParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
 import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
+import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttribution";
 import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
 
 /** Toolbar tone after parse hydration (matches LoadWorkspacePage WorkspaceToolbarTone). */
@@ -22,6 +23,7 @@ export interface LoadWorkspacePdfHydrationResult {
   warnings: string[];
   toolbar: { text: string; tone: LoadWorkspacePdfHydrationTone };
   appliedLabels: string[] | null;
+  engineAttribution: string | null;
 }
 
 /**
@@ -46,11 +48,13 @@ export function computeLoadWorkspacePdfHydrationResult(
     resolvedBrokerId: summary.resolvedBrokerId,
     brokerContactMatched: summary.brokerContactMatched,
   });
+  const engineAttribution = buildParseEngineAttribution(res.context ?? undefined);
   return {
     summary,
     warnings,
     toolbar: { text: outcome.headline, tone },
     appliedLabels: appliedLabels.length > 0 ? appliedLabels : null,
+    engineAttribution,
   };
 }
 

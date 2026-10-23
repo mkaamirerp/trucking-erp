@@ -158,11 +158,11 @@ function LandingPage() {
       <header className="relative z-10">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow">
-              <Truck />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-sm font-bold text-white shadow">
+              TE
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">Trucking ERP</div>
+              <div className="text-sm font-semibold text-white">TruckERP</div>
               <div className="text-xs text-slate-300">Dispatch • Payroll • Compliance</div>
             </div>
           </div>
@@ -564,7 +564,7 @@ function LandingPage() {
           <div className="mx-auto max-w-6xl px-6 py-10">
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div className="text-sm text-slate-300">
-                © {new Date().getFullYear()} Trucking ERP • All rights reserved.
+                © {new Date().getFullYear()} TruckERP • All rights reserved.
               </div>
               <div className="flex gap-4 text-sm">
                 <a href="#features" className="text-slate-300 hover:text-white">

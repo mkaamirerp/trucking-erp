@@ -13,7 +13,8 @@ import {
   createEmptyParseHydrationState,
   type ParseHydrationState,
 } from "@/loadWorkspace/loadParseHydrationState";
-import type { DraftStop } from "@/loadWorkspace/loadWorkspaceShared";
+import type { DraftStop, LoadPersistParams } from "@/loadWorkspace/loadWorkspaceShared";
+import { initialManualCreateStops } from "@/loadWorkspace/loadWorkspaceShared";
 
 function mapParsedStopType(raw: string | null | undefined): {
   stop_type: DraftStop["stop_type"];
@@ -110,12 +111,69 @@ export interface ApplyLoadDocumentParseCallbacks {
 
 export interface ApplyLoadDocumentParseSummary {
   resolvedBrokerId: number | null;
+  resolvedBrokerContactId: number | null;
   brokerContactMatched: boolean;
   mcOrDotAttempted: boolean;
   /** Issue I19 — stops needing operator classification before save. */
   unresolvedStopCount: number;
   /** Session-only parse ownership (Issue I18). */
   parseHydrationState: ParseHydrationState;
+}
+
+function trimmedOrEmpty(v: string | null | undefined): string {
+  return (v ?? "").trim();
+}
+
+/** Build persist payload from parse output (for draft_json after parse — no React state round-trip). */
+export function buildLoadPersistParamsFromParseResponse(
+  res: LoadDocumentParseResponse,
+  summary: ApplyLoadDocumentParseSummary,
+  seed: {
+    loadNumber?: string;
+    hazmat?: LoadPersistParams["hazmat"];
+    palletCaseCount?: string;
+    customsBrokerId?: number | null;
+    existingInternalNotes?: string;
+  } = {},
+): LoadPersistParams {
+  const ex = res.extracted;
+  const meaningfulStops = filterMeaningfulParsedStops(ex.stops ?? []);
+  const draftStops =
+    meaningfulStops.length > 0 ? extractedStopsToDraft(meaningfulStops) : initialManualCreateStops();
+
+  let internalNotes = (seed.existingInternalNotes ?? "").trim();
+  if (ex.customs_broker_name?.trim()) {
+    const cline = `Customs broker (from document): ${ex.customs_broker_name.trim()}`;
+    internalNotes = internalNotes ? `${internalNotes}\n\n---\n${cline}` : cline;
+  }
+
+  return {
+    loadNumber: seed.loadNumber ?? "",
+    brokerId: summary.resolvedBrokerId,
+    brokerContactId: summary.resolvedBrokerContactId,
+    brokerNameSnapshot: trimmedOrEmpty(ex.broker_name_snapshot),
+    brokerContactNameSnapshot: trimmedOrEmpty(ex.broker_contact_name_snapshot),
+    brokerContactPhoneSnapshot: trimmedOrEmpty(ex.broker_contact_phone_snapshot),
+    brokerContactExtensionSnapshot: "",
+    brokerContactEmailSnapshot: trimmedOrEmpty(ex.broker_contact_email_snapshot),
+    brokerLoadReference: trimmedOrEmpty(ex.broker_load_reference),
+    loadReferences: workspaceReferencesFromParse(ex.references),
+    mode: trimmedOrEmpty(ex.mode),
+    equipmentType: trimmedOrEmpty(ex.equipment_type),
+    trailerType: trimmedOrEmpty(ex.trailer_type),
+    trailerSize: trimmedOrEmpty(ex.trailer_size),
+    commodity: trimmedOrEmpty(ex.commodity),
+    estimatedWeight: ex.estimated_weight != null ? String(ex.estimated_weight) : "",
+    hazmat: seed.hazmat ?? "unset",
+    temperatureRequirement: trimmedOrEmpty(ex.temperature_requirement),
+    palletCaseCount: seed.palletCaseCount ?? "",
+    rate: ex.rate != null ? String(ex.rate) : "",
+    customerRate: ex.customer_rate != null ? String(ex.customer_rate) : "",
+    miles: ex.miles != null ? String(Math.round(ex.miles)) : "",
+    customsBrokerId: seed.customsBrokerId ?? null,
+    internalNotes,
+    draftStops,
+  };
 }
 
 /**
@@ -131,6 +189,7 @@ export async function applyLoadDocumentParseResponse(
     parseHydrationState != null ? parseHydrationState : createEmptyParseHydrationState();
   const ex = res.extracted;
   let resolvedBrokerIdForSummary: number | null = null;
+  let resolvedBrokerContactIdForSummary: number | null = null;
   let brokerContactMatchedForSummary = false;
 
   const nextHydration = applyParseScalarHydration(ex, cbs, hydration);
@@ -169,6 +228,7 @@ export async function applyLoadDocumentParseResponse(
         });
         if (matchedContact) {
           brokerContactMatchedForSummary = true;
+          resolvedBrokerContactIdForSummary = matchedContact.id;
           cbs.setBrokerContactId(matchedContact.id);
         }
       } catch {
@@ -206,6 +266,7 @@ export async function applyLoadDocumentParseResponse(
 
   return {
     resolvedBrokerId: resolvedBrokerIdForSummary,
+    resolvedBrokerContactId: resolvedBrokerContactIdForSummary,
     brokerContactMatched: brokerContactMatchedForSummary,
     mcOrDotAttempted,
     unresolvedStopCount,

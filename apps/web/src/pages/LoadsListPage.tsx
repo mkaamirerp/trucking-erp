@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import StatusBadge from "@/components/StatusBadge";
-import { listLoads, Load } from "@/api";
+import { listLoadWorkspaceDrafts, listLoads, Load, type LoadWorkspaceDraft } from "@/api";
+import { workspaceDraftListLabel } from "@/loadWorkspace/workspaceDraftListLabel";
 import { formatRouteFromStops, firstPickupAppointmentDate } from "@/utils/loadStops";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
+
+/** Default loads directory hides commercially cancelled rows (row still exists for audit). */
+const LOAD_LIST_DEFAULT_STATUSES = [
+  "draft",
+  "ready",
+  "unassigned",
+  "assigned",
+  "dispatched",
+  "arrived_pickup",
+  "in_transit",
+  "arrived_delivery",
+  "delivered",
+  "issue_hold",
+];
 
 export default function LoadsListPage() {
   const navigate = useNavigate();
@@ -13,13 +28,30 @@ export default function LoadsListPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
+  const [workspaceDrafts, setWorkspaceDrafts] = useState<LoadWorkspaceDraft[]>([]);
 
   const runQuery = useCallback((q: string, opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? false;
     if (!silent) setLoading(true);
     setError(null);
-    listLoads({ page: 1, size: 50, search: q || undefined })
-      .then((res) => setLoads(res.items || []))
+    Promise.all([
+      listLoads({
+        page: 1,
+        size: 50,
+        search: q || undefined,
+        status: LOAD_LIST_DEFAULT_STATUSES,
+      }),
+      listLoadWorkspaceDrafts({ status: "draft", page: 1, size: 20 }).catch(() => ({
+        items: [] as LoadWorkspaceDraft[],
+        total: 0,
+        page: 1,
+        size: 20,
+      })),
+    ])
+      .then(([loadsRes, draftsRes]) => {
+        setLoads(loadsRes.items || []);
+        setWorkspaceDrafts(draftsRes.items || []);
+      })
       .catch((e) => {
         if (!silent) setError(e?.message || "Failed to load loads");
       })
@@ -117,6 +149,38 @@ export default function LoadsListPage() {
           </button>
         </div>
       </div>
+
+      {workspaceDrafts.length > 0 ? (
+        <div className="rounded-lg border border-amber-500/40 bg-[#1a1e2a] shadow-sm overflow-hidden">
+          <div className="border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-4 py-2.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-amber-400/90">
+              Workspace drafts (not loads yet)
+            </h2>
+            <p className="text-[11px] text-[var(--trk-text-muted)] mt-0.5">
+              Parsed or in-progress work lives here until you open it and choose Create load.
+            </p>
+          </div>
+          <ul className="divide-y divide-[var(--trk-border)]">
+            {workspaceDrafts.map((draft) => (
+              <li key={draft.id}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[var(--trk-surface)] transition-colors"
+                  onClick={() => navigate(OPS.LOAD_DRAFT(draft.id))}
+                >
+                  <span className="text-sm font-medium text-[var(--trk-text)]">
+                    {workspaceDraftListLabel(draft)}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-[var(--trk-text-muted)]">
+                    {draft.pdf_filename ? "PDF attached" : "No PDF"} · Updated{" "}
+                    {new Date(draft.updated_at).toLocaleString()}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {/* Table card */}
       <div className="rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">

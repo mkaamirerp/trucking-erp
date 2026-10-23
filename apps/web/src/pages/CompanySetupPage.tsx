@@ -204,7 +204,7 @@ export default function CompanySetupPage() {
           <div className="trk-brand">
             <div className="trk-badge">TE</div>
             <div>
-              <h1>Trucking ERP</h1>
+              <h1>TruckERP</h1>
               <p>Finish your company profile</p>
             </div>
           </div>

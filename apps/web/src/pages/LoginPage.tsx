@@ -319,9 +319,9 @@ function LoginPage() {
     <div className="trk-auth">
       <div className="trk-auth-wrap">
         <div className="trk-brand">
-          <div className="trk-badge">🚚</div>
+          <div className="trk-badge">TE</div>
           <div>
-            <h1>Trucking ERP</h1>
+            <h1>TruckERP</h1>
             <p>Secure fleet operations platform</p>
           </div>
         </div>
@@ -448,7 +448,7 @@ function LoginPage() {
           <div className="trk-foot">Tenant-isolated • Secure • Multi-tenant SaaS</div>
         </div>
 
-        <div className="trk-copyright">© {new Date().getFullYear()} Trucking ERP</div>
+        <div className="trk-copyright">© {new Date().getFullYear()} TruckERP</div>
       </div>
     </div>
   );

@@ -24,6 +24,7 @@ export function workspacePdfHydrationUxFromDraft(draft: LoadWorkspaceDraft) {
   }
   const ux = computeLoadWorkspacePdfHydrationResult(accepted, {
     resolvedBrokerId: null,
+    resolvedBrokerContactId: null,
     brokerContactMatched: false,
     mcOrDotAttempted: false,
     unresolvedStopCount: 0,

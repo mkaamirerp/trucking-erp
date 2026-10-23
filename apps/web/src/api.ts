@@ -150,6 +150,26 @@ export async function getLoadWorkspaceDraft(draftId: string) {
   return handle<LoadWorkspaceDraft>(res);
 }
 
+export type LoadWorkspaceDraftListResult = {
+  items: LoadWorkspaceDraft[];
+  total: number;
+  page: number;
+  size: number;
+};
+
+export async function listLoadWorkspaceDrafts(params?: {
+  status?: string;
+  page?: number;
+  size?: number;
+}) {
+  const url = new URL(`${API_BASE}/load-workspace-drafts`, window.location.origin);
+  if (params?.status) url.searchParams.set("status", params.status);
+  if (params?.page != null) url.searchParams.set("page", String(params.page));
+  if (params?.size != null) url.searchParams.set("size", String(params.size));
+  const res = await fetchWithTenant(url.toString());
+  return handle<LoadWorkspaceDraftListResult>(res);
+}
+
 export async function updateLoadWorkspaceDraft(
   draftId: string,
   payload: { expected_concurrency_version: number; draft_json: Record<string, unknown> },

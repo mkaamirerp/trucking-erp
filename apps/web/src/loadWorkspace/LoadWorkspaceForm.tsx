@@ -32,6 +32,7 @@ import {
   type WorkspaceSection,
 } from "./loadWorkspaceShared";
 import { formatRouteFromStops } from "@/utils/loadStops";
+import BrokerCarrierCombobox from "@/loadWorkspace/BrokerCarrierCombobox";
 import {
   compactLoadReferencesForDisplay,
   displayOperationalReferenceLabel,
@@ -171,33 +172,27 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   return (
     <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
     <div className="grid grid-cols-1 gap-3 pb-4 lg:grid-cols-2">
-      {/* Broker — WorkspaceSection: Parties */}
+      {/* Broker/Carrier — WorkspaceSection: Parties */}
       {vis("Parties") && <section className={wsSectionCard} data-editable={editable("Parties")}>
         <div className={`${wsSectionHeader} py-3`}>
-          <span className={wsSectionTitle}>Broker</span>
+          <span className={wsSectionTitle}>Broker/Carrier</span>
           <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--trk-text-muted)]">
             {formatEquipmentTempChip(p.trailerType, p.equipmentType, p.temperatureRequirement)}
           </span>
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
-          <div>
-            <label className={L}>Broker</label>
-            <select
-              className={I}
-              value={p.brokerId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                p.setBrokerId(v === "" ? null : Number(v));
-                p.setBrokerContactId(null);
-              }}
-            >
-              <option value="">— Select broker —</option>
-              {p.freightBrokers.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-          </div>
+          <BrokerCarrierCombobox
+            brokers={p.freightBrokers}
+            brokerId={p.brokerId}
+            brokerNameSnapshot={p.brokerNameSnapshot}
+            disabled={!!p.readOnly}
+            onPick={(id, name) => {
+              p.setBrokerId(id);
+              p.setBrokerNameSnapshot(name);
+              if (id === null) p.setBrokerContactId(null);
+            }}
+          />
           <div>
             <label className={L}>Contact</label>
             <select
@@ -214,16 +209,6 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-          </div>
-          <div className="sm:col-span-2">
-            <label className={L}>Broker name</label>
-            <input
-              className={I}
-              style={prefill(ip?.brokerNameSnapshot ?? null)}
-              value={p.brokerNameSnapshot}
-              onChange={(e) => p.setBrokerNameSnapshot(e.target.value)}
-              placeholder="As shown on the rate confirmation"
-            />
           </div>
           <div>
             <label className={L}>Contact name</label>

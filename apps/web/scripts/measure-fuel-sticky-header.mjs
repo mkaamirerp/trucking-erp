@@ -50,7 +50,7 @@ html,body{margin:0;height:100%} body{background:var(--trk-bg);color:var(--trk-te
 ${themes}${fuelHome}${bvdCss}
 </style></head><body>
 <div class="trk-app-shell">
-<header style="position:sticky;top:0;z-index:40;height:3.5rem;background:#111;border-bottom:1px solid #333;display:flex;align-items:center;padding:0 16px">FleetPro Nav</header>
+<header style="position:sticky;top:0;z-index:40;height:3.5rem;background:#111;border-bottom:1px solid #333;display:flex;align-items:center;padding:0 16px">TruckERP Nav</header>
 <main class="trk-app-main">
 ${stickyShell("card-sticky", "card-table", cardRows)}
 ${stickyShell("express-sticky", "express-table", cardRows.slice(0, 400))}

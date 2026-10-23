@@ -72,12 +72,24 @@ import {
   type IntakeProposedFields,
   type LoadWorkspaceMode,
 } from "@/loadWorkspace/loadWorkspaceShared";
+import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttribution";
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
 import {
   draftHasReadyRateConfirmationPdf,
+  loadDocumentParseFromAcceptedJson,
   workspacePdfHydrationUxFromDraft,
   workspaceReferenceTextFromDraft,
 } from "@/loadWorkspace/workspaceDraftPdfRestore";
+import {
+  buildLoadPersistParamsFromParseResponse,
+  type ApplyLoadDocumentParseCallbacks,
+} from "@/loadWorkspace/applyLoadDocumentParseResponse";
+import {
+  commercialGatePrimaryActionLabel,
+  resolveWorkspaceCommercialGatePrompt,
+  type WorkspaceCommercialGateOutcome,
+} from "@/loadWorkspace/workspaceCreateLoadValidation";
+import { isWorkspaceCommercialSnapshotEmpty } from "@/loadWorkspace/workspaceDraftCommercialSnapshot";
 import {
   createEmptyParseHydrationState,
   registerManualParseFieldEdit,
@@ -378,6 +390,13 @@ export default function LoadWorkspacePage() {
   const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
   const [createPlannedTripError, setCreatePlannedTripError] = useState<string | null>(null);
   const [followUpDispatchOpen, setFollowUpDispatchOpen] = useState(false);
+  const commercialGateResolverRef = useRef<((outcome: WorkspaceCommercialGateOutcome) => void) | null>(
+    null,
+  );
+  const [commercialGatePrompt, setCommercialGatePrompt] = useState<{
+    message: string;
+    mode: "create" | "save";
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toolbarMessage, setToolbarMessage] = useState<WorkspaceToolbarMessage | null>(null);
   const [customsMessage, setCustomsMessage] = useState<string | null>(null);
@@ -453,9 +472,11 @@ export default function LoadWorkspacePage() {
   const [customsBrokerId, setCustomsBrokerId] = useState<number | null>(null);
   const [internalNotes, setInternalNotes] = useState("");
   const [parseBusy, setParseBusy] = useState(false);
+  const [parseElapsedSec, setParseElapsedSec] = useState(0);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
+  const [lastParseEngineAttribution, setLastParseEngineAttribution] = useState<string | null>(null);
   const [workspaceReferenceText, setWorkspaceReferenceText] = useState("");
   const [workspacePdfPreviewUrl, setWorkspacePdfPreviewUrl] = useState<string | null>(null);
   const parseHydrationRef = useRef<ParseHydrationState>(createEmptyParseHydrationState());
@@ -469,6 +490,19 @@ export default function LoadWorkspacePage() {
   useEffect(() => {
     loadConcurrencyRef.current = load?.concurrency_version ?? null;
   }, [load?.concurrency_version]);
+
+  useEffect(() => {
+    if (!parseBusy) {
+      setParseElapsedSec(0);
+      return;
+    }
+    const started = Date.now();
+    setParseElapsedSec(0);
+    const id = window.setInterval(() => {
+      setParseElapsedSec(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [parseBusy]);
 
   useEffect(() => {
     setCreatePlannedTripError(null);
@@ -576,15 +610,59 @@ export default function LoadWorkspacePage() {
     setDraftStops(fields.draftStops);
   }, []);
 
+  const getParseHydrationCallbacks = useCallback(
+    (): ApplyLoadDocumentParseCallbacks => ({
+      setBrokerNameSnapshot,
+      setBrokerId,
+      setBrokerContactId,
+      setBrokerContacts,
+      setBrokerContactNameSnapshot,
+      setBrokerContactPhoneSnapshot,
+      setBrokerContactEmailSnapshot,
+      setBrokerLoadReference,
+      setLoadReferences,
+      setFreightMode,
+      setEquipmentType,
+      setTrailerType,
+      setTrailerSize,
+      setCommodity,
+      setEstimatedWeight,
+      setTemperatureRequirement,
+      setRate,
+      setCustomerRate,
+      setMiles,
+      setInternalNotes,
+      existingInternalNotes: internalNotes,
+      setDraftStops,
+    }),
+    [internalNotes],
+  );
+
   const applyWorkspaceDraft = useCallback(
     (draft: LoadWorkspaceDraft, opts?: { restorePdf?: boolean }) => {
       setWorkspaceDraft(draft);
-      hydrateFromWorkspaceFields(workspaceFieldsFromDraftJson(draft.draft_json ?? {}));
+      const fields = workspaceFieldsFromDraftJson(draft.draft_json ?? {});
+      hydrateFromWorkspaceFields(fields);
       if (opts?.restorePdf) {
         void restoreDraftPdfArtifacts(draft);
       }
+      const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
+      if (accepted && isWorkspaceCommercialSnapshotEmpty(fields)) {
+        void (async () => {
+          const hydration = await hydrateLoadWorkspaceFromParseResponse(
+            accepted,
+            getParseHydrationCallbacks(),
+            createEmptyParseHydrationState(),
+          );
+          parseHydrationRef.current = hydration.parseHydrationState;
+          setParseWarnings(hydration.warnings);
+          setToolbarMessage({ text: hydration.toolbar.text, tone: hydration.toolbar.tone });
+          setLastParseAppliedLabels(hydration.appliedLabels);
+          setWorkspaceReferenceText(accepted.raw_text || "");
+        })();
+      }
     },
-    [hydrateFromWorkspaceFields, restoreDraftPdfArtifacts],
+    [hydrateFromWorkspaceFields, restoreDraftPdfArtifacts, getParseHydrationCallbacks],
   );
 
   const hydrateFromLoad = useCallback((l: Load) => {
@@ -852,48 +930,62 @@ export default function LoadWorkspacePage() {
       setParseWarnings([]);
       setToolbarMessage(null);
       setLastParseAppliedLabels(null);
+      setLastParseEngineAttribution(null);
+      let postParseDraftSave: (() => Promise<void>) | null = null;
+      const parseWallStarted = performance.now();
       try {
         if (isDraftWorkspace && draftIdFromRoute && workspaceDraft) {
-          const persisted = await parseLoadWorkspaceDraftDocument(file, draftIdFromRoute, {
+          const persisted = await parseLoadWorkspaceDraftDocument(draftIdFromRoute, file, {
             expectedConcurrencyVersion: workspaceDraft.concurrency_version,
           });
+          const parseRequestMs = performance.now() - parseWallStarted;
           const res = persisted.parse;
           setWorkspaceDraft(persisted.draft);
           setWorkspaceReferenceText(res.raw_text || "");
           replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
+          setParseBusy(false);
           const hydration = await hydrateLoadWorkspaceFromParseResponse(
             res,
-            {
-              setBrokerNameSnapshot,
-              setBrokerId,
-              setBrokerContactId,
-              setBrokerContacts,
-              setBrokerContactNameSnapshot,
-              setBrokerContactPhoneSnapshot,
-              setBrokerContactEmailSnapshot,
-              setBrokerLoadReference,
-              setLoadReferences,
-              setFreightMode,
-              setEquipmentType,
-              setTrailerType,
-              setTrailerSize,
-              setCommodity,
-              setEstimatedWeight,
-              setTemperatureRequirement,
-              setRate,
-              setCustomerRate,
-              setMiles,
-              setInternalNotes,
-              existingInternalNotes: internalNotes,
-              setDraftStops,
-            },
+            getParseHydrationCallbacks(),
             parseHydrationRef.current,
           );
           parseHydrationRef.current = hydration.parseHydrationState;
           setParseWarnings(hydration.warnings);
-          setToolbarMessage({ text: hydration.toolbar.text, tone: hydration.toolbar.tone });
+          const engineLine =
+            buildParseEngineAttribution(res.context ?? undefined, {
+              parseRequestMs,
+              totalMs: performance.now() - parseWallStarted,
+            }) ?? hydration.engineAttribution;
+          setLastParseEngineAttribution(engineLine);
+          setToolbarMessage({
+            text: engineLine ? `${hydration.toolbar.text} — ${engineLine}` : hydration.toolbar.text,
+            tone: hydration.toolbar.tone,
+          });
           setLastParseAppliedLabels(hydration.appliedLabels);
           setDraftConflict(null);
+          const draftId = draftIdFromRoute;
+          const draftVersion = persisted.draft.concurrency_version;
+          postParseDraftSave = async () => {
+            try {
+              const persistParams = buildLoadPersistParamsFromParseResponse(res, hydration.summary, {
+                loadNumber,
+                hazmat,
+                palletCaseCount,
+                customsBrokerId,
+                existingInternalNotes: internalNotes,
+              });
+              const saved = await updateLoadWorkspaceDraft(draftId, {
+                expected_concurrency_version: draftVersion,
+                draft_json: buildWorkspaceDraftJson({ ...persistParams, status }),
+              });
+              setWorkspaceDraft(saved);
+            } catch {
+              setToolbarMessage({
+                text: `${hydration.toolbar.text} (Form filled — use Save draft if fields disappear after refresh.)`,
+                tone: hydration.toolbar.tone,
+              });
+            }
+          };
           return;
         }
 
@@ -901,6 +993,7 @@ export default function LoadWorkspacePage() {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
         });
+        const parseRequestMs = performance.now() - parseWallStarted;
         const hydration = await hydrateLoadWorkspaceFromParseResponse(
           res,
           {
@@ -931,8 +1024,17 @@ export default function LoadWorkspacePage() {
         );
         parseHydrationRef.current = hydration.parseHydrationState;
         setParseWarnings(hydration.warnings);
+        const engineLine =
+          buildParseEngineAttribution(res.context ?? undefined, {
+            parseRequestMs,
+            totalMs: performance.now() - parseWallStarted,
+          }) ?? hydration.engineAttribution;
+        setLastParseEngineAttribution(engineLine);
         const tone: WorkspaceToolbarTone = hydration.toolbar.tone;
-        setToolbarMessage({ text: hydration.toolbar.text, tone });
+        setToolbarMessage({
+          text: engineLine ? `${hydration.toolbar.text} — ${engineLine}` : hydration.toolbar.text,
+          tone,
+        });
         setLastParseAppliedLabels(hydration.appliedLabels);
       } catch (e: unknown) {
         const c = parseLoadWorkspaceDraftVersionConflict(e);
@@ -947,8 +1049,12 @@ export default function LoadWorkspacePage() {
           setToolbarMessage({ text: msg, tone: "error" });
         }
         setLastParseAppliedLabels(null);
+        setLastParseEngineAttribution(null);
       } finally {
         setParseBusy(false);
+      }
+      if (postParseDraftSave) {
+        void postParseDraftSave();
       }
     },
     [
@@ -962,6 +1068,11 @@ export default function LoadWorkspacePage() {
       draftIdFromRoute,
       workspaceDraft,
       replaceWorkspacePdfPreviewUrl,
+      getParseHydrationCallbacks,
+      loadNumber,
+      hazmat,
+      palletCaseCount,
+      customsBrokerId,
     ],
   );
 
@@ -1186,6 +1297,67 @@ export default function LoadWorkspacePage() {
 
   const buildWorkspacePersistPayload = () => buildLoadPersistPayload(workspacePersistParams());
 
+  const currentWorkspaceFields = (): WorkspaceDraftFields => {
+    const p = workspacePersistParams();
+    return {
+      status,
+      loadNumber: p.loadNumber,
+      brokerId: p.brokerId,
+      brokerContactId: p.brokerContactId,
+      brokerNameSnapshot: p.brokerNameSnapshot,
+      brokerContactNameSnapshot: p.brokerContactNameSnapshot,
+      brokerContactPhoneSnapshot: p.brokerContactPhoneSnapshot,
+      brokerContactExtensionSnapshot: p.brokerContactExtensionSnapshot,
+      brokerContactEmailSnapshot: p.brokerContactEmailSnapshot,
+      brokerLoadReference: p.brokerLoadReference,
+      loadReferences: p.loadReferences ?? [],
+      freightMode: p.mode,
+      equipmentType: p.equipmentType,
+      trailerType: p.trailerType,
+      trailerSize: p.trailerSize,
+      commodity: p.commodity,
+      estimatedWeight: p.estimatedWeight,
+      hazmat: p.hazmat,
+      temperatureRequirement: p.temperatureRequirement,
+      palletCaseCount: p.palletCaseCount,
+      rate: p.rate,
+      customerRate: p.customerRate,
+      miles: p.miles,
+      driverId: null,
+      truckId: null,
+      trailerAssetId: null,
+      customsBrokerId: p.customsBrokerId,
+      internalNotes: p.internalNotes,
+      draftStops: p.draftStops,
+    };
+  };
+
+  const closeCommercialGate = useCallback((outcome: WorkspaceCommercialGateOutcome) => {
+    setCommercialGatePrompt(null);
+    const resolve = commercialGateResolverRef.current;
+    commercialGateResolverRef.current = null;
+    resolve?.(outcome);
+  }, []);
+
+  const requestWorkspaceCommercialGate = useCallback(
+    (mode: "create" | "save"): Promise<WorkspaceCommercialGateOutcome> => {
+      const prompt = resolveWorkspaceCommercialGatePrompt(
+        currentWorkspaceFields(),
+        freightBrokers,
+        mode,
+      );
+      if (prompt.outcome === "blocked") {
+        window.alert(prompt.alertMessage);
+        return Promise.resolve("blocked");
+      }
+      return new Promise((resolve) => {
+        commercialGateResolverRef.current = resolve;
+        setCommercialGatePrompt({ message: prompt.message, mode: prompt.mode });
+      });
+    },
+    [freightBrokers],
+  );
+
   const showMarkReadyAction =
     load != null &&
     (workspaceMode === "detail" || workspaceMode === "intake") &&
@@ -1289,11 +1461,15 @@ export default function LoadWorkspacePage() {
 
   async function onSaveDraft() {
     if (!draftIdFromRoute || !workspaceDraft || !isDraftEditable) return;
-    const stopErr = validateDraftStopsClassifiedForSave(draftStops);
-    if (stopErr) {
-      setToolbarMessage({ text: stopErr, tone: "warning" });
+    const saveGate = await requestWorkspaceCommercialGate("save");
+    if (saveGate === "blocked") {
+      setToolbarMessage({
+        text: "Complete required Broker/Carrier and pickup/delivery city and state before saving.",
+        tone: "warning",
+      });
       return;
     }
+    if (saveGate === "cancelled") return;
     setSaving(true);
     setToolbarMessage(null);
     setDraftConflict(null);
@@ -1302,8 +1478,11 @@ export default function LoadWorkspacePage() {
         expected_concurrency_version: workspaceDraft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
-      applyWorkspaceDraft(updated);
-      setToolbarMessage({ text: "Draft saved.", tone: "success" });
+      applyWorkspaceDraft(updated, { restorePdf: true });
+      setToolbarMessage({
+        text: "Workspace draft saved. It stays on this page until you choose Create load — it does not appear on the loads list yet.",
+        tone: "success",
+      });
     } catch (e: unknown) {
       const c = parseLoadWorkspaceDraftVersionConflict(e);
       if (c) {
@@ -1346,11 +1525,15 @@ export default function LoadWorkspacePage() {
 
   async function onPromoteDraft() {
     if (!draftIdFromRoute || !workspaceDraft || !isDraftEditable) return;
-    const stopErr = validateDraftStopsClassifiedForSave(draftStops);
-    if (stopErr) {
-      setToolbarMessage({ text: stopErr, tone: "warning" });
+    const createGate = await requestWorkspaceCommercialGate("create");
+    if (createGate === "blocked") {
+      setToolbarMessage({
+        text: "Complete required Broker/Carrier and pickup/delivery city and state before creating a load.",
+        tone: "warning",
+      });
       return;
     }
+    if (createGate === "cancelled") return;
     setSaving(true);
     setToolbarMessage(null);
     setDraftConflict(null);
@@ -1797,7 +1980,11 @@ export default function LoadWorkspacePage() {
               }
               onClick={() => pdfInputRef.current?.click()}
             >
-              {parseBusy ? "Parsing…" : "Upload & parse PDF"}
+              {parseBusy
+                ? parseElapsedSec > 0
+                  ? `Parsing… ${parseElapsedSec}s`
+                  : "Parsing…"
+                : "Upload & parse PDF"}
             </Button>
           ) : null}
           {workspaceMode === "manual" && isDraftWorkspace ? (
@@ -1970,6 +2157,34 @@ export default function LoadWorkspacePage() {
             }}
           />
         ) : null}
+        {commercialGatePrompt ? (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="workspace-commercial-gate-title"
+          >
+            <div className="max-w-md rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] p-4 shadow-lg">
+              <h2
+                id="workspace-commercial-gate-title"
+                className="text-sm font-semibold text-[var(--trk-heading)]"
+              >
+                {commercialGatePrompt.mode === "save" ? "Save workspace draft" : "Create load"}
+              </h2>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--trk-text)]">
+                {commercialGatePrompt.message}
+              </p>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={() => closeCommercialGate("cancelled")}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => closeCommercialGate("proceed")}>
+                  {commercialGatePrimaryActionLabel(commercialGatePrompt.mode)}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {draftConflict && isDraftWorkspace ? (
           <div className="border-t border-amber-900/50 bg-amber-950/25 px-4 py-2.5">
             <div className="mx-auto flex max-w-[1600px] flex-wrap items-start justify-between gap-3">
@@ -2028,8 +2243,20 @@ export default function LoadWorkspacePage() {
         ) : null}
       </header>
 
-      {parseWarnings.length > 0 || (lastParseAppliedLabels && lastParseAppliedLabels.length > 0) ? (
+      {lastParseEngineAttribution ||
+      parseWarnings.length > 0 ||
+      (lastParseAppliedLabels && lastParseAppliedLabels.length > 0) ? (
       <div className="shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
+        {lastParseEngineAttribution ? (
+          <div className="mx-auto max-w-[1600px] border-b border-[var(--trk-border)] bg-sky-50/80 px-4 py-2 dark:bg-sky-950/30">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-200/90">
+              Parse engine
+            </div>
+            <p className="mt-0.5 font-mono text-[11px] leading-snug text-sky-950 dark:text-sky-100">
+              {lastParseEngineAttribution}
+            </p>
+          </div>
+        ) : null}
         {parseWarnings.length > 0 ? (
           <div className="mx-auto max-w-[1600px] px-4 py-2">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-200/90">

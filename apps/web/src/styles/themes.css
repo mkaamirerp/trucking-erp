@@ -189,6 +189,14 @@
 }
 
 /* Dense data pages: cancel shell padding down to a small workspace gutter (cards keep own padding). */
+/* Post-login dispatch dashboard = wireframe home (TopNav stays; main is edge-to-edge). */
+.trk-app-main--dispatch-home {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  max-width: none;
+}
+
 .trk-page--dense {
   width: 100%;
   max-width: 100%;

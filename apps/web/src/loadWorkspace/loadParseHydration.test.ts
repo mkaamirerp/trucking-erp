@@ -5,6 +5,7 @@ import type { LoadDocumentParseExtracted, LoadDocumentParseResponse } from "../a
 
 const baseSummary = () => ({
   resolvedBrokerId: null as number | null,
+  resolvedBrokerContactId: null as number | null,
   brokerContactMatched: false,
   mcOrDotAttempted: false,
   unresolvedStopCount: 0,
