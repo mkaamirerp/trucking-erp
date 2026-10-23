@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { Broker } from "@/api";
 import { initialManualCreateStops, type WorkspaceDraftFields } from "./loadWorkspaceShared";
-import { evaluateCreateLoadGate, hasLoadNumberOrPo } from "./workspaceCreateLoadValidation";
+import { createEmptyParseHydrationState } from "./loadParseHydrationState";
+import {
+  BROKER_LOAD_NUMBER_PO_LABEL,
+  draftHasParsedPdf,
+  evaluateCreateLoadGate,
+  formatSoftNotProvidedLine,
+  hasBrokerLoadNumberOrPo,
+  listManualCreateHardMissing,
+  listCreateLoadSoftNotProvided,
+} from "./workspaceCreateLoadValidation";
 
 const brokers: Broker[] = [{ id: 1, name: "TQL" }];
 
@@ -44,31 +53,7 @@ function baseFields(overrides: Partial<WorkspaceDraftFields> = {}): WorkspaceDra
 }
 
 describe("evaluateCreateLoadGate", () => {
-  it("hard-blocks without Load # / PO #", () => {
-    const r = evaluateCreateLoadGate(
-      baseFields({ brokerLoadReference: "", loadReferences: [] }),
-      brokers,
-    );
-    expect(r.hardBlockMessage).toMatch(/Load # \/ PO #/);
-  });
-
-  it("accepts PO reference only for Task 2b", () => {
-    expect(
-      hasLoadNumberOrPo(
-        baseFields({
-          brokerLoadReference: "",
-          loadReferences: [{ kind: "po_number", value: "4500123", label: "PO #" }],
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it("hard-blocks without broker/carrier", () => {
-    const r = evaluateCreateLoadGate(baseFields({ brokerNameSnapshot: "" }), brokers);
-    expect(r.hardBlockMessage).toMatch(/Broker\/Carrier/);
-  });
-
-  it("hard-blocks without pickup city", () => {
+  it("manual hard-blocks without pickup city", () => {
     const stops = initialManualCreateStops();
     stops[0] = { ...stops[0], city: "", state_or_province: "ON" };
     stops[1] = { ...stops[1], city: "Montreal", state_or_province: "QC" };
@@ -76,10 +61,58 @@ describe("evaluateCreateLoadGate", () => {
     expect(r.hardBlockMessage).toMatch(/Pickup city/);
   });
 
-  it("passes hard gate and lists optional missing fields", () => {
+  it("manual hard gate does not require broker", () => {
+    const missing = listManualCreateHardMissing(
+      baseFields({ brokerNameSnapshot: "", brokerLoadReference: "" }),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("passes manual hard gate with pickup and delivery city/state", () => {
     const r = evaluateCreateLoadGate(baseFields(), brokers);
     expect(r.hardBlockMessage).toBeNull();
     expect(r.missingOptionalLabels.length).toBeGreaterThan(0);
-    expect(r.missingOptionalLabels).toContain("Rate");
+  });
+});
+
+describe("parsed create soft notes", () => {
+  it("draftHasParsedPdf when accepted_parse_json present", () => {
+    expect(
+      draftHasParsedPdf(
+        {
+          id: "x",
+          accepted_parse_json: { extracted: {} },
+          pdf_filename: null,
+          status: "draft",
+          concurrency_version: 1,
+          draft_json: {},
+          created_at: "",
+          updated_at: "",
+        },
+        createEmptyParseHydrationState(),
+      ),
+    ).toBe(true);
+  });
+
+  it("soft note lists broker load # / PO # when missing", () => {
+    const line = formatSoftNotProvidedLine(
+      listCreateLoadSoftNotProvided(
+        baseFields({ brokerLoadReference: "", loadReferences: [] }),
+        brokers,
+      ),
+    );
+    expect(line).toMatch(/^Not provided:/);
+    expect(line).toContain(BROKER_LOAD_NUMBER_PO_LABEL);
+  });
+
+  it("hasBrokerLoadNumberOrPo accepts PO reference row", () => {
+    expect(
+      hasBrokerLoadNumberOrPo(
+        baseFields({
+          brokerLoadReference: "",
+          loadReferences: [{ kind: "po_number", value: "4500123", label: "PO #" }],
+        }),
+      ),
+    ).toBe(true);
   });
 });

@@ -509,10 +509,6 @@ async def _insert_commercial_load_uncommitted(
     when no stops were supplied).
     """
     _guard_create_payload(payload)
-    if insert_as_ready:
-        missing = validate_load_ready_prerequisites_from_create(payload)
-        if missing:
-            raise ready_prerequisites_http_exception(missing)
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
     if payload.broker_contact_id is not None:

@@ -88,8 +88,13 @@ import {
 import {
   commercialGatePrimaryActionLabel,
   listCreateLoadHardMissing,
-  resolveWorkspaceCommercialGatePrompt,
+  draftHasParsedPdf,
+  formatManualHardMissingLine,
+  formatSoftNotProvidedLine,
+  listCreateLoadSoftNotProvided,
+  listManualCreateHardMissing,
   type WorkspaceCommercialGateOutcome,
+  resolveWorkspaceCommercialGatePrompt,
 } from "@/loadWorkspace/workspaceCreateLoadValidation";
 import {
   createEmptyParseHydrationState,
@@ -1314,9 +1319,17 @@ export default function LoadWorkspacePage() {
   const currentWorkspaceFieldsRef = useRef(currentWorkspaceFields);
   currentWorkspaceFieldsRef.current = currentWorkspaceFields;
 
-  const createHardMissing = listCreateLoadHardMissing(currentWorkspaceFields(), freightBrokers);
-  const createMissingLine =
-    createHardMissing.length > 0 ? `Missing: ${createHardMissing.join(", ")}` : null;
+  const hasParsedPdfIntoDraft = draftHasParsedPdf(workspaceDraft, parseHydrationRef.current);
+  const manualCreateHardMissing = listManualCreateHardMissing(currentWorkspaceFields());
+  const createSoftNotProvided = listCreateLoadSoftNotProvided(
+    currentWorkspaceFields(),
+    freightBrokers,
+  );
+  const createUnderButtonLine = hasParsedPdfIntoDraft
+    ? formatSoftNotProvidedLine(createSoftNotProvided)
+    : formatManualHardMissingLine(manualCreateHardMissing);
+  const createLoadBlockedByHardGate =
+    !hasParsedPdfIntoDraft && manualCreateHardMissing.length > 0;
 
   async function ensureServerDraft(): Promise<{ id: string; draft: LoadWorkspaceDraft }> {
     if (draftIdFromRoute && workspaceDraft) {
@@ -1521,12 +1534,17 @@ export default function LoadWorkspacePage() {
 
   async function onPromoteDraft() {
     if (!isDraftEditable) return;
-    if (createHardMissing.length > 0) {
-      setToolbarMessage({ text: createMissingLine ?? "Complete required fields before creating a load.", tone: "warning" });
+    if (createLoadBlockedByHardGate) {
+      setToolbarMessage({
+        text: createUnderButtonLine ?? "Complete required fields before creating a load.",
+        tone: "warning",
+      });
       return;
     }
-    const createGate = await requestWorkspaceCommercialGate("create");
-    if (createGate === "cancelled") return;
+    if (!hasParsedPdfIntoDraft) {
+      const createGate = await requestWorkspaceCommercialGate("create");
+      if (createGate === "cancelled") return;
+    }
     setSaving(true);
     setToolbarMessage(null);
     setDraftConflict(null);
@@ -2002,20 +2020,14 @@ export default function LoadWorkspacePage() {
               <Button
                 variant="primary"
                 type="button"
-                disabled={
-                  saving ||
-                  markReadyBusy ||
-                  parseBusy ||
-                  !isDraftEditable ||
-                  createHardMissing.length > 0
-                }
-                title={createMissingLine ?? undefined}
+                disabled={saving || markReadyBusy || parseBusy || !isDraftEditable || createLoadBlockedByHardGate}
+                title={createUnderButtonLine ?? undefined}
                 onClick={() => void onPromoteDraft()}
               >
                 {saving ? "Creating…" : "Create load"}
               </Button>
-              {createMissingLine ? (
-                <p className="w-full text-[11px] text-amber-400/90 sm:w-auto">{createMissingLine}</p>
+              {createUnderButtonLine ? (
+                <p className="w-full text-[11px] text-amber-400/90 sm:w-auto">{createUnderButtonLine}</p>
               ) : null}
             </>
           ) : workspaceMode === "manual" ? null : (

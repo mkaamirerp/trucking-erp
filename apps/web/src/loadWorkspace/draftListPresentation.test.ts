@@ -22,7 +22,7 @@ describe("draftListPresentation", () => {
 
   it("formats missing line for incomplete fields", () => {
     const line = missingLineForFields(initialWorkspaceFieldsManual(), []);
-    expect(line).toMatch(/^Missing:/);
-    expect(line).toMatch(/Load # \/ PO #/);
+    expect(line).toMatch(/^Not provided:/);
+    expect(line).toMatch(/Broker load # \/ PO #/);
   });
 });

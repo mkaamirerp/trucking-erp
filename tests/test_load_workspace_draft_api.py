@@ -322,64 +322,76 @@ async def test_promote_creates_ready_load() -> None:
 
 
 @pytest.mark.asyncio
-async def test_promote_rejects_missing_load_number_or_po_creates_no_load() -> None:
+async def test_promote_minimal_empty_draft_creates_ready_load_idempotent() -> None:
     if database_name_from_url(_tenant_async_url()) == "tenant_demo":
         pytest.skip("mutation tests must not run on tenant_demo")
     engine, factory = _session()
     draft_id = None
+    load_id = None
+    promo_key = f"promo-empty-{uuid.uuid4().hex}"
     try:
         async with factory() as db:
             tenant_id = await _resolve_tenant_id(db)
-            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
             draft = await create_workspace_draft(
                 db,
                 tenant_id,
                 LoadWorkspaceDraftCreate(
                     source_channel="manual",
-                    draft_json=_promotable_draft_json(
-                        loadNumber="",
-                        brokerLoadReference="",
-                        loadReferences=[],
-                    ),
+                    draft_json={
+                        "loadNumber": "",
+                        "brokerNameSnapshot": "",
+                        "brokerLoadReference": "",
+                        "draftStops": [],
+                    },
                 ),
                 created_by_platform_user_id="integration-test-user",
             )
             draft_id = draft.id
         async with factory() as db:
             tenant_id = await _resolve_tenant_id(db)
-            with pytest.raises(HTTPException) as exc:
-                await promote_workspace_draft(
-                    db,
-                    tenant_id,
-                    draft_id,
-                    LoadWorkspaceDraftPromote(
-                        expected_concurrency_version=1,
-                        promotion_idempotency_key=f"promo-noref-{uuid.uuid4().hex}",
-                    ),
-                    promoted_by_platform_user_id="integration-test-user",
-                )
-            assert exc.value.status_code == 400
-            detail = exc.value.detail
-            assert isinstance(detail, dict)
-            assert detail.get("code") == "LOAD_READY_PREREQUISITES_NOT_MET"
-            loads_after = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
-            assert loads_after == loads_before
+            promote_payload = LoadWorkspaceDraftPromote(
+                expected_concurrency_version=1,
+                promotion_idempotency_key=promo_key,
+            )
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                promote_payload,
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+            load = await get_load(db, tenant_id, load_id)
+            assert load is not None
+            assert load.status == "ready"
             row = (
                 await db.execute(
-                    text("SELECT status, promoted_load_id FROM load_workspace_drafts WHERE id = :id"),
+                    text(
+                        "SELECT status, promoted_load_id FROM load_workspace_drafts WHERE id = :id"
+                    ),
                     {"id": draft_id},
                 )
             ).one()
-            assert row.status == "draft"
-            assert row.promoted_load_id is None
+            assert row.status == "promoted"
+            assert int(row.promoted_load_id) == load_id
+            evidence_count = await db.scalar(
+                text(
+                    "SELECT COUNT(*) FROM load_commercial_evidence WHERE workspace_draft_id = :id"
+                ),
+                {"id": draft_id},
+            )
+            assert int(evidence_count or 0) >= 0
+            replay = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                promote_payload,
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            assert replay.load_id == load_id
+            assert replay.idempotent_replay is True
     finally:
-        if draft_id is not None:
-            async with factory() as db:
-                await db.execute(
-                    text("DELETE FROM load_workspace_drafts WHERE id = :id"),
-                    {"id": draft_id},
-                )
-                await db.commit()
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
         await engine.dispose()
 
 

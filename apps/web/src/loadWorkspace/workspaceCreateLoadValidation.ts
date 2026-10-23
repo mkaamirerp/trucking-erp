@@ -1,7 +1,8 @@
-import type { Broker } from "@/api";
+import type { Broker, LoadWorkspaceDraft } from "@/api";
 import type { WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
 import type { DraftStop } from "@/loadWorkspace/loadWorkspaceShared";
 import { validateDraftStopsClassifiedForSave } from "@/loadWorkspace/loadStopClassification";
+import type { ParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
 
 export type CreateLoadGateResult = {
   /** When set, block create and show alert — mandatory fields missing. */
@@ -9,6 +10,9 @@ export type CreateLoadGateResult = {
   /** Shown in confirm dialog when hard requirements pass. */
   missingOptionalLabels: string[];
 };
+
+export const BROKER_LOAD_NUMBER_PO_LABEL = "Broker load # / PO #";
+export const INTERNAL_LOAD_NUMBER_LABEL = "Load number";
 
 export function brokerDisplayName(b: Broker): string {
   return (b.display_name || b.name || b.legal_name || "").trim();
@@ -39,41 +43,28 @@ export function firstStopOfTypes(stops: DraftStop[], types: string[]): DraftStop
   return null;
 }
 
-/** Task 2b: broker load number, internal load #, or any parsed reference row (e.g. PO #). */
-export function hasLoadNumberOrPo(fields: WorkspaceDraftFields): boolean {
+/** Broker's number from the rate con (not our internal TruckERP load number). */
+export function hasBrokerLoadNumberOrPo(fields: WorkspaceDraftFields): boolean {
   if (fields.brokerLoadReference.trim()) return true;
-  if (fields.loadNumber.trim()) return true;
   return fields.loadReferences.some((r) => (r.value || "").trim().length > 0);
 }
 
-function locationLabel(stop: DraftStop | null, role: string): string {
-  if (!stop) return `${role} stop`;
-  const city = (stop.city ?? "").trim();
-  const region = (stop.state_or_province ?? "").trim();
-  if (!city && !region) return `${role} (city and state/province)`;
-  if (!city) return `${role} (city)`;
-  if (!region) return `${role} (state/province)`;
-  return `${role}: ${city}, ${region}`;
+export function draftHasParsedPdf(
+  draft: LoadWorkspaceDraft | null,
+  parseHydration: ParseHydrationState,
+): boolean {
+  if (draft?.accepted_parse_json != null && draft.accepted_parse_json !== undefined) return true;
+  if ((draft?.pdf_filename || "").trim()) return true;
+  return parseHydration.lastAppliedKeys.size > 0;
 }
 
-export function listCreateLoadHardMissing(
-  fields: WorkspaceDraftFields,
-  brokers: Broker[],
-): string[] {
+/** Manual create (no parsed PDF): pickup + delivery city/state and stop classification only. */
+export function listManualCreateHardMissing(fields: WorkspaceDraftFields): string[] {
   const hardMissing: string[] = [];
 
   const stopClassErr = validateDraftStopsClassifiedForSave(fields.draftStops);
   if (stopClassErr) {
     hardMissing.push(stopClassErr);
-  }
-
-  const carrier = resolveBrokerCarrierName(fields, brokers);
-  if (!carrier) {
-    hardMissing.push("Broker/Carrier (type a name or pick from suggestions)");
-  }
-
-  if (!hasLoadNumberOrPo(fields)) {
-    hardMissing.push("Load # / PO #");
   }
 
   const pickup = firstStopOfTypes(fields.draftStops, ["PICKUP"]);
@@ -96,11 +87,61 @@ export function listCreateLoadHardMissing(
   return hardMissing;
 }
 
+/** Soft informational list (parsed create + drafts panel); never blocks create after parse. */
+export function listCreateLoadSoftNotProvided(
+  fields: WorkspaceDraftFields,
+  brokers: Broker[],
+): string[] {
+  const items: string[] = [];
+
+  if (!resolveBrokerCarrierName(fields, brokers)) {
+    items.push("Broker");
+  }
+  if (!hasBrokerLoadNumberOrPo(fields)) {
+    items.push(BROKER_LOAD_NUMBER_PO_LABEL);
+  }
+  if (!fields.loadNumber.trim()) {
+    items.push(INTERNAL_LOAD_NUMBER_LABEL);
+  }
+
+  const pickup = firstStopOfTypes(fields.draftStops, ["PICKUP"]);
+  const delivery = firstStopOfTypes(fields.draftStops, ["DELIVERY", "DROP"]);
+
+  if (!pickup) {
+    items.push("Pickup stop");
+  } else {
+    if (!(pickup.city ?? "").trim()) items.push("Pickup city");
+    if (!(pickup.state_or_province ?? "").trim()) items.push("Pickup state or province");
+  }
+
+  if (!delivery) {
+    items.push("Delivery stop");
+  } else {
+    if (!(delivery.city ?? "").trim()) items.push("Delivery city");
+    if (!(delivery.state_or_province ?? "").trim()) items.push("Delivery state or province");
+  }
+
+  if (!fields.commodity.trim()) items.push("Commodity");
+  if (!fields.rate.trim()) items.push("Rate");
+
+  return items;
+}
+
+export function formatSoftNotProvidedLine(items: string[]): string | null {
+  if (items.length === 0) return null;
+  return `Not provided: ${items.join(", ")}`;
+}
+
+export function formatManualHardMissingLine(items: string[]): string | null {
+  if (items.length === 0) return null;
+  return `Missing: ${items.join(", ")}`;
+}
+
 export function evaluateCreateLoadGate(
   fields: WorkspaceDraftFields,
   brokers: Broker[],
 ): CreateLoadGateResult {
-  const hardMissing = listCreateLoadHardMissing(fields, brokers);
+  const hardMissing = listManualCreateHardMissing(fields);
 
   if (hardMissing.length > 0) {
     return {
@@ -113,6 +154,8 @@ export function evaluateCreateLoadGate(
   const delivery = firstStopOfTypes(fields.draftStops, ["DELIVERY", "DROP"]);
 
   const missingOptional: string[] = [];
+  if (!resolveBrokerCarrierName(fields, brokers)) missingOptional.push("Broker");
+  if (!hasBrokerLoadNumberOrPo(fields)) missingOptional.push(BROKER_LOAD_NUMBER_PO_LABEL);
   if (!fields.commodity.trim()) missingOptional.push("Commodity");
   if (!fields.rate.trim()) missingOptional.push("Rate");
   if (!fields.miles.trim()) missingOptional.push("Miles");

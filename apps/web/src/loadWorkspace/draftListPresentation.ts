@@ -1,7 +1,10 @@
 import type { Load, LoadWorkspaceDraft } from "@/api";
 import type { WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
 import { workspaceFieldsFromDraftJson } from "@/loadWorkspace/loadWorkspaceShared";
-import { listCreateLoadHardMissing } from "@/loadWorkspace/workspaceCreateLoadValidation";
+import {
+  formatSoftNotProvidedLine,
+  listCreateLoadSoftNotProvided,
+} from "@/loadWorkspace/workspaceCreateLoadValidation";
 import type { Broker } from "@/api";
 import { formatRouteFromStops } from "@/utils/loadStops";
 
@@ -46,9 +49,7 @@ export function draftTitleFromFields(
 }
 
 export function missingLineForFields(fields: WorkspaceDraftFields, brokers: Broker[]): string | null {
-  const missing = listCreateLoadHardMissing(fields, brokers);
-  if (missing.length === 0) return null;
-  return `Missing: ${missing.join(", ")}`;
+  return formatSoftNotProvidedLine(listCreateLoadSoftNotProvided(fields, brokers));
 }
 
 export function workspaceDraftToListRow(draft: LoadWorkspaceDraft, brokers: Broker[]): DraftListRow {

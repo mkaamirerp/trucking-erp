@@ -99,8 +99,8 @@ Status vocabulary:
 | 7 | 0C-AUDIT | Legacy operator surface retirement map | ☑ AUDIT / DESIGN COMPLETE | Issue 0C map delivered; historical findings remain open for reference | Reference only |
 | 8 | 0C-IMPL | Retire `/dispatch` as ops authority; Trip-first nav/readers | ⬜ NOT IMPLEMENTED | **On hold by owner decision.** Slice 1 (F1/F2 nav → Trip Container) shipped separately; broader 0C UI retirement not active | No further 0C implementation until owner lifts hold |
 | 9 | 0D | Legacy mirror / backfill safety (`dispatch_trips`, Load.trip_number, active_dispatch_trip_id, payroll readers) | 🟠 PARTIAL | Tenant-safe mirror joins included in reported release; historical mirror/backfill retirement and downstream reader proof remain open. | Complete tenant/reader checks before changing mirrors |
-| 10 | I1 | New-write `Load.status` commercial boundary | ✅ DONE / SHIPPED (owner carve-out on promotion) | **POST `/loads` and `create_load` remain create=`draft` only** (0A). **Workspace draft promotion** inserts `loads.status=ready` after shared `validate_load_ready_prerequisites` (owner-approved 2026-03). Writable PATCH statuses `draft`/`ready`; legacy ops rejected. | Watch for residual holes on non-promote create paths |
-| 11 | I3 | Mark Ready bypass / draft→ready authority | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | **Promotion** creates **ready** in one step (shared validator with mark-ready). **`mark_load_ready()`** remains authority for **existing** `loads.status=draft` (email intake, legacy). PATCH cannot bypass to `ready`. | Verify ready bypass rejected and authorized mark-ready works |
+| 10 | I1 | New-write `Load.status` commercial boundary | ✅ DONE / SHIPPED (owner carve-out on promotion) | **POST `/loads` and `create_load` remain create=`draft` only** (0A). **Workspace draft promotion** inserts `loads.status=ready` with **no completeness prerequisites** (owner 2026-10); dispatcher fixes gaps on the load page. Writable PATCH statuses `draft`/`ready`; legacy ops rejected. | Watch for residual holes on non-promote create paths |
+| 11 | I3 | Mark Ready bypass / draft→ready authority | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | **Promotion** creates **ready** immediately after review (parsed or manual). **`mark_load_ready()`** unchanged for **existing** `loads.status=draft` (email intake, legacy) and still enforces completeness. PATCH cannot bypass to `ready`. | Verify ready bypass rejected and authorized mark-ready works |
 | 12 | I12 | TripLoad planned membership requires Load `ready` (unless approved exception) | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Ready-gated planned TripLoad on `main`; live verification pending. | Verify planning membership behavior |
 | 13 | I2 | Full stop replacement destroys stop/action/history | 🟦 LIVE CODE REPORTED — ACCEPTANCE PENDING | Stable-ID stop sync and history-protected removal on `main`; live verification pending. | Verify stop history and audit remain intact |
 | 14 | I5 | Hard DELETE unsafe for commercial/history Loads | 🟠 PARTIAL | DELETE blocked on 6919ec0; **POST `/loads/{id}/cancel`** and mutation guards on integrated `gpt-review`; AR/payroll cancel block and draft policy still open. | Owner decision on cancellation policy; live verification |
@@ -164,7 +164,7 @@ These are **separate but reconcilable** truths.
 | **`ready`** | Commercially verified enough for **dispatch planning** |
 | **`cancelled`** | Commercial Load itself is cancelled / no longer worked |
 
-**Owner carve-out (2026-03):** `POST /load-workspace-drafts/{id}/promote` inserts **`ready`** (not `draft`) after the same prerequisites as `mark_load_ready`. **`POST /api/v1/loads`** and direct `create_load` **still** create **`draft`** only.
+**Owner carve-out (2026-10):** `POST /load-workspace-drafts/{id}/promote` inserts **`ready`** (not `draft`) with **no broker / broker-load-# / stop completeness gate** — dispatcher completes on the load page. **`mark_load_ready()`** keeps prerequisites for legacy/email draft loads. **`POST /api/v1/loads`** and direct `create_load` **still** create **`draft`** only.
 
 **`Load.status` is NOT the execution ladder.**
 
@@ -1619,7 +1619,7 @@ Former `LOAD_INTEGRITY_AUDIT_AND_REMEDIATION_PLAN.md` is retired. Use the **IMPL
 **Issue 3 closure record (code on `main` — not production deployed):**
 
 1. Generic Load **PATCH cannot transition into `ready`**; `_guard_update_payload` returns **409** with `LOAD_STATUS_READY_USE_MARK_READY_ENDPOINT` directing callers to **POST `/api/v1/loads/{load_id}/mark-ready`** (`app/services/loads.py`).
-2. **Dedicated `mark_load_ready()`** remains the authority for **existing** `loads.status=draft` → `ready` (email-created and legacy rows). **Workspace promotion** uses the **same** `validate_load_ready_prerequisites` rules but inserts **`ready`** atomically on promote. CAS on `concurrency_version` + `status == draft` for mark-ready is unchanged.
+2. **Dedicated `mark_load_ready()`** remains the authority for **existing** `loads.status=draft` → `ready` (email-created and legacy rows) with **completeness** prerequisites unchanged. **Workspace promotion** inserts **`ready`** atomically **without** those prerequisites (owner 2026-10). CAS on `concurrency_version` + `status == draft` for mark-ready is unchanged.
 3. **Commercial PATCH** with **`status` omitted** remains available; explicit **`status=ready` when already `ready`** is not treated as a transition.
 4. **Ready→draft** PATCH policy is **unchanged** in this slice.
 5. **Review commits (gpt-review):** `d7912962dcb8465d1853a40799b65cb8757e58af`, `851a7c7282b7297caeef3e08f93836606f87cb14`, `b67455881671598a99437eb35c3637d3e90e794f`.
