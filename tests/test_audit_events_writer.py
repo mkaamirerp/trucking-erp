@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from app.services.audit_events import write_audit_event
-from app.utils.audit_redaction import classify_visibility, redact_changed_fields, redact_snapshot
+from app.utils.audit_redaction import (
+    classify_visibility,
+    redact_changed_fields,
+    redact_snapshot,
+    sanitize_jsonb_payload,
+)
 
 
 class FakeAsyncSession:
@@ -48,6 +55,44 @@ def test_redact_snapshot_redacts_top_level_sensitive_keys():
 def test_visibility_upgrades_to_sensitive_when_redaction_occurs():
     assert classify_visibility(base_visibility="normal", redacted_fields={"ssn"}) == "sensitive"
     assert classify_visibility(base_visibility="admin_sensitive", redacted_fields={"ssn"}) == "admin_sensitive"
+
+
+def test_sanitize_jsonb_payload_serializes_dates_in_nested_stop_audit():
+    appt = date(2026, 10, 23)
+    out = sanitize_jsonb_payload(
+        {
+            "load_id": 661,
+            "stop_change_summary": {
+                "added": [{"after": {"appointment_date": appt, "city": "Dallas"}}],
+            },
+        }
+    )
+    assert out["stop_change_summary"]["added"][0]["after"]["appointment_date"] == "2026-10-23"
+
+
+@pytest.mark.asyncio
+async def test_write_audit_event_serializes_date_in_context_json():
+    db = FakeAsyncSession()
+    appt = date(2026, 1, 15)
+    row = await write_audit_event(
+        db,
+        tenant_id=53,
+        module="loads",
+        entity_type="load",
+        entity_id="661",
+        action="load_stops_changed",
+        source="ui",
+        changed_fields={"stops": {"added": [{"after": {"appointment_date": appt}}]}},
+        context_json={
+            "load_id": 661,
+            "tenant_id": 53,
+            "stop_change_summary": {"added": [{"after": {"appointment_date": appt}}]},
+        },
+        best_effort=False,
+    )
+    assert row is not None
+    assert row.context_json["stop_change_summary"]["added"][0]["after"]["appointment_date"] == "2026-01-15"
+    assert row.changed_fields["stops"]["after"]["added"][0]["after"]["appointment_date"] == "2026-01-15"
 
 
 @pytest.mark.asyncio

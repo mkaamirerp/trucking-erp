@@ -6,7 +6,12 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tenant import AuditEvent
-from app.utils.audit_redaction import classify_visibility, redact_changed_fields, redact_snapshot
+from app.utils.audit_redaction import (
+    classify_visibility,
+    redact_changed_fields,
+    redact_snapshot,
+    sanitize_jsonb_payload,
+)
 
 
 ALLOWED_ACTOR_TYPES = {"user", "system", "api", "webhook", "job", "import"}
@@ -117,6 +122,11 @@ async def write_audit_event(
         redacted_keys |= red
 
         vis = classify_visibility(base_visibility=vis, redacted_fields=redacted_keys)
+
+        redacted_changed = sanitize_jsonb_payload(redacted_changed)
+        red_before = sanitize_jsonb_payload(red_before)
+        red_after = sanitize_jsonb_payload(red_after)
+        context_json = sanitize_jsonb_payload(context_json)
 
         row = AuditEvent(
             tenant_id=int(tenant_id),

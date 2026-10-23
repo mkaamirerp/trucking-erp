@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, time
+from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 
 DEFAULT_SENSITIVE_FIELD_SUBSTRINGS = (
@@ -72,6 +75,31 @@ def redact_snapshot(snapshot: dict[str, Any] | None) -> tuple[dict[str, Any] | N
         else:
             out[k] = v
     return out, redacted_fields
+
+
+def sanitize_jsonb_payload(value: Any) -> Any:
+    """Recursively coerce audit JSONB payloads to types PostgreSQL/json can encode."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (date, datetime, time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): sanitize_jsonb_payload(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_jsonb_payload(v) for v in value]
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        try:
+            return iso()
+        except Exception:
+            pass
+    return str(value)
 
 
 def classify_visibility(*, base_visibility: str, redacted_fields: set[str]) -> str:
