@@ -1,0 +1,57 @@
+name: Verification Disposable Safety
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app/core/verification_host_guard.py"
+      - "app/core/verification_subprocess_env.py"
+      - "scripts/verification_host_preflight.py"
+      - "scripts/disposable_*.py"
+      - "tests/test_verification_*.py"
+      - "tests/test_disposable_verification_auth_unit.py"
+      - "tests/support/disposable_verification_auth.py"
+      - ".github/workflows/verification-disposable.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verification-safety-unit:
+    runs-on: ubuntu-latest
+    env:
+      TRUCKERP_VERIFICATION_DISPOSABLE_CI: workflow:verification-disposable
+      TRUCKERP_VERIFICATION_POSTGRES_ADMIN_URL: postgresql://verify:verify_ci_only@localhost:5432/postgres
+    services:
+      postgres:
+        image: postgres:15.7-alpine
+        env:
+          POSTGRES_USER: verify
+          POSTGRES_PASSWORD: verify_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U verify -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+      - name: Fail-closed preflight
+        run: python scripts/verification_host_preflight.py
+      - name: Safety unit tests only (no integration waves)
+        run: |
+          pytest -q \
+            tests/test_verification_host_guard.py \
+            tests/test_verification_subprocess_env.py \
+            tests/test_disposable_verification_auth_unit.py \
+            tests/test_demo_clone_runner.py::test_approved_live_execution_disabled_for_safety \
+            tests/test_demo_clone_runner.py::test_run_clone_refuses_live_ports
