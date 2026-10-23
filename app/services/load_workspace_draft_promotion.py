@@ -155,6 +155,7 @@ async def promote_workspace_draft(
         tenant_id,
         load_create,
         promotion_origin_workspace_draft_id=draft.id,
+        insert_as_ready=True,
     )
 
     evidence = _maybe_commercial_evidence_row(
@@ -188,7 +189,7 @@ async def promote_workspace_draft(
         request_id=None,
         correlation_id=None,
         source="ui",
-        changed_fields=None,
+        changed_fields={"status": {"before": None, "after": "ready"}},
         context_json={
             "origin": "workspace_draft_promotion",
             "workspace_draft_id": str(draft.id),

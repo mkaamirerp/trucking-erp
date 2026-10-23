@@ -52,6 +52,19 @@ SAMPLE_DRAFT_JSON = {
     "draftStops": [],
 }
 
+
+def _promotable_draft_json(**overrides: object) -> dict:
+    base = {
+        **SAMPLE_DRAFT_JSON,
+        "brokerLoadReference": "PROMO-REF-001",
+        "draftStops": [
+            {"stopType": "PICKUP", "city": "Toronto", "stateOrProvince": "ON"},
+            {"stopType": "DELIVERY", "city": "Montreal", "stateOrProvince": "QC"},
+        ],
+    }
+    base.update(overrides)
+    return base
+
 ACCEPTED_PARSE_BROKER_REF_ONLY = {
     "document": {"filename": "ratecon.pdf"},
     "raw_text": "",
@@ -239,10 +252,10 @@ async def test_promote_fills_broker_load_reference_from_accepted_parse_json() ->
                 tenant_id,
                 LoadWorkspaceDraftCreate(
                     source_channel="manual",
-                    draft_json={
-                        **SAMPLE_DRAFT_JSON,
-                        "loadNumber": f"REF-PARSE-{uuid.uuid4().hex[:8]}",
-                    },
+                    draft_json=_promotable_draft_json(
+                        loadNumber=f"REF-PARSE-{uuid.uuid4().hex[:8]}",
+                        brokerLoadReference="",
+                    ),
                 ),
                 created_by_platform_user_id="integration-test-user",
             )
@@ -270,8 +283,103 @@ async def test_promote_fills_broker_load_reference_from_accepted_parse_json() ->
             load = await get_load(db, tenant_id, load_id)
             assert load is not None
             assert load.broker_load_reference == "3872125-1"
+            assert load.status == "ready"
     finally:
         await _delete_promoted_load_and_draft(factory, load_id, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_creates_ready_load() -> None:
+    if database_name_from_url(_tenant_async_url()) == "tenant_demo":
+        pytest.skip("mutation tests must not run on tenant_demo")
+    engine, factory = _session()
+    draft_id = None
+    load_id = None
+    try:
+        tenant_id, draft_id = await _create_draft(
+            factory,
+            _promotable_draft_json(loadNumber=f"READY-{uuid.uuid4().hex[:8]}"),
+        )
+        async with factory() as db:
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=f"promo-ready-{uuid.uuid4().hex}",
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+            load = await get_load(db, tenant_id, load_id)
+            assert load is not None
+            assert load.status == "ready"
+    finally:
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_rejects_missing_load_number_or_po_creates_no_load() -> None:
+    if database_name_from_url(_tenant_async_url()) == "tenant_demo":
+        pytest.skip("mutation tests must not run on tenant_demo")
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json=_promotable_draft_json(
+                        loadNumber="",
+                        brokerLoadReference="",
+                        loadReferences=[],
+                    ),
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"promo-noref-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 400
+            detail = exc.value.detail
+            assert isinstance(detail, dict)
+            assert detail.get("code") == "LOAD_READY_PREREQUISITES_NOT_MET"
+            loads_after = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+            assert loads_after == loads_before
+            row = (
+                await db.execute(
+                    text("SELECT status, promoted_load_id FROM load_workspace_drafts WHERE id = :id"),
+                    {"id": draft_id},
+                )
+            ).one()
+            assert row.status == "draft"
+            assert row.promoted_load_id is None
+    finally:
+        if draft_id is not None:
+            async with factory() as db:
+                await db.execute(
+                    text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                    {"id": draft_id},
+                )
+                await db.commit()
         await engine.dispose()
 
 
@@ -290,7 +398,7 @@ async def test_service_promote_creates_one_load_with_origin_link() -> None:
                 tenant_id,
                 LoadWorkspaceDraftCreate(
                     source_channel="manual",
-                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"PROMO-{uuid.uuid4().hex[:8]}"},
+                    draft_json=_promotable_draft_json(loadNumber=f"PROMO-{uuid.uuid4().hex[:8]}"),
                 ),
                 created_by_platform_user_id="integration-test-user",
             )
@@ -473,7 +581,7 @@ async def test_promote_creates_commercial_evidence_when_pdf_ready() -> None:
                 tenant_id,
                 LoadWorkspaceDraftCreate(
                     source_channel="manual",
-                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"EV-{uuid.uuid4().hex[:8]}"},
+                    draft_json=_promotable_draft_json(loadNumber=f"EV-{uuid.uuid4().hex[:8]}"),
                 ),
                 created_by_platform_user_id="integration-test-user",
             )
@@ -564,7 +672,7 @@ async def test_promotion_idempotency_key_conflict_across_drafts() -> None:
                 tenant_id,
                 LoadWorkspaceDraftCreate(
                     source_channel="manual",
-                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"A-{uuid.uuid4().hex[:6]}"},
+                    draft_json=_promotable_draft_json(loadNumber=f"A-{uuid.uuid4().hex[:6]}"),
                 ),
                 created_by_platform_user_id="integration-test-user",
             )
@@ -574,7 +682,7 @@ async def test_promotion_idempotency_key_conflict_across_drafts() -> None:
                 tenant_id,
                 LoadWorkspaceDraftCreate(
                     source_channel="manual",
-                    draft_json={**SAMPLE_DRAFT_JSON, "loadNumber": f"B-{uuid.uuid4().hex[:6]}"},
+                    draft_json=_promotable_draft_json(loadNumber=f"B-{uuid.uuid4().hex[:6]}"),
                 ),
                 created_by_platform_user_id="integration-test-user",
             )
@@ -640,7 +748,7 @@ async def test_concurrent_promote_competing_idempotency_keys_one_load() -> None:
     try:
         tenant_id, draft_id = await _create_draft(
             factory,
-            {**SAMPLE_DRAFT_JSON, "loadNumber": load_number},
+            _promotable_draft_json(loadNumber=load_number),
         )
 
         async def _promote(key: str):
@@ -782,14 +890,13 @@ async def test_promote_persists_commercial_stops_through_shared_insert() -> None
     engine, factory = _session()
     draft_id = load_id = None
     try:
-        draft_json = {
-            **SAMPLE_DRAFT_JSON,
-            "loadNumber": f"PROMO-STOPS-{uuid.uuid4().hex[:8]}",
-            "draftStops": [
-                {"stopType": "PICKUP", "city": "Toronto", "facilityName": "Origin DC"},
-                {"stopType": "DELIVERY", "city": "Boston", "sequence": 4},
+        draft_json = _promotable_draft_json(
+            loadNumber=f"PROMO-STOPS-{uuid.uuid4().hex[:8]}",
+            draftStops=[
+                {"stopType": "PICKUP", "city": "Toronto", "stateOrProvince": "ON", "facilityName": "Origin DC"},
+                {"stopType": "DELIVERY", "city": "Boston", "stateOrProvince": "MA", "sequence": 4},
             ],
-        }
+        )
         tenant_id, draft_id = await _create_draft(factory, draft_json)
         async with factory() as db:
             result = await promote_workspace_draft(
@@ -811,7 +918,7 @@ async def test_promote_persists_commercial_stops_through_shared_insert() -> None
                     {"id": load_id},
                 )
             ).one()
-            assert load_row.status == "draft"
+            assert load_row.status == "ready"
             assert int(load_row.tenant_id) == tenant_id
             assert str(load_row.promotion_origin_workspace_draft_id) == str(draft_id)
             stops = (
@@ -842,7 +949,10 @@ async def test_promote_rejects_unknown_broker_without_load_or_draft_change() -> 
             loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
         tenant_id, draft_id = await _create_draft(
             factory,
-            {**SAMPLE_DRAFT_JSON, "loadNumber": f"PROMO-BRK-{uuid.uuid4().hex[:8]}", "brokerId": missing_broker_id},
+            _promotable_draft_json(
+                loadNumber=f"PROMO-BRK-{uuid.uuid4().hex[:8]}",
+                brokerId=missing_broker_id,
+            ),
         )
         async with factory() as db:
             with pytest.raises(HTTPException) as exc:
@@ -887,12 +997,11 @@ async def test_promote_rejects_contact_of_other_broker_like_api_create() -> None
             loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
         _, draft_id = await _create_draft(
             factory,
-            {
-                **SAMPLE_DRAFT_JSON,
-                "loadNumber": f"PROMO-CON-{uuid.uuid4().hex[:8]}",
-                "brokerId": int(pair.other_broker_id),
-                "brokerContactId": int(pair.contact_id),
-            },
+            _promotable_draft_json(
+                loadNumber=f"PROMO-CON-{uuid.uuid4().hex[:8]}",
+                brokerId=int(pair.other_broker_id),
+                brokerContactId=int(pair.contact_id),
+            ),
         )
         async with factory() as db:
             with pytest.raises(HTTPException) as exc:
@@ -928,7 +1037,7 @@ async def test_promote_rejects_duplicate_load_number_without_promoting() -> None
             if existing_number is None:
                 pytest.skip("tenant has no existing Load")
             loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
-        _, draft_id = await _create_draft(factory, {**SAMPLE_DRAFT_JSON, "loadNumber": existing_number})
+        _, draft_id = await _create_draft(factory, _promotable_draft_json(loadNumber=existing_number))
         async with factory() as db:
             with pytest.raises(HTTPException) as exc:
                 await promote_workspace_draft(
@@ -956,7 +1065,7 @@ async def test_promote_writes_one_load_created_audit_and_replay_adds_none() -> N
     draft_id = load_id = None
     try:
         tenant_id, draft_id = await _create_draft(
-            factory, {**SAMPLE_DRAFT_JSON, "loadNumber": f"PROMO-AUD-{uuid.uuid4().hex[:8]}"}
+            factory, _promotable_draft_json(loadNumber=f"PROMO-AUD-{uuid.uuid4().hex[:8]}")
         )
         promo_key = f"promo-aud-{uuid.uuid4().hex}"
         promote_payload = LoadWorkspaceDraftPromote(expected_concurrency_version=1, promotion_idempotency_key=promo_key)
@@ -1011,7 +1120,7 @@ async def test_promote_audit_failure_rolls_back_load_and_keeps_draft_promotable(
             loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
         tenant_id, draft_id = await _create_draft(
             factory,
-            {**SAMPLE_DRAFT_JSON, "loadNumber": load_number, "draftStops": [{"stopType": "PICKUP", "city": "Albany"}]},
+            _promotable_draft_json(loadNumber=load_number),
         )
 
         async def _failing_audit(*_a, **_k):

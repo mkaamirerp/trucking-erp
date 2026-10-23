@@ -39,6 +39,13 @@ export function firstStopOfTypes(stops: DraftStop[], types: string[]): DraftStop
   return null;
 }
 
+/** Task 2b: broker load number, internal load #, or any parsed reference row (e.g. PO #). */
+export function hasLoadNumberOrPo(fields: WorkspaceDraftFields): boolean {
+  if (fields.brokerLoadReference.trim()) return true;
+  if (fields.loadNumber.trim()) return true;
+  return fields.loadReferences.some((r) => (r.value || "").trim().length > 0);
+}
+
 function locationLabel(stop: DraftStop | null, role: string): string {
   if (!stop) return `${role} stop`;
   const city = (stop.city ?? "").trim();
@@ -49,10 +56,10 @@ function locationLabel(stop: DraftStop | null, role: string): string {
   return `${role}: ${city}, ${region}`;
 }
 
-export function evaluateCreateLoadGate(
+export function listCreateLoadHardMissing(
   fields: WorkspaceDraftFields,
   brokers: Broker[],
-): CreateLoadGateResult {
+): string[] {
   const hardMissing: string[] = [];
 
   const stopClassErr = validateDraftStopsClassifiedForSave(fields.draftStops);
@@ -63,6 +70,10 @@ export function evaluateCreateLoadGate(
   const carrier = resolveBrokerCarrierName(fields, brokers);
   if (!carrier) {
     hardMissing.push("Broker/Carrier (type a name or pick from suggestions)");
+  }
+
+  if (!hasLoadNumberOrPo(fields)) {
+    hardMissing.push("Load # / PO #");
   }
 
   const pickup = firstStopOfTypes(fields.draftStops, ["PICKUP"]);
@@ -82,6 +93,15 @@ export function evaluateCreateLoadGate(
     if (!(delivery.state_or_province ?? "").trim()) hardMissing.push("Delivery state or province");
   }
 
+  return hardMissing;
+}
+
+export function evaluateCreateLoadGate(
+  fields: WorkspaceDraftFields,
+  brokers: Broker[],
+): CreateLoadGateResult {
+  const hardMissing = listCreateLoadHardMissing(fields, brokers);
+
   if (hardMissing.length > 0) {
     return {
       hardBlockMessage: `Cannot create load yet. Required:\n\n• ${hardMissing.join("\n• ")}`,
@@ -89,8 +109,10 @@ export function evaluateCreateLoadGate(
     };
   }
 
+  const pickup = firstStopOfTypes(fields.draftStops, ["PICKUP"]);
+  const delivery = firstStopOfTypes(fields.draftStops, ["DELIVERY", "DROP"]);
+
   const missingOptional: string[] = [];
-  if (!fields.brokerLoadReference.trim()) missingOptional.push("Broker load reference");
   if (!fields.commodity.trim()) missingOptional.push("Commodity");
   if (!fields.rate.trim()) missingOptional.push("Rate");
   if (!fields.miles.trim()) missingOptional.push("Miles");
@@ -107,10 +129,10 @@ export function formatCommercialGateConfirm(
   missing: string[],
   mode: "create" | "save",
 ): string {
-  const anyway = mode === "save" ? "Save draft anyway?" : "Create load anyway?";
+  const anyway = mode === "save" ? "Save for later anyway?" : "Create load anyway?";
   if (missing.length === 0) {
     return mode === "save"
-      ? "Save this workspace draft with the information entered?"
+      ? "Save this draft for later with the information entered?"
       : "Create this load with the information entered?";
   }
   return "Some fields are still empty:\n\n• " + missing.join("\n• ") + `\n\n${anyway}`;
@@ -125,7 +147,7 @@ export type WorkspaceCommercialGateOutcome = "proceed" | "blocked" | "cancelled"
 
 /** Primary action label for the commercial gate modal (replaces native confirm OK). */
 export function commercialGatePrimaryActionLabel(mode: "create" | "save"): string {
-  return mode === "save" ? "Save Draft Anyway" : "Create Load Anyway";
+  return mode === "save" ? "Save for later anyway" : "Create load anyway";
 }
 
 export type WorkspaceCommercialGatePrompt =

@@ -87,6 +87,7 @@ import {
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import {
   commercialGatePrimaryActionLabel,
+  listCreateLoadHardMissing,
   resolveWorkspaceCommercialGatePrompt,
   type WorkspaceCommercialGateOutcome,
 } from "@/loadWorkspace/workspaceCreateLoadValidation";
@@ -314,13 +315,13 @@ function formatPlannedTripCreateError(err: unknown): string {
 function workspaceDraftClosedMessage(status: string): string {
   switch (status) {
     case "discarded":
-      return "This workspace draft was discarded.";
+      return "This draft was discarded.";
     case "expired":
-      return "This workspace draft has expired.";
+      return "This draft has expired.";
     case "promoted":
-      return "This workspace draft was already promoted.";
+      return "This draft was already promoted to a load.";
     default:
-      return "This workspace draft is no longer editable.";
+      return "This draft is no longer editable.";
   }
 }
 
@@ -405,7 +406,10 @@ export default function LoadWorkspacePage() {
     serverSnapshot: Load | null;
   } | null>(null);
   const [workspaceDraft, setWorkspaceDraft] = useState<LoadWorkspaceDraft | null>(null);
-  const isDraftEditable = isDraftWorkspace && workspaceDraft?.status === "draft";
+  const isLocalNewDraft = isManualCreate && !draftIdFromRoute;
+  const isDraftEditable =
+    isLocalNewDraft || (isDraftWorkspace && workspaceDraft?.status === "draft");
+  const showManualDraftActions = workspaceMode === "manual" && (isDraftWorkspace || isManualCreate);
   const [draftConflict, setDraftConflict] = useState<{ serverVersion: number | null } | null>(null);
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
@@ -916,7 +920,7 @@ export default function LoadWorkspacePage() {
   const onParseWorkspacePdf = useCallback(
     async (file: File) => {
       if (!canWorkspaceParsePdf) return;
-      if (isDraftWorkspace && (!draftIdFromRoute || !workspaceDraft)) return;
+      if (workspaceMode !== "manual" && isDraftWorkspace && (!draftIdFromRoute || !workspaceDraft)) return;
       // Load Lab / parser: hydrate commercial fields only — no trip creation, assignment, dispatch_trips, or dispatched status.
       setParseBusy(true);
       setParseWarnings([]);
@@ -925,9 +929,10 @@ export default function LoadWorkspacePage() {
       setLastParseEngineAttribution(null);
       const parseWallStarted = performance.now();
       try {
-        if (isDraftWorkspace && draftIdFromRoute && workspaceDraft) {
-          const persisted = await parseLoadWorkspaceDraftDocument(draftIdFromRoute, file, {
-            expectedConcurrencyVersion: workspaceDraft.concurrency_version,
+        if (workspaceMode === "manual") {
+          const { id: manualDraftId, draft: manualDraft } = await ensureServerDraft();
+          const persisted = await parseLoadWorkspaceDraftDocument(manualDraftId, file, {
+            expectedConcurrencyVersion: manualDraft.concurrency_version,
           });
           const parseRequestMs = performance.now() - parseWallStarted;
           const res = persisted.parse;
@@ -954,7 +959,7 @@ export default function LoadWorkspacePage() {
           setLastParseAppliedLabels(hydration.appliedLabels);
           setDraftConflict(null);
           const saved = await persistWorkspaceDraftAfterParse({
-            draftId: draftIdFromRoute,
+            draftId: manualDraftId,
             draftVersion: persisted.draft.concurrency_version,
             res,
             summary: hydration.summary,
@@ -1071,22 +1076,9 @@ export default function LoadWorkspacePage() {
 
   useEffect(() => {
     if (workspaceMode === "manual" && isManualCreate) {
-      let cancelled = false;
-      setLoading(true);
+      setLoading(false);
       setError(null);
-      createLoadWorkspaceDraft({ source_channel: "manual", draft_json: {} })
-        .then((draft) => {
-          if (!cancelled) navigate(OPS.LOAD_DRAFT(draft.id), { replace: true });
-        })
-        .catch((e) => {
-          if (!cancelled) setError((e as Error)?.message || "Could not start workspace draft");
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     if (workspaceMode === "manual" && isDraftWorkspace && draftIdFromRoute) {
@@ -1283,7 +1275,7 @@ export default function LoadWorkspacePage() {
 
   const buildWorkspacePersistPayload = () => buildLoadPersistPayload(workspacePersistParams());
 
-  const currentWorkspaceFields = (): WorkspaceDraftFields => {
+  function currentWorkspaceFields(): WorkspaceDraftFields {
     const p = workspacePersistParams();
     return {
       status,
@@ -1316,7 +1308,28 @@ export default function LoadWorkspacePage() {
       internalNotes: p.internalNotes,
       draftStops: p.draftStops,
     };
-  };
+  }
+
+  /** Always read latest form state — gate must not use a stale useCallback closure after parse hydration. */
+  const currentWorkspaceFieldsRef = useRef(currentWorkspaceFields);
+  currentWorkspaceFieldsRef.current = currentWorkspaceFields;
+
+  const createHardMissing = listCreateLoadHardMissing(currentWorkspaceFields(), freightBrokers);
+  const createMissingLine =
+    createHardMissing.length > 0 ? `Missing: ${createHardMissing.join(", ")}` : null;
+
+  async function ensureServerDraft(): Promise<{ id: string; draft: LoadWorkspaceDraft }> {
+    if (draftIdFromRoute && workspaceDraft) {
+      return { id: draftIdFromRoute, draft: workspaceDraft };
+    }
+    const created = await createLoadWorkspaceDraft({
+      source_channel: "manual",
+      draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
+    });
+    setWorkspaceDraft(created);
+    navigate(OPS.LOAD_DRAFT(created.id), { replace: true });
+    return { id: created.id, draft: created };
+  }
 
   const closeCommercialGate = useCallback((outcome: WorkspaceCommercialGateOutcome) => {
     setCommercialGatePrompt(null);
@@ -1328,7 +1341,7 @@ export default function LoadWorkspacePage() {
   const requestWorkspaceCommercialGate = useCallback(
     (mode: "create" | "save"): Promise<WorkspaceCommercialGateOutcome> => {
       const prompt = resolveWorkspaceCommercialGatePrompt(
-        currentWorkspaceFields(),
+        currentWorkspaceFieldsRef.current(),
         freightBrokers,
         mode,
       );
@@ -1428,9 +1441,14 @@ export default function LoadWorkspacePage() {
   }
 
   async function onDiscardDraft() {
-    if (!draftIdFromRoute || !isDraftEditable) return;
+    if (!isDraftEditable) return;
+    if (isLocalNewDraft) {
+      navigate(OPS.LOADS, { replace: true });
+      return;
+    }
+    if (!draftIdFromRoute) return;
     const confirmed = window.confirm(
-      "Discard this workspace draft? Saved draft data and the workspace PDF will be removed. This cannot be undone.",
+      "Discard this draft? Saved data and the PDF will be removed. This cannot be undone.",
     );
     if (!confirmed) return;
     setSaving(true);
@@ -1446,27 +1464,19 @@ export default function LoadWorkspacePage() {
   }
 
   async function onSaveDraft() {
-    if (!draftIdFromRoute || !workspaceDraft || !isDraftEditable) return;
-    const saveGate = await requestWorkspaceCommercialGate("save");
-    if (saveGate === "blocked") {
-      setToolbarMessage({
-        text: "Complete required Broker/Carrier and pickup/delivery city and state before saving.",
-        tone: "warning",
-      });
-      return;
-    }
-    if (saveGate === "cancelled") return;
+    if (!isDraftEditable) return;
     setSaving(true);
     setToolbarMessage(null);
     setDraftConflict(null);
     try {
-      const updated = await updateLoadWorkspaceDraft(draftIdFromRoute, {
-        expected_concurrency_version: workspaceDraft.concurrency_version,
+      const { id, draft } = await ensureServerDraft();
+      const updated = await updateLoadWorkspaceDraft(id, {
+        expected_concurrency_version: draft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(updated, { restorePdf: true });
       setToolbarMessage({
-        text: "Workspace draft saved. It stays on this page until you choose Create load — it does not appear on the loads list yet.",
+        text: "Draft saved for later. Use Create load when you are ready to assign it.",
         tone: "success",
       });
     } catch (e: unknown) {
@@ -1510,26 +1520,24 @@ export default function LoadWorkspacePage() {
   }
 
   async function onPromoteDraft() {
-    if (!draftIdFromRoute || !workspaceDraft || !isDraftEditable) return;
-    const createGate = await requestWorkspaceCommercialGate("create");
-    if (createGate === "blocked") {
-      setToolbarMessage({
-        text: "Complete required Broker/Carrier and pickup/delivery city and state before creating a load.",
-        tone: "warning",
-      });
+    if (!isDraftEditable) return;
+    if (createHardMissing.length > 0) {
+      setToolbarMessage({ text: createMissingLine ?? "Complete required fields before creating a load.", tone: "warning" });
       return;
     }
+    const createGate = await requestWorkspaceCommercialGate("create");
     if (createGate === "cancelled") return;
     setSaving(true);
     setToolbarMessage(null);
     setDraftConflict(null);
     try {
-      const saved = await updateLoadWorkspaceDraft(draftIdFromRoute, {
-        expected_concurrency_version: workspaceDraft.concurrency_version,
+      const { id, draft } = await ensureServerDraft();
+      const saved = await updateLoadWorkspaceDraft(id, {
+        expected_concurrency_version: draft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(saved);
-      const result = await promoteLoadWorkspaceDraft(draftIdFromRoute, {
+      const result = await promoteLoadWorkspaceDraft(id, {
         expected_concurrency_version: saved.concurrency_version,
         promotion_idempotency_key: crypto.randomUUID(),
       });
@@ -1973,7 +1981,7 @@ export default function LoadWorkspacePage() {
                 : "Upload & parse PDF"}
             </Button>
           ) : null}
-          {workspaceMode === "manual" && isDraftWorkspace ? (
+          {showManualDraftActions ? (
             <>
               <Button
                 variant="secondary"
@@ -1981,7 +1989,7 @@ export default function LoadWorkspacePage() {
                 disabled={saving || markReadyBusy || !isDraftEditable}
                 onClick={() => void onDiscardDraft()}
               >
-                Discard draft
+                Discard
               </Button>
               <Button
                 variant="secondary"
@@ -1989,16 +1997,26 @@ export default function LoadWorkspacePage() {
                 disabled={saving || markReadyBusy || parseBusy || !isDraftEditable}
                 onClick={() => void onSaveDraft()}
               >
-                {saving ? "Saving…" : "Save draft"}
+                {saving ? "Saving…" : "Save for later"}
               </Button>
               <Button
                 variant="primary"
                 type="button"
-                disabled={saving || markReadyBusy || parseBusy || !isDraftEditable}
+                disabled={
+                  saving ||
+                  markReadyBusy ||
+                  parseBusy ||
+                  !isDraftEditable ||
+                  createHardMissing.length > 0
+                }
+                title={createMissingLine ?? undefined}
                 onClick={() => void onPromoteDraft()}
               >
                 {saving ? "Creating…" : "Create load"}
               </Button>
+              {createMissingLine ? (
+                <p className="w-full text-[11px] text-amber-400/90 sm:w-auto">{createMissingLine}</p>
+              ) : null}
             </>
           ) : workspaceMode === "manual" ? null : (
             <>
@@ -2155,7 +2173,7 @@ export default function LoadWorkspacePage() {
                 id="workspace-commercial-gate-title"
                 className="text-sm font-semibold text-[var(--trk-heading)]"
               >
-                {commercialGatePrompt.mode === "save" ? "Save workspace draft" : "Create load"}
+                {commercialGatePrompt.mode === "save" ? "Save for later" : "Create load"}
               </h2>
               <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--trk-text)]">
                 {commercialGatePrompt.message}

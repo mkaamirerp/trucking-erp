@@ -355,6 +355,70 @@ def _stop_is_delivery_or_drop(stop_type: str | None) -> bool:
     return u in ("DROP", "DELIVERY")
 
 
+def _load_number_or_po_present(
+    *,
+    broker_load_reference: str | None,
+    load_number: str | None,
+    operational_reference_values: list[str] | None,
+) -> bool:
+    if (broker_load_reference or "").strip():
+        return True
+    if (load_number or "").strip():
+        return True
+    return any((value or "").strip() for value in operational_reference_values or [])
+
+
+def validate_load_ready_prerequisites(
+    *,
+    broker_id: int | None,
+    broker_name_snapshot: str | None,
+    broker_load_reference: str | None,
+    load_number: str | None = None,
+    operational_reference_values: list[str] | None = None,
+    stop_types: list[str],
+) -> list[str]:
+    """Shared mark-ready / workspace-promote rules. Returns human-readable missing items."""
+    missing: list[str] = []
+    if not (broker_id or (broker_name_snapshot or "").strip()):
+        missing.append("Broker or broker name is required")
+    if not _load_number_or_po_present(
+        broker_load_reference=broker_load_reference,
+        load_number=load_number,
+        operational_reference_values=operational_reference_values,
+    ):
+        missing.append("Load # / PO # is required")
+    normalized = [(value or "").strip().upper() for value in stop_types]
+    if "PICKUP" not in normalized:
+        missing.append("At least one pickup is required")
+    if not any(_stop_is_delivery_or_drop(value) for value in normalized):
+        missing.append("At least one delivery or drop is required")
+    return missing
+
+
+def validate_load_ready_prerequisites_from_create(payload: LoadCreate) -> list[str]:
+    stop_types = [(s.stop_type or "") for s in (payload.stops or [])]
+    ref_values = [(r.value or "") for r in (payload.references or [])]
+    return validate_load_ready_prerequisites(
+        broker_id=payload.broker_id,
+        broker_name_snapshot=payload.broker_name_snapshot,
+        broker_load_reference=payload.broker_load_reference,
+        load_number=payload.load_number,
+        operational_reference_values=ref_values,
+        stop_types=stop_types,
+    )
+
+
+def ready_prerequisites_http_exception(missing: list[str]) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "code": "LOAD_READY_PREREQUISITES_NOT_MET",
+            "missing": missing,
+            "message": "; ".join(missing),
+        },
+    )
+
+
 async def _ready_requirements_violation(
     db: AsyncSession,
     tenant_id: int,
@@ -366,6 +430,8 @@ async def _ready_requirements_violation(
                 Load.broker_id,
                 Load.broker_name_snapshot,
                 Load.broker_load_reference,
+                Load.load_number,
+                Load.operational_references,
             ).where(
                 Load.id == load_id,
                 Load.tenant_id == tenant_id,
@@ -376,17 +442,8 @@ async def _ready_requirements_violation(
     if row is None:
         return "Load not found"
 
-    if not (
-        row.broker_id
-        or (row.broker_name_snapshot or "").strip()
-    ):
-        return "Broker or broker name is required"
-
-    if not (row.broker_load_reference or "").strip():
-        return "Broker load reference is required"
-
     stop_types = [
-        (value or "").strip().upper()
+        (value or "").strip()
         for value in (
             await db.scalars(
                 select(LoadStop.stop_type).where(
@@ -397,16 +454,21 @@ async def _ready_requirements_violation(
         ).all()
     ]
 
-    if "PICKUP" not in stop_types:
-        return "At least one pickup is required"
-
-    if not any(
-        _stop_is_delivery_or_drop(value)
-        for value in stop_types
-    ):
-        return "At least one delivery or drop is required"
-
-    return None
+    op_refs = row.operational_references if isinstance(row.operational_references, list) else []
+    ref_values = [
+        str(item.get("value") or "")
+        for item in op_refs
+        if isinstance(item, dict)
+    ]
+    missing = validate_load_ready_prerequisites(
+        broker_id=row.broker_id,
+        broker_name_snapshot=row.broker_name_snapshot,
+        broker_load_reference=row.broker_load_reference,
+        load_number=row.load_number,
+        operational_reference_values=ref_values,
+        stop_types=stop_types,
+    )
+    return missing[0] if missing else None
 
 
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
@@ -438,6 +500,7 @@ async def _insert_commercial_load_uncommitted(
     payload: LoadCreate,
     *,
     promotion_origin_workspace_draft_id: uuid.UUID | None = None,
+    insert_as_ready: bool = False,
 ) -> tuple[Load, dict[str, object] | None]:
     """Validate and stage one draft Load plus commercial stops.
 
@@ -446,6 +509,10 @@ async def _insert_commercial_load_uncommitted(
     when no stops were supplied).
     """
     _guard_create_payload(payload)
+    if insert_as_ready:
+        missing = validate_load_ready_prerequisites_from_create(payload)
+        if missing:
+            raise ready_prerequisites_http_exception(missing)
     if payload.broker_id is not None and not await _get_broker(db, tenant_id, payload.broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Broker not found")
     if payload.broker_contact_id is not None:
@@ -465,7 +532,7 @@ async def _insert_commercial_load_uncommitted(
 
     data = _load_data_from_payload(payload)
     data["load_number"] = load_number
-    data["status"] = "draft"
+    data["status"] = "ready" if insert_as_ready else "draft"
 
     load = Load(
         **data,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Broker } from "@/api";
 import { initialManualCreateStops, type WorkspaceDraftFields } from "./loadWorkspaceShared";
-import { evaluateCreateLoadGate } from "./workspaceCreateLoadValidation";
+import { evaluateCreateLoadGate, hasLoadNumberOrPo } from "./workspaceCreateLoadValidation";
 
 const brokers: Broker[] = [{ id: 1, name: "TQL" }];
 
@@ -19,7 +19,7 @@ function baseFields(overrides: Partial<WorkspaceDraftFields> = {}): WorkspaceDra
     brokerContactPhoneSnapshot: "",
     brokerContactExtensionSnapshot: "",
     brokerContactEmailSnapshot: "",
-    brokerLoadReference: "",
+    brokerLoadReference: "REF-100",
     loadReferences: [],
     freightMode: "",
     equipmentType: "",
@@ -44,6 +44,25 @@ function baseFields(overrides: Partial<WorkspaceDraftFields> = {}): WorkspaceDra
 }
 
 describe("evaluateCreateLoadGate", () => {
+  it("hard-blocks without Load # / PO #", () => {
+    const r = evaluateCreateLoadGate(
+      baseFields({ brokerLoadReference: "", loadReferences: [] }),
+      brokers,
+    );
+    expect(r.hardBlockMessage).toMatch(/Load # \/ PO #/);
+  });
+
+  it("accepts PO reference only for Task 2b", () => {
+    expect(
+      hasLoadNumberOrPo(
+        baseFields({
+          brokerLoadReference: "",
+          loadReferences: [{ kind: "po_number", value: "4500123", label: "PO #" }],
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("hard-blocks without broker/carrier", () => {
     const r = evaluateCreateLoadGate(baseFields({ brokerNameSnapshot: "" }), brokers);
     expect(r.hardBlockMessage).toMatch(/Broker\/Carrier/);
