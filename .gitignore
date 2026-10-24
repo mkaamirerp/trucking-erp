@@ -104,6 +104,16 @@ runtime/
 .cursor/hooks/
 .cursor/context/
 
+# Local verification scratch (screenshots, E2E dumps) — never commit
+docs/verification/
+
+# WIP parser/casbin sandboxes — never commit
+parser-casbin-wip-*/
+
+# Local rate-con / lab PDFs at repo root or load_lab (committed fixtures elsewhere stay tracked)
+/TQLRC.pdf
+docs/fixtures/load_lab/Agriculture.pdf
+
 # Local customer Toll evidence — never commit
 tests/fixtures/1104Toll.jpg
 tests/fixtures/359238_AccountMonthlyStatement_20230403165823557.PDF
