@@ -44,6 +44,11 @@ from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.future_movement_plans import load_has_open_future_movement_plan
+from app.services.load_workspace_draft_storage import (
+    LoadWorkspaceDraftStorageError,
+    Sha256MismatchError,
+    read_object_bytes,
+)
 from app.services.load_operational_references import sanitize_load_operational_references
 from app.services.trips import (
     _lock_load_for_membership,
@@ -1433,3 +1438,43 @@ async def get_load_rate_confirmation_pdf_evidence(
             detail="No rate confirmation PDF on this load",
         )
     return row
+
+
+async def read_load_rate_confirmation_pdf_bytes(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    tenant_slug: str,
+) -> tuple[LoadCommercialEvidence, bytes]:
+    """Load commercial evidence row and PDF bytes; verify object SHA-256 before serve."""
+    row = await get_load_rate_confirmation_pdf_evidence(db, tenant_id, load_id)
+    expected = (row.file_sha256 or "").strip().lower()
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "LOAD_RATE_CONFIRMATION_PDF_INTEGRITY",
+                "message": "Rate confirmation PDF evidence is missing file_sha256",
+            },
+        )
+    try:
+        body = read_object_bytes(
+            row.storage_key,
+            tenant_slug=tenant_slug,
+            expected_sha256=expected,
+        )
+    except Sha256MismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "LOAD_RATE_CONFIRMATION_PDF_SHA256_MISMATCH",
+                "message": "Stored rate confirmation PDF does not match commercial evidence hash",
+            },
+        ) from exc
+    except LoadWorkspaceDraftStorageError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Rate confirmation PDF file not found",
+        ) from exc
+    return row, body

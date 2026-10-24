@@ -211,3 +211,101 @@ async def test_load_rate_confirmation_pdf_armstrong_selectable_text(
     finally:
         await _delete_promoted_load_and_draft(factory, load_id, draft_id)
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_load_rate_confirmation_pdf_sha256_mismatch_refused(override_auth_tenant) -> None:
+    if database_name_from_url(_tenant_async_url()) == "tenant_demo":
+        pytest.skip("mutation tests must not run on tenant_demo")
+    if not _ARMSTRONG_PDF.is_file():
+        pytest.skip("Armstrong.pdf fixture missing")
+
+    pdf_bytes = _ARMSTRONG_PDF.read_bytes()
+    engine, factory = _session()
+    draft_id = None
+    load_id = None
+    tenant_slug = integration_tenant_slug()
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={
+                        **_PROMOTABLE_DRAFT_JSON,
+                        "loadNumber": f"SHA-{uuid.uuid4().hex[:8]}",
+                    },
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+
+        stored = await get_storage().save_bytes(
+            tenant_slug,
+            LOAD_WORKSPACE_DRAFT_PDF_MODULE,
+            "workspace_draft",
+            str(draft_id),
+            pdf_bytes,
+            filename_hint="Armstrong.pdf",
+            content_type="application/pdf",
+        )
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            await db.execute(
+                text(
+                    """
+                    UPDATE load_workspace_drafts
+                    SET pdf_upload_state = 'ready',
+                        pdf_storage_key = :key,
+                        pdf_sha256 = :sha,
+                        pdf_filename = 'Armstrong.pdf',
+                        accepted_parse_json = '{}'::jsonb,
+                        accepted_parse_schema_version = 'load_document_parse_response_v1'
+                    WHERE tenant_id = :tenant_id AND id = :id
+                    """
+                ),
+                {"tenant_id": tenant_id, "id": draft_id, "key": stored.storage_key, "sha": stored.sha256},
+            )
+            await db.commit()
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=f"sha-mismatch-{uuid.uuid4().hex}",
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            await db.execute(
+                text(
+                    """
+                    UPDATE load_commercial_evidence
+                    SET file_sha256 = '0000000000000000000000000000000000000000000000000000000000000000'
+                    WHERE tenant_id = :tenant_id AND load_id = :load_id
+                    """
+                ),
+                {"tenant_id": tenant_id, "load_id": load_id},
+            )
+            await db.commit()
+
+        headers = integration_auth_headers()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.get(f"/api/v1/loads/{load_id}/rate-confirmation-pdf", headers=headers)
+            assert res.status_code == 409
+            detail = res.json().get("detail")
+            if isinstance(detail, dict):
+                assert detail.get("code") == "LOAD_RATE_CONFIRMATION_PDF_SHA256_MISMATCH"
+    finally:
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
+        await engine.dispose()
