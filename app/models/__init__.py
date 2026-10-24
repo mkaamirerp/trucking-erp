@@ -41,6 +41,7 @@ from app.models.load_lab import LoadLabExtractionRun, LoadLabPromoteAudit
 from app.models.extraction_field_learning import ExtractionFieldLearningEvent
 from app.models.platform_extraction_learning import PlatformExtractionSanitizedPattern
 from app.models.dispatch_trip import TenantDispatchNumbering, DispatchTrip
+from app.models.tenant_load_number_period import TenantLoadNumberPeriod
 from app.models.trip import Trip, TripLoad
 from app.models.future_movement_plan import FutureMovementPlan, FutureMovementPlanLoad
 from app.models.load_dispatch_instruction import LoadDispatchInstruction
