@@ -964,8 +964,10 @@ export async function listLoads(params: {
   search?: string;
   page?: number;
   size?: number;
+  dispatch_unassigned?: boolean;
 } = {}) {
   const url = new URL(`${API_BASE}/loads`, window.location.origin);
+  if (params.dispatch_unassigned) url.searchParams.set("dispatch_unassigned", "true");
   if (params.status) params.status.forEach((s) => url.searchParams.append("status", s));
   if (params.driver_id) url.searchParams.set("driver_id", String(params.driver_id));
   if (params.broker_id) url.searchParams.set("broker_id", String(params.broker_id));
@@ -4301,6 +4303,7 @@ export type Load = {
   open_planned_trip_number?: string | null;
   /** Open §9A Future Movement Plan (pre-Trip); not a trip number. */
   open_future_movement_plan_id?: number | null;
+  custody_owner?: string | null;
   broker_match_method?: string | null;
   broker_match_confidence_tier?: string | null;
   broker_match_explanation?: string | null;

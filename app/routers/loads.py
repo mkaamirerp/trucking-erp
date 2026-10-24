@@ -85,20 +85,30 @@ async def list_loads(
     search: str | None = Query(None, max_length=120),
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=200),
+    dispatch_unassigned: bool = Query(False),
 ):
-    paged = await loads_service.list_loads(
-        db,
-        tenant_id=tenant_id,
-        statuses=status,
-        driver_id=driver_id,
-        broker_id=broker_id,
-        truck_id=truck_id,
-        trailer_id=trailer_id,
-        search=search,
-        page=page,
-        size=size,
-    )
+    if dispatch_unassigned:
+        paged = await loads_service.list_dispatch_unassigned_loads(
+            db,
+            tenant_id=tenant_id,
+            page=page,
+            size=size,
+        )
+    else:
+        paged = await loads_service.list_loads(
+            db,
+            tenant_id=tenant_id,
+            statuses=status,
+            driver_id=driver_id,
+            broker_id=broker_id,
+            truck_id=truck_id,
+            trailer_id=trailer_id,
+            search=search,
+            page=page,
+            size=size,
+        )
     items = [LoadResponse.model_validate(item) for item in paged["items"]]
+    items = await loads_service.enrich_load_responses(db, tenant_id, items)
     return {**paged, "items": items}
 
 

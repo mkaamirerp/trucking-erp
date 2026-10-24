@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +40,7 @@ from app.models.broker import Broker, BrokerContact
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
 from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
 from app.models.load_commercial_evidence import LoadCommercialEvidence
+from app.models.future_movement_plan import FutureMovementPlanLoad
 from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
@@ -51,8 +52,11 @@ from app.services.load_workspace_draft_storage import (
     read_object_bytes,
 )
 from app.services.load_operational_references import sanitize_load_operational_references
+from app.services.future_movement_plans import tenant_has_fmp_schema
 from app.services.trips import (
+    _fmpl_is_open_clause,
     _lock_load_for_membership,
+    _trip_load_is_open_planned_clause,
     close_open_trip_load_memberships_for_commercial_cancel,
 )
 from app.utils.pagination import paginate
@@ -707,6 +711,123 @@ async def list_loads(
     if trailer_id:
         stmt = stmt.where(Load.trailer_id == trailer_id)
 
+    return await paginate(db, stmt, page=page, size=size)
+
+
+DISPATCH_UNASSIGNED_STORED_STATUSES = frozenset({"ready", "unassigned"})
+DISPATCH_UNASSIGNED_MAX_SIZE = 50
+
+
+async def _open_planned_trip_map(
+    db: AsyncSession, tenant_id: int, load_ids: list[int]
+) -> dict[int, tuple[int, str]]:
+    if not load_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(TripLoad.load_id, Trip.id, Trip.trip_number)
+            .select_from(TripLoad)
+            .join(
+                Trip,
+                and_(Trip.tenant_id == TripLoad.tenant_id, Trip.id == TripLoad.trip_id),
+            )
+            .where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.load_id.in_(load_ids),
+                _trip_load_is_open_planned_clause(),
+            )
+            .order_by(TripLoad.load_id.asc(), TripLoad.id.desc())
+        )
+    ).all()
+    out: dict[int, tuple[int, str]] = {}
+    for load_id, trip_id, trip_number in rows:
+        lid = int(load_id)
+        if lid not in out:
+            out[lid] = (int(trip_id), str(trip_number or ""))
+    return out
+
+
+async def _open_fmp_map(db: AsyncSession, tenant_id: int, load_ids: list[int]) -> dict[int, int]:
+    if not load_ids or not await tenant_has_fmp_schema(db):
+        return {}
+    rows = (
+        await db.execute(
+            select(FutureMovementPlanLoad.load_id, FutureMovementPlanLoad.plan_id).where(
+                FutureMovementPlanLoad.tenant_id == tenant_id,
+                FutureMovementPlanLoad.load_id.in_(load_ids),
+                _fmpl_is_open_clause(),
+            )
+        )
+    ).all()
+    return {int(r[0]): int(r[1]) for r in rows}
+
+
+async def enrich_load_responses(
+    db: AsyncSession, tenant_id: int, items: list[LoadResponse]
+) -> list[LoadResponse]:
+    """Attach open planned trip and FMP mirrors for operator status (read-only)."""
+    if not items:
+        return items
+    load_ids = [int(r.id) for r in items]
+    planned = await _open_planned_trip_map(db, tenant_id, load_ids)
+    fmp = await _open_fmp_map(db, tenant_id, load_ids)
+    enriched: list[LoadResponse] = []
+    for resp in items:
+        lid = int(resp.id)
+        updates: dict[str, object] = {}
+        if lid in planned:
+            updates["open_planned_trip_id"] = planned[lid][0]
+            updates["open_planned_trip_number"] = planned[lid][1]
+        if lid in fmp:
+            updates["open_future_movement_plan_id"] = fmp[lid]
+        enriched.append(resp.model_copy(update=updates) if updates else resp)
+    return enriched
+
+
+async def list_dispatch_unassigned_loads(
+    db: AsyncSession,
+    tenant_id: int,
+    *,
+    page: int = 1,
+    size: int = 50,
+):
+    """Ready/unassigned loads with no active trip, open planned trip, or open FMP."""
+    size = min(max(1, size), DISPATCH_UNASSIGNED_MAX_SIZE)
+    planned_exists = (
+        select(1)
+        .select_from(TripLoad)
+        .where(
+            TripLoad.tenant_id == Load.tenant_id,
+            TripLoad.load_id == Load.id,
+            _trip_load_is_open_planned_clause(),
+        )
+    )
+    stmt = (
+        select(Load)
+        .options(
+            selectinload(Load.driver),
+            selectinload(Load.broker),
+            selectinload(Load.stops),
+        )
+        .where(
+            Load.tenant_id == tenant_id,
+            Load.status.in_(tuple(DISPATCH_UNASSIGNED_STORED_STATUSES)),
+            Load.active_trip_id.is_(None),
+            ~exists(planned_exists),
+        )
+        .order_by(Load.id.desc())
+    )
+    if await tenant_has_fmp_schema(db):
+        fmp_exists = (
+            select(1)
+            .select_from(FutureMovementPlanLoad)
+            .where(
+                FutureMovementPlanLoad.tenant_id == Load.tenant_id,
+                FutureMovementPlanLoad.load_id == Load.id,
+                _fmpl_is_open_clause(),
+            )
+        )
+        stmt = stmt.where(~exists(fmp_exists))
     return await paginate(db, stmt, page=page, size=size)
 
 

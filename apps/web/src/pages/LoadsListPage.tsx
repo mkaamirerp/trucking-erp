@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import StatusBadge from "@/components/StatusBadge";
+import OperatorLoadStatusChip from "@/components/OperatorLoadStatusChip";
 import {
   devPlaygroundResetLoadsAndTrips,
   listLoadWorkspaceDrafts,
@@ -268,7 +268,7 @@ export default function LoadsListPage() {
                     <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.route}</td>
                     <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.pickup}</td>
                     <td className="px-4 py-2.5">
-                      <StatusBadge status={row.status} />
+                      <OperatorLoadStatusChip load={row.operatorStatus} />
                     </td>
                     <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.driver}</td>
                     <td className="px-4 py-2.5 text-right text-sm text-[var(--trk-text)]">{row.rateDisplay}</td>

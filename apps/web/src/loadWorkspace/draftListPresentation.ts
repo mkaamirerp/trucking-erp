@@ -1,4 +1,5 @@
 import type { Load, LoadWorkspaceDraft } from "@/api";
+import type { OperatorLoadStatusInput } from "@/loads/operatorLoadStatus";
 import type { WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
 import { workspaceFieldsFromDraftJson } from "@/loadWorkspace/loadWorkspaceShared";
 import {
@@ -76,6 +77,7 @@ export type LoadsDirectoryRow = {
   route: string;
   pickup: string;
   status: string;
+  operatorStatus: OperatorLoadStatusInput;
   driver: string;
   rateDisplay: string;
   updatedAt: string;
@@ -99,6 +101,13 @@ export function loadToDirectoryRow(load: Load): LoadsDirectoryRow {
     route: formatRouteFromStops(load.stops ?? []),
     pickup: firstPickupAppointmentDate(load.stops) || "—",
     status: load.status,
+    operatorStatus: {
+      status: load.status,
+      active_trip_id: load.active_trip_id,
+      open_planned_trip_id: load.open_planned_trip_id,
+      open_future_movement_plan_id: load.open_future_movement_plan_id,
+      custody_owner: load.custody_owner,
+    },
     driver: loadDriverLabel(load) || "—",
     rateDisplay: load.rate != null ? String(load.rate) : "—",
     updatedAt: load.updated_at ?? load.created_at ?? new Date(0).toISOString(),
@@ -123,6 +132,7 @@ export function workspaceDraftToDirectoryRow(draft: LoadWorkspaceDraft): LoadsDi
     route: formatRouteFromStops(fields.draftStops),
     pickup: firstPickupAppointmentDate(fields.draftStops) || "—",
     status: "draft",
+    operatorStatus: { status: "draft" },
     driver: "—",
     rateDisplay: fields.rate.trim() ? fields.rate.trim() : "—",
     updatedAt: draft.updated_at,

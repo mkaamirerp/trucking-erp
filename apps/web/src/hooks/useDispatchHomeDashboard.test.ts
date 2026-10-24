@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   INBOUND_ETA_NOT_RECORDED,
   buildAssignQueue,
+  buildUnassignedLoadAssignRows,
   buildDriverRows,
+  mergeAssignQueue,
   buildInboundRows,
   inboundEtaLabel,
   isLicenseExpired,
@@ -170,6 +172,35 @@ describe("loads to assign", () => {
       expect(rows[0].queueKind).toBe("needs_equipment");
       expect(rows[0].sublabel).toContain("truck");
     }
+  });
+
+  it("places unassigned load rows before trip rows without duplicating trip queue entries", () => {
+    const loadRows = buildUnassignedLoadAssignRows([
+      {
+        id: 42,
+        load_number: "Oct-26-0042",
+        status: "ready",
+        stops: [
+          { id: 1, load_id: 42, stop_type: "PICKUP", sequence: 0, city: "Dallas", state_or_province: "TX" },
+          { id: 2, load_id: 42, stop_type: "DELIVERY", sequence: 1, city: "Houston", state_or_province: "TX" },
+        ],
+      } as import("../api").Load,
+    ]);
+    const tripRows = buildAssignQueue([], [trip({ id: 7, trip_number: "T-7", status: "planned", driver_id: null })]);
+    const merged = mergeAssignQueue(
+      [
+        {
+          id: 42,
+          load_number: "Oct-26-0042",
+          status: "ready",
+          stops: [],
+        } as import("../api").Load,
+      ],
+      tripRows,
+    );
+    expect(merged[0].kind).toBe("unassigned_load");
+    expect(merged.some((r) => r.kind === "trip")).toBe(true);
+    expect(loadRows[0].badge).toBe("Unassigned");
   });
 
   it("keeps open FMP separate from numbered trips", () => {

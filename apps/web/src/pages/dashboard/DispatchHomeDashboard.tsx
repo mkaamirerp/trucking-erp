@@ -193,7 +193,7 @@ export default function DispatchHomeDashboard() {
               <p className="px-2.5 py-2 text-[11px] text-slate-500">Loading queue…</p>
             ) : assignQueue.length === 0 ? (
               <p className="px-2.5 py-2 text-[11px] text-slate-500">
-                No open future plans or planned trips need attention.
+                No unassigned loads, open future plans, or planned trips need attention.
               </p>
             ) : (
               <ul>
@@ -202,13 +202,19 @@ export default function DispatchHomeDashboard() {
                     <RowButton
                       to={row.href}
                       primary={row.label}
-                      secondary={`${row.sublabel} · ${row.loadCount} load(s)`}
+                      secondary={
+                        row.kind === "unassigned_load"
+                          ? row.sublabel
+                          : `${row.sublabel} · ${row.loadCount} load(s)`
+                      }
                       badge={
-                        row.kind === "fmp"
-                          ? "FMP"
-                          : row.queueKind === "needs_driver"
-                            ? "Driver"
-                            : "Equip"
+                        row.kind === "unassigned_load"
+                          ? row.badge
+                          : row.kind === "fmp"
+                            ? "FMP"
+                            : row.queueKind === "needs_driver"
+                              ? "Driver"
+                              : "Equip"
                       }
                     />
                   </li>
@@ -216,15 +222,8 @@ export default function DispatchHomeDashboard() {
               </ul>
             )}
             <div className="border-t border-slate-100 px-2.5 py-1 text-[10px] text-slate-500">
-              Assign via{" "}
-              <Link to={OPS.TRIP_CONTAINER} className="text-sky-700 hover:underline">
-                Trip Container
-              </Link>{" "}
-              or{" "}
-              <Link to={OPS.FUTURE_MOVEMENT_PLANS} className="text-sky-700 hover:underline">
-                Future plans
-              </Link>
-              .
+              Unassigned loads open in the load workspace. Planned trips and future movement plans use their
+              own links above.
             </div>
           </Panel>
 

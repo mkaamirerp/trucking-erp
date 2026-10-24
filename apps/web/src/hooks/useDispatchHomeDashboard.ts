@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type Driver,
   type FutureMovementPlan,
+  type Load,
   type TripListItem,
   listDrivers,
   listFutureMovementPlans,
+  listLoads,
   listTrips,
 } from "../api";
+import { formatRouteFromStops, firstPickupAppointmentDate } from "../utils/loadStops";
 
 /** Canonical open Trip statuses (Trip operational truth — not legacy Load.status). */
 export const OPEN_TRIP_STATUSES = new Set(["planned", "assigned", "in_progress"]);
@@ -42,6 +45,14 @@ export type InboundYardRow = {
 };
 
 export type AssignQueueRow =
+  | {
+      kind: "unassigned_load";
+      id: number;
+      label: string;
+      sublabel: string;
+      href: string;
+      badge: "Unassigned";
+    }
   | {
       kind: "fmp";
       id: number;
@@ -189,6 +200,30 @@ export function buildInboundRows(
   return rows.slice(0, 40);
 }
 
+export const DISPATCH_UNASSIGNED_LOADS_PAGE_SIZE = 50;
+
+export function buildUnassignedLoadAssignRows(loads: Load[]): AssignQueueRow[] {
+  return loads.map((load) => {
+    const loadNumber = (load.load_number || "").trim() || `Load ${load.id}`;
+    const route = formatRouteFromStops(load.stops ?? []);
+    const pickup = firstPickupAppointmentDate(load.stops) || "—";
+    const rate =
+      load.rate != null && String(load.rate).trim() !== "" ? `$${load.rate}` : "—";
+    return {
+      kind: "unassigned_load",
+      id: load.id,
+      label: loadNumber,
+      sublabel: `${route} · PU ${pickup} · ${rate}`,
+      href: `/loads/${load.id}`,
+      badge: "Unassigned",
+    };
+  });
+}
+
+export function mergeAssignQueue(unassignedLoads: Load[], tripAndFmpRows: AssignQueueRow[]): AssignQueueRow[] {
+  return [...buildUnassignedLoadAssignRows(unassignedLoads), ...tripAndFmpRows];
+}
+
 export function buildAssignQueue(
   fmpPlans: FutureMovementPlan[],
   trips: TripListItem[],
@@ -308,6 +343,18 @@ export function useDispatchHomeDashboard(): DispatchHomeState {
       partial.push(`future plans: ${e instanceof Error ? e.message : "failed"}`);
     }
 
+    let unassignedLoads: Load[] = [];
+    try {
+      const unassigned = await listLoads({
+        dispatch_unassigned: true,
+        page: 1,
+        size: DISPATCH_UNASSIGNED_LOADS_PAGE_SIZE,
+      });
+      unassignedLoads = unassigned.items ?? [];
+    } catch (e) {
+      partial.push(`unassigned loads: ${e instanceof Error ? e.message : "failed"}`);
+    }
+
     const tripsIncomplete = tripItems.length > 0 && tripsFetchMayBeIncomplete(tripItems, tripTotal);
 
     setDrivers(
@@ -316,7 +363,7 @@ export function useDispatchHomeDashboard(): DispatchHomeState {
       }),
     );
     setInbound(buildInboundRows(fmpItems, tripItems));
-    setAssignQueue(buildAssignQueue(fmpItems, tripItems));
+    setAssignQueue(mergeAssignQueue(unassignedLoads, buildAssignQueue(fmpItems, tripItems)));
 
     setPartialErrors(partial);
     setLoading(false);

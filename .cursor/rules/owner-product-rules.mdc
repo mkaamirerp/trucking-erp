@@ -35,11 +35,13 @@ When implementing operator-facing Load / Trip / Dispatch behavior, follow this f
 - **Broker load # / PO #** = the broker’s number from the rate confirmation (`broker_load_reference` and related refs). Label and help text must say **broker** (or PO), not “load number.”
 - **Load number** = **our** internal carrier load number (`load_number`). Never use “load number” in UI to mean the broker’s reference.
 
-## `ready` meaning
+## `ready` meaning (stored) vs operator status
 
-**`ready`** = dispatcher-reviewed load, **available to dispatch**; **no completeness prerequisites** on the **promotion** path. **`mark_load_ready`** on existing **`loads.status=draft`** (email/legacy) may still enforce prerequisites until the owner changes that path.
+**Stored `loads.status = ready`** = commercial row is **available to dispatch** (promotion / mark-ready path); **no completeness prerequisites** on promotion. **`mark_load_ready`** on existing **`loads.status=draft`** (email/legacy) may still enforce prerequisites until the owner changes that path.
 
 **`ready` is not execution:** it does not assign a driver, create a trip, dispatch, or start movement by itself.
+
+**Operators never see the word “Ready”.** For UI, a stored **`ready`** load with no open planned trip, active trip, or future movement plan is shown as **Unassigned**. Lifecycle labels: **Draft**, **Unassigned**, **Assigned**, **In transit**, **Delivered**, **Cancelled** (derived in frontend; do not add new stored status values for these).
 
 ## Dispatch home and assignment (target product)
 

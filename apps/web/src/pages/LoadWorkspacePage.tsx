@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import Button from "@/components/Button";
+import OperatorLoadStatusChip from "@/components/OperatorLoadStatusChip";
 import FollowUpDispatchDialog from "@/components/FollowUpDispatchDialog";
 import {
   addLoadNote,
@@ -1974,13 +1975,17 @@ function LoadWorkspacePage() {
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               {workspaceMode !== "manual" && load ? (
-                <span className="rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
-                  {status || "draft"}
-                </span>
+                <OperatorLoadStatusChip
+                  load={{
+                    status: load.status,
+                    active_trip_id: load.active_trip_id,
+                    open_planned_trip_id: load.open_planned_trip_id,
+                    open_future_movement_plan_id: load.open_future_movement_plan_id,
+                    custody_owner: load.custody_owner,
+                  }}
+                />
               ) : (
-                <span className="rounded border border-sky-800 bg-sky-950/50 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
-                  draft
-                </span>
+                <OperatorLoadStatusChip load={{ status: "draft" }} />
               )}
               {workspaceMode === "detail" ? (
                 <span className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-400">
