@@ -47,6 +47,17 @@ Former Decision 6–14, Phase3L, Trip Container 000/001, integrity tracker, trip
 
 ---
 
+## Payroll / Settlements
+
+| Title | Path | Status / purpose |
+|---|---|---|
+| **Settlement rate (owner decision)** | [`payroll_settlements/SETTLEMENT_RATE_OWNER_DECISION_2026-10-24.md`](../../payroll_settlements/SETTLEMENT_RATE_OWNER_DECISION_2026-10-24.md) | Broker `loads.rate` vs settlement `customer_rate`; effective rate; O/O pay; finalize snapshots (Amir, 2026-10-24) |
+| **Settlement rate — payroll/load chain report** | [`payroll_settlements/SETTLEMENT_RATE_PAYROLL_LOAD_CHAIN_REPORT_2026-10-24.md`](../../payroll_settlements/SETTLEMENT_RATE_PAYROLL_LOAD_CHAIN_REPORT_2026-10-24.md) | Read-only investigation: load → trip → pay run, current payroll behavior, snapshot options |
+| Payroll / O/O fuel linkage | [`payroll_settlements/PAYROLL_OO_FUEL_SETTLEMENT_LINKAGE.md`](../../payroll_settlements/PAYROLL_OO_FUEL_SETTLEMENT_LINKAGE.md) | Fuel deduction timing vs settlement module |
+| Module index | [`payroll_settlements/README.md`](../../payroll_settlements/README.md) | Navigation |
+
+---
+
 ## Other domains
 
-See module-specific docs (Fuel, Tolls, Onboarding, Settlements, etc.). They must **not** redefine Load/Trip status or dispatch authority — defer to [`load_trip/MASTER.md`](./load_trip/MASTER.md).
+See module-specific docs (Fuel, Tolls, Onboarding, etc.). They must **not** redefine Load/Trip status or dispatch authority — defer to [`load_trip/MASTER.md`](./load_trip/MASTER.md).
