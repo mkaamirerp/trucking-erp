@@ -14,6 +14,7 @@ import {
   createPlannedTrip,
   createLoadWorkspaceDraft,
   discardLoadWorkspaceDraft,
+  fetchLoadRateConfirmationPdfObjectUrl,
   fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
   getLoadWorkspaceDraft,
   parseLoadWorkspaceDraftDocument,
@@ -54,6 +55,11 @@ import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh"
 import { OPS } from "@/routes";
 import { sortedStops as sortStops } from "@/utils/loadStops";
 import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
+import {
+  RateConfirmationPdfPanel,
+  draftRateConfirmationPdfDownloadPath,
+  loadRateConfirmationPdfDownloadPath,
+} from "@/loadWorkspace/RateConfirmationPdfPanel";
 import {
   baselineSignatureFromLoad,
   buildLoadPersistPayload,
@@ -530,11 +536,34 @@ export default function LoadWorkspacePage() {
     });
   }, []);
 
+  const rateConPdfOpenInNewTabPath = useMemo(() => {
+    if (workspaceMode === "detail" && load?.id) {
+      return loadRateConfirmationPdfDownloadPath(load.id);
+    }
+    if (isDraftWorkspace && draftIdFromRoute) {
+      return draftRateConfirmationPdfDownloadPath(draftIdFromRoute);
+    }
+    return null;
+  }, [workspaceMode, load?.id, isDraftWorkspace, draftIdFromRoute]);
+
   useEffect(() => {
     return () => {
       if (workspacePdfPreviewUrl) URL.revokeObjectURL(workspacePdfPreviewUrl);
     };
   }, [workspacePdfPreviewUrl]);
+
+  useEffect(() => {
+    if (workspaceMode !== "detail" || !Number.isFinite(loadIdFromRoute)) {
+      return;
+    }
+    let cancelled = false;
+    void fetchLoadRateConfirmationPdfObjectUrl(loadIdFromRoute).then((url) => {
+      if (!cancelled) replaceWorkspacePdfPreviewUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceMode, loadIdFromRoute, replaceWorkspacePdfPreviewUrl]);
 
   const restoreDraftPdfArtifacts = useCallback(
     async (draft: LoadWorkspaceDraft) => {
@@ -2319,16 +2348,10 @@ export default function LoadWorkspacePage() {
           ) : (
             <div className="space-y-2">
             {workspacePdfPreviewUrl ? (
-              <div className="overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)]">
-                <div className="border-b border-[var(--trk-border)] px-3 py-2">
-                  <span className={wsSectionTitle}>Rate confirmation PDF</span>
-                </div>
-                <iframe
-                  title="Rate confirmation PDF"
-                  src={workspacePdfPreviewUrl}
-                  className="h-[min(42vh,320px)] w-full bg-white"
-                />
-              </div>
+              <RateConfirmationPdfPanel
+                objectUrl={workspacePdfPreviewUrl}
+                openInNewTabPath={rateConPdfOpenInNewTabPath}
+              />
             ) : null}
             <div className="overflow-hidden rounded-lg border border-[var(--trk-border)]">
             <ReferenceTextRail

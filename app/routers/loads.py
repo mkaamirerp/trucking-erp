@@ -29,6 +29,7 @@ from app.services import load_custody as custody_service
 from app.schemas.load_pod_evidence import LoadPodEvidenceListResponse, LoadPodEvidenceOut
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
+from app.services.load_workspace_draft_document import LOAD_WORKSPACE_DRAFT_PDF_MODULE
 from app.services.load_pod_evidence import (
     PodEvidenceError,
     assert_pod_storage_key_tenant,
@@ -354,6 +355,24 @@ async def download_load_pod_file(
         tenant_slug=tenant_slug,
         content_type=row.content_type or "application/octet-stream",
         filename=row.original_filename or f"pod-{pod_id}",
+    )
+
+
+@router.get("/{load_id}/rate-confirmation-pdf")
+async def download_load_rate_confirmation_pdf(
+    load_id: int,
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> Response:
+    row = await loads_service.get_load_rate_confirmation_pdf_evidence(db, tenant_id, load_id)
+    return download_response(
+        row.storage_key,
+        module=LOAD_WORKSPACE_DRAFT_PDF_MODULE,
+        tenant_slug=tenant_slug,
+        content_type="application/pdf",
+        filename=row.filename or "rate-confirmation.pdf",
     )
 
 

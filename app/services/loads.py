@@ -39,6 +39,7 @@ from app.constants.trip_dispatch import (
 from app.models.broker import Broker, BrokerContact
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
 from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
+from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
@@ -1406,3 +1407,29 @@ async def confirm_load_customs_document_snapshot(
     if out is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
     return out
+
+
+RATE_CONFIRMATION_PDF_EVIDENCE_KIND = "rate_confirmation_pdf"
+
+
+async def get_load_rate_confirmation_pdf_evidence(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+) -> LoadCommercialEvidence:
+    load = await get_load(db, tenant_id, load_id)
+    if load is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    row = await db.scalar(
+        select(LoadCommercialEvidence).where(
+            LoadCommercialEvidence.tenant_id == tenant_id,
+            LoadCommercialEvidence.load_id == load_id,
+            LoadCommercialEvidence.evidence_kind == RATE_CONFIRMATION_PDF_EVIDENCE_KIND,
+        )
+    )
+    if row is None or not (row.storage_key or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No rate confirmation PDF on this load",
+        )
+    return row

@@ -1655,6 +1655,20 @@ export async function fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(
   return URL.createObjectURL(blob);
 }
 
+/** Object URL for the promoted load's stored rate confirmation PDF (caller must revoke when done). */
+export async function fetchLoadRateConfirmationPdfObjectUrl(loadId: number): Promise<string | null> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/loads/${encodeURIComponent(String(loadId))}/rate-confirmation-pdf`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    await handle(res);
+    return null;
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 /** Load Lab — persisted extraction run (tenant DB). */
 export type LoadLabRun = {
   id: number;
