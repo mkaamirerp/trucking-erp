@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Iterator, Literal
 
 from fastapi import UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -927,19 +927,27 @@ def download_response(
     tenant_slug: str | None = None,
     content_type: str = "application/pdf",
     filename: str | None = None,
+    disposition: Literal["attachment", "inline"] = "attachment",
 ) -> Response:
     """Return FileResponse (local) or StreamingResponse (S3) for document download. Streams for large files."""
     from fastapi import HTTPException
     backend = get_storage()
     fname = filename or Path(storage_key).name or "document.pdf"
+    if disposition not in ("attachment", "inline"):
+        disposition = "attachment"
     if isinstance(backend, LocalStorageBackend):
         path = backend._key_to_path(storage_key, module, tenant_slug)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Document file not found")
-        return FileResponse(path, media_type=content_type, filename=fname, content_disposition_type="attachment")
+        return FileResponse(
+            path,
+            media_type=content_type,
+            filename=fname,
+            content_disposition_type=disposition,
+        )
     if not backend.exists(storage_key, module, tenant_slug):
         raise HTTPException(status_code=404, detail="Document file not found")
-    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    headers = {"Content-Disposition": f'{disposition}; filename="{fname}"'}
     return StreamingResponse(
         backend.stream_chunks(storage_key, module, tenant_slug),
         media_type=content_type,

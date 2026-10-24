@@ -353,7 +353,7 @@ function formatApiErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export default function LoadWorkspacePage() {
+function LoadWorkspacePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { id: idParam, draftId: draftIdParam } = useParams<{ id?: string; draftId?: string }>();
@@ -1360,7 +1360,10 @@ export default function LoadWorkspacePage() {
   const createLoadBlockedByHardGate =
     !hasParsedPdfIntoDraft && manualCreateHardMissing.length > 0;
 
-  async function ensureServerDraft(): Promise<{ id: string; draft: LoadWorkspaceDraft }> {
+  async function ensureServerDraft(
+    options: { syncRoute?: boolean } = {},
+  ): Promise<{ id: string; draft: LoadWorkspaceDraft }> {
+    const syncRoute = options.syncRoute !== false;
     if (draftIdFromRoute && workspaceDraft) {
       return { id: draftIdFromRoute, draft: workspaceDraft };
     }
@@ -1369,7 +1372,9 @@ export default function LoadWorkspacePage() {
       draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
     });
     setWorkspaceDraft(created);
-    navigate(OPS.LOAD_DRAFT(created.id), { replace: true });
+    if (syncRoute) {
+      navigate(OPS.LOAD_DRAFT(created.id), { replace: true });
+    }
     return { id: created.id, draft: created };
   }
 
@@ -1578,7 +1583,7 @@ export default function LoadWorkspacePage() {
     setToolbarMessage(null);
     setDraftConflict(null);
     try {
-      const { id, draft } = await ensureServerDraft();
+      const { id, draft } = await ensureServerDraft({ syncRoute: false });
       const saved = await updateLoadWorkspaceDraft(id, {
         expected_concurrency_version: draft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
@@ -1588,7 +1593,11 @@ export default function LoadWorkspacePage() {
         expected_concurrency_version: saved.concurrency_version,
         promotion_idempotency_key: crypto.randomUUID(),
       });
-      navigate(OPS.LOAD_DETAIL(result.load_id), { replace: true });
+      const loadId = Number(result.load_id);
+      if (!Number.isFinite(loadId) || loadId <= 0) {
+        throw new Error("Create load succeeded but the server did not return a load id.");
+      }
+      navigate(OPS.LOAD_DETAIL(loadId), { replace: true });
     } catch (e: unknown) {
       const c = parseLoadWorkspaceDraftVersionConflict(e);
       if (c) {
@@ -2716,4 +2725,10 @@ function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
       </ul>
     </div>
   );
+}
+
+/** Remount when switching between /loads/new, /loads/draft/:id, and /loads/:id (Task 12). */
+export default function LoadWorkspacePageRoute() {
+  const location = useLocation();
+  return <LoadWorkspacePage key={location.pathname} />;
 }

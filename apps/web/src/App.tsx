@@ -20,7 +20,7 @@ import BrokerDetailPage from "./pages/BrokerDetailPage";
 import LoadsListPage from "./pages/LoadsListPage";
 import DeprecatedDispatchPage from "./pages/DeprecatedDispatchPage";
 import LoadInboxPage from "./pages/LoadInboxPage";
-import LoadWorkspacePage from "./pages/LoadWorkspacePage";
+import LoadWorkspacePageRoute from "./pages/LoadWorkspacePage";
 import TripWorkspacePage from "./pages/TripWorkspacePage";
 import TripContainerPage from "./pages/trip-container/TripContainerPage";
 import TripsListPage from "./pages/TripsListPage";
@@ -244,9 +244,9 @@ function App() {
           </Layout>
         }
       />
-      <Route path="/loads/new" element={<LoadWorkspacePage />} />
-      <Route path="/loads/draft/:draftId" element={<LoadWorkspacePage />} />
-      <Route path="/loads/:id" element={<LoadWorkspacePage />} />
+      <Route path="/loads/new" element={<LoadWorkspacePageRoute />} />
+      <Route path="/loads/draft/:draftId" element={<LoadWorkspacePageRoute />} />
+      <Route path="/loads/:id" element={<LoadWorkspacePageRoute />} />
       <Route
         path="/trips"
         element={

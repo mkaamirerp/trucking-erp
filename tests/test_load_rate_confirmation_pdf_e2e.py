@@ -219,6 +219,89 @@ async def test_load_rate_confirmation_pdf_armstrong_selectable_text(
 
 
 @pytest.mark.asyncio
+async def test_workspace_draft_rate_confirmation_pdf_content_disposition_inline(
+    override_auth_tenant,
+) -> None:
+    """Draft RC PDF is served inline (browser tab), not forced download."""
+    if database_name_from_url(_tenant_async_url()) == "tenant_demo":
+        pytest.skip("mutation tests must not run on tenant_demo")
+    if not _ARMSTRONG_PDF.is_file():
+        pytest.skip("Armstrong.pdf fixture missing")
+
+    pdf_bytes = _ARMSTRONG_PDF.read_bytes()
+    engine, factory = _session()
+    draft_id = None
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json={
+                        **_PROMOTABLE_DRAFT_JSON,
+                        "loadNumber": f"INLINE-{uuid.uuid4().hex[:8]}",
+                    },
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+
+        stored = await get_storage().save_bytes(
+            integration_tenant_slug(),
+            LOAD_WORKSPACE_DRAFT_PDF_MODULE,
+            "workspace_draft",
+            str(draft_id),
+            pdf_bytes,
+            filename_hint="Armstrong.pdf",
+            content_type="application/pdf",
+        )
+
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            await db.execute(
+                text(
+                    """
+                    UPDATE load_workspace_drafts
+                    SET pdf_upload_state = 'ready',
+                        pdf_storage_key = :key,
+                        pdf_sha256 = :sha,
+                        pdf_filename = 'Armstrong.pdf'
+                    WHERE tenant_id = :tenant_id AND id = :id
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "id": draft_id,
+                    "key": stored.storage_key,
+                    "sha": stored.sha256,
+                },
+            )
+            await db.commit()
+
+        headers = integration_auth_headers()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.get(
+                f"/api/v1/load-workspace-drafts/{draft_id}/rate-confirmation-pdf",
+                headers=headers,
+            )
+            assert res.status_code == 200, res.text
+            disposition = res.headers.get("content-disposition", "")
+            assert "inline" in disposition.lower()
+            assert res.content[:4] == b"%PDF"
+    finally:
+        if draft_id is not None:
+            async with factory() as db:
+                await db.execute(
+                    text("DELETE FROM load_workspace_drafts WHERE id = :id"),
+                    {"id": draft_id},
+                )
+                await db.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_load_rate_confirmation_pdf_sha256_mismatch_refused(override_auth_tenant) -> None:
     if database_name_from_url(_tenant_async_url()) == "tenant_demo":
         pytest.skip("mutation tests must not run on tenant_demo")

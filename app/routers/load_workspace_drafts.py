@@ -170,6 +170,7 @@ async def download_workspace_draft_rate_confirmation_pdf(
         tenant_slug=tenant_slug,
         content_type="application/pdf",
         filename=row.pdf_filename or "rate-confirmation.pdf",
+        disposition="inline",
     )
 
 
