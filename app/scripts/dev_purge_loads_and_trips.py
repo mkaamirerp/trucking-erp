@@ -111,7 +111,14 @@ async def _counts(db: AsyncSession, tenant_id: int) -> dict[str, int]:
     return out
 
 
+async def execute_dev_playground_load_trip_reset(db: AsyncSession, tenant_id: int) -> None:
+    """Delete all load/trip operational rows for tenant and reset trip number counter (prefix unchanged)."""
+    await _purge(db, tenant_id)
+
+
 async def _purge(db: AsyncSession, tenant_id: int) -> None:
+    from app.constants.trip_dispatch import DEFAULT_NEXT_TRIP_NUMERIC
+
     t = tenant_id
     stmts: list[str] = [
         "DELETE FROM future_movement_plan_loads WHERE tenant_id = :t",
@@ -150,9 +157,13 @@ async def _purge(db: AsyncSession, tenant_id: int) -> None:
             "DELETE FROM audit_events WHERE tenant_id = :t AND entity_type IN ('load', 'trip')"
         ),
         "DELETE FROM loads WHERE tenant_id = :t",
+        "UPDATE tenant_dispatch_numbering SET next_numeric = :next_n WHERE tenant_id = :t",
     ]
     for sql in stmts:
-        await db.execute(text(sql), {"t": t})
+        if "next_numeric" in sql:
+            await db.execute(text(sql), {"t": t, "next_n": DEFAULT_NEXT_TRIP_NUMERIC})
+        else:
+            await db.execute(text(sql), {"t": t})
     await db.commit()
 
 
@@ -184,7 +195,7 @@ async def main() -> int:
                 f"Refusing purge without {CONFIRM_ENV}={CONFIRM_VALUE} (and DRY_RUN=0)"
             )
 
-        await _purge(db, tenant_id)
+        await execute_dev_playground_load_trip_reset(db, tenant_id)
         after = await _counts(db, tenant_id)
         print("\nCounts after:")
         for k, v in after.items():

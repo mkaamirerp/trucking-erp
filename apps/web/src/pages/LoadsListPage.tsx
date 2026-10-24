@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import StatusBadge from "@/components/StatusBadge";
 import {
+  devPlaygroundResetLoadsAndTrips,
   discardLoadWorkspaceDraft,
   listBrokers,
   listLoadWorkspaceDrafts,
@@ -9,6 +10,9 @@ import {
   Load,
   type LoadWorkspaceDraft,
 } from "@/api";
+import { isTenantAdmin } from "@/auth/roles";
+import { useMe } from "@/hooks/useMe";
+import { getTenantSlugFromHost } from "@/tenant";
 import {
   loadDraftToListRow,
   workspaceDraftToListRow,
@@ -33,7 +37,11 @@ const LOAD_LIST_DEFAULT_STATUSES = [
 
 export default function LoadsListPage() {
   const navigate = useNavigate();
+  const { me } = useMe();
+  const showDemoReset =
+    getTenantSlugFromHost() === "demo" && isTenantAdmin(me);
   const [loads, setLoads] = useState<Load[]>([]);
+  const [resetBusy, setResetBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
@@ -137,6 +145,34 @@ export default function LoadsListPage() {
     runQuery(searchApplied, { silent: true });
   }
 
+  async function onDemoResetLoadsAndTrips() {
+    if (
+      !window.confirm(
+        "Delete ALL loads, trips, workspace drafts, and related operational data for the demo tenant? Trip numbers will restart from your locked prefix + 10001. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    if (
+      !window.confirm(
+        "Last chance: confirm demo reset. Fuel, payroll, drivers, and brokers are NOT deleted.",
+      )
+    ) {
+      return;
+    }
+    setResetBusy(true);
+    setError(null);
+    try {
+      const out = await devPlaygroundResetLoadsAndTrips();
+      window.alert(out.message || "Reset complete.");
+      runQuery("", { silent: false });
+    } catch (e: unknown) {
+      setError((e as Error)?.message || "Demo reset failed");
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -173,6 +209,17 @@ export default function LoadsListPage() {
           {!loading && loads.length > 0 ? (
             <button type="button" className={btnClass} onClick={exportCsv}>
               Export CSV
+            </button>
+          ) : null}
+          {showDemoReset ? (
+            <button
+              type="button"
+              className={`${btnClass} border-red-500/40 text-red-700 hover:border-red-500`}
+              onClick={() => void onDemoResetLoadsAndTrips()}
+              disabled={loading || resetBusy}
+              title="Demo only: wipe loads/trips and reset trip numbering"
+            >
+              {resetBusy ? "Resetting…" : "Reset loads & trips (demo)"}
             </button>
           ) : null}
           {draftRows.length > 0 ? (

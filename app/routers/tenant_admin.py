@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1068,3 +1068,59 @@ async def patch_broker_intake_settings(
 
 # Tenant-admin password reset removed: password management remains platform-side.
 # Use /api/v1/auth/forgot-password (user-initiated) for now.
+
+_PLAYGROUND_RESET_CONFIRM = "RESET_LOADS_AND_TRIPS"
+_PLAYGROUND_RESET_SLUG = "demo"
+_PLAYGROUND_RESET_DB = "tenant_demo"
+
+
+class PlaygroundResetLoadsTripsIn(BaseModel):
+    confirm: Literal["RESET_LOADS_AND_TRIPS"]
+
+
+class PlaygroundResetLoadsTripsOut(BaseModel):
+    ok: bool = True
+    message: str
+
+
+@router.post("/dev-playground/reset-loads-and-trips", response_model=PlaygroundResetLoadsTripsOut)
+async def playground_reset_loads_and_trips(
+    body: PlaygroundResetLoadsTripsIn,
+    tenant_id: int = Depends(require_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    platform_db: AsyncSession = Depends(get_db),
+):
+    """Dev playground only (demo + tenant_demo): wipe loads/trips and reset trip numbering counter."""
+    if not is_tenant_admin(current_user.role):
+        raise HTTPException(status_code=403, detail="Admin role required")
+    if body.confirm != _PLAYGROUND_RESET_CONFIRM:
+        raise HTTPException(status_code=400, detail="Invalid confirmation token")
+
+    tenant = await platform_db.scalar(select(PlatformTenant).where(PlatformTenant.id == tenant_id))
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if (tenant.slug or "").strip().lower() != _PLAYGROUND_RESET_SLUG:
+        raise HTTPException(
+            status_code=403,
+            detail="Load/trip reset is only allowed on the demo workspace.",
+        )
+
+    async with open_tenant_session_by_id(tenant_id) as tenant_db:
+        db_name = await tenant_db.scalar(text("SELECT current_database()"))
+        if str(db_name or "") != _PLAYGROUND_RESET_DB:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Refusing reset: tenant database must be {_PLAYGROUND_RESET_DB!r}.",
+            )
+        from app.scripts.dev_purge_loads_and_trips import execute_dev_playground_load_trip_reset
+
+        await execute_dev_playground_load_trip_reset(tenant_db, tenant_id)
+
+    logger.warning(
+        "playground_reset_loads_trips tenant_id=%s actor_user_id=%s",
+        tenant_id,
+        getattr(current_user, "user_id", None),
+    )
+    return PlaygroundResetLoadsTripsOut(
+        message="All loads and trips removed; trip number counter reset (prefix unchanged).",
+    )

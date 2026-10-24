@@ -899,6 +899,16 @@ export async function putDispatchNumbering(payload: { trip_number_prefix: string
   return handle<DispatchNumberingState>(res);
 }
 
+/** Demo playground only: delete all loads/trips and reset trip number counter. */
+export async function devPlaygroundResetLoadsAndTrips() {
+  const res = await fetchWithTenant(`${API_BASE}/admin/dev-playground/reset-loads-and-trips`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: "RESET_LOADS_AND_TRIPS" }),
+  });
+  return handle<{ ok: boolean; message: string }>(res);
+}
+
 export type BrokerIntakeSettings = {
   broker_auto_create_from_global: boolean;
 };
