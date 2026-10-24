@@ -13,6 +13,7 @@ export type WorkspaceSection =
   | "Parties"
   | "Stops"
   | "Equipment"
+  | "Assignment"
   | "Documents"
   | "Notes"
   | "Settlement"
@@ -23,8 +24,8 @@ export const SECTION_CONFIG: Record<
   { visible: WorkspaceSection[]; editable: WorkspaceSection[]; defaultSection: WorkspaceSection }
 > = {
   manual: {
-    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Documents", "Notes"],
-    editable: ["Parties", "Stops", "Equipment", "Documents", "Notes"],
+    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
+    editable: ["Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
     defaultSection: "Parties",
   },
   intake: {
@@ -33,17 +34,17 @@ export const SECTION_CONFIG: Record<
     defaultSection: "Parties",
   },
   detail: {
-    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Documents", "Notes"],
-    editable: ["Parties", "Stops", "Equipment", "Documents", "Notes"],
+    visible: ["HeaderIdentity", "Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
+    editable: ["Parties", "Stops", "Equipment", "Assignment", "Documents", "Notes"],
     defaultSection: "Stops",
   },
   payroll: {
-    visible: ["HeaderIdentity", "Settlement", "Documents"],
+    visible: ["HeaderIdentity", "Assignment", "Settlement", "Documents"],
     editable: [],
     defaultSection: "Settlement",
   },
   audit: {
-    visible: ["HeaderIdentity", "Parties", "Stops", "Settlement", "Documents", "AuditTimeline"],
+    visible: ["HeaderIdentity", "Parties", "Stops", "Assignment", "Settlement", "Documents", "AuditTimeline"],
     editable: [],
     defaultSection: "AuditTimeline",
   },

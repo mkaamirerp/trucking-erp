@@ -156,6 +156,19 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
 
   const compactReferences = compactLoadReferencesForDisplay(p.loadReferences ?? [], p.sortedDraftStops);
 
+  const driver = p.driverId != null ? p.drivers.find((d) => d.id === p.driverId) : undefined;
+  const driverLabel =
+    p.driverId == null ? "— Unassigned —" : driver ? `${driver.first_name} ${driver.last_name}` : `Driver #${p.driverId}`;
+  const truck = p.truckId != null ? p.trucks.find((t) => t.id === p.truckId) : undefined;
+  const truckLabel = p.truckId == null ? "— None —" : truck ? truck.unit_number : `Truck #${p.truckId}`;
+  const trailer = p.trailerAssetId != null ? p.trailers.find((t) => t.id === p.trailerAssetId) : undefined;
+  const trailerLabel =
+    p.trailerAssetId == null
+      ? "— None —"
+      : trailer
+        ? `${trailer.unit_number}${trailer.trailer_type ? ` · ${trailer.trailer_type}` : ""}`
+        : `Trailer #${p.trailerAssetId}`;
+
   return (
     <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
     <div className="grid grid-cols-1 gap-3 pb-4 lg:grid-cols-2">
@@ -262,10 +275,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </div>
       </section>}
 
-      {vis("Equipment") && (
+      {(vis("Equipment") || vis("Assignment")) && (
         <div className="flex flex-col gap-3">
       {/* Financials — WorkspaceSection: Equipment (financial/cargo parameters travel together) */}
-      <section className={wsSectionCard} data-editable={editable("Equipment")}>
+      {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
         <div className={`${wsSectionHeader} py-3`}>
           <span className={wsSectionTitle}>Financials</span>
           <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 font-mono text-sm font-bold text-[var(--trk-success)]">
@@ -320,149 +333,46 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           </div>
         </div>
         </div>
-      </section>
+      </section>}
 
-      {/* Freight & equipment — WorkspaceSection: Equipment */}
-      <section className={wsSectionCard} data-editable={editable("Equipment")}>
+      {/* Assignment — WorkspaceSection: Assignment */}
+      {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
         <div className={wsSectionHeader}>
-          <span className={wsSectionTitle}>Freight &amp; equipment</span>
+          <span className={wsSectionTitle}>Status &amp; assignment</span>
+          <span className={wsSectionMeta}>Read-only</span>
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
           <div>
-            <label className={L}>Mode</label>
-            <input
-              className={I}
-              value={p.freightMode}
-              onChange={(e) => p.setFreightMode(e.target.value)}
-            />
+            <label className={L}>Status</label>
+            <input className={I} value={p.status || "draft"} readOnly disabled data-testid="load-status-readonly" />
           </div>
           <div>
-            <label className={L}>Equipment type</label>
-            <input
-              className={I}
-              value={p.equipmentType}
-              tabIndex={p.verificationTabIndex.get("equipmentType")}
-              onChange={(e) => p.setEquipmentType(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [p.equipmentType, "equipment", "trailer", "van", "reefer", "flatbed"],
-                  fallbackToken: "equipment",
-                })
-              }
-            />
+            <label className={L}>Driver</label>
+            <input className={I} value={driverLabel} readOnly disabled data-testid="load-driver-readonly" />
           </div>
           <div>
-            <label className={L}>Trailer type</label>
-            <input
-              className={I}
-              value={p.trailerType}
-              tabIndex={p.verificationTabIndex.get("trailerType")}
-              onChange={(e) => p.setTrailerType(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [
-                    p.trailerType,
-                    "trailer type",
-                    "trailer",
-                    "equipment",
-                    "dry van",
-                    "reefer",
-                    "flatbed",
-                    "step deck",
-                    "53",
-                  ],
-                  fallbackToken: "trailer",
-                })
-              }
-            />
+            <label className={L}>Truck</label>
+            <input className={I} value={truckLabel} readOnly disabled data-testid="load-truck-readonly" />
           </div>
           <div>
-            <label className={L}>Trailer size</label>
-            <input
-              className={I}
-              value={p.trailerSize}
-              onChange={(e) => p.setTrailerSize(e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={L}>Commodity</label>
-            <input
-              className={I}
-              value={p.commodity}
-              tabIndex={p.verificationTabIndex.get("commodity")}
-              onChange={(e) => p.setCommodity(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [
-                    p.commodity,
-                    "commodity",
-                    "product",
-                    "freight",
-                    "description",
-                    "cargo",
-                    "sku",
-                  ],
-                  fallbackToken: "commodity",
-                })
-              }
-            />
-          </div>
-          <div>
-            <label className={L}>Est. weight (lb)</label>
-            <input
-              className={I}
-              inputMode="numeric"
-              value={p.estimatedWeight}
-              tabIndex={p.verificationTabIndex.get("estimatedWeight")}
-              onChange={(e) => p.setEstimatedWeight(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [
-                    p.estimatedWeight,
-                    "weight",
-                    "lbs",
-                    "lb",
-                    "pounds",
-                    "gross",
-                    "net weight",
-                  ],
-                  fallbackToken: "weight",
-                })
-              }
-            />
-          </div>
-          <div>
-            <label className={L}>Hazmat</label>
-            <select
-              className={I}
-              value={p.hazmat}
-              onChange={(e) => p.setHazmat(e.target.value as "unset" | "yes" | "no")}
-            >
-              <option value="unset">— Unset —</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-          <div>
-            <label className={L}>Temperature</label>
-            <input
-              className={I}
-              value={p.temperatureRequirement}
-              onChange={(e) => p.setTemperatureRequirement(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className={L}>Pallet / case count</label>
-            <input
-              className={I}
-              value={p.palletCaseCount}
-              onChange={(e) => p.setPalletCaseCount(e.target.value)}
-            />
+            <label className={L}>Trailer</label>
+            <input className={I} value={trailerLabel} readOnly disabled data-testid="load-trailer-readonly" />
           </div>
         </div>
+        <p className="mt-2 text-[11px] leading-snug text-[var(--trk-text-muted)]">
+          Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> for draft → ready. Driver, truck,
+          trailer, and trip status are set on the Trip, not on the Load.
+        </p>
+        {p.activeTripId != null && p.activeTripId > 0 ? (
+          <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
+            This load is on a trip — use{" "}
+            <span className="font-medium text-[var(--trk-text)]">View / Assign on Trip</span> in the header to set driver,
+            truck, and trailer.
+          </p>
+        ) : null}
         </div>
-      </section>
+      </section>}
         </div>
       )}
 
@@ -745,6 +655,148 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         >
           + Add stop
         </button>
+        </div>
+      </section>}
+
+      {/* Freight & equipment — WorkspaceSection: Equipment */}
+      {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
+        <div className={wsSectionHeader}>
+          <span className={wsSectionTitle}>Freight & equipment</span>
+        </div>
+        <div className={wsSectionBody}>
+        <div className={wsGrid2}>
+          <div>
+            <label className={L}>Mode</label>
+            <input
+              className={I}
+              value={p.freightMode}
+              onChange={(e) => p.setFreightMode(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={L}>Equipment type</label>
+            <input
+              className={I}
+              value={p.equipmentType}
+              tabIndex={p.verificationTabIndex.get("equipmentType")}
+              onChange={(e) => p.setEquipmentType(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [p.equipmentType, "equipment", "trailer", "van", "reefer", "flatbed"],
+                  fallbackToken: "equipment",
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={L}>Trailer type</label>
+            <input
+              className={I}
+              value={p.trailerType}
+              tabIndex={p.verificationTabIndex.get("trailerType")}
+              onChange={(e) => p.setTrailerType(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [
+                    p.trailerType,
+                    "trailer type",
+                    "trailer",
+                    "equipment",
+                    "dry van",
+                    "reefer",
+                    "flatbed",
+                    "step deck",
+                    "53",
+                  ],
+                  fallbackToken: "trailer",
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={L}>Trailer size</label>
+            <input
+              className={I}
+              value={p.trailerSize}
+              onChange={(e) => p.setTrailerSize(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={L}>Commodity</label>
+            <input
+              className={I}
+              value={p.commodity}
+              tabIndex={p.verificationTabIndex.get("commodity")}
+              onChange={(e) => p.setCommodity(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [
+                    p.commodity,
+                    "commodity",
+                    "product",
+                    "freight",
+                    "description",
+                    "cargo",
+                    "sku",
+                  ],
+                  fallbackToken: "commodity",
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={L}>Est. weight (lb)</label>
+            <input
+              className={I}
+              inputMode="numeric"
+              value={p.estimatedWeight}
+              tabIndex={p.verificationTabIndex.get("estimatedWeight")}
+              onChange={(e) => p.setEstimatedWeight(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [
+                    p.estimatedWeight,
+                    "weight",
+                    "lbs",
+                    "lb",
+                    "pounds",
+                    "gross",
+                    "net weight",
+                  ],
+                  fallbackToken: "weight",
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={L}>Hazmat</label>
+            <select
+              className={I}
+              value={p.hazmat}
+              onChange={(e) => p.setHazmat(e.target.value as "unset" | "yes" | "no")}
+            >
+              <option value="unset">— Unset —</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </div>
+          <div>
+            <label className={L}>Temperature</label>
+            <input
+              className={I}
+              value={p.temperatureRequirement}
+              onChange={(e) => p.setTemperatureRequirement(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={L}>Pallet / case count</label>
+            <input
+              className={I}
+              value={p.palletCaseCount}
+              onChange={(e) => p.setPalletCaseCount(e.target.value)}
+            />
+          </div>
+        </div>
         </div>
       </section>}
 
