@@ -54,7 +54,9 @@ import {
 } from "@/api";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { loadWorkspaceRemountKey, OPS } from "@/routes";
-import { sortedStops as sortStops } from "@/utils/loadStops";
+import { firstPickupAppointmentDate, formatRouteFromStops, sortedStops as sortStops } from "@/utils/loadStops";
+import { formatDateMonthFirst } from "@/loadWorkspace/loadWorkspaceDateFormat";
+import { formatLinehaulDisplay } from "@/loadWorkspace/loadWorkspaceShared";
 import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
   RateConfirmationPdfPanel,
@@ -1918,6 +1920,14 @@ function LoadWorkspacePage() {
   const hasActiveDispatchTrip = load?.active_dispatch_trip_id != null;
 
   const lidLabel = workspaceMode === "manual" ? "#NEW" : load ? `#${load.id}` : "#—";
+  const condensedWorkspaceLayout =
+    workspaceMode === "manual" && isDraftWorkspace && !!workspacePdfPreviewUrl;
+  const condensedRouteSummary = formatRouteFromStops(sortedDraftStops);
+  const condensedPickupIso = firstPickupAppointmentDate(sortedDraftStops);
+  const condensedPickupLabel = condensedPickupIso
+    ? `Pickup ${formatDateMonthFirst(condensedPickupIso.slice(0, 10))}`
+    : "Pickup —";
+  const condensedLinehaulChip = formatLinehaulDisplay(rate);
   const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
   const toolBtnSecondary =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
@@ -1962,19 +1972,45 @@ function LoadWorkspacePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--trk-bg)] text-[var(--trk-text)]">
-      <header className="z-10 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
+      <header
+        className={clsx(
+          "z-20 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]",
+          condensedWorkspaceLayout && "sticky top-0",
+        )}
+      >
         <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-            <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
-              ← Loads
-            </button>
+            {!condensedWorkspaceLayout ? (
+              <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
+                ← Loads
+              </button>
+            ) : null}
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</span>
-              <h1 className="truncate text-[14px] font-semibold tracking-tight text-[var(--trk-heading)]">
-                {workspaceMode === "manual" ? "New load" : loadNumber || load?.load_number || "Load"}
+              {!condensedWorkspaceLayout ? (
+                <span className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</span>
+              ) : null}
+              <h1 className="truncate font-mono text-[15px] font-semibold tracking-tight text-[var(--trk-heading)]">
+                {condensedWorkspaceLayout
+                  ? (loadNumber || "").trim() || "—"
+                  : workspaceMode === "manual"
+                    ? "New load"
+                    : loadNumber || load?.load_number || "Load"}
               </h1>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {workspaceMode !== "manual" && load ? (
+              {condensedWorkspaceLayout ? (
+                <>
+                  <OperatorLoadStatusChip load={{ status: "draft" }} />
+                  <span className="hidden text-[12px] text-[var(--trk-text-muted)] sm:inline">
+                    {condensedRouteSummary}
+                  </span>
+                  <span className="hidden text-[12px] text-[var(--trk-text-muted)] md:inline">{condensedPickupLabel}</span>
+                  {condensedLinehaulChip ? (
+                    <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2 py-0.5 font-mono text-[12px] font-bold text-[var(--trk-success)]">
+                      {condensedLinehaulChip}
+                    </span>
+                  ) : null}
+                </>
+              ) : workspaceMode !== "manual" && load ? (
                 <OperatorLoadStatusChip
                   load={{
                     status: load.status,
@@ -2359,8 +2395,22 @@ function LoadWorkspacePage() {
       </div>
       ) : null}
 
-      <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="flex max-h-[42vh] min-h-0 flex-col gap-3 overflow-y-auto border-b border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 lg:sticky lg:top-0 lg:max-h-[calc(100vh-7rem)] lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]">
+      <div
+        className={clsx(
+          "mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden",
+          condensedWorkspaceLayout
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]"
+            : "lg:grid-cols-[260px_minmax(0,1fr)]",
+        )}
+      >
+        <aside
+          className={clsx(
+            "flex min-h-0 flex-col gap-3 overflow-y-auto border-b border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 lg:sticky lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]",
+            condensedWorkspaceLayout
+              ? "max-h-[38vh] lg:top-[var(--load-ws-sticky-offset,3.5rem)] lg:max-h-[calc(100vh-var(--load-ws-sticky-offset,3.5rem))]"
+              : "max-h-[42vh] lg:top-0 lg:max-h-[calc(100vh-7rem)]",
+          )}
+        >
           {workspaceMode === "intake" && hasIntakeThread ? (
             <div className="min-h-[160px] overflow-hidden rounded-lg border border-[var(--trk-border)]">
             <IntakeEmailRail
@@ -2378,6 +2428,7 @@ function LoadWorkspacePage() {
                 openInNewTabPath={rateConPdfOpenInNewTabPath}
               />
             ) : null}
+            {!condensedWorkspaceLayout ? (
             <div className="overflow-hidden rounded-lg border border-[var(--trk-border)]">
             <ReferenceTextRail
               title={workspaceMode === "manual" ? "Rate confirmation" : "Source document"}
@@ -2403,9 +2454,10 @@ function LoadWorkspacePage() {
               activeDocLine={activeDocLine}
             />
             </div>
+            ) : null}
             </div>
           )}
-          {sectionConfig.visible.includes("Notes") ? (
+          {sectionConfig.visible.includes("Notes") && !condensedWorkspaceLayout ? (
             <LoadWorkspaceNotesPanel
               internalNotes={internalNotes}
               setInternalNotes={setInternalNotes}
@@ -2528,6 +2580,8 @@ function LoadWorkspacePage() {
 
           <LoadWorkspaceForm
             mode={workspaceMode}
+            condensedLayout={condensedWorkspaceLayout}
+            workspaceHasRateConfirmationPdf={!!workspacePdfPreviewUrl}
             visibleSections={sectionConfig.visible}
             editableSections={sectionConfig.editable}
             intakeProposed={intakeProposed}
@@ -2551,7 +2605,7 @@ function LoadWorkspacePage() {
             newNoteBody={workspaceMode === "manual" ? "" : newNoteBody}
             setNewNoteBody={workspaceMode === "manual" ? () => {} : setNewNoteBody}
             onAddNote={workspaceMode === "manual" ? () => {} : () => void onAddNote()}
-            renderNotes={false}
+            renderNotes={condensedWorkspaceLayout}
             focusDoc={focusDoc}
             verificationTabIndex={verificationTabIndex}
             status={status}

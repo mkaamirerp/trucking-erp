@@ -1,6 +1,7 @@
 /**
  * Canonical editable load form — shared by LoadWorkspace (manual / detail / intake modes).
  */
+import { LoadWorkspaceCondensedForm } from "./LoadWorkspaceCondensedForm";
 import Button from "@/components/Button";
 import type {
   Broker,
@@ -136,9 +137,16 @@ export type LoadWorkspaceFormProps = {
   readOnly?: boolean;
   /** When false, Notes render outside this form (page sidebar). Default true. */
   renderNotes?: boolean;
+  /** Post-parse draft layout (Task 16) — same fields, condensed density. */
+  condensedLayout?: boolean;
+  /** Hint for collapsed Notes section (rate confirmation PDF on workspace). */
+  workspaceHasRateConfirmationPdf?: boolean;
 };
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
+  if (p.condensedLayout) {
+    return <LoadWorkspaceCondensedForm {...p} />;
+  }
   const modeCreate = p.mode === "manual";
   const isIntake = p.mode === "intake";
   const ip = p.intakeProposed;
@@ -914,15 +922,13 @@ export type LoadWorkspaceNotesPanelProps = {
   saving: boolean;
   className?: string;
   dataEditable?: boolean;
+  /** When true, render body only (parent supplies section chrome). */
+  embedded?: boolean;
 };
 
 export function LoadWorkspaceNotesPanel(p: LoadWorkspaceNotesPanelProps) {
-  return (
-    <section className={`${wsSectionCard} ${p.className ?? ""}`} data-editable={p.dataEditable}>
-      <div className={wsSectionHeader}>
-        <span className={wsSectionTitle}>Notes & documents</span>
-      </div>
-      <div className={wsSectionBody}>
+  const body = (
+      <div className={p.embedded ? "px-3 py-2.5" : wsSectionBody}>
         <div>
           <label className={L}>Internal notes (load)</label>
           <textarea
@@ -968,6 +974,16 @@ export function LoadWorkspaceNotesPanel(p: LoadWorkspaceNotesPanelProps) {
           </div>
         ) : null}
       </div>
+  );
+  if (p.embedded) {
+    return body;
+  }
+  return (
+    <section className={`${wsSectionCard} ${p.className ?? ""}`} data-editable={p.dataEditable}>
+      <div className={wsSectionHeader}>
+        <span className={wsSectionTitle}>Notes & documents</span>
+      </div>
+      {body}
     </section>
   );
 }
