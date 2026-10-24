@@ -40,7 +40,9 @@ cffi==2.0.0
     #   bcrypt
     #   cryptography
 charset-normalizer==3.4.4
-    # via requests
+    # via
+    #   pdfminer-six
+    #   requests
 click==8.3.3
     # via uvicorn
 colorama==0.4.6
@@ -49,6 +51,7 @@ cryptography==48.0.0
     # via
     #   -r requirements.in
     #   google-auth
+    #   pdfminer-six
 dnspython==2.8.0
     # via email-validator
 docutils==0.19
@@ -95,9 +98,9 @@ opencv-python-headless==4.11.0.86
     # via -r requirements.in
 packaging==26.2
     # via pytest
-pillow==12.2.0
+pdfminer-six==20251230
     # via -r requirements.in
-pdfminer.six==20251230
+pillow==12.2.0
     # via -r requirements.in
 pluggy==1.6.0
     # via pytest
@@ -125,7 +128,7 @@ pygments==2.20.0
     # via pytest
 pyjwt==2.12.0
     # via -r requirements.in
-pypdf==6.10.2
+pypdf==6.21.2
     # via -r requirements.in
 pytest==9.0.2
     # via
