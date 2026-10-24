@@ -140,10 +140,9 @@ describe("Issue 0A — legacy assignment UI unreachable", () => {
     expect(board).not.toMatch(/dispatchAssign|LOAD_DISPATCH_ASSIGN_QUERY/);
   });
 
-  it("21b. Load form renders status and assignment as read-only (no setters, no selects)", () => {
+  it("21b. Load form has no load-level assignment controls (Issue 0A)", () => {
     const form = source("./LoadWorkspaceForm.tsx");
     expect(form).not.toMatch(/setStatus|setDriverId|setTruckId|setTrailerAssetId|LOAD_STATUSES/);
-    expect(form).toContain('data-testid="load-status-readonly"');
-    expect(form).toContain('data-testid="load-driver-readonly"');
+    expect(form).not.toMatch(/Status &amp; assignment|load-status-readonly|load-driver-readonly/);
   });
 });
