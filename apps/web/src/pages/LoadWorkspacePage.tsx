@@ -52,7 +52,7 @@ import {
   type Truck,
 } from "@/api";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
-import { OPS } from "@/routes";
+import { loadWorkspaceRemountKey, OPS } from "@/routes";
 import { sortedStops as sortStops } from "@/utils/loadStops";
 import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
@@ -2730,5 +2730,5 @@ function LoadAuditTimeline({ loadId }: { loadId: number | null }) {
 /** Remount when switching between /loads/new, /loads/draft/:id, and /loads/:id (Task 12). */
 export default function LoadWorkspacePageRoute() {
   const location = useLocation();
-  return <LoadWorkspacePage key={location.pathname} />;
+  return <LoadWorkspacePage key={loadWorkspaceRemountKey(location.pathname)} />;
 }

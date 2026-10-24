@@ -61,6 +61,20 @@ export const OPS = {
   TOLLS_MANUAL_ENTRY: "/tolls/manual-entry",
 } as const;
 
+/**
+ * React remount key for load workspace routes. Keeps one instance across /loads/new →
+ * /loads/draft/:id (parse navigates mid-request) but remounts when opening /loads/:id.
+ */
+export function loadWorkspaceRemountKey(pathname: string): string {
+  const pathOnly = pathname.split("?")[0] ?? pathname;
+  if (pathOnly === OPS.LOAD_NEW || pathOnly.startsWith("/loads/draft/")) {
+    return "load-workspace-pre-promote";
+  }
+  const detail = pathOnly.match(/^\/loads\/(\d+)(?:\/|$)/);
+  if (detail) return `load-workspace-detail-${detail[1]}`;
+  return pathname;
+}
+
 /** Apex-only platform control plane (X-Platform-Admin-Key). */
 export const PLATFORM = {
   HOME: "/platform",

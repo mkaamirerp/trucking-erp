@@ -15,9 +15,9 @@ describe("load workspace promote navigation (Task 12)", () => {
     expect(pageSource).toContain("navigate(OPS.LOAD_DETAIL(loadId), { replace: true })");
   });
 
-  it("remounts workspace when pathname changes between new, draft, and load routes", () => {
-    expect(pageSource).toContain("LoadWorkspacePageRoute");
-    expect(pageSource).toMatch(/key=\{location\.pathname\}/);
+  it("remounts workspace for load detail but not new→draft (parse timer)", () => {
+    expect(pageSource).toContain("loadWorkspaceRemountKey(location.pathname)");
+    expect(pageSource).not.toMatch(/key=\{location\.pathname\}/);
   });
 
   it("routes use LoadWorkspacePageRoute wrapper", () => {
