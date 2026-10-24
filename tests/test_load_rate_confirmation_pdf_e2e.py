@@ -25,9 +25,11 @@ from app.schemas.load_workspace_draft import LoadWorkspaceDraftCreate, LoadWorks
 from app.services.load_workspace_draft import create_workspace_draft
 from app.services.load_workspace_draft_document import LOAD_WORKSPACE_DRAFT_PDF_MODULE
 from app.services.load_workspace_draft_promotion import promote_workspace_draft
+from tests.support.demo_clone_integration import demo_clone_active, demo_clone_tenant_id
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
+    install_integration_tenant_database_override,
 )
 from tests.support.integration_isolation import integration_auth_headers, integration_tenant_slug
 
@@ -65,6 +67,8 @@ def _session():
 
 
 async def _resolve_tenant_id(session: AsyncSession) -> int:
+    if demo_clone_active():
+        return demo_clone_tenant_id()
     tid = await session.scalar(text("SELECT MIN(tenant_id) FROM loads"))
     if tid is not None:
         return int(tid)
@@ -108,6 +112,7 @@ def test_bypass_env():
 
 @pytest.fixture
 def override_auth_tenant(test_bypass_env):
+    install_integration_tenant_database_override(app)
     install_host_aligned_current_user_and_tenant(app)
     yield
     clear_current_user_and_tenant_overrides(app)
@@ -200,7 +205,7 @@ async def test_load_rate_confirmation_pdf_armstrong_selectable_text(
             assert missing.status_code == 404
 
             res = await client.get(f"/api/v1/loads/{load_id}/rate-confirmation-pdf", headers=headers)
-            assert res.status_code == 200
+            assert res.status_code == 200, res.text
             assert res.headers.get("content-type", "").startswith("application/pdf")
             body = res.content
             assert body[:4] == b"%PDF"
@@ -302,7 +307,7 @@ async def test_load_rate_confirmation_pdf_sha256_mismatch_refused(override_auth_
         headers = integration_auth_headers()
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             res = await client.get(f"/api/v1/loads/{load_id}/rate-confirmation-pdf", headers=headers)
-            assert res.status_code == 409
+            assert res.status_code == 409, res.text
             detail = res.json().get("detail")
             if isinstance(detail, dict):
                 assert detail.get("code") == "LOAD_RATE_CONFIRMATION_PDF_SHA256_MISMATCH"
