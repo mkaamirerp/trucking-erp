@@ -178,7 +178,7 @@ async def main() -> int:
     print(f"Platform slug: {slug} (tenant_id={tenant_id})")
     print(f"Mode: {'DRY_RUN (counts only)' if dry_run else 'EXECUTE PURGE'}")
 
-    async with open_tenant_session_by_id(tenant_id) as db:
+    async for db in open_tenant_session_by_id(tenant_id):
         before = await _counts(db, tenant_id)
         print("\nCounts before:")
         for k, v in before.items():
@@ -200,6 +200,7 @@ async def main() -> int:
         print("\nCounts after:")
         for k, v in after.items():
             print(f"  {k}: {v}")
+        break
 
     print("\nPurge complete.")
     return 0

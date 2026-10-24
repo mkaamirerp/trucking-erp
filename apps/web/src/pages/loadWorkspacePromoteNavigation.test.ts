@@ -11,6 +11,16 @@ describe("load workspace promote navigation (Task 12)", () => {
     expect(pageSource).toContain("ensureServerDraft({ syncRoute: false })");
   });
 
+  it("manual parse defers draft URL until after parse persist", () => {
+    expect(pageSource).toMatch(
+      /ensureServerDraft\(\{\s*syncRoute:\s*false,\s*\}\)[\s\S]*navigate\(OPS\.LOAD_DRAFT\(manualDraftId\)/,
+    );
+  });
+
+  it("ensureServerDraft reuses in-memory workspace draft id (save after parse on /loads/new)", () => {
+    expect(pageSource).toContain("workspaceDraft?.status === \"draft\" && workspaceDraft.id");
+  });
+
   it("navigates to load detail after promote with validated load id", () => {
     expect(pageSource).toContain("navigate(OPS.LOAD_DETAIL(loadId), { replace: true })");
   });

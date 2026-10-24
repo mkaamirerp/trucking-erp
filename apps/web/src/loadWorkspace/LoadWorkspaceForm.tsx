@@ -280,10 +280,36 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
       {/* Financials — WorkspaceSection: Equipment (financial/cargo parameters travel together) */}
       {vis("Equipment") && <section className={wsSectionCard} data-editable={editable("Equipment")}>
         <div className={`${wsSectionHeader} py-3`}>
-          <span className={wsSectionTitle}>Financials</span>
-          <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 font-mono text-sm font-bold text-[var(--trk-success)]">
-            {formatLinehaulDisplay(p.rate) ?? "—"}
-          </span>
+          <div className="min-w-0">
+            <span className={wsSectionTitle}>Financials</span>
+            {editable("Equipment") && !p.readOnly ? (
+              <p className="mt-0.5 text-[10px] font-normal text-[var(--trk-text-muted)]">
+                Linehaul rate is editable in any load state — correct parser mistakes here, then save.
+              </p>
+            ) : null}
+          </div>
+          {editable("Equipment") && !p.readOnly ? (
+            <input
+              className="w-[8.5rem] shrink-0 rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 text-right font-mono text-sm font-bold text-[var(--trk-success)] placeholder:text-emerald-700/60 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600/40"
+              inputMode="decimal"
+              value={p.rate}
+              tabIndex={p.verificationTabIndex.get("rate")}
+              onChange={(e) => p.setRate(e.target.value)}
+              onFocus={() =>
+                p.focusDoc({
+                  tokens: [p.rate, "rate", "linehaul", "$", "total", "amount"],
+                  fallbackToken: "rate",
+                })
+              }
+              aria-label="Linehaul rate"
+              placeholder="Linehaul"
+              title="Linehaul rate from rate confirmation — edit anytime before save"
+            />
+          ) : (
+            <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 font-mono text-sm font-bold text-[var(--trk-success)]">
+              {formatLinehaulDisplay(p.rate) ?? "—"}
+            </span>
+          )}
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>

@@ -364,6 +364,9 @@ async def test_promote_minimal_empty_draft_creates_ready_load_idempotent() -> No
             load = await get_load(db, tenant_id, load_id)
             assert load is not None
             assert load.status == "ready"
+            assert (load.load_number or "").strip()
+            assert not (load.load_number or "").upper().startswith("DRAFT-")
+            assert (load.load_number or "").upper().startswith("INT-")
             row = (
                 await db.execute(
                     text(

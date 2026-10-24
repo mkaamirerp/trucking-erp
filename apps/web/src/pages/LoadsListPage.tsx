@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 import StatusBadge from "@/components/StatusBadge";
 import {
   devPlaygroundResetLoadsAndTrips,
-  discardLoadWorkspaceDraft,
-  listBrokers,
   listLoadWorkspaceDrafts,
   listLoads,
   Load,
@@ -13,16 +11,12 @@ import {
 import { isTenantAdmin } from "@/auth/roles";
 import { useMe } from "@/hooks/useMe";
 import { getTenantSlugFromHost } from "@/tenant";
-import {
-  loadDraftToListRow,
-  workspaceDraftToListRow,
-  type DraftListRow,
-} from "@/loadWorkspace/draftListPresentation";
+import { buildLoadsDirectoryRows } from "@/loadWorkspace/draftListPresentation";
 import { formatRouteFromStops, firstPickupAppointmentDate } from "@/utils/loadStops";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
 
-/** Main loads directory: commercially active rows only (draft loads live under Drafts). */
+/** Main loads directory: active loads plus rows in status draft (saved-for-later and legacy load drafts). */
 const LOAD_LIST_DEFAULT_STATUSES = [
   "ready",
   "unassigned",
@@ -38,8 +32,10 @@ const LOAD_LIST_DEFAULT_STATUSES = [
 export default function LoadsListPage() {
   const navigate = useNavigate();
   const { me } = useMe();
-  const showDemoReset =
-    getTenantSlugFromHost() === "demo" && isTenantAdmin(me);
+  const demoSlug =
+    getTenantSlugFromHost() === "demo" ||
+    (me?.tenant_slug ?? "").trim().toLowerCase() === "demo";
+  const showDemoReset = demoSlug && isTenantAdmin(me?.roles);
   const [loads, setLoads] = useState<Load[]>([]);
   const [resetBusy, setResetBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -48,9 +44,6 @@ export default function LoadsListPage() {
   const [searchApplied, setSearchApplied] = useState("");
   const [workspaceDrafts, setWorkspaceDrafts] = useState<LoadWorkspaceDraft[]>([]);
   const [draftLoads, setDraftLoads] = useState<Load[]>([]);
-  const [brokers, setBrokers] = useState<Awaited<ReturnType<typeof listBrokers>>["items"]>([]);
-  const [draftsPanelOpen, setDraftsPanelOpen] = useState(false);
-
   const runQuery = useCallback((q: string, opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? false;
     if (!silent) setLoading(true);
@@ -69,13 +62,11 @@ export default function LoadsListPage() {
         page: 1,
         size: 20,
       })),
-      listBrokers({ page: 1, size: 200, sort: "name_asc" }).catch(() => ({ items: [] })),
     ])
-      .then(([loadsRes, draftLoadsRes, draftsRes, brokersRes]) => {
+      .then(([loadsRes, draftLoadsRes, draftsRes]) => {
         setLoads(loadsRes.items || []);
         setDraftLoads(draftLoadsRes.items || []);
         setWorkspaceDrafts(draftsRes.items || []);
-        setBrokers(brokersRes.items || []);
       })
       .catch((e) => {
         if (!silent) setError(e?.message || "Failed to load loads");
@@ -94,14 +85,11 @@ export default function LoadsListPage() {
     onRefresh: () => runQuery(searchApplied, { silent: true }),
   });
 
-  const draftRows: DraftListRow[] = useMemo(() => {
-    const brokerList = brokers ?? [];
-    const rows = [
-      ...workspaceDrafts.map((d) => workspaceDraftToListRow(d, brokerList)),
-      ...draftLoads.map((l) => loadDraftToListRow(l, brokerList)),
-    ];
-    return rows.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [workspaceDrafts, draftLoads, brokers]);
+  const directoryRows = useMemo(
+    () =>
+      buildLoadsDirectoryRows(loads, draftLoads, workspaceDrafts, searchApplied),
+    [loads, draftLoads, workspaceDrafts, searchApplied],
+  );
 
   const applySearch = () => {
     const q = searchInput.trim();
@@ -138,12 +126,6 @@ export default function LoadsListPage() {
 
   const btnClass =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:opacity-50";
-
-  async function onDiscardWorkspaceDraft(draftId: string) {
-    if (!window.confirm("Discard this draft? Saved data and the PDF will be removed.")) return;
-    await discardLoadWorkspaceDraft(draftId, { discard_reason: "operator_discard" });
-    runQuery(searchApplied, { silent: true });
-  }
 
   async function onDemoResetLoadsAndTrips() {
     if (
@@ -222,15 +204,6 @@ export default function LoadsListPage() {
               {resetBusy ? "Resetting…" : "Reset loads & trips (demo)"}
             </button>
           ) : null}
-          {draftRows.length > 0 ? (
-            <button
-              type="button"
-              className={btnClass}
-              onClick={() => setDraftsPanelOpen((v) => !v)}
-            >
-              Drafts ({draftRows.length})
-            </button>
-          ) : null}
           <button
             type="button"
             className="rounded-md bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-slate-900 hover:bg-amber-400"
@@ -241,58 +214,15 @@ export default function LoadsListPage() {
         </div>
       </div>
 
-      {draftsPanelOpen && draftRows.length > 0 ? (
-        <div className="rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
-          <ul className="divide-y divide-[var(--trk-border)]">
-            {draftRows.map((row) => (
-              <li key={`${row.kind}-${row.id}`} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--trk-text)] truncate">{row.title}</p>
-                  {row.missingLine ? (
-                    <p className="text-[11px] text-amber-400/90 mt-0.5">{row.missingLine}</p>
-                  ) : null}
-                  <p className="text-[11px] text-[var(--trk-text-muted)] mt-0.5">
-                    {row.pdfHint ? `${row.pdfHint} · ` : ""}
-                    Updated {new Date(row.updatedAt).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    className={btnClass}
-                    onClick={() =>
-                      row.kind === "workspace_draft"
-                        ? navigate(OPS.LOAD_DRAFT(row.id))
-                        : navigate(OPS.LOAD_DETAIL(row.loadId!))
-                    }
-                  >
-                    Open
-                  </button>
-                  {row.kind === "workspace_draft" ? (
-                    <button
-                      type="button"
-                      className={btnClass}
-                      onClick={() => void onDiscardWorkspaceDraft(row.id)}
-                    >
-                      Discard
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
       <div className="rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
         {loading && (
           <p className="px-4 py-6 text-center text-sm text-[var(--trk-text-muted)]">Loading…</p>
         )}
         {error && <p className="px-4 py-6 text-center text-sm text-red-400">{error}</p>}
-        {!loading && !error && loads.length === 0 && (
+        {!loading && !error && directoryRows.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-[var(--trk-text-muted)]">No loads yet.</p>
         )}
-        {!loading && !error && loads.length > 0 && (
+        {!loading && !error && directoryRows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
@@ -321,36 +251,29 @@ export default function LoadsListPage() {
                 </tr>
               </thead>
               <tbody>
-                {loads.map((load) => {
-                  const driver = load.driver
-                    ? `${load.driver.first_name} ${load.driver.last_name}`.trim()
-                    : "";
-                  return (
-                    <tr
-                      key={load.id}
-                      className="border-b border-[var(--trk-border)] hover:bg-[var(--trk-surface)] cursor-pointer"
-                      onClick={() => navigate(OPS.LOAD_DETAIL(load.id))}
-                    >
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text)]">{load.load_number}</td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
-                        {load.trip_number?.trim() || "—"}
-                      </td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
-                        {formatRouteFromStops(load.stops)}
-                      </td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
-                        {firstPickupAppointmentDate(load.stops) || "—"}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <StatusBadge status={load.status} />
-                      </td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{driver || "—"}</td>
-                      <td className="px-4 py-2.5 text-right text-sm text-[var(--trk-text)]">
-                        {load.rate != null ? String(load.rate) : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {directoryRows.map((row) => (
+                  <tr
+                    key={row.key}
+                    className="border-b border-[var(--trk-border)] hover:bg-[var(--trk-surface)] cursor-pointer"
+                    onClick={() =>
+                      row.kind === "workspace_draft" && row.workspaceDraftId
+                        ? navigate(OPS.LOAD_DRAFT(row.workspaceDraftId))
+                        : row.loadId != null
+                          ? navigate(OPS.LOAD_DETAIL(row.loadId))
+                          : undefined
+                    }
+                  >
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text)]">{row.loadNumber}</td>
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.tripNumber}</td>
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.route}</td>
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.pickup}</td>
+                    <td className="px-4 py-2.5">
+                      <StatusBadge status={row.status} />
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{row.driver}</td>
+                    <td className="px-4 py-2.5 text-right text-sm text-[var(--trk-text)]">{row.rateDisplay}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

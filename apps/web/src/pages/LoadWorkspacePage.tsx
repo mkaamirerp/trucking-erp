@@ -964,7 +964,9 @@ function LoadWorkspacePage() {
       const parseWallStarted = performance.now();
       try {
         if (workspaceMode === "manual") {
-          const { id: manualDraftId, draft: manualDraft } = await ensureServerDraft();
+          const { id: manualDraftId, draft: manualDraft } = await ensureServerDraft({
+            syncRoute: false,
+          });
           const persisted = await parseLoadWorkspaceDraftDocument(manualDraftId, file, {
             expectedConcurrencyVersion: manualDraft.concurrency_version,
           });
@@ -1013,6 +1015,7 @@ function LoadWorkspacePage() {
             concurrency_version: saved.concurrency_version,
             draft_json: saved.draft_json ?? persisted.draft.draft_json,
           });
+          navigate(OPS.LOAD_DRAFT(manualDraftId), { replace: true });
           return;
         }
 
@@ -1098,6 +1101,7 @@ function LoadWorkspacePage() {
       palletCaseCount,
       customsBrokerId,
       status,
+      navigate,
     ],
   );
 
@@ -1364,6 +1368,13 @@ function LoadWorkspacePage() {
     options: { syncRoute?: boolean } = {},
   ): Promise<{ id: string; draft: LoadWorkspaceDraft }> {
     const syncRoute = options.syncRoute !== false;
+    if (workspaceDraft?.status === "draft" && workspaceDraft.id) {
+      const id = workspaceDraft.id;
+      if (syncRoute && draftIdFromRoute !== id) {
+        navigate(OPS.LOAD_DRAFT(id), { replace: true });
+      }
+      return { id, draft: workspaceDraft };
+    }
     if (draftIdFromRoute && workspaceDraft) {
       return { id: draftIdFromRoute, draft: workspaceDraft };
     }

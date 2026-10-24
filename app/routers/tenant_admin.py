@@ -26,7 +26,7 @@ from app.deps.admin import access_level_to_role, has_full_access, is_tenant_admi
 from app.deps.auth import CurrentUser, get_current_user
 from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant
-from app.deps.tenant_db import open_tenant_session_by_id
+from app.deps.tenant_db import get_tenant_db, open_tenant_session_by_id
 from app.models.platform import (
     PlatformCompanyProfile,
     PlatformTenant,
@@ -1089,6 +1089,7 @@ async def playground_reset_loads_and_trips(
     tenant_id: int = Depends(require_tenant),
     current_user: CurrentUser = Depends(get_current_user),
     platform_db: AsyncSession = Depends(get_db),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
 ):
     """Dev playground only (demo + tenant_demo): wipe loads/trips and reset trip numbering counter."""
     if not is_tenant_admin(current_user.role):
@@ -1105,16 +1106,15 @@ async def playground_reset_loads_and_trips(
             detail="Load/trip reset is only allowed on the demo workspace.",
         )
 
-    async with open_tenant_session_by_id(tenant_id) as tenant_db:
-        db_name = await tenant_db.scalar(text("SELECT current_database()"))
-        if str(db_name or "") != _PLAYGROUND_RESET_DB:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Refusing reset: tenant database must be {_PLAYGROUND_RESET_DB!r}.",
-            )
-        from app.scripts.dev_purge_loads_and_trips import execute_dev_playground_load_trip_reset
+    db_name = await tenant_db.scalar(text("SELECT current_database()"))
+    if str(db_name or "") != _PLAYGROUND_RESET_DB:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Refusing reset: tenant database must be {_PLAYGROUND_RESET_DB!r}.",
+        )
+    from app.scripts.dev_purge_loads_and_trips import execute_dev_playground_load_trip_reset
 
-        await execute_dev_playground_load_trip_reset(tenant_db, tenant_id)
+    await execute_dev_playground_load_trip_reset(tenant_db, tenant_id)
 
     logger.warning(
         "playground_reset_loads_trips tenant_id=%s actor_user_id=%s",

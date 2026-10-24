@@ -477,6 +477,26 @@ async def _ready_requirements_violation(
     return missing[0] if missing else None
 
 
+async def _allocate_intake_style_load_number(db: AsyncSession, tenant_id: int) -> str:
+    """Provisional internal load number until tenant_load_number_periods minter ships (owner LN decision)."""
+    for _ in range(16):
+        candidate = f"INT-{uuid.uuid4().hex[:12].upper()}"
+        taken = await db.scalar(
+            select(Load.id).where(Load.tenant_id == tenant_id, Load.load_number == candidate).limit(1)
+        )
+        if taken is None:
+            return candidate
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not allocate a unique load number",
+    )
+
+
+def _is_placeholder_load_number(load_number: str | None) -> bool:
+    text = (load_number or "").strip().upper()
+    return not text or text.startswith("DRAFT-")
+
+
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
     stmt = select(Load).where(Load.tenant_id == tenant_id, Load.load_number == load_number)
     if exclude_id:
@@ -529,7 +549,13 @@ async def _insert_commercial_load_uncommitted(
     if payload.customs_broker_id is not None and not await _get_customs_broker(db, tenant_id, payload.customs_broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
 
-    load_number = payload.load_number or f"DRAFT-{uuid.uuid4().hex[:8].upper()}"
+    explicit = (payload.load_number or "").strip()
+    if explicit:
+        load_number = explicit
+    elif insert_as_ready:
+        load_number = await _allocate_intake_style_load_number(db, tenant_id)
+    else:
+        load_number = f"DRAFT-{uuid.uuid4().hex[:8].upper()}"
     await _ensure_unique_load_number(db, tenant_id, load_number)
 
     data = _load_data_from_payload(payload)
@@ -1211,6 +1237,14 @@ async def mark_load_ready(
             detail=violation,
         )
 
+    mark_ready_values: dict[str, object] = {
+        "status": "ready",
+        "concurrency_version": Load.concurrency_version + 1,
+        "updated_at": func.now(),
+    }
+    if _is_placeholder_load_number(load.load_number):
+        mark_ready_values["load_number"] = await _allocate_intake_style_load_number(db, tenant_id)
+
     stmt = (
         update(Load)
         .where(
@@ -1219,11 +1253,7 @@ async def mark_load_ready(
             Load.concurrency_version == expected_concurrency_version,
             Load.status == "draft",
         )
-        .values(
-            status="ready",
-            concurrency_version=Load.concurrency_version + 1,
-            updated_at=func.now(),
-        )
+        .values(**mark_ready_values)
         .execution_options(synchronize_session=False)
     )
     result = await db.execute(stmt)

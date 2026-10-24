@@ -6,7 +6,7 @@ import {
   listCreateLoadSoftNotProvided,
 } from "@/loadWorkspace/workspaceCreateLoadValidation";
 import type { Broker } from "@/api";
-import { formatRouteFromStops } from "@/utils/loadStops";
+import { firstPickupAppointmentDate, formatRouteFromStops } from "@/utils/loadStops";
 
 export type DraftListRowKind = "workspace_draft" | "load_draft";
 
@@ -62,6 +62,104 @@ export function workspaceDraftToListRow(draft: LoadWorkspaceDraft, brokers: Brok
     updatedAt: draft.updated_at,
     pdfHint: draft.pdf_filename ? "PDF attached" : "No PDF",
   };
+}
+
+export type LoadsDirectoryRowKind = "workspace_draft" | "load";
+
+export type LoadsDirectoryRow = {
+  key: string;
+  kind: LoadsDirectoryRowKind;
+  workspaceDraftId?: string;
+  loadId?: number;
+  loadNumber: string;
+  tripNumber: string;
+  route: string;
+  pickup: string;
+  status: string;
+  driver: string;
+  rateDisplay: string;
+  updatedAt: string;
+  /** Lowercased tokens for client-side search (workspace drafts). */
+  searchBlob: string;
+};
+
+function loadDriverLabel(load: Load): string {
+  return load.driver ? `${load.driver.first_name} ${load.driver.last_name}`.trim() : "";
+}
+
+export function loadToDirectoryRow(load: Load): LoadsDirectoryRow {
+  const loadNumber = (load.load_number ?? "").trim() || "—";
+  const brokerRef = (load.broker_load_reference ?? "").trim();
+  return {
+    key: `load-${load.id}`,
+    kind: "load",
+    loadId: load.id,
+    loadNumber: load.status === "draft" && loadNumber === "—" && brokerRef ? brokerRef : loadNumber,
+    tripNumber: load.trip_number?.trim() || "—",
+    route: formatRouteFromStops(load.stops ?? []),
+    pickup: firstPickupAppointmentDate(load.stops) || "—",
+    status: load.status,
+    driver: loadDriverLabel(load) || "—",
+    rateDisplay: load.rate != null ? String(load.rate) : "—",
+    updatedAt: load.updated_at ?? load.created_at ?? new Date(0).toISOString(),
+    searchBlob: [loadNumber, brokerRef, load.trip_number, load.broker_load_reference, load.commodity]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase(),
+  };
+}
+
+export function workspaceDraftToDirectoryRow(draft: LoadWorkspaceDraft): LoadsDirectoryRow {
+  const fields = workspaceFieldsFromDraftJson(draft.draft_json ?? {});
+  const title = draftTitleFromFields(fields, draft.pdf_filename);
+  const brokerRef = (fields.brokerLoadReference || "").trim();
+  const loadNum = (fields.loadNumber || "").trim();
+  return {
+    key: `workspace-draft-${draft.id}`,
+    kind: "workspace_draft",
+    workspaceDraftId: draft.id,
+    loadNumber: loadNum || "—",
+    tripNumber: "—",
+    route: formatRouteFromStops(fields.draftStops),
+    pickup: firstPickupAppointmentDate(fields.draftStops) || "—",
+    status: "draft",
+    driver: "—",
+    rateDisplay: fields.rate.trim() ? fields.rate.trim() : "—",
+    updatedAt: draft.updated_at,
+    searchBlob: [title, brokerRef, loadNum, draft.pdf_filename, fields.brokerNameSnapshot, fields.commodity]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase(),
+  };
+}
+
+/** Main Loads table: active loads + load drafts + save-for-later workspace drafts. */
+export function buildLoadsDirectoryRows(
+  activeLoads: Load[],
+  draftLoads: Load[],
+  workspaceDrafts: LoadWorkspaceDraft[],
+  searchQuery: string,
+): LoadsDirectoryRow[] {
+  const byLoadId = new Map<number, Load>();
+  for (const load of activeLoads) byLoadId.set(load.id, load);
+  for (const load of draftLoads) {
+    if (!byLoadId.has(load.id)) byLoadId.set(load.id, load);
+  }
+
+  const rows: LoadsDirectoryRow[] = [
+    ...Array.from(byLoadId.values()).map(loadToDirectoryRow),
+    ...workspaceDrafts.map((d) => workspaceDraftToDirectoryRow(d)),
+  ];
+
+  const q = searchQuery.trim().toLowerCase();
+  const filtered =
+    q.length === 0
+      ? rows
+      : rows.filter((row) => row.searchBlob.includes(q) || row.route.toLowerCase().includes(q));
+
+  return filtered.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
 }
 
 export function loadDraftToListRow(load: Load, brokers: Broker[]): DraftListRow {
