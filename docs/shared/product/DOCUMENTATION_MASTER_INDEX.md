@@ -21,6 +21,8 @@ For other domains, prefer **current code + newer explicit locks/decisions**. His
 | Title | Path | Status / purpose |
 |---|---|---|
 | **Load / Trip Master Architecture** | [`load_trip/MASTER.md`](../../load_trip/MASTER.md) | Load/Trip/TripLoad/Dispatch/custody architecture + work order (workflow overrides: owner-product-rules). |
+| **Load numbering (owner decision)** | [`load_trip/LOAD_NUMBERING_OWNER_DECISION_2026-10-24.md`](../../load_trip/LOAD_NUMBERING_OWNER_DECISION_2026-10-24.md) | Internal `Mon-YY-NNNN` minting; monthly reset; Toronto creation month; one minter; no new DRAFT/INT (Amir, 2026-10-24) |
+| **Load numbering — read-only report** | [`load_trip/LOAD_NUMBERING_READ_ONLY_REPORT_2026-10-24.md`](../../load_trip/LOAD_NUMBERING_READ_ONLY_REPORT_2026-10-24.md) | Trip numbering pattern, migration parents (dual heads), assign/read paths, TZ, concurrency, sequencing |
 
 Former Decision 6–14, Phase3L, Trip Container 000/001, integrity tracker, trip-number rule, and related foundation/index MDs were consolidated into that master and removed.
 
