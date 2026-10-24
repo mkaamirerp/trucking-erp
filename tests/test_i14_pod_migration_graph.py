@@ -1,4 +1,4 @@
-"""POD revision graph: x5 and DW-1 histories must not both create the table."""
+"""Tenant revision graph: split heads (ln01) and POD safety on historical upgrades."""
 
 from __future__ import annotations
 
@@ -11,6 +11,9 @@ from alembic.script import ScriptDirectory
 from scripts.tenant_revision_plan import (
     DW1C,
     DW1D,
+    FMP02,
+    LN01_FMP,
+    LN01_X5,
     POD_DW1,
     POD_X5,
     X5,
@@ -35,8 +38,8 @@ def _heads(script: ScriptDirectory) -> set[str]:
     return set(script.get_heads())
 
 
-def test_approved_heads_are_exactly_the_pod_pair(script: ScriptDirectory) -> None:
-    assert _heads(script) == {POD_DW1, POD_X5}
+def test_approved_heads_are_exactly_the_ln01_pair(script: ScriptDirectory) -> None:
+    assert _heads(script) == {LN01_FMP, LN01_X5}
 
 
 def test_x5_plan_creates_pod_once_without_dw1(script: ScriptDirectory) -> None:
@@ -74,45 +77,49 @@ def test_existing_i14_refuses_second_pod_revision(script: ScriptDirectory) -> No
         assert_target_matches_history(script, POD_X5, POD_DW1)
 
 
-def test_upgrade_heads_from_x5_would_run_both_pod_revisions(script: ScriptDirectory) -> None:
+def test_upgrade_heads_from_x5_would_run_both_ln01_revisions(script: ScriptDirectory) -> None:
     """`upgrade heads` from x5 reaches both branches. That plan is forbidden."""
     pending: set[str] = set()
     for head in script.get_heads():
         pending.update(upgrade_plan(script, X5, head))
-    assert POD_X5 in pending
-    assert POD_DW1 in pending
+    assert LN01_X5 in pending
+    assert LN01_FMP in pending
     with pytest.raises(Exception, match="multiple heads"):
         script.get_current_head()
 
 
 def test_explicit_tenant_targets_stay_usable_and_head_fails_closed(script: ScriptDirectory) -> None:
-    assert migration_target_for_request(script, X5, POD_X5) == POD_X5
-    assert migration_target_for_request(script, DW1D, POD_DW1) == POD_DW1
-    assert migration_target_for_request(script, POD_DW1, POD_DW1) == POD_DW1
-    assert migration_target_for_request(script, POD_X5, POD_X5) == POD_X5
+    assert migration_target_for_request(script, POD_X5, LN01_X5) == LN01_X5
+    assert migration_target_for_request(script, FMP02, LN01_FMP) == LN01_FMP
+    assert migration_target_for_request(script, LN01_FMP, LN01_FMP) == LN01_FMP
+    assert migration_target_for_request(script, LN01_X5, LN01_X5) == LN01_X5
     with pytest.raises(RevisionPlanError, match="refusing upgrade head"):
         migration_target_for_request(script, X5, "head")
     with pytest.raises(RevisionPlanError, match="refusing upgrade head"):
         migration_target_for_request(script, None, None)
     with pytest.raises(RevisionPlanError, match="already at"):
-        migration_target_for_request(script, POD_DW1, POD_X5)
-    with pytest.raises(RevisionPlanError, match="allowlist|must be one of"):
+        migration_target_for_request(script, LN01_FMP, LN01_X5)
+    with pytest.raises(RevisionPlanError, match="must be one of"):
         migration_target_for_request(script, X5, "dw1c_composite_fk_set_null_optional_columns")
 
 
 def test_fuel_migrate_picks_one_branch_and_rejects_the_other(script: ScriptDirectory) -> None:
-    assert fuel_test_migrate_target(script, X5) == POD_X5
-    assert fuel_test_migrate_target(script, None) == POD_X5
+    assert fuel_test_migrate_target(script, X5) == LN01_X5
+    assert fuel_test_migrate_target(script, None) == LN01_X5
     assert fuel_test_migrate_target(script, DW1D) == POD_DW1
     assert fuel_test_migrate_target(script, DW1C) == POD_DW1
     assert fuel_test_migrate_target(script, POD_DW1) == POD_DW1
-    assert fuel_test_migrate_target(script, POD_X5) == POD_X5
+    assert fuel_test_migrate_target(script, POD_X5) == LN01_X5
+    assert fuel_test_migrate_target(script, FMP02) == LN01_FMP
     x5_plan = upgrade_plan(script, X5, fuel_test_migrate_target(script, X5))
     dw1_plan = upgrade_plan(script, DW1D, fuel_test_migrate_target(script, DW1D))
     dw1c_plan = upgrade_plan(script, DW1C, fuel_test_migrate_target(script, DW1C))
-    assert x5_plan == [POD_X5]
+    fmp_plan = upgrade_plan(script, FMP02, fuel_test_migrate_target(script, FMP02))
+    assert x5_plan[-1] == LN01_X5
+    assert POD_X5 in x5_plan
     assert dw1_plan == [POD_DW1]
     assert dw1c_plan == [DW1D, POD_DW1]
+    assert fmp_plan == [LN01_FMP]
     assert POD_DW1 not in x5_plan
     assert POD_X5 not in dw1_plan
     with pytest.raises(RevisionPlanError):

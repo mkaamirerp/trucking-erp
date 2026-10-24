@@ -30,7 +30,6 @@ async def api_create_draft_load(
         headers=headers,
         json={
             "status": "draft",
-            "load_number": f"{tag}-{uuid.uuid4().hex[:10]}",
             **extra,
         },
     )

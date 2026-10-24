@@ -44,6 +44,7 @@ from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.future_movement_plans import load_has_open_future_movement_plan
+from app.services.load_numbering import mint_next_load_number
 from app.services.load_workspace_draft_storage import (
     LoadWorkspaceDraftStorageError,
     Sha256MismatchError,
@@ -188,6 +189,11 @@ def _reject_legacy_status_target(new_status: str) -> None:
 
 def _guard_create_payload(payload: LoadCreate) -> None:
     _reject_load_assignment_fields(payload)
+    if (payload.load_number or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="load_number is assigned automatically and cannot be set on create",
+        )
     new_status = (payload.status or "draft").strip().lower()
     _reject_legacy_status_target(new_status)
     if new_status != "draft":
@@ -477,26 +483,6 @@ async def _ready_requirements_violation(
     return missing[0] if missing else None
 
 
-async def _allocate_intake_style_load_number(db: AsyncSession, tenant_id: int) -> str:
-    """Provisional internal load number until tenant_load_number_periods minter ships (owner LN decision)."""
-    for _ in range(16):
-        candidate = f"INT-{uuid.uuid4().hex[:12].upper()}"
-        taken = await db.scalar(
-            select(Load.id).where(Load.tenant_id == tenant_id, Load.load_number == candidate).limit(1)
-        )
-        if taken is None:
-            return candidate
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Could not allocate a unique load number",
-    )
-
-
-def _is_placeholder_load_number(load_number: str | None) -> bool:
-    text = (load_number or "").strip().upper()
-    return not text or text.startswith("DRAFT-")
-
-
 async def _ensure_unique_load_number(db: AsyncSession, tenant_id: int, load_number: str, exclude_id: int | None = None):
     stmt = select(Load).where(Load.tenant_id == tenant_id, Load.load_number == load_number)
     if exclude_id:
@@ -549,13 +535,7 @@ async def _insert_commercial_load_uncommitted(
     if payload.customs_broker_id is not None and not await _get_customs_broker(db, tenant_id, payload.customs_broker_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
 
-    explicit = (payload.load_number or "").strip()
-    if explicit:
-        load_number = explicit
-    elif insert_as_ready:
-        load_number = await _allocate_intake_style_load_number(db, tenant_id)
-    else:
-        load_number = f"DRAFT-{uuid.uuid4().hex[:8].upper()}"
+    load_number = await mint_next_load_number(db, tenant_id)
     await _ensure_unique_load_number(db, tenant_id, load_number)
 
     data = _load_data_from_payload(payload)
@@ -784,8 +764,12 @@ async def update_load(
         if new_val is not None and not await _get_customs_broker(db, tenant_id, new_val):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customs broker not found")
 
-    if "load_number" in data and data["load_number"]:
-        await _ensure_unique_load_number(db, tenant_id, data["load_number"], exclude_id=load.id)
+    if "load_number" in payload.model_fields_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="load_number cannot be changed",
+        )
+    data.pop("load_number", None)
 
     # Trip read-model pointers (trip_number, active_dispatch_trip_id, active_trip_id) are never written here.
     values = {**data}
@@ -1242,9 +1226,6 @@ async def mark_load_ready(
         "concurrency_version": Load.concurrency_version + 1,
         "updated_at": func.now(),
     }
-    if _is_placeholder_load_number(load.load_number):
-        mark_ready_values["load_number"] = await _allocate_intake_style_load_number(db, tenant_id)
-
     stmt = (
         update(Load)
         .where(

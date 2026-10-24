@@ -28,6 +28,7 @@ from app.services.broker_intake_resolve import (
     fetch_latest_inbound_from_header,
 )
 from app.services.broker_intake_unified import resolve_booking_broker_for_email_intake
+from app.services.load_numbering import mint_next_load_number
 from app.constants.email_intake_routing import MANUAL_CREATE_DRAFT_FROM_REVIEW, MANUAL_LINK_EXISTING_LOAD
 from app.services.email_engine.intake_service import find_duplicate_linked_load_for_thread_pdf_content
 from app.services.email_intake_qr_extractions import link_thread_qr_extractions_to_load
@@ -50,20 +51,6 @@ def _require_thread_eligible_for_manual_intake(thread: EmailThread) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Thread already has a linked load",
         )
-
-
-async def _allocate_intake_style_load_number(db: AsyncSession, tenant_id: int) -> str:
-    for _ in range(16):
-        candidate = f"INT-{uuid.uuid4().hex[:12].upper()}"
-        taken = await db.scalar(
-            select(Load.id).where(Load.tenant_id == tenant_id, Load.load_number == candidate).limit(1)
-        )
-        if taken is None:
-            return candidate
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Could not allocate a unique intake load number",
-    )
 
 
 async def _latest_inbound_message_body_excerpt(
@@ -226,7 +213,7 @@ async def create_draft_load_from_review_thread(
     body_excerpt = await _latest_inbound_message_body_excerpt(db, tenant_id, thread.id)
     notes = _compose_internal_notes_from_thread(thread, body_excerpt)
 
-    load_number = await _allocate_intake_style_load_number(db, tenant_id)
+    load_number = await mint_next_load_number(db, tenant_id)
     load = Load(
         tenant_id=tenant_id,
         load_number=load_number,

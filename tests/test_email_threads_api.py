@@ -343,7 +343,7 @@ class TestEmailThreadIntakeManualActions:
             assert data["thread"]["intake_bucket"] == "linked"
             assert data["thread"]["routing_reason"] == "manual_create_draft_from_review"
             assert data["thread"]["linked_load_id"] == data["load"]["id"]
-            assert data["load"]["load_number"].startswith("INT-")
+            assert data["load"]["load_number"] and "-" in data["load"]["load_number"]
             assert data["load"]["status"] == "draft"
             load_id = data["load"]["id"]
 

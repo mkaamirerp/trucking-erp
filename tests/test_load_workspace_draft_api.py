@@ -366,7 +366,7 @@ async def test_promote_minimal_empty_draft_creates_ready_load_idempotent() -> No
             assert load.status == "ready"
             assert (load.load_number or "").strip()
             assert not (load.load_number or "").upper().startswith("DRAFT-")
-            assert (load.load_number or "").upper().startswith("INT-")
+            assert "-" in (load.load_number or "")
             row = (
                 await db.execute(
                     text(
@@ -1040,9 +1040,10 @@ async def test_promote_rejects_contact_of_other_broker_like_api_create() -> None
 
 
 @pytest.mark.asyncio
-async def test_promote_rejects_duplicate_load_number_without_promoting() -> None:
+async def test_promote_ignores_draft_load_number_and_mints_fresh() -> None:
     engine, factory = _session()
     draft_id = None
+    load_id = None
     try:
         async with factory() as db:
             tenant_id = await _resolve_tenant_id(db)
@@ -1054,23 +1055,26 @@ async def test_promote_rejects_duplicate_load_number_without_promoting() -> None
             loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
         _, draft_id = await _create_draft(factory, _promotable_draft_json(loadNumber=existing_number))
         async with factory() as db:
-            with pytest.raises(HTTPException) as exc:
-                await promote_workspace_draft(
-                    db,
-                    tenant_id,
-                    draft_id,
-                    LoadWorkspaceDraftPromote(
-                        expected_concurrency_version=1,
-                        promotion_idempotency_key=f"promo-dup-{uuid.uuid4().hex}",
-                    ),
-                    promoted_by_platform_user_id="integration-test-user",
-                )
-            assert exc.value.status_code == 400
-            assert exc.value.detail == "A load with this load_number already exists"
-            await db.rollback()
-        await _assert_rejected_promotion_left_draft_promotable(factory, tenant_id, draft_id, loads_before)
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(
+                    expected_concurrency_version=1,
+                    promotion_idempotency_key=f"promo-dup-{uuid.uuid4().hex}",
+                ),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+            load = await get_load(db, tenant_id, load_id)
+            assert load is not None
+            assert load.load_number != existing_number
+            await db.commit()
+        async with factory() as db:
+            loads_after = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+        assert loads_after == loads_before + 1
     finally:
-        await _delete_promoted_load_and_draft(factory, None, draft_id)
+        await _delete_promoted_load_and_draft(factory, load_id, draft_id)
         await engine.dispose()
 
 

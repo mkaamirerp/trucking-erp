@@ -315,13 +315,12 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         <div className={wsGrid2}>
           <div>
             <label className={L}>{VISIBLE_INTERNAL_LOAD_NUMBER_LABEL}</label>
-            <input
-              className={I}
-              value={p.loadNumber}
-              tabIndex={p.verificationTabIndex.get("loadNumber")}
-              onChange={(e) => p.setLoadNumber(e.target.value)}
-              placeholder="INT-..."
-            />
+            <p className="font-mono text-sm text-[var(--trk-text)]">
+              {(p.loadNumber || "").trim() || "—"}
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--trk-muted)]">
+              Assigned when the load is created; cannot be edited.
+            </p>
           </div>
           <div>
             <label className={L}>Linehaul rate</label>

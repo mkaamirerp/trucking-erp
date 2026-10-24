@@ -169,7 +169,11 @@ class TestSharedCommercialInsertionUnit:
         async def _no_audit(*_a, **_k):
             raise AssertionError("shared Load insertion must not write audit")
 
+        async def _fake_mint(_db, _tenant_id, now=None):
+            return "Oct-26-0001"
+
         monkeypatch.setattr(loads_service, "_write_load_audit", _no_audit)
+        monkeypatch.setattr(loads_service, "mint_next_load_number", _fake_mint)
         origin = uuid.uuid4()
         db = _StagingOnlyDb()
         payload = LoadCreate(
@@ -184,7 +188,7 @@ class TestSharedCommercialInsertionUnit:
         assert isinstance(load, Load)
         assert load.tenant_id == 7
         assert load.status == "draft"
-        assert load.load_number.startswith("DRAFT-")
+        assert load.load_number and "-" in load.load_number
         assert load.promotion_origin_workspace_draft_id == origin
         stops = [o for o in db.added if isinstance(o, LoadStop)]
         assert [(s.tenant_id, s.load_id, s.sequence, s.city) for s in stops] == [
@@ -194,11 +198,15 @@ class TestSharedCommercialInsertionUnit:
         assert [a["stop_id"] for a in stop_diff["added"]] == [s.id for s in stops]
         assert stop_diff["removed"] == [] and stop_diff["updated"] == []
 
-    async def test_shared_insert_without_stops_returns_no_diff(self) -> None:
+    async def test_shared_insert_without_stops_returns_no_diff(self, monkeypatch) -> None:
+        async def _fake_mint(_db, _tenant_id, now=None):
+            return "Oct-26-0099"
+
+        monkeypatch.setattr(loads_service, "mint_next_load_number", _fake_mint)
         load, stop_diff = await loads_service._insert_commercial_load_uncommitted(
-            _StagingOnlyDb(), 3, LoadCreate(load_number="API-1")
+            _StagingOnlyDb(), 3, LoadCreate()
         )
-        assert load.load_number == "API-1"
+        assert load.load_number == "Oct-26-0099"
         assert load.promotion_origin_workspace_draft_id is None
         assert stop_diff is None
 
@@ -414,7 +422,7 @@ async def _new_draft(client: AsyncClient, tag: str, **extra) -> dict:
     r = await client.post(
         "/api/v1/loads",
         headers=AUTH_HEADERS,
-        json={"status": "draft", "load_number": f"{tag}-{uuid.uuid4().hex[:8]}", **extra},
+        json={"status": "draft", **extra},
     )
     assert r.status_code == 201, r.text
     return r.json()
@@ -431,26 +439,23 @@ class TestLoadWriterFreezeHttp:
     @pytest.mark.parametrize("legacy_status", ["assigned", "dispatched", "in_transit"])
     async def test_post_legacy_status_creates_nothing(self, client, override_auth_tenant, legacy_status) -> None:
         ln = f"I0A-C-{uuid.uuid4().hex[:8]}"
-        r = await client.post("/api/v1/loads", headers=AUTH_HEADERS, json={"status": legacy_status, "load_number": ln})
+        r = await client.post("/api/v1/loads", headers=AUTH_HEADERS, json={"status": legacy_status})
         assert r.status_code == 409, r.text
         assert _detail_code(r.json()) == LEGACY_LOAD_STATUS_DISPATCH_DEPRECATED
-        assert not await _load_number_exists(client, ln)
 
     @pytest.mark.parametrize("field", ASSIGNMENT_FIELDS)
     async def test_post_assignment_rejected(self, client, override_auth_tenant, field) -> None:
-        ln = f"I0A-A-{uuid.uuid4().hex[:8]}"
         r = await client.post(
-            "/api/v1/loads", headers=AUTH_HEADERS, json={"status": "draft", "load_number": ln, field: 1}
+            "/api/v1/loads", headers=AUTH_HEADERS, json={"status": "draft", field: 1}
         )
         assert r.status_code == 409, r.text
         assert _detail_code(r.json()) == LEGACY_LOAD_ASSIGNMENT_DEPRECATED
-        assert not await _load_number_exists(client, ln)
 
     async def test_post_default_creates_draft(self, client, override_auth_tenant) -> None:
-        ln = f"I0A-D-{uuid.uuid4().hex[:8]}"
-        r = await client.post("/api/v1/loads", headers=AUTH_HEADERS, json={"load_number": ln})
+        r = await client.post("/api/v1/loads", headers=AUTH_HEADERS, json={"status": "draft"})
         assert r.status_code == 201, r.text
         assert r.json()["status"] == "draft"
+        assert (r.json().get("load_number") or "").strip()
 
     @pytest.mark.parametrize("legacy_status", ["assigned", "in_transit", "dispatched"])
     async def test_patch_draft_to_legacy_status_blocked(self, client, override_auth_tenant, legacy_status) -> None:

@@ -580,7 +580,6 @@ export function buildLoadPersistPayload(params: LoadPersistParams): LoadWritePay
   const milesN = params.miles.trim();
 
   return {
-    load_number: params.loadNumber.trim() || null,
     broker_id: params.brokerId,
     broker_contact_id: params.brokerContactId,
     broker_name_snapshot: params.brokerNameSnapshot.trim() || null,

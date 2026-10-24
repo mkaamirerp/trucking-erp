@@ -180,10 +180,9 @@ def draft_json_to_load_create(draft_json: dict[str, Any]) -> LoadCreate:
     """Build LoadCreate from workspace draft_json; ignores assignment / trip fields."""
     if not isinstance(draft_json, dict):
         raise DraftJsonMappingError("draft_json", "must be a JSON object")
-    load_number = _text(draft_json.get("loadNumber") or draft_json.get("load_number")) or None
     return LoadCreate(
         status="draft",
-        load_number=load_number,
+        load_number=None,
         broker_id=_parse_optional_id(draft_json.get("brokerId") or draft_json.get("broker_id"), "brokerId"),
         broker_contact_id=_parse_optional_id(
             draft_json.get("brokerContactId") or draft_json.get("broker_contact_id"),
