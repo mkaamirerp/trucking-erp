@@ -13,6 +13,9 @@ When implementing operator-facing Load / Trip / Dispatch behavior, follow this f
 
 - Develop on branch **`gpt-review`**; review on **GitHub** by **Claude or ChatGPT**; merge to **`main` only after owner approval**.
 - **Push to `origin/gpt-review` before deploy.** Deploy to any shared or demo host **only with the owner's explicit approval**; the running host must match a **pushed** commit on `gpt-review` (not unpushed local-only changes).
+- **One small checkpoint at a time**, then **STOP** for owner review on GitHub — do not stack the next task without approval.
+- **Every task report** must state **dispatcher step count** **before** and **after** the change (numbered operator actions on the happy path).
+- **“Done”** means the full journey was exercised in a **real browser** on a **disposable clone**, with a **screenshot per step**. Passing automated tests alone is **not** done.
 
 ## Load workspace (small-carrier flow)
 
@@ -20,7 +23,17 @@ When implementing operator-facing Load / Trip / Dispatch behavior, follow this f
 2. **Workspace drafts** (`load_workspace_drafts`) are **save for later** for incomplete work only. Do not create a `loads` row until **Create load** (promote).
 3. **`POST /api/v1/loads`** and paths that already create **`loads.status=draft`** (e.g. email intake) **stay `draft`** until **`mark_load_ready`** (legacy). Do not remove that guard without owner approval.
 4. **Promotion** inserts **`status=ready` with no completeness prerequisites** (no broker / broker-load-# / stop gate). Dispatcher may fix gaps on the load page after create.
-5. **Create load from parsed PDF** is **never field-blocked** for missing optional commercial fields; soft “not provided” UX is allowed. Manual create may keep **pickup/delivery city+state** hard gates only where already approved in task scope.
+5. **Create load from parsed PDF** is **never field-blocked** for missing optional commercial fields; soft “not provided” UX is allowed.
+6. **Manual load create — required fields only:** pickup **city + state/province**, delivery **city + state/province**, and pickup and delivery **date/time** (calendar picker, or typed with a mask with **month first**, or **“Anytime”**). **Everything else is optional** on manual create (including broker, rate, equipment, broker reference).
+
+## Operator language (UI copy)
+
+- Operators **never** see the word **“workspace”** in product UI (use **Load**, **New load**, **Loads**, etc.). Internal code/table names may still say workspace.
+
+## Load identifiers (do not mix)
+
+- **Broker load # / PO #** = the broker’s number from the rate confirmation (`broker_load_reference` and related refs). Label and help text must say **broker** (or PO), not “load number.”
+- **Load number** = **our** internal carrier load number (`load_number`). Never use “load number” in UI to mean the broker’s reference.
 
 ## `ready` meaning
 
