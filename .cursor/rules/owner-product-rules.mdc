@@ -53,7 +53,7 @@ When implementing operator-facing Load / Trip / Dispatch behavior, follow this f
 ## Commercial fields
 
 - **`rate` (linehaul):** carrier/broker pay on the rate confirmation — primary commercial rate.
-- **`customer_rate`:** optional auxiliary field; not a primary parser target; **do not** copy `rate` into `customer_rate` unless a separate customer/shipper price is explicit on the document.
+- **`customer_rate`:** second editable rate. If it is blank on Save/Create Load while `rate` is present, persist the RC rate in **both** `loads.rate` and `loads.customer_rate`. If explicitly entered (including 0), preserve the separate amount. This is a **persistence default**, not a parser extraction rule. Downstream settlement, invoicing, and commission usage of the second rate will be decided later.
 
 ## Stored rate confirmation PDF
 

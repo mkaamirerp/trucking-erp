@@ -143,7 +143,7 @@ export function buildWorkspaceDraftJson(
     temperatureRequirement: params.temperatureRequirement,
     palletCaseCount: params.palletCaseCount,
     rate: params.rate,
-    customerRate: params.customerRate,
+    customerRate: params.customerRate.trim() === "" ? params.rate.trim() : params.customerRate,
     miles: params.miles,
     customsBrokerId: params.customsBrokerId,
     internalNotes: params.internalNotes,
@@ -576,7 +576,7 @@ export function buildLoadPersistPayload(params: LoadPersistParams): LoadWritePay
   const stopsPayload = sorted.map((s, i) => stopToPayload(s, i));
   const estW = params.estimatedWeight.trim();
   const rateN = params.rate.trim();
-  const crN = params.customerRate.trim();
+  const crN = params.customerRate.trim() || rateN;
   const milesN = params.miles.trim();
 
   return {

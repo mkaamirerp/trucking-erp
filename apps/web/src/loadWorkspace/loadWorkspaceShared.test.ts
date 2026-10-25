@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLoadPersistPayload,
+  buildWorkspaceDraftJson,
   formatEquipmentTempChip,
   formatLinehaulDisplay,
   initialManualCreateStops,
@@ -215,5 +216,32 @@ describe("load workspace header glances", () => {
     expect(formatEquipmentTempChip("Van", "V53", "")).toBe("Van · No temp set");
     expect(formatEquipmentTempChip("Reefer", "", "-10")).toBe("Reefer · -10");
     expect(formatEquipmentTempChip("", "", "")).toBe("Equipment · No temp set");
+  });
+});
+
+
+describe("RC and customer rate persistence defaults", () => {
+  it("fills a blank customer rate with the RC rate in draft JSON and the Load API payload", () => {
+    const params = minimalPersist({ rate: "2000", customerRate: "" });
+    expect(buildWorkspaceDraftJson(params).customerRate).toBe("2000");
+    expect(buildLoadPersistPayload(params)).toMatchObject({ rate: 2000, customer_rate: 2000 });
+  });
+
+  it("preserves a separately entered customer rate", () => {
+    const params = minimalPersist({ rate: "2000", customerRate: "1600" });
+    expect(buildWorkspaceDraftJson(params).customerRate).toBe("1600");
+    expect(buildLoadPersistPayload(params)).toMatchObject({ rate: 2000, customer_rate: 1600 });
+  });
+
+  it("preserves explicit zero rather than treating it as blank", () => {
+    const params = minimalPersist({ rate: "2000", customerRate: "0" });
+    expect(buildWorkspaceDraftJson(params).customerRate).toBe("0");
+    expect(buildLoadPersistPayload(params)).toMatchObject({ rate: 2000, customer_rate: 0 });
+  });
+
+  it("does not invent a rate when both fields are blank", () => {
+    const params = minimalPersist({ rate: "", customerRate: "" });
+    expect(buildWorkspaceDraftJson(params).customerRate).toBe("");
+    expect(buildLoadPersistPayload(params)).toMatchObject({ rate: null, customer_rate: null });
   });
 });

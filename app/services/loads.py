@@ -510,6 +510,23 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
     return data
 
 
+def _fill_customer_rate_from_rc(
+    data: dict,
+    *,
+    existing_rate: Decimal | None = None,
+    existing_customer_rate: Decimal | None = None,
+) -> None:
+    """Copy RC rate to a blank customer rate, preserving explicit amounts including zero."""
+    if "customer_rate" in data:
+        if data["customer_rate"] is None:
+            rate = data.get("rate", existing_rate)
+            if rate is not None:
+                data["customer_rate"] = rate
+        return
+    if "rate" in data and data["rate"] is not None and existing_customer_rate is None:
+        data["customer_rate"] = data["rate"]
+
+
 async def _insert_commercial_load_uncommitted(
     db: AsyncSession,
     tenant_id: int,
@@ -543,6 +560,7 @@ async def _insert_commercial_load_uncommitted(
     await _ensure_unique_load_number(db, tenant_id, load_number)
 
     data = _load_data_from_payload(payload)
+    _fill_customer_rate_from_rc(data)
     data["load_number"] = load_number
     data["status"] = "ready" if insert_as_ready else "draft"
 
@@ -854,6 +872,9 @@ async def update_load(
     old_driver_id = load.driver_id
     old_customs_broker_id = load.customs_broker_id
     data = _load_data_from_payload(payload)
+    _fill_customer_rate_from_rc(
+        data, existing_rate=load.rate, existing_customer_rate=load.customer_rate
+    )
     before_snapshot: dict[str, object] = {str(k): getattr(load, k, None) for k in data.keys()}
 
     if "broker_id" in data:

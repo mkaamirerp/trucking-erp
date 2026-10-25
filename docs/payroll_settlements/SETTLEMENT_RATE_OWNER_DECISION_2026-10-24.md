@@ -1,6 +1,6 @@
 # Settlement rate — owner decision (Amir, 2026-10-24)
 
-**Status:** Product / payroll contract (documentation lock). **No implementation** in this document.
+**Status:** Historical settlement proposal, **superseded in part** by the later owner instruction to copy the RC rate into a blank `customer_rate` on Save/Create Load. Only storage/default behavior is approved now; downstream payroll, invoicing, settlement, and margin usage will be decided later. Sections below describe the earlier proposal and are **not implementation authorization**.
 
 **Scope:** How broker revenue on a load relates to what an owner-operator (or settlement engine) uses as “gross” for that load. Complements load commercial fields in [`.cursor/rules/owner-product-rules.mdc`](../../.cursor/rules/owner-product-rules.mdc) and parser rules in [`TruckERP_Rate_Confirmation_AI_Handoff_Contract_v2_FULL.json`](../../app/contracts/TruckERP_Rate_Confirmation_AI_Handoff_Contract_v2_FULL.json) (`customer_rate_guardrail`).
 

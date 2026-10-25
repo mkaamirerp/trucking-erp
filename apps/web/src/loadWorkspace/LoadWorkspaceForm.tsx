@@ -553,8 +553,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             <input
               className={I}
               inputMode="decimal"
-              value={p.customerRate}
+              value={p.customerRate.trim() === "" ? p.rate : p.customerRate}
               onChange={(e) => p.setCustomerRate(e.target.value)}
+              title="Defaults to the RC rate if not set separately"
             />
           </div>
           <div>
