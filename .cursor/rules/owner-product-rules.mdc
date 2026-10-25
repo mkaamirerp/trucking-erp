@@ -58,3 +58,14 @@ When implementing operator-facing Load / Trip / Dispatch behavior, follow this f
 ## Stored rate confirmation PDF
 
 Loads promoted from workspace should retain a **viewable RC PDF** (`load_commercial_evidence`). Missing PDF on the load detail page after promote is a **product gap** to fix, not an acceptable operator workaround.
+
+## Universal equipment association and assignment hints (owner decision 2026-10-25)
+
+- **Universal scope:** New Load / Parser, Dispatch, Trip, Driver, and Fleet views must consume ONE backend equipment-association policy; never implement independent per-screen guesses.
+- **Two independent relationships:** a driver's usual/default truck is NOT proof of current attachment; current driver↔truck and physical truck↔trailer hook/drop state require confirmed records. Duty/availability is a third, independent fact.
+- Finishing a Load/Trip or delivering in Boston does NOT unhook a trailer. Only an explicit physical drop/change supersedes a hook. Off-duty does NOT automatically release equipment; off-duty at home MAY have none, or still be hooked.
+- Selecting a driver suggests their confirmed current truck and its currently hooked trailer. If no current truck, suggest a valid dedicated/default truck **without claiming attachment or inferring a trailer**. City/local has no assumed default; a current shift binding may apply.
+- Selecting a truck suggests its uniquely confirmed current driver and hooked trailer. Multiple/missing drivers require human selection. Do NOT infer current links from legacy Load fields, asset ownership, or the last Trip alone.
+- All suggestions are visible/editable before confirmation; unknown, stale, or conflicting evidence returns blank fields/warnings. Drivers busy/off-duty receive appropriate warnings; established schedule overlap/Trip locks still apply.
+- Selecting equipment for a future Trip does NOT change current physical attachments. Trip remains the sole assignment authority; no Load-level assignment writes.
+- **Checkpoint 1 implemented:** pure backend suggestion policy at `app/services/equipment_assignment_policy.py`; no persistent binding writer/API/UI is implemented. Persistent event/binding schemas, cross-module APIs, and migration paths require a separate STOP report under `AGENTS.md` before coding/deploy.

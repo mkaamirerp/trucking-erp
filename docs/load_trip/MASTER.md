@@ -530,6 +530,12 @@ Primary detail: Appendix H; §12 / §13A / §13C.
 
 ## 10. Driver / truck / trailer
 
+### Universal equipment-association intent — OWNER-APPROVED 2026-10-25
+
+The one equipment policy is shared by all Load/Parser, Dispatch, Trip, Driver, and Fleet surfaces. **Default truck**, **current driver↔truck association**, **current physical trailer hook/drop**, and **driver duty/availability** are separate facts. Delivery and Trip completion do not imply an equipment release. Off-duty alone does not imply attachment or release. Suggestions must come from confirmed current equipment-state evidence; historical Trips and asset ownership are insufficient to prove a physical hook. Driver-first and truck-first selection should resolve the other uniquely confirmed links, with no guessing and a review/override step. Future planned Trip assignment does not update physical hook state.
+
+**Checkpoint 1:** `app/services/equipment_assignment_policy.py` implements a pure, tenant-input-scoped suggestion policy, with isolated tests. It is **not yet backed by live equipment-event persistence**, not a dispatched assignment action, and not wired into UI. Any persistence / Driver / Fleet / Trip API / schema changes require the STOP/impact gate before implementation. Operational assignment remains Trip-owned; legacy Load mirrors remain non-writing.
+
 
 **Implementation state:** ✅ Trip assignment API. ⬜ Decision 10 conflict guard on assign (I16). ⬜ in_progress immutability (I15).
 **Current / new operational assignment authority lives on Trip.**
