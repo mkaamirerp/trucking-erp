@@ -4303,8 +4303,6 @@ export type Load = {
   open_planned_trip_number?: string | null;
   /** Open §9A Future Movement Plan (pre-Trip); not a trip number. */
   open_future_movement_plan_id?: number | null;
-  /** GET enrichment: rate-con raw text from commercial evidence. */
-  verification_extracted_text?: string | null;
   custody_owner?: string | null;
   broker_match_method?: string | null;
   broker_match_confidence_tier?: string | null;
