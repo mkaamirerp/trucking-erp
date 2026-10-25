@@ -91,6 +91,7 @@ function minimalCondensedProps() {
     moveStop: vi.fn(),
     workspaceHasRateConfirmationPdf: true,
     renderNotes: true,
+    operatorStatusInput: { status: "draft" },
   };
 }
 

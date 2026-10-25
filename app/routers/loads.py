@@ -166,16 +166,11 @@ async def get_load_detail(
     if not load:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
     resp = LoadResponse.model_validate(load)
-    planned = await trips_service.get_open_planned_trip_for_load(db, tenant_id, load_id)
-    updates: dict = {}
-    if planned is not None:
-        updates["open_planned_trip_id"] = planned[0]
-        updates["open_planned_trip_number"] = planned[1]
-    fmp_id = await fmp_service.get_open_future_movement_plan_id(db, tenant_id, load_id)
-    if fmp_id is not None:
-        updates["open_future_movement_plan_id"] = fmp_id
-    if updates:
-        resp = resp.model_copy(update=updates)
+    enriched = await loads_service.enrich_load_responses(db, tenant_id, [resp])
+    resp = enriched[0]
+    verification_text = await loads_service.get_load_verification_extracted_text(db, tenant_id, load_id)
+    if verification_text:
+        resp = resp.model_copy(update={"verification_extracted_text": verification_text})
     return resp
 
 

@@ -1549,6 +1549,32 @@ async def confirm_load_customs_document_snapshot(
 RATE_CONFIRMATION_PDF_EVIDENCE_KIND = "rate_confirmation_pdf"
 
 
+def verification_extracted_text_from_accepted_parse(accepted: dict | None) -> str | None:
+    if not accepted or not isinstance(accepted, dict):
+        return None
+    raw = accepted.get("raw_text")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
+
+
+async def get_load_verification_extracted_text(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+) -> str | None:
+    row = await db.scalar(
+        select(LoadCommercialEvidence).where(
+            LoadCommercialEvidence.tenant_id == tenant_id,
+            LoadCommercialEvidence.load_id == load_id,
+            LoadCommercialEvidence.evidence_kind == RATE_CONFIRMATION_PDF_EVIDENCE_KIND,
+        )
+    )
+    if row is None:
+        return None
+    return verification_extracted_text_from_accepted_parse(row.accepted_parse_json)
+
+
 async def get_load_rate_confirmation_pdf_evidence(
     db: AsyncSession,
     tenant_id: int,

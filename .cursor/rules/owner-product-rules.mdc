@@ -58,3 +58,10 @@ When implementing operator-facing Load / Trip / Dispatch behavior, follow this f
 ## Stored rate confirmation PDF
 
 Loads promoted from workspace should retain a **viewable RC PDF** (`load_commercial_evidence`). Missing PDF on the load detail page after promote is a **product gap** to fix, not an acceptable operator workaround.
+
+## Verification layout standard
+
+- **One load workspace layout** in every mode (new parse, saved draft, saved load, intake): **right = condensed commercial form**; **left = source evidence** linked to the focused field.
+- **Left panel tabs:** **Extracted text** (default) and **PDF**. Focusing a field on the right scrolls/highlights matching lines in extracted text (`focusDoc` token behavior).
+- **Column ratio:** about **40% left / 60% right** on desktop.
+- This pattern is the **app-wide standard** for verification-heavy forms (Dispatch, Payroll, and others later).

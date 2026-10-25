@@ -20,6 +20,7 @@ const SOURCES = import.meta.glob<string>(
     "../pages/LoadWorkspacePage.tsx",
     "../pages/DeprecatedDispatchPage.tsx",
     "./LoadWorkspaceForm.tsx",
+    "./LoadWorkspaceCondensedForm.tsx",
     "./DispatchAssignmentStrip.tsx",
   ],
   { query: "?raw", import: "default", eager: true },
@@ -141,7 +142,7 @@ describe("Issue 0A — legacy assignment UI unreachable", () => {
   });
 
   it("21b. Load form renders status and assignment as read-only (no setters, no selects)", () => {
-    const form = source("./LoadWorkspaceForm.tsx");
+    const form = source("./LoadWorkspaceCondensedForm.tsx");
     expect(form).not.toMatch(/setStatus|setDriverId|setTruckId|setTrailerAssetId|LOAD_STATUSES/);
     expect(form).toContain('data-testid="load-status-readonly"');
     expect(form).toContain('data-testid="load-driver-readonly"');

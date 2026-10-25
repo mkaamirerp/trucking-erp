@@ -57,9 +57,13 @@ import { loadWorkspaceRemountKey, OPS } from "@/routes";
 import { firstPickupAppointmentDate, formatRouteFromStops, sortedStops as sortStops } from "@/utils/loadStops";
 import { formatDateMonthFirst } from "@/loadWorkspace/loadWorkspaceDateFormat";
 import { formatLinehaulDisplay } from "@/loadWorkspace/loadWorkspaceShared";
-import { LoadWorkspaceForm, LoadWorkspaceNotesPanel } from "@/loadWorkspace/LoadWorkspaceForm";
+import { LoadWorkspaceForm } from "@/loadWorkspace/LoadWorkspaceForm";
 import {
-  RateConfirmationPdfPanel,
+  LoadWorkspaceVerificationPanel,
+  type VerificationLeftTab,
+} from "@/loadWorkspace/LoadWorkspaceVerificationPanel";
+import type { OperatorLoadStatusInput } from "@/loads/operatorLoadStatus";
+import {
   draftRateConfirmationPdfDownloadPath,
   loadRateConfirmationPdfDownloadPath,
 } from "@/loadWorkspace/RateConfirmationPdfPanel";
@@ -221,56 +225,6 @@ function IntakeEmailRail({
               );
             })
           : null}
-      </div>
-    </div>
-  );
-}
-
-function ReferenceTextRail({
-  title,
-  hint,
-  docLines,
-  docScrollRef,
-  docLineRefs,
-  activeDocLine,
-}: {
-  title: string;
-  hint: ReactNode;
-  docLines: string[];
-  docScrollRef: RefObject<HTMLDivElement>;
-  docLineRefs: MutableRefObject<Map<number, HTMLDivElement | null>>;
-  activeDocLine: number | null;
-}) {
-  return (
-    <div className="flex min-h-0 max-h-[200px] flex-col bg-[var(--trk-surface)]">
-      <div className="shrink-0 border-b border-[var(--trk-border)] px-3 py-2">
-        <span className={wsSectionTitle}>{title}</span>
-        <p className="mt-1 text-[11px] leading-snug text-[var(--trk-text-muted)]">{hint}</p>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {docLines.length ? (
-          <div
-            ref={docScrollRef}
-            className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
-          >
-            {docLines.map((line, i) => (
-              <div
-                key={i}
-                ref={(el) => {
-                  docLineRefs.current.set(i, el);
-                }}
-                className="whitespace-pre-wrap break-words rounded px-1 py-0.5"
-                style={activeDocLine === i ? { background: "rgba(245,166,35,0.2)" } : undefined}
-              >
-                {line || " "}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="rounded-md border border-dashed border-[var(--trk-border)] bg-[var(--trk-bg)]/50 px-3 py-6 text-center text-xs text-[var(--trk-text-muted)]">
-            Nothing to show yet — add text in Notes below.
-          </p>
-        )}
       </div>
     </div>
   );
@@ -497,6 +451,8 @@ function LoadWorkspacePage() {
   const [lastParseEngineAttribution, setLastParseEngineAttribution] = useState<string | null>(null);
   const [workspaceReferenceText, setWorkspaceReferenceText] = useState("");
   const [workspacePdfPreviewUrl, setWorkspacePdfPreviewUrl] = useState<string | null>(null);
+  const [verificationTab, setVerificationTab] = useState<VerificationLeftTab>("text");
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const parseHydrationRef = useRef<ParseHydrationState>(createEmptyParseHydrationState());
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
@@ -527,10 +483,15 @@ function LoadWorkspacePage() {
   }, [load?.id]);
 
   const docLines = useMemo(() => {
-    const raw = workspaceReferenceText.trim() ? workspaceReferenceText : internalNotes || "";
-    if (!raw.trim()) return [];
+    const raw = workspaceReferenceText.trim() || internalNotes.trim();
+    if (!raw) return [];
     return raw.split(/\r?\n/);
   }, [workspaceReferenceText, internalNotes]);
+
+  const hasWorkspaceRateConPdf = useMemo(
+    () => !!workspacePdfPreviewUrl || draftHasReadyRateConfirmationPdf(workspaceDraft),
+    [workspacePdfPreviewUrl, workspaceDraft],
+  );
 
   const replaceWorkspacePdfPreviewUrl = useCallback((next: string | null) => {
     setWorkspacePdfPreviewUrl((prev) => {
@@ -586,6 +547,7 @@ function LoadWorkspacePage() {
 
   const focusDoc = useCallback(
     (opts: { tokens: string[]; fallbackToken?: string }) => {
+      setVerificationTab("text");
       if (!docLines.length) return;
       const tokens = (opts.tokens || [])
         .map((t) => (t || "").trim())
@@ -750,6 +712,14 @@ function LoadWorkspacePage() {
     setTrailerId(l.trailer_id ?? null);
     setCustomsBrokerId(l.customs_broker_id ?? null);
     setInternalNotes(l.internal_notes ?? "");
+    const verificationText = (l.verification_extracted_text ?? "").trim();
+    if (verificationText) {
+      setWorkspaceReferenceText(verificationText);
+    } else if ((l.internal_notes ?? "").trim()) {
+      setWorkspaceReferenceText((l.internal_notes ?? "").trim());
+    } else {
+      setWorkspaceReferenceText("");
+    }
     setDraftStops(stopsToDraft(l.stops));
   }, []);
 
@@ -1919,15 +1889,29 @@ function LoadWorkspacePage() {
   const confirmed = Boolean(load?.document_snapshot_confirmed_at);
   const hasActiveDispatchTrip = load?.active_dispatch_trip_id != null;
 
-  const lidLabel = workspaceMode === "manual" ? "#NEW" : load ? `#${load.id}` : "#—";
-  const condensedWorkspaceLayout =
-    workspaceMode === "manual" && isDraftWorkspace && !!workspacePdfPreviewUrl;
-  const condensedRouteSummary = formatRouteFromStops(sortedDraftStops);
-  const condensedPickupIso = firstPickupAppointmentDate(sortedDraftStops);
-  const condensedPickupLabel = condensedPickupIso
-    ? `Pickup ${formatDateMonthFirst(condensedPickupIso.slice(0, 10))}`
+  const headerRouteSummary = formatRouteFromStops(sortedDraftStops);
+  const headerPickupIso = firstPickupAppointmentDate(sortedDraftStops);
+  const headerPickupLabel = headerPickupIso
+    ? `Pickup ${formatDateMonthFirst(headerPickupIso.slice(0, 10))}`
     : "Pickup —";
-  const condensedLinehaulChip = formatLinehaulDisplay(rate);
+  const headerLinehaulChip = formatLinehaulDisplay(rate);
+  const headerLoadNumber =
+    load?.load_number?.trim() || (loadNumber || "").trim() || "—";
+  const operatorStatusInput: OperatorLoadStatusInput = load && workspaceMode !== "manual"
+    ? {
+        status: load.status,
+        active_trip_id: load.active_trip_id,
+        open_planned_trip_id: load.open_planned_trip_id,
+        open_future_movement_plan_id: load.open_future_movement_plan_id,
+        custody_owner: load.custody_owner,
+      }
+    : { status: "draft" };
+  const extractedEmptyMessage =
+    workspaceReferenceText.trim() || internalNotes.trim()
+      ? "Nothing to show yet — add text in Notes on the form."
+      : hasWorkspaceRateConPdf
+        ? "No extracted text is stored for this load. Use the PDF tab to read the rate confirmation."
+        : "No extracted text yet. Upload and parse a rate confirmation PDF to verify fields against the document.";
   const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
   const toolBtnSecondary =
     "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
@@ -1972,90 +1956,25 @@ function LoadWorkspacePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--trk-bg)] text-[var(--trk-text)]">
-      <header
-        className={clsx(
-          "z-20 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]",
-          condensedWorkspaceLayout && "sticky top-0",
-        )}
-      >
+      <header className="sticky top-0 z-20 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
         <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-            {!condensedWorkspaceLayout ? (
-              <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
-                ← Loads
-              </button>
-            ) : null}
-            <div className="flex min-w-0 items-baseline gap-2">
-              {!condensedWorkspaceLayout ? (
-                <span className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</span>
-              ) : null}
-              <h1 className="truncate font-mono text-[15px] font-semibold tracking-tight text-[var(--trk-heading)]">
-                {condensedWorkspaceLayout
-                  ? (loadNumber || "").trim() || "—"
-                  : workspaceMode === "manual"
-                    ? "New load"
-                    : loadNumber || load?.load_number || "Load"}
-              </h1>
-            </div>
+            <Link to={OPS.LOADS} className="text-[11px] font-semibold text-[var(--trk-text-muted)] hover:text-[var(--trk-heading)] hover:underline">
+              ← Loads
+            </Link>
+            <h1 className="truncate font-mono text-[15px] font-semibold tracking-tight text-[var(--trk-heading)]" data-testid="load-workspace-header-number">
+              {headerLoadNumber}
+            </h1>
             <div className="flex flex-wrap items-center gap-1.5">
-              {condensedWorkspaceLayout ? (
-                <>
-                  <OperatorLoadStatusChip load={{ status: "draft" }} />
-                  <span className="hidden text-[12px] text-[var(--trk-text-muted)] sm:inline">
-                    {condensedRouteSummary}
-                  </span>
-                  <span className="hidden text-[12px] text-[var(--trk-text-muted)] md:inline">{condensedPickupLabel}</span>
-                  {condensedLinehaulChip ? (
-                    <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2 py-0.5 font-mono text-[12px] font-bold text-[var(--trk-success)]">
-                      {condensedLinehaulChip}
-                    </span>
-                  ) : null}
-                </>
-              ) : workspaceMode !== "manual" && load ? (
-                <OperatorLoadStatusChip
-                  load={{
-                    status: load.status,
-                    active_trip_id: load.active_trip_id,
-                    open_planned_trip_id: load.open_planned_trip_id,
-                    open_future_movement_plan_id: load.open_future_movement_plan_id,
-                    custody_owner: load.custody_owner,
-                  }}
-                />
-              ) : (
-                <OperatorLoadStatusChip load={{ status: "draft" }} />
-              )}
-              {workspaceMode === "detail" ? (
-                <span className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-400">
-                  DETAIL
-                </span>
-              ) : null}
-              {workspaceMode === "manual" ? (
-                <span className="rounded bg-[var(--trk-btn-primary)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--trk-btn-text)]">
-                  Manual
-                </span>
-              ) : null}
-              {workspaceMode === "intake" ? (
-                <span className="rounded border border-sky-800 bg-sky-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
-                  Intake
+              <OperatorLoadStatusChip load={operatorStatusInput} />
+              <span className="hidden text-[12px] text-[var(--trk-text-muted)] sm:inline">{headerRouteSummary}</span>
+              <span className="hidden text-[12px] text-[var(--trk-text-muted)] md:inline">{headerPickupLabel}</span>
+              {headerLinehaulChip ? (
+                <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2 py-0.5 font-mono text-[12px] font-bold text-[var(--trk-success)]">
+                  {headerLinehaulChip}
                 </span>
               ) : null}
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
-            Load directory
-          </button>
-          <button
-            type="button"
-            className={toolBtnSecondary}
-            data-testid="load-workspace-dispatch-nav"
-            onClick={() => navigate(OPS.TRIP_CONTAINER)}
-          >
-            Dispatch
-          </button>
-          {workspaceMode === "intake" ? (
-            <button type="button" className={toolBtnSecondary} onClick={() => navigate(intakeQueueUrl)}>
-              Intake queue
-            </button>
-          ) : null}
           <input
             ref={pdfInputRef}
             type="file"
@@ -2068,27 +1987,6 @@ function LoadWorkspacePage() {
               if (f) void onParseWorkspacePdf(f);
             }}
           />
-          {canWorkspaceParsePdf ? (
-            <Button
-              variant="secondary"
-              type="button"
-              disabled={
-                saving ||
-                markReadyBusy ||
-                cancelLoadBusy ||
-                parseBusy ||
-                loading ||
-                (isDraftWorkspace && !isDraftEditable)
-              }
-              onClick={() => pdfInputRef.current?.click()}
-            >
-              {parseBusy
-                ? parseElapsedSec > 0
-                  ? `Parsing… ${parseElapsedSec}s`
-                  : "Parsing…"
-                : "Upload & parse PDF"}
-            </Button>
-          ) : null}
           {showManualDraftActions ? (
             <>
               <Button
@@ -2395,80 +2293,35 @@ function LoadWorkspacePage() {
       </div>
       ) : null}
 
-      <div
-        className={clsx(
-          "mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden",
-          condensedWorkspaceLayout
-            ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]"
-            : "lg:grid-cols-[260px_minmax(0,1fr)]",
-        )}
-      >
-        <aside
-          className={clsx(
-            "flex min-h-0 flex-col gap-3 overflow-y-auto border-b border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 lg:sticky lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]",
-            condensedWorkspaceLayout
-              ? "max-h-[38vh] lg:top-[var(--load-ws-sticky-offset,3.5rem)] lg:max-h-[calc(100vh-var(--load-ws-sticky-offset,3.5rem))]"
-              : "max-h-[42vh] lg:top-0 lg:max-h-[calc(100vh-7rem)]",
-          )}
-        >
-          {workspaceMode === "intake" && hasIntakeThread ? (
-            <div className="min-h-[160px] overflow-hidden rounded-lg border border-[var(--trk-border)]">
-            <IntakeEmailRail
-              threadId={intakeThreadId}
-              loading={intakeLoading}
-              error={intakeError}
-              messages={intakeMessages}
-            />
-            </div>
-          ) : (
-            <div className="space-y-2">
-            {workspacePdfPreviewUrl ? (
-              <RateConfirmationPdfPanel
-                objectUrl={workspacePdfPreviewUrl}
-                openInNewTabPath={rateConPdfOpenInNewTabPath}
-              />
-            ) : null}
-            {!condensedWorkspaceLayout ? (
-            <div className="overflow-hidden rounded-lg border border-[var(--trk-border)]">
-            <ReferenceTextRail
-              title={workspaceMode === "manual" ? "Rate confirmation" : "Source document"}
-              hint={
-                workspaceMode === "manual" ? (
-                  workspaceReferenceText.trim() ? (
-                    <>Extracted PDF text for verification. Tab fields in the form to highlight matching lines.</>
-                  ) : (
-                    <>
-                      Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
-                      Tab fields to highlight lines.
-                    </>
-                  )
-                ) : (
-                  <>
-                    Text from <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
-                  </>
-                )
-              }
-              docLines={docLines}
-              docScrollRef={docScrollRef}
-              docLineRefs={docLineRefs}
-              activeDocLine={activeDocLine}
-            />
-            </div>
-            ) : null}
-            </div>
-          )}
-          {sectionConfig.visible.includes("Notes") && !condensedWorkspaceLayout ? (
-            <LoadWorkspaceNotesPanel
-              internalNotes={internalNotes}
-              setInternalNotes={setInternalNotes}
-              showOperationalNotesTimeline={workspaceMode !== "manual"}
-              loadNotes={workspaceMode === "manual" ? [] : loadNotes}
-              newNoteBody={workspaceMode === "manual" ? "" : newNoteBody}
-              setNewNoteBody={workspaceMode === "manual" ? () => {} : setNewNoteBody}
-              onAddNote={workspaceMode === "manual" ? () => {} : () => void onAddNote()}
-              saving={saving || markReadyBusy}
-            />
-          ) : null}
+      <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[2fr_3fr]">
+        <aside className="flex min-h-[280px] min-h-0 flex-col border-b border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 lg:sticky lg:top-[3.25rem] lg:max-h-[calc(100vh-3.25rem)] lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]">
+          <LoadWorkspaceVerificationPanel
+            activeTab={verificationTab}
+            onTabChange={setVerificationTab}
+            docLines={docLines}
+            docScrollRef={docScrollRef}
+            docLineRefs={docLineRefs}
+            activeDocLine={activeDocLine}
+            extractedEmptyMessage={extractedEmptyMessage}
+            pdfObjectUrl={workspacePdfPreviewUrl}
+            pdfOpenInNewTabPath={rateConPdfOpenInNewTabPath}
+            canUploadParse={canWorkspaceParsePdf}
+            parseBusy={parseBusy}
+            parseElapsedSec={parseElapsedSec}
+            onUploadParseClick={() => pdfInputRef.current?.click()}
+            intakeEmailSlot={
+              workspaceMode === "intake" && hasIntakeThread ? (
+                <div className="max-h-[140px] overflow-hidden">
+                  <IntakeEmailRail
+                    threadId={intakeThreadId}
+                    loading={intakeLoading}
+                    error={intakeError}
+                    messages={intakeMessages}
+                  />
+                </div>
+              ) : undefined
+            }
+          />
         </aside>
 
         <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--trk-bg)] p-3 lg:p-4">
@@ -2481,107 +2334,10 @@ function LoadWorkspacePage() {
             </div>
           ) : null}
 
-          {workspaceMode !== "manual" && load ? (
-            <details className="mb-3 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] shadow-sm">
-              <summary className="cursor-pointer list-none px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
-                System context · trip, match, resolved labels
-              </summary>
-              <div className="border-t border-[var(--trk-border)] px-3 py-3 text-xs">
-                <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ContextRow label="Trip number" value={load.trip_number?.trim() || "—"} mono />
-                  <ContextRow label="Dispatch trip" value={hasActiveDispatchTrip ? "Linked" : "—"} />
-                  <ContextRow label="Match method" value={load.broker_match_method?.replace(/_/g, " ") || "—"} />
-                  <ContextRow label="Confidence tier" value={load.broker_match_confidence_tier || "—"} />
-                </dl>
-                {load.broker_match_explanation?.trim() ? (
-                  <p className="mt-3 whitespace-pre-wrap text-xs text-[var(--trk-text-muted)]">{load.broker_match_explanation.trim()}</p>
-                ) : null}
-                {load.is_duplicate_of_load_id != null ? (
-                  <p className="mt-3 text-xs">
-                    <span className="text-[var(--trk-text-muted)]">Possible duplicate — </span>
-                    <Link
-                      to={OPS.LOAD_DETAIL(load.is_duplicate_of_load_id)}
-                      className="font-medium text-indigo-600 hover:underline"
-                    >
-                      Open linked load
-                    </Link>
-                  </p>
-                ) : null}
-                <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Resolved labels</p>
-                  <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-sm">
-                    <ContextRow label="Broker" value={load.broker?.name || "—"} />
-                    <ContextRow label="Broker contact" value={load.broker_contact?.name || "—"} />
-                    <ContextRow
-                      label="Driver"
-                      value={load.driver ? `${load.driver.first_name} ${load.driver.last_name}`.trim() : "—"}
-                    />
-                    <ContextRow label="Truck" value={load.truck ? load.truck.unit_number : "—"} />
-                    <ContextRow
-                      label="Trailer"
-                      value={
-                        load.trailer
-                          ? [load.trailer.unit_number, load.trailer.trailer_type].filter(Boolean).join(" · ")
-                          : "—"
-                      }
-                    />
-                    <ContextRow label="Customs broker" value={load.customs_broker?.legal_name || "—"} />
-                  </dl>
-                </div>
-                {contextStops.length > 0 ? (
-                  <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
-                      Stop schedules (read-only)
-                    </p>
-                    <ul className="space-y-1 text-xs text-[var(--trk-text-muted)]">
-                      {contextStops.map((s, i) => (
-                        <li key={s.id || `ctx-${i}`}>
-                          Stop {(s.sequence ?? i) + 1}
-                          {s.scheduled_at
-                            ? ` — ${new Date(s.scheduled_at).toLocaleString(undefined, {
-                                dateStyle: "short",
-                                timeStyle: "short",
-                              })}`
-                            : " — —"}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {(load.document_snapshot_confirmed_at || load.customs_snapshot) && (
-                  <div className="mt-4 border-t border-[var(--trk-border)] pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Customs snapshot</p>
-                    <dl className="space-y-1 text-xs">
-                      <ContextRow
-                        label="Confirmed at"
-                        value={
-                          load.document_snapshot_confirmed_at
-                            ? new Date(load.document_snapshot_confirmed_at).toLocaleString()
-                            : "—"
-                        }
-                      />
-                      <ContextRow label="Snapshot version" value={String(load.document_snapshot_version ?? 0)} />
-                    </dl>
-                    {load.customs_snapshot && (
-                      <ul className="mt-2 space-y-0.5 text-xs text-[var(--trk-text-muted)]">
-                        <li>{load.customs_snapshot.legal_name_snapshot || "—"}</li>
-                        <li>{load.customs_snapshot.phone_primary_snapshot || ""}</li>
-                        <li>{load.customs_snapshot.generic_email_snapshot || ""}</li>
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </div>
-              {contextSummary ? (
-                <p className="mt-2 border-t border-[var(--trk-border)] pt-2 text-[11px] text-amber-400/85">{contextSummary}</p>
-              ) : null}
-            </details>
-          ) : null}
-
           <LoadWorkspaceForm
             mode={workspaceMode}
-            condensedLayout={condensedWorkspaceLayout}
-            workspaceHasRateConfirmationPdf={!!workspacePdfPreviewUrl}
+            operatorStatusInput={operatorStatusInput}
+            workspaceHasRateConfirmationPdf={hasWorkspaceRateConPdf}
             visibleSections={sectionConfig.visible}
             editableSections={sectionConfig.editable}
             intakeProposed={intakeProposed}
@@ -2605,7 +2361,8 @@ function LoadWorkspacePage() {
             newNoteBody={workspaceMode === "manual" ? "" : newNoteBody}
             setNewNoteBody={workspaceMode === "manual" ? () => {} : setNewNoteBody}
             onAddNote={workspaceMode === "manual" ? () => {} : () => void onAddNote()}
-            renderNotes={condensedWorkspaceLayout}
+            renderNotes={sectionConfig.visible.includes("Notes")}
+            readOnly={sectionConfig.editable.length === 0}
             focusDoc={focusDoc}
             verificationTabIndex={verificationTabIndex}
             status={status}
@@ -2672,13 +2429,36 @@ function LoadWorkspacePage() {
             <SectionSettlement load={load} />
           ) : null}
 
-          {/* AuditTimeline — visible in audit mode */}
-          {sectionConfig.visible.includes("AuditTimeline") ? (
-            <section className="mt-2.5 rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface)] px-3.5 py-2">
-                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]">Audit timeline</span>
-              </div>
-              <LoadAuditTimeline loadId={load?.id ?? null} />
+          {(workspaceMode !== "manual" && load) || sectionConfig.visible.includes("AuditTimeline") ? (
+            <section className="mt-2.5 overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] shadow-sm">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 border-b border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-3.5 py-2 text-left"
+                onClick={() => setHistoryExpanded((v) => !v)}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--trk-text-muted)]">History</span>
+                <span className="text-[11px] font-semibold text-[var(--trk-heading)]">{historyExpanded ? "Hide" : "Show"}</span>
+              </button>
+              {historyExpanded ? (
+                <div className="space-y-3 px-3 py-3 text-xs">
+                  {workspaceMode !== "manual" && load ? (
+                    <>
+                      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <ContextRow label="Trip number" value={load.trip_number?.trim() || "—"} mono />
+                        <ContextRow label="Dispatch trip" value={hasActiveDispatchTrip ? "Linked" : "—"} />
+                        <ContextRow label="Match method" value={load.broker_match_method?.replace(/_/g, " ") || "—"} />
+                        <ContextRow label="Confidence tier" value={load.broker_match_confidence_tier || "—"} />
+                      </dl>
+                      {contextSummary ? (
+                        <p className="text-[11px] text-amber-400/85">{contextSummary}</p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {sectionConfig.visible.includes("AuditTimeline") ? (
+                    <LoadAuditTimeline loadId={load?.id ?? null} />
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           ) : null}
         </main>

@@ -286,6 +286,8 @@ class LoadResponse(LoadBase):
     open_planned_trip_id: Optional[int] = None
     open_planned_trip_number: Optional[str] = None
     open_future_movement_plan_id: Optional[int] = None
+    #: Rate-con parse raw text from commercial evidence (GET enrichment only).
+    verification_extracted_text: Optional[str] = None
     #: Operational custody read-model (e.g. final delivery without changing loads.status).
     custody_owner: Optional[str] = None
     broker_match_method: Optional[str] = Field(default=None, max_length=32)

@@ -4,6 +4,8 @@ type Props = {
   objectUrl: string;
   /** When set, show “Open in new tab” for the same PDF bytes (cookie auth on same origin). */
   openInNewTabPath?: string | null;
+  className?: string;
+  iframeClassName?: string;
 };
 
 export function loadRateConfirmationPdfDownloadPath(loadId: number): string {
@@ -14,9 +16,16 @@ export function draftRateConfirmationPdfDownloadPath(draftId: string): string {
   return `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/rate-confirmation-pdf`;
 }
 
-export function RateConfirmationPdfPanel({ objectUrl, openInNewTabPath }: Props) {
+export function RateConfirmationPdfPanel({
+  objectUrl,
+  openInNewTabPath,
+  className,
+  iframeClassName,
+}: Props) {
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)]">
+    <div
+      className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[var(--trk-surface)] ${className ?? ""}`}
+    >
       <div className="flex items-center justify-between gap-2 border-b border-[var(--trk-border)] px-3 py-2">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
           Rate confirmation PDF
@@ -36,7 +45,7 @@ export function RateConfirmationPdfPanel({ objectUrl, openInNewTabPath }: Props)
         data-testid="rate-confirmation-pdf-viewer"
         title="Rate confirmation PDF"
         src={objectUrl}
-        className="h-[min(42vh,320px)] w-full bg-white"
+        className={iframeClassName ?? "h-[min(42vh,320px)] w-full bg-white"}
       />
     </div>
   );

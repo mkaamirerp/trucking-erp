@@ -27,7 +27,7 @@ import {
   type WorkspaceSection,
 } from "./loadWorkspaceShared";
 import { formatDateMonthFirst, parseDateMonthFirst } from "./loadWorkspaceDateFormat";
-import type { LoadWorkspaceFormProps } from "./LoadWorkspaceForm";
+import type { LoadWorkspaceFormProps } from "./loadWorkspaceFormTypes";
 import { LoadWorkspaceNotesPanel } from "./LoadWorkspaceForm";
 
 const L = wsLabelClass;
@@ -126,19 +126,10 @@ export function LoadWorkspaceCondensedForm(p: LoadWorkspaceFormProps) {
 
   const customsHint = customsInUse ? "Customs broker linked" : "not used on this load";
 
-  const operatorStatusLoad =
-    p.mode === "detail"
-      ? {
-          status: p.status,
-          active_trip_id: p.activeTripId ?? null,
-          open_planned_trip_id: null,
-          open_future_movement_plan_id: null,
-          custody_owner: null,
-        }
-      : { status: "draft" as const };
+  const operatorStatusLoad = p.operatorStatusInput;
 
   return (
-    <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0">
+    <fieldset disabled={!!p.readOnly} className="m-0 min-w-0 border-0 p-0" data-testid="load-workspace-condensed">
       <div className="flex flex-col gap-2.5 pb-3">
         {vis("Parties") && (
           <section className={wsSectionCard} data-editable={editable("Parties")}>
@@ -274,6 +265,15 @@ export function LoadWorkspaceCondensedForm(p: LoadWorkspaceFormProps) {
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
+                  </div>
+                  <div>
+                    <label className={L}>Customer rate</label>
+                    <input
+                      className={I}
+                      inputMode="decimal"
+                      value={p.customerRate}
+                      onChange={(e) => p.setCustomerRate(e.target.value)}
+                    />
                   </div>
                 </div>
               ) : null}
