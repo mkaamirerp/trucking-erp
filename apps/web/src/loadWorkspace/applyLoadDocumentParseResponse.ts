@@ -225,10 +225,43 @@ export async function persistWorkspaceDraftAfterParse(
     existingInternalNotes: input.seed.existingInternalNotes,
   });
   try {
-    return await input.updateDraft(input.draftId, {
+    const draftJson = input.buildDraftJson({ ...persistParams, status: input.status });
+    const saved = await input.updateDraft(input.draftId, {
       expected_concurrency_version: input.draftVersion,
-      draft_json: input.buildDraftJson({ ...persistParams, status: input.status }),
+      draft_json: draftJson,
     });
+
+    // The accepted parser output and editable draft are separate on purpose:
+    // never silently promote unreviewed stops. Protect the explicit post-parse
+    // draft save from dropping source stop rows during the server round trip.
+    // This is NOT a completeness gate on manual / workspace promotion.
+    if (filterMeaningfulParsedStops(input.res.extracted.stops ?? []).length > 0) {
+      const requested = draftJson.draftStops;
+      const persisted = saved.draft_json?.draftStops;
+      const identityFields = [
+        "stop_type", "sequence", "facility_name", "street", "city",
+        "state_or_province", "postal_code", "country", "reference_number",
+        "appointment_type", "appointment_date", "appointment_time_text",
+        "notes", "commodity_notes",
+      ] as const;
+      const textAt = (row: unknown, field: string): string =>
+        row && typeof row === "object"
+          ? String((row as Record<string, unknown>)[field] ?? "").trim()
+          : "";
+      const missingOrChanged =
+        !Array.isArray(requested) ||
+        !Array.isArray(persisted) ||
+        requested.length !== persisted.length ||
+        requested.some((stop, index) =>
+          identityFields.some((field) => textAt(stop, field) !== textAt(persisted[index], field)),
+        );
+      if (missingOrChanged) {
+        throw new Error(
+          "Parsed pickup/delivery stops were not preserved in the saved draft. Reopen the draft and verify stops before creating a load.",
+        );
+      }
+    }
+    return saved;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Could not save draft after parse";
     throw new Error(msg);

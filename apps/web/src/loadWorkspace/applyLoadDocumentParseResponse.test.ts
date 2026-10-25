@@ -6,7 +6,7 @@ import {
 } from "./applyLoadDocumentParseResponse";
 import type { LoadDocumentParseResponse } from "@/api";
 import { createEmptyParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
-import { initialWorkspaceFieldsManual } from "@/loadWorkspace/loadWorkspaceShared";
+import { buildWorkspaceDraftJson, initialWorkspaceFieldsManual } from "@/loadWorkspace/loadWorkspaceShared";
 
 vi.mock("@/api", () => ({
   resolveBrokerIdentity: vi.fn(),
@@ -339,4 +339,106 @@ describe("persistWorkspaceDraftAfterParse", () => {
     expect(saved.concurrency_version).toBe(3);
     expect(saved.draft_json?.brokerLoadReference).toBe("3872125-1");
   });
+  it("persists reviewed Chicago pickup and Reidsville delivery in the post-parse draft save", async () => {
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: createEmptyParseHydrationState(),
+    };
+    const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => ({
+      concurrency_version: 3,
+      draft_json: body.draft_json,
+    }));
+    const saved = await persistWorkspaceDraftAfterParse({
+      draftId: "armstrong-review-draft",
+      draftVersion: 2,
+      res: emptyRes({
+        broker_load_reference: "3872125-1",
+        rate: 1800,
+        stops: [
+          { stop_type: "pickup", sequence: 0, city: "Chicago", state_or_province: "IL" },
+          { stop_type: "delivery", sequence: 1, city: "Reidsville", state_or_province: "NC" },
+        ],
+      }),
+      summary,
+      status: "draft",
+      seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
+      updateDraft,
+      buildDraftJson: buildWorkspaceDraftJson,
+    });
+    const stops = saved.draft_json?.draftStops as Array<Record<string, unknown>>;
+    expect(stops).toHaveLength(2);
+    expect(stops.map((s) => [s.stop_type, s.city, s.state_or_province])).toEqual([
+      ["PICKUP", "Chicago", "IL"],
+      ["DELIVERY", "Reidsville", "NC"],
+    ]);
+    expect(updateDraft).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a successful-looking draft response that silently discarded parsed stops", async () => {
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: createEmptyParseHydrationState(),
+    };
+    const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => ({
+      concurrency_version: 3,
+      draft_json: { ...body.draft_json, draftStops: [] },
+    }));
+    await expect(persistWorkspaceDraftAfterParse({
+      draftId: "armstrong-review-draft",
+      draftVersion: 2,
+      res: emptyRes({
+        stops: [
+          { stop_type: "pickup", sequence: 0, city: "Chicago", state_or_province: "IL" },
+          { stop_type: "delivery", sequence: 1, city: "Reidsville", state_or_province: "NC" },
+        ],
+      }),
+      summary,
+      status: "draft",
+      seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
+      updateDraft,
+      buildDraftJson: buildWorkspaceDraftJson,
+    })).rejects.toThrow("not preserved");
+  });
+
+  it("rejects altered parsed stop locations in the echoed saved draft, not just zero rows", async () => {
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: createEmptyParseHydrationState(),
+    };
+    const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => {
+      const rows = body.draft_json.draftStops as Array<Record<string, unknown>>;
+      return {
+        concurrency_version: 3,
+        draft_json: { ...body.draft_json, draftStops: [{ ...rows[0], city: "Wrong" }, rows[1]] },
+      };
+    });
+    await expect(persistWorkspaceDraftAfterParse({
+      draftId: "armstrong-review-draft",
+      draftVersion: 2,
+      res: emptyRes({
+        stops: [
+          { stop_type: "pickup", sequence: 0, city: "Chicago", state_or_province: "IL" },
+          { stop_type: "delivery", sequence: 1, city: "Reidsville", state_or_province: "NC" },
+        ],
+      }),
+      summary,
+      status: "draft",
+      seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
+      updateDraft,
+      buildDraftJson: buildWorkspaceDraftJson,
+    })).rejects.toThrow("not preserved");
+  });
+
 });
