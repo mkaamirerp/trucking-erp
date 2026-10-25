@@ -1,12 +1,14 @@
 /**
  * Trip workspace: planned container, member loads, cancellation, and equipment assignment (Slice 14A+).
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   addLoadToTrip,
   cancelTrip,
   getTrip,
+  getDriverAssignmentHints,
+  getTruckAssignmentHints,
   listDrivers,
   listLoads,
   listTrailers,
@@ -23,6 +25,7 @@ import {
   isOpenTripMembership,
 } from "@/api";
 import { OPS } from "@/routes";
+import { ConfirmEquipmentAction } from "@/components/equipment/ConfirmEquipmentAction";
 import { TripWorkspaceExecutionSection } from "@/tripWorkspace/TripWorkspaceExecutionSection";
 
 function formatMoney(n: number | null | undefined): string {
@@ -227,6 +230,55 @@ export default function TripWorkspacePage() {
   const [draftDriverId, setDraftDriverId] = useState("");
   const [draftTruckId, setDraftTruckId] = useState("");
   const [draftTrailerId, setDraftTrailerId] = useState("");
+  const hintRequest = useRef(0);
+  const [equipmentHint, setEquipmentHint] = useState<string | null>(null);
+
+  const pickDriverWithHints = (value: string) => {
+    const request = ++hintRequest.current;
+    setDraftDriverId(value);
+    setDraftTruckId("");
+    setDraftTrailerId("");
+    setEquipmentHint(null);
+    if (!value) return;
+    void getDriverAssignmentHints(Number(value)).then((hint) => {
+      if (request !== hintRequest.current) return;
+      if (hint.truck_id != null) setDraftTruckId((prev) => prev || String(hint.truck_id));
+      // Only a confirmed current driver/truck link may carry a trailer.
+      if (hint.truck_source === "current" && hint.trailer_id != null) {
+        setDraftTrailerId((prev) => prev || String(hint.trailer_id));
+      }
+      setEquipmentHint(
+        hint.warnings?.length ? `Equipment review: ${hint.warnings.join(", ")}` :
+        hint.truck_source === "current"
+          ? "Suggested from confirmed current equipment (editable)."
+          : hint.truck_source === "default"
+            ? "Default truck only — not confirmed attached; trailer not inferred."
+            : "No confirmed current equipment — select manually and confirm once in use."
+      );
+    }).catch(() => {
+      if (request === hintRequest.current) setEquipmentHint("Equipment suggestions unavailable; choose manually.");
+    });
+  };
+
+  const pickTruckWithHints = (value: string) => {
+    const request = ++hintRequest.current;
+    setDraftTruckId(value);
+    setDraftTrailerId("");
+    setEquipmentHint(null);
+    if (!value) return;
+    void getTruckAssignmentHints(Number(value)).then((hint) => {
+      if (request !== hintRequest.current) return;
+      if (hint.driver_id != null) setDraftDriverId((prev) => prev || String(hint.driver_id));
+      if (hint.trailer_id != null) setDraftTrailerId((prev) => prev || String(hint.trailer_id));
+      setEquipmentHint(hint.warnings?.length ? `Equipment review: ${hint.warnings.join(", ")}` :
+        hint.driver_source === "current" || hint.trailer_source === "hooked"
+        ? "Suggested from confirmed current equipment (editable)."
+        : "No confirmed equipment on this truck — choose manually.");
+    }).catch(() => {
+      if (request === hintRequest.current) setEquipmentHint("Equipment suggestions unavailable; choose manually.");
+    });
+  };
+
   const [startExecBusy, setStartExecBusy] = useState(false);
   const [startExecError, setStartExecError] = useState<string | null>(null);
 
@@ -272,6 +324,8 @@ export default function TripWorkspacePage() {
     setDraftDriverId("");
     setDraftTruckId("");
     setDraftTrailerId("");
+    hintRequest.current += 1;
+    setEquipmentHint(null);
     setStartExecBusy(false);
     setStartExecError(null);
   }, [tripId]);
@@ -612,7 +666,7 @@ export default function TripWorkspacePage() {
                       <span className="text-[var(--trk-text-muted)]">Driver</span>
                       <select
                         value={draftDriverId}
-                        onChange={(e) => setDraftDriverId(e.target.value)}
+                        onChange={(e) => pickDriverWithHints(e.target.value)}
                         disabled={assignSaveBusy}
                         className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
                       >
@@ -628,7 +682,7 @@ export default function TripWorkspacePage() {
                       <span className="text-[var(--trk-text-muted)]">Truck</span>
                       <select
                         value={draftTruckId}
-                        onChange={(e) => setDraftTruckId(e.target.value)}
+                        onChange={(e) => pickTruckWithHints(e.target.value)}
                         disabled={assignSaveBusy}
                         className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
                       >
@@ -644,7 +698,10 @@ export default function TripWorkspacePage() {
                       <span className="text-[var(--trk-text-muted)]">Trailer</span>
                       <select
                         value={draftTrailerId}
-                        onChange={(e) => setDraftTrailerId(e.target.value)}
+                        onChange={(e) => {
+                          hintRequest.current += 1;
+                          setDraftTrailerId(e.target.value);
+                        }}
                         disabled={assignSaveBusy}
                         className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-1.5 text-sm text-[var(--trk-text)]"
                       >
@@ -657,6 +714,7 @@ export default function TripWorkspacePage() {
                       </select>
                     </label>
                   </div>
+                  {equipmentHint ? <p role="status" className="text-[11px] text-[var(--trk-text-muted)]">{equipmentHint}</p> : null}
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
@@ -668,6 +726,16 @@ export default function TripWorkspacePage() {
                     </button>
                   </div>
                   {assignError ? <p className="text-[11px] text-red-700">{assignError}</p> : null}
+                </div>
+              ) : null}
+              {trip && !trip.cancelled_at && ["assigned", "in_progress", "completed"].includes(trip.status) ? (
+                <div className="mt-3 border-t border-[var(--trk-border)] pt-2">
+                  <ConfirmEquipmentAction
+                    driverId={trip.driver_id}
+                    truckId={trip.truck_id}
+                    trailerId={trip.trailer_id}
+                    allowConfirm={trip.status !== "completed"}
+                  />
                 </div>
               ) : null}
             </section>

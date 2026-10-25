@@ -48,8 +48,13 @@ def _id(value: int, name: str) -> int:
     return value
 
 
-def _require_actor(actor_user_id: int) -> int:
-    return _id(actor_user_id, "actor_user_id")
+def _require_actor(actor_user_id: int | None, actor_label: str | None) -> None:
+    # Tenant-auth actors have an integer user ID; platform-auth actor UUIDs
+    # belong in the audited actor_label, supplied by the authenticated router.
+    if actor_user_id is not None:
+        _id(actor_user_id, "actor_user_id")
+    elif not actor_label or not actor_label.startswith("platform:"):
+        raise EquipmentStateError("Authenticated actor identity required")
 
 
 async def _require_asset(
@@ -90,7 +95,8 @@ async def _audit(
     entity_type: str,
     entity_id: int,
     action: str,
-    actor_user_id: int,
+    actor_user_id: int | None,
+    actor_label: str | None,
     before: dict,
     after: dict,
     request_id: str | None,
@@ -104,6 +110,7 @@ async def _audit(
         action=action,
         source="api",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=request_id,
         snapshot_before=before,
         snapshot_after=after,
@@ -120,7 +127,8 @@ async def change_current_attachment(
         "confirm_driver", "release_driver", "hook_trailer", "drop_trailer"
     ],
     expected_version: int,
-    actor_user_id: int,
+    actor_user_id: int | None,
+    actor_label: str | None = None,
     driver_id: int | None = None,
     trailer_id: int | None = None,
     request_id: str | None = None,
@@ -137,7 +145,7 @@ async def change_current_attachment(
     """
     tenant_id = _id(tenant_id, "tenant_id")
     truck_id = _id(truck_id, "truck_id")
-    _require_actor(actor_user_id)
+    _require_actor(actor_user_id, actor_label)
     if type(expected_version) is not int or expected_version < 0:
         raise EquipmentStateError("expected_version must be a nonnegative integer")
     if operation not in {"confirm_driver", "release_driver", "hook_trailer", "drop_trailer"}:
@@ -221,6 +229,7 @@ async def change_current_attachment(
         entity_id=truck_id,
         action=f"equipment_{operation}",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         before=before,
         after=_physical_snapshot(row, truck_id),
         request_id=request_id,
@@ -235,8 +244,9 @@ async def set_driver_equipment_default(
     driver_id: int,
     default_truck_id: int | None,
     equipment_binding_mode: Literal["dedicated", "owner_bound", "shift_based", "pooled"],
-    actor_user_id: int,
+    actor_user_id: int | None,
     expected_before: tuple[int | None, str] | None,
+    actor_label: str | None = None,
     request_id: str | None = None,
 ) -> DriverEquipmentDefault:
     """Update an equipment preference, NOT current physical attachment.
@@ -246,7 +256,7 @@ async def set_driver_equipment_default(
     """
     tenant_id = _id(tenant_id, "tenant_id")
     driver_id = _id(driver_id, "driver_id")
-    _require_actor(actor_user_id)
+    _require_actor(actor_user_id, actor_label)
     if default_truck_id is not None:
         default_truck_id = _id(default_truck_id, "default_truck_id")
     if equipment_binding_mode not in {"dedicated", "owner_bound", "shift_based", "pooled"}:
@@ -308,6 +318,7 @@ async def set_driver_equipment_default(
         entity_id=driver_id,
         action="equipment_default_set",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         before=before,
         after=after,
         request_id=request_id,

@@ -2,7 +2,7 @@
  * Trip Container = Dispatch Control Center — dispatcher-brain layout (focused trip + load stack).
  * Trip APIs only; no dispatch board; no drawer.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import {
@@ -11,6 +11,8 @@ import {
   createPlannedTrip,
   getLoad,
   getTrip,
+  getDriverAssignmentHints,
+  getTruckAssignmentHints,
   listDrivers,
   listLoads,
   listTrailers,
@@ -30,6 +32,7 @@ import {
   isOpenTripMembership,
 } from "@/api";
 import { OPS } from "@/routes";
+import { ConfirmEquipmentAction } from "@/components/equipment/ConfirmEquipmentAction";
 import { formatRouteFromStops, sortedStops, formatStopCityState } from "@/utils/loadStops";
 import { FuturePlaceholderPanels } from "./FuturePlaceholderPanels";
 import StopExecutionActions from "./StopExecutionActions";
@@ -565,11 +568,54 @@ function SlimAssignmentPanel({
   const [draftR, setDraftR] = useState(String(detail.trailer_id ?? ""));
   const [saveBusy, setSaveBusy] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
+  const hintSeq = useRef(0);
+  const [equipmentHint, setEquipmentHint] = useState<string | null>(null);
+
+  const chooseDriver = (value: string) => {
+    const req = ++hintSeq.current;
+    setDraftD(value);
+    setDraftT("");
+    setDraftR("");
+    setEquipmentHint(null);
+    if (!value) return;
+    void getDriverAssignmentHints(Number(value)).then((hint) => {
+      if (req !== hintSeq.current) return;
+      if (hint.truck_id != null) setDraftT((v) => v || String(hint.truck_id));
+      if (hint.truck_source === "current" && hint.trailer_id != null) setDraftR((v) => v || String(hint.trailer_id));
+      setEquipmentHint(
+        hint.warnings?.length ? `Equipment review: ${hint.warnings.join(", ")}` :
+        hint.truck_source === "current" ? "Confirmed equipment suggested (editable)." :
+        hint.truck_source === "default" ? "Default truck only; physical trailer unconfirmed." :
+        "No confirmed equipment; select manually and confirm when in use."
+      );
+    }).catch(() => {
+      if (req === hintSeq.current) setEquipmentHint("Equipment suggestions unavailable; select manually.");
+    });
+  };
+  const chooseTruck = (value: string) => {
+    const req = ++hintSeq.current;
+    setDraftT(value);
+    setDraftR("");
+    setEquipmentHint(null);
+    if (!value) return;
+    void getTruckAssignmentHints(Number(value)).then((hint) => {
+      if (req !== hintSeq.current) return;
+      if (hint.driver_id != null) setDraftD((v) => v || String(hint.driver_id));
+      if (hint.trailer_id != null) setDraftR((v) => v || String(hint.trailer_id));
+      setEquipmentHint(hint.warnings?.length ? `Equipment review: ${hint.warnings.join(", ")}` :
+        hint.driver_source === "current" || hint.trailer_source === "hooked"
+        ? "Confirmed equipment suggested (editable)." : "No confirmed equipment; select manually.");
+    }).catch(() => {
+      if (req === hintSeq.current) setEquipmentHint("Equipment suggestions unavailable; select manually.");
+    });
+  };
 
   useEffect(() => {
     setDraftD(String(detail.driver_id ?? ""));
     setDraftT(String(detail.truck_id ?? ""));
     setDraftR(String(detail.trailer_id ?? ""));
+    hintSeq.current += 1;
+    setEquipmentHint(null);
   }, [detail.driver_id, detail.truck_id, detail.trailer_id, detail.id]);
 
   useEffect(() => {
@@ -624,7 +670,7 @@ function SlimAssignmentPanel({
       <div className="grid gap-1 sm:grid-cols-3">
         <select
           value={draftD}
-          onChange={(e) => setDraftD(e.target.value)}
+          onChange={(e) => chooseDriver(e.target.value)}
           className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-1 py-0.5 text-[10px]"
         >
           <option value="">— Driver —</option>
@@ -636,7 +682,7 @@ function SlimAssignmentPanel({
         </select>
         <select
           value={draftT}
-          onChange={(e) => setDraftT(e.target.value)}
+          onChange={(e) => chooseTruck(e.target.value)}
           className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-1 py-0.5 text-[10px]"
         >
           <option value="">— Truck —</option>
@@ -648,7 +694,10 @@ function SlimAssignmentPanel({
         </select>
         <select
           value={draftR}
-          onChange={(e) => setDraftR(e.target.value)}
+          onChange={(e) => {
+            hintSeq.current += 1;
+            setDraftR(e.target.value);
+          }}
           className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-1 py-0.5 text-[10px]"
         >
           <option value="">— Trailer —</option>
@@ -659,6 +708,7 @@ function SlimAssignmentPanel({
           ))}
         </select>
       </div>
+      {equipmentHint ? <p role="status" className="text-[9px] text-[var(--trk-text-muted)]">{equipmentHint}</p> : null}
       <button type="button" className={btnPrimary} disabled={saveBusy} onClick={() => void saveAssignment()}>
         {saveBusy ? "…" : "Update assignment"}
       </button>
@@ -2018,6 +2068,17 @@ export default function TripContainerPage() {
                       </div>
                     </div>
                   </div>
+                  {focusedDetail && !focusedDetail.cancelled_at &&
+                    ["assigned", "in_progress", "completed"].includes(focusedDetail.status) ? (
+                    <div className="border-b border-[var(--trk-border)] bg-[var(--trk-bg)]/25 px-3 py-2">
+                      <ConfirmEquipmentAction
+                        driverId={focusedDetail.driver_id}
+                        truckId={focusedDetail.truck_id}
+                        trailerId={focusedDetail.trailer_id}
+                        allowConfirm={focusedDetail.status !== "completed"}
+                      />
+                    </div>
+                  ) : null}
                   {showAssignment && focusedDetail ? (
                     <div className="border-b border-[var(--trk-border)] bg-[var(--trk-bg)]/25 px-3 py-2">
                       <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">

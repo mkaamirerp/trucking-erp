@@ -2343,6 +2343,48 @@ export type EquipmentAssignmentHints = {
   warnings?: string[];
 };
 
+/** EQ02 confirmed physical equipment, independent of Trip planned assignment. */
+export type CurrentEquipmentState = {
+  truck_id: number;
+  driver_id: number | null;
+  trailer_id: number | null;
+  version: number;
+};
+
+export async function getCurrentEquipmentState(truckId: number): Promise<CurrentEquipmentState> {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${truckId}/equipment-state`);
+  return handle<CurrentEquipmentState>(res);
+}
+
+export async function confirmCurrentEquipment(
+  truckId: number,
+  body: { driver_id: number; trailer_id: number; expected_version: number },
+): Promise<CurrentEquipmentState> {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${truckId}/confirm-current`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<CurrentEquipmentState>(res);
+}
+
+export async function changeCurrentEquipment(
+  truckId: number,
+  body: {
+    operation: "confirm_driver" | "release_driver" | "hook_trailer" | "drop_trailer";
+    expected_version: number;
+    driver_id?: number | null;
+    trailer_id?: number | null;
+  },
+): Promise<CurrentEquipmentState> {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${truckId}/equipment-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle<CurrentEquipmentState>(res);
+}
+
 export type DriverAssignmentHints = EquipmentAssignmentHints;
 
 export async function getDriverAssignmentHints(driverId: number) {

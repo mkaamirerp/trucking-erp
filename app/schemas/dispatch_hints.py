@@ -30,6 +30,6 @@ class TruckAssignmentHintsOut(BaseModel):
 
 
 class TruckSuggestedTrailerOut(BaseModel):
-    """Trailer seen most recently on a load with this truck."""
+    """Only the currently confirmed hooked trailer, never a prior Load."""
 
     trailer_id: int | None = None
