@@ -11,6 +11,10 @@ LN01_FMP = "ln01_load_number_periods_fmp"
 LN01_X5 = "ln01_load_number_periods_x5"
 APPROVED_SPLIT_HEADS = frozenset({LN01_FMP, LN01_X5})
 
+EQ01_FMP = "eq01_equipment_attachments_fmp"
+EQ01_X5 = "eq01_equipment_attachments_x5"
+APPROVED_EQ01_HEADS = frozenset({EQ01_FMP, EQ01_X5})
+
 POD_X5 = "i14_load_pod_evidence_x5"
 POD_DW1 = "i14_load_pod_evidence"
 APPROVED_POD_TARGETS = frozenset({POD_X5, POD_DW1})
@@ -58,6 +62,20 @@ def assert_ln01_plan_safe(plan: list[str], *, current: str | None, target: str) 
         raise RevisionPlanError(
             f"database is already at {current}; refusing a second ln01 revision"
         )
+
+
+def assert_eq01_plan_safe(plan: list[str], *, current: str | None, target: str) -> None:
+    """Never install both EQ01 sibling migrations (both create the same tables)."""
+    if target not in APPROVED_EQ01_HEADS:
+        return
+    steps = [rev for rev in plan if rev in APPROVED_EQ01_HEADS]
+    if len(steps) != 1 or steps[0] != target or plan[-1] != target:
+        raise RevisionPlanError(
+            "EQ01 plan must install exactly its own branch-specific revision"
+        )
+    other = EQ01_X5 if target == EQ01_FMP else EQ01_FMP
+    if other in plan or current == other:
+        raise RevisionPlanError("refusing EQ01 sibling cross-branch migration")
 
 
 def assert_pod_plan_safe(plan: list[str], *, current: str | None, target: str) -> None:
@@ -133,7 +151,13 @@ def pod_dw1_direct_parent(script: ScriptDirectory) -> str:
 
 
 def approved_heads_are_split(script: ScriptDirectory) -> bool:
-    return set(script.get_heads()) == set(APPROVED_SPLIT_HEADS)
+    """Recognize only the two explicitly reviewed two-head migration layouts."""
+    heads = set(script.get_heads())
+    return heads in (APPROVED_SPLIT_HEADS, APPROVED_EQ01_HEADS)
+
+
+def approved_eq01_heads_are_split(script: ScriptDirectory) -> bool:
+    return set(script.get_heads()) == APPROVED_EQ01_HEADS
 
 
 def migration_target_for_request(
@@ -141,45 +165,63 @@ def migration_target_for_request(
     current: str | None,
     requested: str | None,
 ) -> str:
-    """Resolve one upgrade target. `head` is refused while the ln01 heads are split."""
+    """Resolve a pinned tenant target; never silently choose a split-graph head."""
+    heads = set(script.get_heads())
     if requested in {None, "", "head", "heads"}:
         if approved_heads_are_split(script):
             raise RevisionPlanError("refusing upgrade head while tenant branches are split")
-        if len(script.get_heads()) != 1:
-            raise RevisionPlanError(f"unexpected tenant heads: {sorted(script.get_heads())}")
+        if len(heads) != 1:
+            raise RevisionPlanError(f"unexpected tenant heads: {sorted(heads)}")
         return "head"
-    if approved_heads_are_split(script) and requested not in APPROVED_SPLIT_HEADS:
+
+    if heads == APPROVED_EQ01_HEADS:
+        allowed = APPROVED_EQ01_HEADS
+    elif heads == APPROVED_SPLIT_HEADS:
+        allowed = APPROVED_SPLIT_HEADS
+    elif len(heads) == 1:
+        # Preserve the original single-head behavior: an explicitly pinned
+        # historical revision is permitted only if its upgrade plan is safe.
+        allowed = None
+    else:
+        raise RevisionPlanError(f"unexpected tenant heads: {sorted(heads)}")
+
+    if allowed is not None and requested not in allowed:
         raise RevisionPlanError(
-            f"target must be one of {sorted(APPROVED_SPLIT_HEADS)} while ln01 heads are split; got {requested!r}"
+            f"target must be one of {sorted(allowed)} for current migration heads; got {requested!r}"
         )
-    if requested in APPROVED_SPLIT_HEADS:
-        if current == requested:
-            return requested
+    if current != requested:
         assert_target_matches_history(script, current, requested)
-        return requested
-    plan = upgrade_plan(script, current, requested)
-    if POD_X5 in plan and POD_DW1 in plan:
-        raise RevisionPlanError("plan runs both POD revisions; refusing duplicate CREATE TABLE")
-    if LN01_X5 in plan and LN01_FMP in plan:
-        raise RevisionPlanError("plan runs both ln01 revisions; refusing duplicate CREATE TABLE")
     return requested
 
 
 def fuel_test_migrate_target(script: ScriptDirectory, current: str | None) -> str:
-    """Pinned revision for Fuel's optional integration migrate. Never `head`."""
-    if not approved_heads_are_split(script):
-        heads = list(script.get_heads())
-        if len(heads) != 1:
-            raise RevisionPlanError(f"unexpected tenant heads: {sorted(heads)}")
-        return heads[0]
-    if current in APPROVED_SPLIT_HEADS:
-        return current
-    if current == FMP02 or (current is not None and on_fmp_line(script, current)):
-        target = LN01_FMP
-    elif current == POD_DW1 or (current is not None and on_dw1_line(script, current)):
-        target = POD_DW1
+    """Pinned Fuel integration DB target: keep branch isolation, never use head."""
+    heads = set(script.get_heads())
+    if heads == APPROVED_EQ01_HEADS:
+        if current in APPROVED_EQ01_HEADS:
+            return current
+        if current is not None and on_fmp_line(script, current):
+            target = EQ01_FMP
+        elif current is not None and on_dw1_line(script, current):
+            # Historical DW-1 tenants are deliberately only brought to POD.
+            # EQ01-FMP must not be inferred merely from a DW-1 ancestor.
+            target = POD_DW1
+        else:
+            target = EQ01_X5
+    elif heads == APPROVED_SPLIT_HEADS:
+        if current in APPROVED_SPLIT_HEADS:
+            return current
+        if current is not None and on_fmp_line(script, current):
+            target = LN01_FMP
+        elif current is not None and on_dw1_line(script, current):
+            target = POD_DW1
+        else:
+            target = LN01_X5
+    elif len(heads) == 1:
+        target = next(iter(heads))
     else:
-        target = LN01_X5
+        raise RevisionPlanError(f"unexpected tenant heads: {sorted(heads)}")
+
     if current == target:
         return target
     assert_target_matches_history(script, current, target)
@@ -188,6 +230,23 @@ def fuel_test_migrate_target(script: ScriptDirectory, current: str | None) -> st
 
 def assert_target_matches_history(script: ScriptDirectory, current: str | None, target: str) -> list[str]:
     """Return the upgrade plan or raise RevisionPlanError."""
+    if current in APPROVED_EQ01_HEADS and target in APPROVED_EQ01_HEADS and current != target:
+        raise RevisionPlanError(
+            f"database is already at {current}; refusing a second EQ01 revision"
+        )
+    if target in APPROVED_EQ01_HEADS and current == target:
+        return []
+    if target == EQ01_FMP:
+        if current is None or not on_fmp_line(script, current):
+            raise RevisionPlanError(
+                f"{EQ01_FMP} requires established FMP lineage; current is {current}"
+            )
+    if target == EQ01_X5:
+        if current is not None and current != X5 and POD_X5 not in ancestor_revisions(script, current):
+            raise RevisionPlanError(
+                f"{EQ01_X5} requires x5/POD-x5 lineage; current is {current}"
+            )
+
     if current in APPROVED_SPLIT_HEADS and target in APPROVED_SPLIT_HEADS:
         raise RevisionPlanError(
             f"database is already at {current}; refusing a second ln01 revision"
@@ -252,6 +311,17 @@ def assert_target_matches_history(script: ScriptDirectory, current: str | None, 
 
     if target in APPROVED_POD_TARGETS:
         assert_pod_plan_safe(plan, current=current, target=target)
+    if target in APPROVED_EQ01_HEADS:
+        # Also forbid replaying either POD/ln01 branch's duplicate DDL.
+        if target == EQ01_FMP and any(rev in {POD_X5, LN01_X5, EQ01_X5} for rev in plan):
+            raise RevisionPlanError("FMP EQ01 plan crosses into the x5 branch")
+        if target == EQ01_X5 and any(
+            rev == POD_DW1 or rev == LN01_FMP or rev == EQ01_FMP
+            or rev == FMP02 or rev.startswith("dw0") or rev.startswith("dw1")
+            for rev in plan
+        ):
+            raise RevisionPlanError("x5 EQ01 plan crosses into the FMP/DW-1 branch")
+        assert_eq01_plan_safe(plan, current=current, target=target)
     if target in APPROVED_SPLIT_HEADS:
         assert_ln01_plan_safe(plan, current=current, target=target)
 
