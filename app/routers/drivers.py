@@ -13,9 +13,11 @@ from app.deps.auth import get_current_user
 logger = logging.getLogger(__name__)
 from app.models.driver import Driver
 from app.models.load import Load, LoadStop
-from app.models.trailer import Trailer
-from app.models.truck import Truck
 from app.schemas.dispatch_hints import DriverAssignmentHintsOut
+from app.services.equipment_assignment_context import (
+    assignment_suggestion_to_hints,
+    suggest_assignment_for_driver,
+)
 from app.schemas.driver import DriverCreate, DriverOut, DriverUpdate, DriverListOut, driver_row_to_list_out
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -117,15 +119,6 @@ async def list_drivers(
         ) from e
 
 
-_ASSIGNMENT_HINT_LOAD_STATUSES = (
-    "assigned",
-    "dispatched",
-    "arrived_pickup",
-    "in_transit",
-    "arrived_delivery",
-)
-
-
 @router.get("/{driver_id}/assignment-hints", response_model=DriverAssignmentHintsOut)
 async def get_driver_assignment_hints(
     driver_id: int,
@@ -133,59 +126,15 @@ async def get_driver_assignment_hints(
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Suggest truck/trailer from the driver's latest in-progress load, then fleet ownership."""
+    """Suggest truck/trailer for a driver via shared equipment assignment policy."""
     result = await db.execute(select(Driver).where(Driver.id == driver_id, Driver.tenant_id == tenant_id))
     driver = result.scalar_one_or_none()
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
 
-    truck_id: int | None = None
-    trailer_id: int | None = None
-
-    load_stmt = (
-        select(Load)
-        .where(
-            Load.tenant_id == tenant_id,
-            Load.driver_id == driver_id,
-            Load.status.in_(_ASSIGNMENT_HINT_LOAD_STATUSES),
-        )
-        .order_by(Load.updated_at.desc())
-        .limit(1)
-    )
-    load_row = (await db.execute(load_stmt)).scalar_one_or_none()
-    if load_row:
-        truck_id = load_row.truck_id
-        trailer_id = load_row.trailer_id
-
-    if truck_id is None and driver.person_id:
-        own_truck = (
-            await db.execute(
-                select(Truck.id)
-                .where(
-                    Truck.tenant_id == tenant_id,
-                    Truck.owner_person_id == driver.person_id,
-                    Truck.status == "active",
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        truck_id = own_truck
-
-    if trailer_id is None and driver.person_id:
-        own_trailer = (
-            await db.execute(
-                select(Trailer.id)
-                .where(
-                    Trailer.tenant_id == tenant_id,
-                    Trailer.owner_person_id == driver.person_id,
-                    Trailer.status == "active",
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        trailer_id = own_trailer
-
-    return DriverAssignmentHintsOut(truck_id=truck_id, trailer_id=trailer_id)
+    suggestion = await suggest_assignment_for_driver(db, tenant_id, driver_id)
+    payload = assignment_suggestion_to_hints(suggestion, anchor_driver_id=driver_id)
+    return DriverAssignmentHintsOut(**payload)
 
 
 @router.get("/{driver_id}", response_model=DriverOut)

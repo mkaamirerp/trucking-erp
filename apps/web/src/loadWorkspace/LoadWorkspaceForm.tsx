@@ -13,9 +13,26 @@ import type {
   Truck,
 } from "@/api";
 import {
-  docFocusForStopAddress,
-  docFocusForStopAppointment,
+  bindDocFocus,
+  docFocusForBroker,
+  docFocusForBrokerContactEmail,
+  docFocusForBrokerContactName,
+  docFocusForBrokerContactPhone,
+  docFocusForBrokerLoadReference,
+  docFocusForFreightHints,
+  docFocusForMoneyField,
+  docFocusForStopAppointmentDate,
+  docFocusForStopAppointmentTime,
+  docFocusForStopAppointmentType,
+  docFocusForStopCity,
+  docFocusForStopCountry,
+  docFocusForStopFacility,
+  docFocusForStopNotes,
+  docFocusForStopPostal,
   docFocusForStopReference,
+  docFocusForStopState,
+  docFocusForStopStreet,
+  type DocFocusOpts,
   formatEquipmentTempChip,
   formatLinehaulDisplay,
   wsGrid2,
@@ -59,7 +76,8 @@ type StopDenseCardProps = {
   updateStop: (key: string, patch: Partial<DraftStop>) => void;
   removeStop: (key: string) => void;
   moveStop: (key: string, dir: -1 | 1) => void;
-  focusDoc: (opts: { tokens: string[]; fallbackToken?: string }) => void;
+  focusDoc: (opts: DocFocusOpts) => void;
+  sectionIndex: number;
 };
 
 function StopDenseCard({
@@ -71,7 +89,9 @@ function StopDenseCard({
   removeStop,
   moveStop,
   focusDoc,
+  sectionIndex,
 }: StopDenseCardProps) {
+  const bind = (opts: DocFocusOpts) => bindDocFocus(focusDoc, opts);
   const u = (stop.stop_type || "").toUpperCase();
   const isPu = u === "PICKUP";
   const isDr = u === "DELIVERY" || u === "DROP";
@@ -146,7 +166,7 @@ function StopDenseCard({
             value={stop.facility_name ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::facility`)}
             onChange={(e) => updateStop(stop._key, { facility_name: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAddress(stop))}
+            {...bind(docFocusForStopFacility(stop, sectionIndex))}
           />
         </div>
         <div className="col-span-2">
@@ -156,7 +176,7 @@ function StopDenseCard({
             value={stop.street ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::street`)}
             onChange={(e) => updateStop(stop._key, { street: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAddress(stop))}
+            {...bind(docFocusForStopStreet(stop, sectionIndex))}
           />
         </div>
         <div className="col-span-2">
@@ -166,7 +186,7 @@ function StopDenseCard({
             value={stop.reference_number ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::reference`)}
             onChange={(e) => updateStop(stop._key, { reference_number: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopReference(stop))}
+            {...bind(docFocusForStopReference(stop, sectionIndex))}
           />
         </div>
         <div>
@@ -176,7 +196,7 @@ function StopDenseCard({
             value={stop.city ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::city`)}
             onChange={(e) => updateStop(stop._key, { city: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAddress(stop))}
+            {...bind(docFocusForStopCity(stop, sectionIndex))}
           />
         </div>
         <div>
@@ -186,7 +206,7 @@ function StopDenseCard({
             value={stop.state_or_province ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::state`)}
             onChange={(e) => updateStop(stop._key, { state_or_province: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAddress(stop))}
+            {...bind(docFocusForStopState(stop, sectionIndex))}
           />
         </div>
         <div>
@@ -196,7 +216,7 @@ function StopDenseCard({
             value={stop.postal_code ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::postal`)}
             onChange={(e) => updateStop(stop._key, { postal_code: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAddress(stop))}
+            {...bind(docFocusForStopPostal(stop, sectionIndex))}
           />
         </div>
         <div>
@@ -206,7 +226,7 @@ function StopDenseCard({
             maxLength={2}
             value={stop.country ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::country`)}
-            onFocus={() => focusDoc(docFocusForStopAddress(stop))}
+            {...bind(docFocusForStopCountry(stop, sectionIndex))}
             onChange={(e) => updateStop(stop._key, { country: e.target.value })}
           />
         </div>
@@ -222,7 +242,7 @@ function StopDenseCard({
             }
             tabIndex={verificationTabIndex.get(`${stop._key}::apptDate`)}
             onChange={(e) => updateStop(stop._key, { appointment_date: e.target.value || null })}
-            onFocus={() => focusDoc(docFocusForStopAppointment(stop))}
+            {...bind(docFocusForStopAppointmentDate(stop, sectionIndex))}
           />
         </div>
         <div>
@@ -232,7 +252,7 @@ function StopDenseCard({
             value={stop.appointment_time_text ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::apptTime`)}
             onChange={(e) => updateStop(stop._key, { appointment_time_text: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAppointment(stop))}
+            {...bind(docFocusForStopAppointmentTime(stop, sectionIndex))}
           />
         </div>
         <div className="col-span-2">
@@ -242,7 +262,7 @@ function StopDenseCard({
             value={stop.appointment_type ?? ""}
             tabIndex={verificationTabIndex.get(`${stop._key}::apptType`)}
             onChange={(e) => updateStop(stop._key, { appointment_type: e.target.value })}
-            onFocus={() => focusDoc(docFocusForStopAppointment(stop))}
+            {...bind(docFocusForStopAppointmentType(stop, sectionIndex))}
           />
         </div>
         <div className="col-span-2">
@@ -253,6 +273,7 @@ function StopDenseCard({
             data-testid="stop-notes-input"
             value={stop.notes ?? ""}
             onChange={(e) => updateStop(stop._key, { notes: e.target.value })}
+            {...bind(docFocusForStopNotes(stop, sectionIndex, stop.notes ?? ""))}
           />
         </div>
         <div className="col-span-2">
@@ -263,6 +284,7 @@ function StopDenseCard({
             data-testid="commodity-notes-input"
             value={stop.commodity_notes ?? ""}
             onChange={(e) => updateStop(stop._key, { commodity_notes: e.target.value })}
+            {...bind(docFocusForStopNotes(stop, sectionIndex, stop.commodity_notes ?? ""))}
           />
         </div>
       </div>
@@ -292,7 +314,7 @@ export type LoadWorkspaceFormProps = {
   newNoteBody: string;
   setNewNoteBody: (v: string) => void;
   onAddNote: () => void;
-  focusDoc: (opts: { tokens: string[]; fallbackToken?: string }) => void;
+  focusDoc: (opts: DocFocusOpts) => void;
   verificationTabIndex: Map<string, number>;
   /** Stored Load.status — displayed only; readiness changes go through Mark ready. */
   status: string;
@@ -339,10 +361,18 @@ export type LoadWorkspaceFormProps = {
   setCustomerRate: (v: string) => void;
   miles: string;
   setMiles: (v: string) => void;
-  /** Historical Load equipment — displayed only; equipment is assigned on the Trip. */
+  /** Trip movement assignment (UI state before Create load creates the Trip). */
   driverId: number | null;
   truckId: number | null;
   trailerAssetId: number | null;
+  setDriverId?: (v: number | null) => void;
+  setTruckId?: (v: number | null) => void;
+  setTrailerAssetId?: (v: number | null) => void;
+  /** Policy warnings from equipment assignment suggestions (shown before confirm). */
+  assignmentWarnings?: string[];
+  onAssignmentDriverChange?: (driverId: number | null) => void;
+  onAssignmentTruckChange?: (truckId: number | null) => void;
+  onAssignmentTrailerChange?: (trailerId: number | null) => void;
   /** When set, operational movement assignment is owned on the trip workspace (Slice 15A). */
   activeTripId?: number | null;
   customsBrokerId: number | null;
@@ -381,6 +411,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   }
 
   const compactReferences = compactLoadReferencesForDisplay(p.loadReferences ?? [], p.sortedDraftStops);
+  const bindFieldDoc = (opts: DocFocusOpts) => bindDocFocus(p.focusDoc, opts);
 
   const driver = p.driverId != null ? p.drivers.find((d) => d.id === p.driverId) : undefined;
   const driverLabel =
@@ -418,6 +449,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               p.setBrokerNameSnapshot(name);
               if (id === null) p.setBrokerContactId(null);
             }}
+            docFocusHandlers={bindFieldDoc(docFocusForBroker(p.brokerNameSnapshot))}
           />
           <div>
             <label className={L}>Contact</label>
@@ -429,6 +461,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 p.setBrokerContactId(v === "" ? null : Number(v));
               }}
               disabled={!p.brokerId}
+              {...bindFieldDoc(
+                docFocusForBrokerContactName(p.brokerContactNameSnapshot),
+              )}
             >
               <option value="">— Select contact —</option>
               {p.brokerContacts.map((c) => (
@@ -442,6 +477,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.brokerContactNameSnapshot}
               onChange={(e) => p.setBrokerContactNameSnapshot(e.target.value)}
+              {...bindFieldDoc(docFocusForBrokerContactName(p.brokerContactNameSnapshot))}
             />
           </div>
           <div>
@@ -450,6 +486,12 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.brokerContactPhoneSnapshot}
               onChange={(e) => p.setBrokerContactPhoneSnapshot(e.target.value)}
+              {...bindFieldDoc(
+                docFocusForBrokerContactPhone(
+                  p.brokerContactPhoneSnapshot,
+                  p.brokerContactExtensionSnapshot,
+                ),
+              )}
             />
           </div>
           <div>
@@ -458,6 +500,12 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.brokerContactExtensionSnapshot}
               onChange={(e) => p.setBrokerContactExtensionSnapshot(e.target.value)}
+              {...bindFieldDoc(
+                docFocusForBrokerContactPhone(
+                  p.brokerContactPhoneSnapshot,
+                  p.brokerContactExtensionSnapshot,
+                ),
+              )}
             />
           </div>
           <div>
@@ -466,6 +514,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.brokerContactEmailSnapshot}
               onChange={(e) => p.setBrokerContactEmailSnapshot(e.target.value)}
+              {...bindFieldDoc(docFocusForBrokerContactEmail(p.brokerContactEmailSnapshot))}
             />
           </div>
           <div className="sm:col-span-2">
@@ -476,12 +525,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               tabIndex={p.verificationTabIndex.get("brokerLoadReference")}
               onChange={(e) => p.setBrokerLoadReference(e.target.value)}
               placeholder="Load number from broker"
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [p.brokerLoadReference, "broker load", "load ref", "ref", "reference", "confirmation", "rate con", "bol"],
-                  fallbackToken: "ref",
-                })
-              }
+              {...bindFieldDoc(docFocusForBrokerLoadReference(p.brokerLoadReference))}
             />
           </div>
           {compactReferences.length > 0 ? (
@@ -521,12 +565,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.rate}
               tabIndex={p.verificationTabIndex.get("rate")}
               onChange={(e) => p.setRate(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [p.rate, "rate", "linehaul", "$", "total", "amount"],
-                  fallbackToken: "rate",
-                })
-              }
+              {...bindFieldDoc(docFocusForMoneyField(p.rate, "linehaul"))}
               aria-label="Linehaul rate"
               placeholder="Linehaul"
               title="Linehaul rate from rate confirmation — edit anytime before save"
@@ -556,6 +595,12 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.customerRate.trim() === "" ? p.rate : p.customerRate}
               onChange={(e) => p.setCustomerRate(e.target.value)}
               title="Defaults to the RC rate if not set separately"
+              {...bindFieldDoc(
+                docFocusForMoneyField(
+                  p.customerRate.trim() === "" ? p.rate : p.customerRate,
+                  "customer",
+                ),
+              )}
             />
           </div>
           <div>
@@ -565,6 +610,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               inputMode="numeric"
               value={p.miles}
               onChange={(e) => p.setMiles(e.target.value)}
+              {...bindFieldDoc(docFocusForMoneyField(p.miles, "miles"))}
             />
           </div>
         </div>
@@ -575,7 +621,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
       {vis("Assignment") && <section className={wsSectionCard} data-editable={editable("Assignment")}>
         <div className={wsSectionHeader}>
           <span className={wsSectionTitle}>Status &amp; assignment</span>
-          <span className={wsSectionMeta}>Read-only</span>
+          <span className={wsSectionMeta}>
+            {editable("Assignment") && !p.readOnly && !p.activeTripId && p.setDriverId ? "Optional" : "Read-only"}
+          </span>
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
@@ -583,22 +631,98 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             <label className={L}>Status</label>
             <input className={I} value={p.status || "draft"} readOnly disabled data-testid="load-status-readonly" />
           </div>
-          <div>
-            <label className={L}>Driver</label>
-            <input className={I} value={driverLabel} readOnly disabled data-testid="load-driver-readonly" />
-          </div>
-          <div>
-            <label className={L}>Truck</label>
-            <input className={I} value={truckLabel} readOnly disabled data-testid="load-truck-readonly" />
-          </div>
-          <div>
-            <label className={L}>Trailer</label>
-            <input className={I} value={trailerLabel} readOnly disabled data-testid="load-trailer-readonly" />
-          </div>
+          {editable("Assignment") && !p.readOnly && !p.activeTripId && p.setDriverId ? (
+            <>
+              <div>
+                <label className={L}>Driver</label>
+                <select
+                  className={I}
+                  value={p.driverId ?? ""}
+                  data-testid="load-driver-select"
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? null : Number(e.target.value);
+                    p.setDriverId?.(v);
+                    p.onAssignmentDriverChange?.(v);
+                  }}
+                >
+                  <option value="">— Unassigned —</option>
+                  {p.drivers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.first_name} {d.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={L}>Truck</label>
+                <select
+                  className={I}
+                  value={p.truckId ?? ""}
+                  data-testid="load-truck-select"
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? null : Number(e.target.value);
+                    p.setTruckId?.(v);
+                    p.onAssignmentTruckChange?.(v);
+                  }}
+                >
+                  <option value="">— None —</option>
+                  {p.trucks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.unit_number}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={L}>Trailer</label>
+                <select
+                  className={I}
+                  value={p.trailerAssetId ?? ""}
+                  data-testid="load-trailer-select"
+                  onChange={(e) => {
+                    const v = e.target.value === "" ? null : Number(e.target.value);
+                    p.setTrailerAssetId?.(v);
+                    p.onAssignmentTrailerChange?.(v);
+                  }}
+                >
+                  <option value="">— None —</option>
+                  {p.trailers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.unit_number}
+                      {t.trailer_type ? ` · ${t.trailer_type}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className={L}>Driver</label>
+                <input className={I} value={driverLabel} readOnly disabled data-testid="load-driver-readonly" />
+              </div>
+              <div>
+                <label className={L}>Truck</label>
+                <input className={I} value={truckLabel} readOnly disabled data-testid="load-truck-readonly" />
+              </div>
+              <div>
+                <label className={L}>Trailer</label>
+                <input className={I} value={trailerLabel} readOnly disabled data-testid="load-trailer-readonly" />
+              </div>
+            </>
+          )}
         </div>
+        {p.assignmentWarnings && p.assignmentWarnings.length > 0 ? (
+          <ul className="mt-2 space-y-0.5 text-[11px] text-amber-600">
+            {p.assignmentWarnings.map((w) => (
+              <li key={w}>{w.replace(/_/g, " ")}</li>
+            ))}
+          </ul>
+        ) : null}
         <p className="mt-2 text-[11px] leading-snug text-[var(--trk-text-muted)]">
-          Use <span className="font-medium text-[var(--trk-text)]">Mark ready</span> for draft → ready. Driver, truck,
-          trailer, and trip status are set on the Trip, not on the Load.
+          {editable("Assignment") && !p.readOnly && !p.activeTripId && p.setDriverId
+            ? "Optional before Create load — choosing a driver creates a trip automatically. Equipment is stored on the Trip, not the Load."
+            : "Driver, truck, and trailer are set on the Trip, not on the Load."}
         </p>
         {p.activeTripId != null && p.activeTripId > 0 ? (
           <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
@@ -641,7 +765,12 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               No stops yet — add pickup and delivery.
             </p>
           ) : (
-            p.sortedDraftStops.map((stop, idx) => (
+            p.sortedDraftStops.map((stop, idx) => {
+              const stopType = (stop.stop_type || "").toUpperCase();
+              const sectionIndex = p.sortedDraftStops
+                .slice(0, idx)
+                .filter((s) => (s.stop_type || "").toUpperCase() === stopType).length;
+              return (
               <StopDenseCard
                 key={stop._key}
                 stop={stop}
@@ -652,8 +781,10 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 removeStop={p.removeStop}
                 moveStop={p.moveStop}
                 focusDoc={p.focusDoc}
+                sectionIndex={sectionIndex}
               />
-            ))
+              );
+            })
           )}
         </div>
         </div>
@@ -672,6 +803,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.freightMode}
               onChange={(e) => p.setFreightMode(e.target.value)}
+              {...bindFieldDoc(docFocusForFreightHints(p.freightMode, ["mode", "ftl", "ltl", "freight"]))}
             />
           </div>
           <div>
@@ -681,12 +813,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.equipmentType}
               tabIndex={p.verificationTabIndex.get("equipmentType")}
               onChange={(e) => p.setEquipmentType(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [p.equipmentType, "equipment", "trailer", "van", "reefer", "flatbed"],
-                  fallbackToken: "equipment",
-                })
-              }
+              {...bindFieldDoc(
+                docFocusForFreightHints(p.equipmentType, ["equipment", "trailer", "van", "reefer", "flatbed"]),
+              )}
             />
           </div>
           <div>
@@ -696,22 +825,18 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.trailerType}
               tabIndex={p.verificationTabIndex.get("trailerType")}
               onChange={(e) => p.setTrailerType(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [
-                    p.trailerType,
-                    "trailer type",
-                    "trailer",
-                    "equipment",
-                    "dry van",
-                    "reefer",
-                    "flatbed",
-                    "step deck",
-                    "53",
-                  ],
-                  fallbackToken: "trailer",
-                })
-              }
+              {...bindFieldDoc(
+                docFocusForFreightHints(p.trailerType, [
+                  "trailer type",
+                  "trailer",
+                  "equipment",
+                  "dry van",
+                  "reefer",
+                  "flatbed",
+                  "step deck",
+                  "53",
+                ]),
+              )}
             />
           </div>
           <div>
@@ -720,6 +845,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.trailerSize}
               onChange={(e) => p.setTrailerSize(e.target.value)}
+              {...bindFieldDoc(docFocusForFreightHints(p.trailerSize, ["trailer size", "length", "53", "48", "ft"]))}
             />
           </div>
           <div className="sm:col-span-2">
@@ -729,20 +855,16 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.commodity}
               tabIndex={p.verificationTabIndex.get("commodity")}
               onChange={(e) => p.setCommodity(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [
-                    p.commodity,
-                    "commodity",
-                    "product",
-                    "freight",
-                    "description",
-                    "cargo",
-                    "sku",
-                  ],
-                  fallbackToken: "commodity",
-                })
-              }
+              {...bindFieldDoc(
+                docFocusForFreightHints(p.commodity, [
+                  "commodity",
+                  "product",
+                  "freight",
+                  "description",
+                  "cargo",
+                  "sku",
+                ]),
+              )}
             />
           </div>
           <div>
@@ -753,20 +875,16 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               value={p.estimatedWeight}
               tabIndex={p.verificationTabIndex.get("estimatedWeight")}
               onChange={(e) => p.setEstimatedWeight(e.target.value)}
-              onFocus={() =>
-                p.focusDoc({
-                  tokens: [
-                    p.estimatedWeight,
-                    "weight",
-                    "lbs",
-                    "lb",
-                    "pounds",
-                    "gross",
-                    "net weight",
-                  ],
-                  fallbackToken: "weight",
-                })
-              }
+              {...bindFieldDoc(
+                docFocusForFreightHints(p.estimatedWeight, [
+                  "weight",
+                  "lbs",
+                  "lb",
+                  "pounds",
+                  "gross",
+                  "net weight",
+                ]),
+              )}
             />
           </div>
           <div>
@@ -775,6 +893,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.hazmat}
               onChange={(e) => p.setHazmat(e.target.value as "unset" | "yes" | "no")}
+              {...bindFieldDoc(docFocusForFreightHints(p.hazmat === "yes" ? "hazmat" : "", ["hazmat", "hazardous", "dg"]))}
             >
               <option value="unset">— Unset —</option>
               <option value="yes">Yes</option>
@@ -787,6 +906,15 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.temperatureRequirement}
               onChange={(e) => p.setTemperatureRequirement(e.target.value)}
+              {...bindFieldDoc(
+                docFocusForFreightHints(p.temperatureRequirement, [
+                  "temperature",
+                  "temp",
+                  "reefer",
+                  "frozen",
+                  "continuous",
+                ]),
+              )}
             />
           </div>
           <div>
@@ -795,6 +923,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className={I}
               value={p.palletCaseCount}
               onChange={(e) => p.setPalletCaseCount(e.target.value)}
+              {...bindFieldDoc(
+                docFocusForFreightHints(p.palletCaseCount, ["pallet", "pallets", "case", "cases", "pieces", "qty"]),
+              )}
             />
           </div>
         </div>

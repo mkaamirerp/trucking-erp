@@ -1,5 +1,5 @@
 /**
- * Task 12 — Create load must navigate to /loads/:id after promote.
+ * Create load must navigate to dispatch home after promote so the load appears in Loads to assign.
  */
 import { describe, expect, it } from "vitest";
 
@@ -21,8 +21,11 @@ describe("load workspace promote navigation (Task 12)", () => {
     expect(pageSource).toContain("workspaceDraft?.status === \"draft\" && workspaceDraft.id");
   });
 
-  it("navigates to load detail after promote with validated load id", () => {
-    expect(pageSource).toContain("navigate(OPS.LOAD_DETAIL(loadId), { replace: true })");
+  it("navigates to dispatch home after promote with validated load id", () => {
+    expect(pageSource).toContain("navigate(OPS.DASHBOARD, { replace: true })");
+    expect(pageSource).toMatch(
+      /const loadId = Number\(result\.load_id\)[\s\S]*navigate\(OPS\.DASHBOARD/,
+    );
   });
 
   it("remounts workspace for load detail but not new→draft (parse timer)", () => {

@@ -12,7 +12,11 @@ from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.models.load import Load
-from app.schemas.dispatch_hints import TruckSuggestedTrailerOut
+from app.schemas.dispatch_hints import TruckAssignmentHintsOut, TruckSuggestedTrailerOut
+from app.services.equipment_assignment_context import (
+    assignment_suggestion_to_hints,
+    suggest_assignment_for_truck,
+)
 from app.schemas.truck import TruckCreate, TruckResponse, TruckUpdate
 from app.services import trucks as trucks_service
 
@@ -55,6 +59,21 @@ async def list_trucks(
     )
     items = [TruckResponse.model_validate(item) for item in paged["items"]]
     return {**paged, "items": items}
+
+
+@router.get("/{truck_id}/assignment-hints", response_model=TruckAssignmentHintsOut)
+async def get_truck_assignment_hints(
+    truck_id: int,
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    truck = await trucks_service.get_truck(db, tenant_id, truck_id)
+    if not truck:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Truck not found")
+    suggestion = await suggest_assignment_for_truck(db, tenant_id, truck_id)
+    payload = assignment_suggestion_to_hints(suggestion, anchor_truck_id=truck_id)
+    return TruckAssignmentHintsOut(**payload)
 
 
 @router.get("/{truck_id}/suggested-trailer", response_model=TruckSuggestedTrailerOut)

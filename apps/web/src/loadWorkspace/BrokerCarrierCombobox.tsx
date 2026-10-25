@@ -11,6 +11,7 @@ type Props = {
   brokerNameSnapshot: string;
   disabled?: boolean;
   onPick: (brokerId: number | null, nameSnapshot: string) => void;
+  docFocusHandlers?: { onFocus?: () => void; onClick?: () => void };
 };
 
 export default function BrokerCarrierCombobox({
@@ -19,6 +20,7 @@ export default function BrokerCarrierCombobox({
   brokerNameSnapshot,
   disabled,
   onPick,
+  docFocusHandlers,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(brokerNameSnapshot);
@@ -83,7 +85,11 @@ export default function BrokerCarrierCombobox({
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          setOpen(true);
+          docFocusHandlers?.onFocus?.();
+        }}
+        onClick={() => docFocusHandlers?.onClick?.()}
         onChange={(e) => {
           const v = e.target.value;
           setQuery(v);

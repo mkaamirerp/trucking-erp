@@ -13,7 +13,10 @@ import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
   createPlannedTrip,
+  createTripForLoadAssignment,
   createLoadWorkspaceDraft,
+  getDriverAssignmentHints,
+  getTruckAssignmentHints,
   discardLoadWorkspaceDraft,
   fetchLoadRateConfirmationPdfObjectUrl,
   fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
@@ -68,6 +71,8 @@ import {
   workspaceFieldsFromDraftJson,
   type WorkspaceDraftFields,
   buildVerificationTabIndexMap,
+  findBestDocLineIndex,
+  type DocFocusOpts,
   type LoadPersistParams,
   emptyIntakeProposed,
   initialManualCreateStops,
@@ -245,10 +250,9 @@ function ReferenceTextRail({
         <span className={wsSectionTitle}>{title}</span>
         <p className="mt-1 text-[11px] leading-snug text-[var(--trk-text-muted)]">{hint}</p>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div ref={docScrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
         {docLines.length ? (
           <div
-            ref={docScrollRef}
             className="rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] p-2 font-mono text-[11px] leading-snug text-[var(--trk-text)]"
           >
             {docLines.map((line, i) => (
@@ -425,6 +429,39 @@ function LoadWorkspacePage() {
   const [draftConflict, setDraftConflict] = useState<{ serverVersion: number | null } | null>(null);
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
+  const onAssignmentDriverChange = useCallback(async (id: number | null) => {
+    if (!id) {
+      setTruckId(null);
+      setTrailerId(null);
+      setAssignmentWarnings([]);
+      return;
+    }
+    try {
+      const hints = await getDriverAssignmentHints(id);
+      setAssignmentWarnings(hints.warnings ?? []);
+      setTruckId(hints.truck_id ?? null);
+      setTrailerId(hints.trailer_id ?? null);
+    } catch {
+      setAssignmentWarnings([]);
+    }
+  }, []);
+
+  const onAssignmentTruckChange = useCallback(async (id: number | null) => {
+    if (!id) {
+      setTrailerId(null);
+      setAssignmentWarnings([]);
+      return;
+    }
+    try {
+      const hints = await getTruckAssignmentHints(id);
+      setAssignmentWarnings(hints.warnings ?? []);
+      if (hints.driver_id != null) setDriverId(hints.driver_id);
+      setTrailerId(hints.trailer_id ?? null);
+    } catch {
+      setAssignmentWarnings([]);
+    }
+  }, []);
+
   const onCreatePlannedTrip = useCallback(async () => {
     if (
       !load ||
@@ -485,6 +522,7 @@ function LoadWorkspacePage() {
   const [driverId, setDriverId] = useState<number | null>(null);
   const [truckId, setTruckId] = useState<number | null>(null);
   const [trailerId, setTrailerId] = useState<number | null>(null);
+  const [assignmentWarnings, setAssignmentWarnings] = useState<string[]>([]);
   const [customsBrokerId, setCustomsBrokerId] = useState<number | null>(null);
   const [internalNotes, setInternalNotes] = useState("");
   const [parseBusy, setParseBusy] = useState(false);
@@ -583,35 +621,27 @@ function LoadWorkspacePage() {
   );
 
   const focusDoc = useCallback(
-    (opts: { tokens: string[]; fallbackToken?: string }) => {
-      if (!docLines.length) return;
-      const tokens = (opts.tokens || [])
-        .map((t) => (t || "").trim())
-        .filter(Boolean)
-        .slice(0, 6);
-      const needle = (tokens[0] || opts.fallbackToken || "").toLowerCase();
-      if (!needle) return;
-      let bestIdx = -1;
-      let bestScore = -1;
-      for (let i = 0; i < docLines.length; i++) {
-        const line = docLines[i].toLowerCase();
-        if (!line) continue;
-        let score = 0;
-        for (const t of tokens) {
-          const tl = t.toLowerCase();
-          if (tl && line.includes(tl)) score += Math.min(8, tl.length);
-        }
-        if (line.includes(needle)) score += 10;
-        if (score > bestScore) {
-          bestScore = score;
-          bestIdx = i;
-        }
-      }
+    (opts: DocFocusOpts) => {
+      const bestIdx = findBestDocLineIndex(docLines, opts);
       if (bestIdx < 0) return;
       setActiveDocLine(bestIdx);
       requestAnimationFrame(() => {
-        const el = docLineRefs.current.get(bestIdx);
-        if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+        const lineEl = docLineRefs.current.get(bestIdx);
+        const scrollEl = docScrollRef.current;
+        if (!lineEl) return;
+        if (scrollEl) {
+          const lineRect = lineEl.getBoundingClientRect();
+          const scrollRect = scrollEl.getBoundingClientRect();
+          const lineHeight = lineRect.height;
+          const viewHeight = scrollEl.clientHeight;
+          const relativeTop = lineRect.top - scrollRect.top + scrollEl.scrollTop;
+          scrollEl.scrollTo({
+            top: Math.max(0, relativeTop - viewHeight / 2 + lineHeight / 2),
+            behavior: "smooth",
+          });
+        } else {
+          lineEl.scrollIntoView({ block: "center", behavior: "smooth" });
+        }
       });
     },
     [docLines],
@@ -1609,7 +1639,16 @@ function LoadWorkspacePage() {
       if (!Number.isFinite(loadId) || loadId <= 0) {
         throw new Error("Create load succeeded but the server did not return a load id.");
       }
-      navigate(OPS.LOAD_DETAIL(loadId), { replace: true });
+      if (driverId != null && driverId > 0) {
+        const trip = await createTripForLoadAssignment(loadId, {
+          driver_id: driverId,
+          truck_id: truckId,
+          trailer_id: trailerId,
+        });
+        navigate(OPS.TRIP_DETAIL(trip.id), { replace: true });
+      } else {
+        navigate(OPS.DASHBOARD, { replace: true });
+      }
     } catch (e: unknown) {
       const c = parseLoadWorkspaceDraftVersionConflict(e);
       if (c) {
@@ -2384,11 +2423,11 @@ function LoadWorkspacePage() {
               hint={
                 workspaceMode === "manual" ? (
                   workspaceReferenceText.trim() ? (
-                    <>Extracted PDF text for verification. Tab fields in the form to highlight matching lines.</>
+                    <>Extracted PDF text for verification. Click or tab a field to highlight matching lines.</>
                   ) : (
                     <>
                       Mirrors <code className="rounded bg-[var(--trk-border)] px-1 text-[10px]">internal_notes</code>. Edit in Notes below.
-                      Tab fields to highlight lines.
+                      Click or tab fields to highlight lines.
                     </>
                   )
                 ) : (
@@ -2601,6 +2640,12 @@ function LoadWorkspacePage() {
             driverId={driverId}
             truckId={truckId}
             trailerAssetId={trailerId}
+            setDriverId={showManualDraftActions ? setDriverId : undefined}
+            setTruckId={showManualDraftActions ? setTruckId : undefined}
+            setTrailerAssetId={showManualDraftActions ? setTrailerId : undefined}
+            assignmentWarnings={assignmentWarnings}
+            onAssignmentDriverChange={showManualDraftActions ? onAssignmentDriverChange : undefined}
+            onAssignmentTruckChange={showManualDraftActions ? onAssignmentTruckChange : undefined}
             activeTripId={workspaceMode === "detail" && load ? load.active_trip_id ?? null : null}
             customsBrokerId={customsBrokerId}
             internalNotes={internalNotes}

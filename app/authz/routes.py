@@ -267,6 +267,7 @@ def _rows() -> tuple[RouteBinding, ...]:
             _bind("POST", f"{_API}/trucks", "assets", "assets.trucks", "manage", "write", None),
             _bind("GET", f"{_API}/trucks", "assets", "assets.trucks", "view", "read", None),
             _bind("GET", f"{_API}/trucks/{{truck_id}}/suggested-trailer", "assets", "assets.trucks", "view", "read", None),
+            _bind("GET", f"{_API}/trucks/{{truck_id}}/assignment-hints", "assets", "assets.trucks", "view", "read", None),
             _bind("GET", f"{_API}/trucks/{{truck_id}}", "assets", "assets.trucks", "view", "read", None),
             _bind("PATCH", f"{_API}/trucks/{{truck_id}}", "assets", "assets.trucks", "manage", "write", None),
             _bind("POST", f"{_API}/trailers", "assets", "assets.trailers", "manage", "write", None),

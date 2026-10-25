@@ -396,74 +396,542 @@ export function initialManualCreateStops(): DraftStop[] {
   return [newDraftStop(0, "PICKUP"), newDraftStop(1, "DELIVERY")];
 }
 
-export function docFocusForStopAddress(stop: DraftStop): { tokens: string[]; fallbackToken?: string } {
-  const type = (stop.stop_type || "").toUpperCase();
-  const isPickup = type === "PICKUP";
-  const isDelivery = type === "DELIVERY" || type === "DROP";
-  const parts = [stop.street, stop.city, stop.state_or_province, stop.postal_code, stop.facility_name]
-    .map((x) => (x ?? "").trim())
-    .filter(Boolean);
-  const tokens = [
-    ...parts.slice(0, 6),
-    ...(isPickup ? ["pickup", "pick up", "origin", "shipper", "ship from", "pu", "load at"] : []),
-    ...(isDelivery ? ["delivery", "deliver", "drop", "consignee", "ship to", "dest", "unload"] : []),
+/** Options for matching a form field to a line in extracted RC / internal_notes text. */
+export type DocFocusOpts = {
+  /** Primary field value — highest priority; matching uses normalized variants. */
+  primaryValue?: string;
+  /** Additional values (e.g. formatted + raw) beyond `primaryValue`. */
+  extraValues?: string[];
+  /** Context keywords — tie-breakers only; not used alone when `primaryValue` is set. */
+  hintTokens?: string[];
+  /** Legacy combined list; prefer `primaryValue` + `hintTokens`. */
+  tokens?: string[];
+  fallbackToken?: string;
+  /** Lines containing these start the Nth section (0-based `sectionIndex`). */
+  sectionStartMatchers?: string[];
+  /** First line after the section start that contains any of these ends the window (exclusive). */
+  sectionEndMatchers?: string[];
+  /** @deprecated Use sectionStartMatchers */
+  sectionMatchers?: string[];
+  sectionIndex?: number;
+};
+
+const DOC_FOCUS_MIN_PRIMARY_SCORE = 28;
+const DOC_FOCUS_MIN_HINT_ONLY_SCORE = 12;
+
+const DOC_FOCUS_GENERIC_TOKENS = new Set(
+  [
+    "rate",
+    "linehaul",
+    "ref",
+    "reference",
+    "pickup",
+    "pick up",
+    "delivery",
+    "deliver",
+    "drop",
     "address",
     "location",
-  ];
-  return {
-    tokens,
-    fallbackToken: parts[0] || (isPickup ? "pickup" : isDelivery ? "delivery" : "address"),
-  };
-}
-
-export function docFocusForStopAppointment(stop: DraftStop): { tokens: string[]; fallbackToken?: string } {
-  const type = (stop.stop_type || "").toUpperCase();
-  const isPickup = type === "PICKUP";
-  const isDelivery = type === "DELIVERY" || type === "DROP";
-  const tokens = [
-    (stop.appointment_date ?? "").trim(),
-    (stop.appointment_time_text ?? "").trim(),
-    (stop.appointment_type ?? "").trim(),
-    ...(isPickup ? ["pickup", "pu appt", "pick up appt", "loading", "origin appt", "shipper appt"] : []),
-    ...(isDelivery
-      ? ["delivery appt", "delivery appointment", "unloading", "receiver appt", "consignee appt"]
-      : []),
+    "equipment",
+    "trailer",
+    "commodity",
+    "weight",
+    "lbs",
+    "lb",
     "appointment",
     "appt",
     "appt.",
     "window",
     "fcfs",
-    "strict",
-  ].filter(Boolean);
-  const fallback =
-    (stop.appointment_time_text || "").trim() ||
-    (stop.appointment_date || "").trim() ||
-    (isPickup ? "pickup" : isDelivery ? "delivery" : "appointment");
-  return { tokens, fallbackToken: fallback };
+    "origin",
+    "shipper",
+    "consignee",
+    "dest",
+    "unload",
+    "broker",
+    "carrier",
+    "contact",
+    "phone",
+    "email",
+    "miles",
+    "mile",
+    "total",
+    "amount",
+    "$",
+    "po",
+    "bol",
+    "order",
+    "product",
+    "freight",
+    "description",
+    "cargo",
+    "sku",
+    "pounds",
+    "gross",
+    "hazmat",
+    "temperature",
+    "temp",
+    "pallet",
+    "case",
+    "mode",
+    "van",
+    "reefer",
+    "flatbed",
+    "dry van",
+    "step deck",
+    "53",
+    "confirmation",
+    "rate con",
+  ].map((s) => s.toLowerCase()),
+);
+
+function isDocFocusValueToken(token: string): boolean {
+  const t = token.trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+  if (DOC_FOCUS_GENERIC_TOKENS.has(lower)) return false;
+  if (/\d/.test(t)) return true;
+  return t.length >= 3;
 }
 
-export function docFocusForStopReference(stop: DraftStop): { tokens: string[]; fallbackToken?: string } {
+/** Collapse whitespace and lowercase for substring checks. */
+export function normalizeDocFocusLine(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function digitsOnlyDocFocus(text: string): string {
+  return text.replace(/\D/g, "");
+}
+
+/** Build search needles for a single field value (currency, dates, phone digits). */
+export function expandDocFocusVariants(raw: string): string[] {
+  const t = raw.trim();
+  if (!t) return [];
+  const out = new Set<string>();
+  out.add(t);
+  out.add(t.toLowerCase());
+  const collapsed = t.replace(/\s+/g, " ");
+  if (collapsed !== t) out.add(collapsed);
+
+  const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const y = iso[1];
+    const m = iso[2];
+    const d = iso[3];
+    const mi = String(parseInt(m, 10));
+    const di = String(parseInt(d, 10));
+    out.add(`${m}/${d}/${y}`);
+    out.add(`${mi}/${di}/${y}`);
+    out.add(`${m}-${d}-${y}`);
+    out.add(`${mi}-${di}-${y}`);
+  }
+
+  const slashDate = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if (slashDate) {
+    const [, mm, dd, yy] = slashDate;
+    const y4 = yy.length === 2 ? `20${yy}` : yy;
+    out.add(`${y4}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`);
+    out.add(`${mm}/${dd}/${y4}`);
+  }
+
+  const moneyDigits = t.replace(/[^\d.]/g, "");
+  if (moneyDigits && /^\d/.test(moneyDigits)) {
+    out.add(moneyDigits);
+    const num = Number.parseFloat(moneyDigits);
+    if (Number.isFinite(num)) {
+      out.add(String(num));
+      if (Number.isInteger(num)) out.add(String(Math.trunc(num)));
+      const withCommas = num.toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+      out.add(withCommas);
+      out.add(`$${withCommas}`);
+      out.add(num.toFixed(2));
+      out.add(`$${num.toFixed(2)}`);
+    }
+  }
+
+  const phoneDigits = digitsOnlyDocFocus(t);
+  if (phoneDigits.length >= 7) {
+    out.add(phoneDigits);
+    if (phoneDigits.length === 10) {
+      out.add(`(${phoneDigits.slice(0, 3)}) ${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`);
+    }
+  }
+
+  const weightDigits = digitsOnlyDocFocus(t);
+  if (weightDigits.length >= 3 && weightDigits !== phoneDigits) out.add(weightDigits);
+
+  return [...out].filter((s) => s.length >= 2 || /\d/.test(s));
+}
+
+function resolveDocFocusNeedles(opts: DocFocusOpts): { primaryNeedles: string[]; hintTokens: string[] } {
+  const hintTokens = [...(opts.hintTokens ?? [])];
+  const primaryNeedles: string[] = [];
+
+  const pushPrimary = (v: string) => {
+    for (const needle of expandDocFocusVariants(v)) {
+      if (!primaryNeedles.includes(needle)) primaryNeedles.push(needle);
+    }
+  };
+
+  if (opts.primaryValue?.trim()) pushPrimary(opts.primaryValue);
+  for (const extra of opts.extraValues ?? []) {
+    if (extra?.trim()) pushPrimary(extra);
+  }
+
+  const legacy = (opts.tokens ?? []).map((t) => (t || "").trim()).filter(Boolean);
+  if (!primaryNeedles.length && legacy.length) {
+    for (const t of legacy) {
+      if (isDocFocusValueToken(t)) pushPrimary(t);
+      else hintTokens.push(t);
+    }
+  } else if (legacy.length) {
+    for (const t of legacy) {
+      if (!isDocFocusValueToken(t)) hintTokens.push(t);
+    }
+  }
+
+  if (!hintTokens.length && opts.fallbackToken?.trim() && !primaryNeedles.length) {
+    if (isDocFocusValueToken(opts.fallbackToken)) pushPrimary(opts.fallbackToken);
+    else hintTokens.push(opts.fallbackToken.trim());
+  }
+
+  return { primaryNeedles, hintTokens };
+}
+
+function lineMatchesPrimaryNeedle(line: string, needle: string): { hit: boolean; score: number } {
+  const normLine = normalizeDocFocusLine(line);
+  const normNeedle = normalizeDocFocusLine(needle);
+  if (!normNeedle) return { hit: false, score: 0 };
+  if (normLine === normNeedle) return { hit: true, score: 100 };
+  if (normLine.includes(normNeedle)) {
+    return { hit: true, score: 42 + Math.min(28, normNeedle.length) };
+  }
+  const lineDigits = digitsOnlyDocFocus(line);
+  const needleDigits = digitsOnlyDocFocus(needle);
+  if (needleDigits.length >= 3 && lineDigits.includes(needleDigits)) {
+    return { hit: true, score: 36 + Math.min(20, needleDigits.length) };
+  }
+  return { hit: false, score: 0 };
+}
+
+function scoreDocLineForFocus(
+  lineRaw: string,
+  primaryNeedles: string[],
+  hintTokens: string[],
+): { score: number; primaryHit: boolean } {
+  const line = lineRaw;
+  if (!normalizeDocFocusLine(line)) return { score: 0, primaryHit: false };
+
+  let score = 0;
+  let primaryHit = false;
+  for (const needle of primaryNeedles) {
+    const m = lineMatchesPrimaryNeedle(line, needle);
+    if (m.hit) {
+      primaryHit = true;
+      score = Math.max(score, m.score);
+    }
+  }
+  if (primaryHit) {
+    for (const h of hintTokens) {
+      const nh = normalizeDocFocusLine(h);
+      if (nh && normalizeDocFocusLine(line).includes(nh)) score += 3;
+    }
+    return { score, primaryHit };
+  }
+  for (const h of hintTokens) {
+    const nh = normalizeDocFocusLine(h);
+    if (nh && normalizeDocFocusLine(line).includes(nh)) score += 5;
+  }
+  return { score, primaryHit: false };
+}
+
+function docFocusFieldOpts(
+  primaryValue: string,
+  hintTokens: string[],
+  section?: Partial<DocFocusOpts>,
+): DocFocusOpts {
+  return {
+    primaryValue,
+    hintTokens,
+    ...section,
+  };
+}
+
+function docLineSectionBounds(
+  docLines: string[],
+  startMatchers: string[],
+  endMatchers: string[],
+  sectionIndex: number,
+): { start: number; end: number } | null {
+  if (!startMatchers.length || sectionIndex < 0) return null;
+  const starts: number[] = [];
+  for (let i = 0; i < docLines.length; i++) {
+    const line = docLines[i].toLowerCase();
+    if (startMatchers.some((m) => line.includes(m.toLowerCase()))) starts.push(i);
+  }
+  if (!starts.length) return null;
+  const start = starts[Math.min(sectionIndex, starts.length - 1)];
+  let end = docLines.length;
+  if (endMatchers.length) {
+    for (let i = start + 1; i < docLines.length; i++) {
+      const line = docLines[i].toLowerCase();
+      if (endMatchers.some((m) => line.includes(m.toLowerCase()))) {
+        end = i;
+        break;
+      }
+    }
+  }
+  return { start, end };
+}
+
+type DocFocusCandidate = { idx: number; score: number; primaryHit: boolean };
+
+function pickBestDocFocusCandidate(
+  docLines: string[],
+  start: number,
+  end: number,
+  primaryNeedles: string[],
+  hintTokens: string[],
+  sectionBonus: boolean,
+): DocFocusCandidate | null {
+  let best: DocFocusCandidate | null = null;
+  for (let i = start; i < end; i++) {
+    const { score, primaryHit } = scoreDocLineForFocus(docLines[i], primaryNeedles, hintTokens);
+    let total = score;
+    if (sectionBonus && score > 0) total += 4;
+    if (total <= 0) continue;
+    if (!best || total > best.score || (total === best.score && primaryHit && !best.primaryHit)) {
+      best = { idx: i, score: total, primaryHit };
+    }
+  }
+  return best;
+}
+
+/** Pick the best line index in extracted document text for field-driven verification focus. */
+export function findBestDocLineIndex(docLines: string[], opts: DocFocusOpts): number {
+  if (!docLines.length) return -1;
+  const { primaryNeedles, hintTokens } = resolveDocFocusNeedles(opts);
+  const hasPrimary = primaryNeedles.length > 0;
+
+  const startMatchers = opts.sectionStartMatchers?.length
+    ? opts.sectionStartMatchers
+    : opts.sectionMatchers;
+  const bounds =
+    startMatchers?.length && opts.sectionIndex != null
+      ? docLineSectionBounds(docLines, startMatchers, opts.sectionEndMatchers ?? [], opts.sectionIndex)
+      : null;
+
+  const tryPick = (start: number, end: number, sectionBonus: boolean) =>
+    pickBestDocFocusCandidate(docLines, start, end, primaryNeedles, hintTokens, sectionBonus);
+
+  let candidate =
+    bounds != null
+      ? tryPick(bounds.start, bounds.end, true)
+      : tryPick(0, docLines.length, false);
+
+  if (hasPrimary && candidate && !candidate.primaryHit) {
+    candidate = null;
+  }
+
+  if (hasPrimary && (!candidate || !candidate.primaryHit)) {
+    const full = tryPick(0, docLines.length, false);
+    if (full?.primaryHit) candidate = full;
+  }
+
+  if (!candidate) return -1;
+
+  if (hasPrimary) {
+    return candidate.primaryHit && candidate.score >= DOC_FOCUS_MIN_PRIMARY_SCORE ? candidate.idx : -1;
+  }
+
+  return candidate.score >= DOC_FOCUS_MIN_HINT_ONLY_SCORE ? candidate.idx : -1;
+}
+
+/** Run doc focus on focus and click (click covers re-selecting an already-focused field). */
+export function bindDocFocus(
+  focusDoc: (opts: DocFocusOpts) => void,
+  opts: DocFocusOpts,
+): { onFocus: () => void; onClick: () => void } {
+  const run = () => focusDoc(opts);
+  return { onFocus: run, onClick: run };
+}
+
+export function docFocusSectionBoundsForStop(stop: DraftStop): {
+  sectionStartMatchers: string[];
+  sectionEndMatchers: string[];
+} | undefined {
   const type = (stop.stop_type || "").toUpperCase();
   const isPickup = type === "PICKUP";
   const isDelivery = type === "DELIVERY" || type === "DROP";
+  if (isPickup) {
+    return {
+      sectionStartMatchers: ["pick up", "pickup", "pu "],
+      sectionEndMatchers: ["delivery", "deliver", "drop", "consignee"],
+    };
+  }
+  if (isDelivery) {
+    return { sectionStartMatchers: ["delivery", "deliver", "drop"], sectionEndMatchers: ["pick up", "pickup"] };
+  }
+  return undefined;
+}
+
+function docFocusStopSectionOpts(stop: DraftStop, sectionIndex: number): Partial<DocFocusOpts> {
+  const bounds = docFocusSectionBoundsForStop(stop);
+  if (!bounds) return {};
+  return { ...bounds, sectionIndex };
+}
+
+function stopTypeHints(stop: DraftStop): string[] {
+  const type = (stop.stop_type || "").toUpperCase();
+  const isPickup = type === "PICKUP";
+  const isDelivery = type === "DELIVERY" || type === "DROP";
+  if (isPickup) return ["pickup", "pick up", "shipper", "origin"];
+  if (isDelivery) return ["delivery", "deliver", "consignee", "receiver"];
+  return [];
+}
+
+export function docFocusForBroker(brokerName: string): DocFocusOpts {
+  const name = brokerName.trim();
+  return docFocusFieldOpts(name, ["broker", "carrier", "logistics", "mc", "dot"]);
+}
+
+export function docFocusForBrokerLoadReference(brokerLoadReference: string): DocFocusOpts {
+  const ref = brokerLoadReference.trim();
+  return docFocusFieldOpts(ref, ["load #", "load no", "reference", "order #", "bol"]);
+}
+
+export function docFocusForBrokerContactName(name: string): DocFocusOpts {
+  return docFocusFieldOpts(name.trim(), ["contact", "dispatcher", "dispatch"]);
+}
+
+export function docFocusForBrokerContactPhone(phone: string, extension: string): DocFocusOpts {
+  const p = phone.trim();
+  const ext = extension.trim();
+  return docFocusFieldOpts(p, ["phone", "tel", "fax", ...(ext ? [`ext ${ext}`, `x${ext}`] : [])]);
+}
+
+export function docFocusForBrokerContactEmail(email: string): DocFocusOpts {
+  return docFocusFieldOpts(email.trim(), ["email", "e-mail", "@"]);
+}
+
+/** @deprecated Use field-specific broker contact helpers */
+export function docFocusForBrokerContact(parts: {
+  name: string;
+  phone: string;
+  email: string;
+}): DocFocusOpts {
+  const name = parts.name.trim();
+  const phone = parts.phone.trim();
+  const email = parts.email.trim();
+  const primary = name || phone || email;
+  return docFocusFieldOpts(primary, ["contact", "phone", "email", "dispatcher"]);
+}
+
+export function docFocusForMoneyField(value: string, kind: "linehaul" | "customer" | "miles"): DocFocusOpts {
+  const v = value.trim();
+  if (kind === "miles") {
+    return docFocusFieldOpts(v, ["miles", "mile", "mi", "distance"]);
+  }
+  return docFocusFieldOpts(v, ["rate", "linehaul", "line haul", "total", "amount", "pay"]);
+}
+
+export function docFocusForFreightHints(fieldValue: string, hints: string[]): DocFocusOpts {
+  return docFocusFieldOpts(fieldValue.trim(), hints);
+}
+
+export function docFocusForStopFacility(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusFieldOpts((stop.facility_name ?? "").trim(), stopTypeHints(stop), {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopStreet(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusFieldOpts((stop.street ?? "").trim(), ["st", "street", "ave", "road", "rd", "blvd"], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopCity(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusFieldOpts((stop.city ?? "").trim(), stopTypeHints(stop), {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopState(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  const state = (stop.state_or_province ?? "").trim();
+  return docFocusFieldOpts(state, stopTypeHints(stop), {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopPostal(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusFieldOpts((stop.postal_code ?? "").trim(), ["zip", "postal"], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopCountry(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusFieldOpts((stop.country ?? "").trim(), ["country"], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+/** Combined address search — avoid for per-field verification; use stop field helpers. */
+export function docFocusForStopAddress(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusForStopStreet(stop, sectionIndex);
+}
+
+export function docFocusForStopAppointmentDate(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  const raw = (stop.appointment_date ?? "").trim();
+  return docFocusFieldOpts(raw, ["appt", "appointment", "date", ...stopTypeHints(stop)], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopAppointmentTime(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  const raw = (stop.appointment_time_text ?? "").trim();
+  return docFocusFieldOpts(raw, ["appt", "appointment", "time", "fcfs", "window", ...stopTypeHints(stop)], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopAppointmentType(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  const raw = (stop.appointment_type ?? "").trim();
+  return docFocusFieldOpts(raw, ["appt", "appointment", "fcfs", "strict", "window"], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+/** @deprecated Use date/time/type-specific helpers */
+export function docFocusForStopAppointment(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
+  return docFocusForStopAppointmentDate(stop, sectionIndex);
+}
+
+export function docFocusForStopReference(stop: DraftStop, sectionIndex = 0): DocFocusOpts {
   const ref = (stop.reference_number ?? "").trim();
-  const tokens = [
-    ref,
-    ...(isPickup ? ["pickup ref", "shipper ref", "origin ref"] : []),
-    ...(isDelivery ? ["delivery ref", "receiver ref", "consignee ref"] : []),
+  const type = (stop.stop_type || "").toUpperCase();
+  const isPickup = type === "PICKUP";
+  const isDelivery = type === "DELIVERY" || type === "DROP";
+  return docFocusFieldOpts(ref, [
+    ...(isPickup ? ["pickup ref", "shipper ref"] : []),
+    ...(isDelivery ? ["delivery ref", "receiver ref"] : []),
     "po",
-    "p.o",
-    "p/o",
     "reference",
     "ref",
-    "ref #",
-    "ref no",
-    "order",
     "bol",
-    "b.o.l",
-    "pickup #",
-  ].filter(Boolean);
-  return { tokens, fallbackToken: ref || "reference" };
+  ], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
+}
+
+export function docFocusForStopNotes(stop: DraftStop, sectionIndex = 0, notes: string): DocFocusOpts {
+  const text = notes.trim();
+  return docFocusFieldOpts(text, ["notes", "instruction", "special", ...stopTypeHints(stop)], {
+    ...docFocusStopSectionOpts(stop, sectionIndex),
+  });
 }
 
 export function buildVerificationTabIndexMap(sortedStops: DraftStop[]): Map<string, number> {

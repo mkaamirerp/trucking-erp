@@ -2333,11 +2333,40 @@ export async function listDrivers(
   return handle<Driver[]>(res);
 }
 
-export type DriverAssignmentHints = { truck_id: number | null; trailer_id: number | null };
+export type EquipmentAssignmentHints = {
+  driver_id?: number | null;
+  truck_id: number | null;
+  trailer_id: number | null;
+  truck_source?: string | null;
+  trailer_source?: string | null;
+  driver_source?: string | null;
+  warnings?: string[];
+};
+
+export type DriverAssignmentHints = EquipmentAssignmentHints;
 
 export async function getDriverAssignmentHints(driverId: number) {
   const res = await fetchWithTenant(`${API_BASE}/drivers/${driverId}/assignment-hints`);
   return handle<DriverAssignmentHints>(res);
+}
+
+export async function getTruckAssignmentHints(truckId: number) {
+  const res = await fetchWithTenant(`${API_BASE}/trucks/${truckId}/assignment-hints`);
+  return handle<EquipmentAssignmentHints>(res);
+}
+
+/** Create planned trip for a load and persist movement assignment on the Trip (not Load). */
+export async function createTripForLoadAssignment(
+  loadId: number,
+  assignment: { driver_id: number | null; truck_id: number | null; trailer_id: number | null },
+): Promise<TripDetail> {
+  const trip = await createPlannedTrip({
+    load_ids: [loadId],
+    driver_id: assignment.driver_id,
+    truck_id: assignment.truck_id,
+    trailer_id: assignment.trailer_id,
+  });
+  return updateTripAssignment(trip.id, assignment);
 }
 
 export async function getTruckSuggestedTrailer(truckId: number) {
