@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Date, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, func
+from sqlalchemy import BigInteger, Date, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -7,6 +7,7 @@ from app.models.base import Base
 class Driver(Base):
     __tablename__ = "drivers"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_drivers_tenant_id_id"),
         ForeignKeyConstraint(
             ["tenant_id", "person_id"],
             ["people.tenant_id", "people.id"],

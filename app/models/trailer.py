@@ -25,6 +25,7 @@ from app.models.base import Base
 class Trailer(Base):
     __tablename__ = "trailers"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_trailers_tenant_id_id"),
         UniqueConstraint("tenant_id", "unit_number", name="uq_trailers_tenant_unit_number"),
         ForeignKeyConstraint(
             ["tenant_id", "owner_person_id"],

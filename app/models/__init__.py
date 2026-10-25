@@ -4,6 +4,7 @@ from app.models.driver import Driver
 from app.models.driver_phone import DriverPhone
 from app.models.truck import Truck
 from app.models.trailer import Trailer
+from app.models.equipment_attachment import DriverEquipmentDefault, EquipmentCurrentAttachment
 from app.models.fleet_document import FleetDocument
 
 from app.models.driver_document import DriverDocument
