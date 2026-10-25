@@ -59,6 +59,7 @@ async def parse_and_attach_workspace_draft_pdf(
     *,
     updated_by_platform_user_id: str | None,
     expected_concurrency_version: int | None = None,
+    continue_anyway: bool = False,
 ) -> tuple[LoadWorkspaceDraft, LoadDocumentParseResponse]:
     current = await db.scalar(
         select(LoadWorkspaceDraft).where(
@@ -88,7 +89,12 @@ async def parse_and_attach_workspace_draft_pdf(
         filename=filename,
         tenant_id=tenant_id,
         db=db,
+        continue_anyway=continue_anyway,
     )
+    if parse.context.get("semantic_outcome") == "blocked_duplicate_review":
+        # Review gate must not store/replace the draft PDF, accepted parse,
+        # or increment concurrency. Continue anyway reuses the same draft.
+        return current, parse
     ctx = dict(parse.context or {})
     ctx["workspace_draft_id"] = str(draft_id)
     parse = parse.model_copy(update={"context": ctx})

@@ -29,6 +29,7 @@ from app.services import load_custody as custody_service
 from app.schemas.load_pod_evidence import LoadPodEvidenceListResponse, LoadPodEvidenceOut
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
+from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
 from app.services.load_pod_evidence import (
     PodEvidenceError,
     assert_pod_storage_key_tenant,
@@ -120,6 +121,7 @@ async def parse_load_workspace_document(
     file: UploadFile = File(...),
     email_thread_id: int | None = Form(None),
     load_id: int | None = Form(None),
+    continue_anyway: bool = Form(False),
     tenant_id: int = Depends(require_tenant),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
@@ -147,11 +149,17 @@ async def parse_load_workspace_document(
             openai_chat_json_schema=None,
             tenant_id=tenant_id,
             db=db,
+            continue_anyway=continue_anyway,
         )
     except UnsafeLoadPdfError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
+        ) from exc
+    except DuplicatePrecheckUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Duplicate check unavailable; AI parsing was not started.",
         ) from exc
 
 

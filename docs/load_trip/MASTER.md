@@ -1285,6 +1285,8 @@ Parser / intake **hydrates / proposes** commercial Load data.
 
 Load review remains **commercial intake**.
 
+**Pre-AI duplicate gate (2026-10-25; review-branch implementation pending tests):** After safe PDF acquisition/usable embedded-text classification for digital files, or after OCR text acquisition for image-only files, run a **tenant-scoped exact SHA-256 lookup against promoted Load commercial PDF evidence before any semantic AI request**. On an exact match, return a review-only result with the matching existing Load/broker/stop/Trip summary; do not call AI, overwrite a workspace draft PDF/accepted parse, or hydrate fields. Operator chooses **Cancel** or **Continue anyway** (explicitly permits the normal AI parse). The checksum is from the actual PDF bytes; it need not be derived from text, and the unchanged digital-PDF AI handoff still sends original PDF + canonical field rules, never duplicate flattened text. Scanned PDFs still use OCR text-only handoff. Mixed-PDF blocked behavior remains. **V1 only catches byte-identical PDFs previously promoted with evidence**; different revisions/re-saved PDFs or abandoned drafts may not match. Broker name shown from the matched Load is informational, not an unreliable pre-AI heuristic filter. Never auto-delete, merge or cancel a Load based on a candidate.
+
 Primary detail: Appendix M; §14.
 
 ---

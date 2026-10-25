@@ -24,6 +24,7 @@ from app.schemas.load_workspace_draft import (
     LoadWorkspaceDraftUpdate,
 )
 from app.services import load_workspace_draft as draft_service
+from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
 from app.services.load_workspace_draft_lifecycle import (
     discard_workspace_draft,
     get_workspace_draft_with_lifecycle,
@@ -134,21 +135,29 @@ async def parse_workspace_draft_document(
     draft_id: uuid.UUID,
     file: UploadFile = File(...),
     expected_concurrency_version: int | None = Form(None),
+    continue_anyway: bool = Form(False),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> LoadWorkspaceDraftParseOut:
     """Parse a rate-confirmation PDF, persist file + accepted parse on the draft (no Load row)."""
-    draft, parse = await parse_and_attach_workspace_draft_pdf(
-        db,
-        tenant_id,
-        tenant_slug,
-        draft_id,
-        file,
-        updated_by_platform_user_id=_platform_user_id(user),
-        expected_concurrency_version=expected_concurrency_version,
-    )
+    try:
+        draft, parse = await parse_and_attach_workspace_draft_pdf(
+            db,
+            tenant_id,
+            tenant_slug,
+            draft_id,
+            file,
+            updated_by_platform_user_id=_platform_user_id(user),
+            expected_concurrency_version=expected_concurrency_version,
+            continue_anyway=continue_anyway,
+        )
+    except DuplicatePrecheckUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Duplicate check unavailable; AI parsing was not started.",
+        ) from exc
     return LoadWorkspaceDraftParseOut(
         draft=LoadWorkspaceDraftOut.model_validate(draft),
         parse=parse,

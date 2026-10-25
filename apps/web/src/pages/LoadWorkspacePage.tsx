@@ -22,6 +22,8 @@ import {
   fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
   getLoadWorkspaceDraft,
   parseLoadWorkspaceDraftDocument,
+  duplicateLoadCandidatesFromParse,
+  type DuplicateLoadCandidate,
   promoteLoadWorkspaceDraft,
   parseLoadWorkspaceDraftVersionConflict,
   updateLoadWorkspaceDraft,
@@ -528,6 +530,10 @@ function LoadWorkspacePage() {
   const [parseBusy, setParseBusy] = useState(false);
   const [parseElapsedSec, setParseElapsedSec] = useState(0);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
+  const [duplicateReview, setDuplicateReview] = useState<{
+    file: File;
+    candidates: DuplicateLoadCandidate[];
+  } | null>(null);
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
   const [lastParseEngineAttribution, setLastParseEngineAttribution] = useState<string | null>(null);
@@ -983,9 +989,11 @@ function LoadWorkspacePage() {
   );
 
   const onParseWorkspacePdf = useCallback(
-    async (file: File) => {
+    async (file: File, continueAnyway = false) => {
       if (!canWorkspaceParsePdf) return;
       if (workspaceMode !== "manual" && isDraftWorkspace && (!draftIdFromRoute || !workspaceDraft)) return;
+      // Local PDF duplicate review must complete BEFORE semantic AI and form hydration.
+      if (!continueAnyway) setDuplicateReview(null);
       // Load Lab / parser: hydrate commercial fields only — no trip creation, assignment, dispatch_trips, or dispatched status.
       setParseBusy(true);
       setParseWarnings([]);
@@ -1000,9 +1008,16 @@ function LoadWorkspacePage() {
           });
           const persisted = await parseLoadWorkspaceDraftDocument(manualDraftId, file, {
             expectedConcurrencyVersion: manualDraft.concurrency_version,
+            continueAnyway,
           });
           const parseRequestMs = performance.now() - parseWallStarted;
           const res = persisted.parse;
+          const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
+          if (duplicateCandidates !== null) {
+            setDuplicateReview({ file, candidates: duplicateCandidates });
+            return; // No accepted parse, stored PDF replacement or form hydration.
+          }
+          setDuplicateReview(null);
           setWorkspaceDraft(persisted.draft);
           setWorkspaceReferenceText(res.raw_text || "");
           replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
@@ -1053,7 +1068,14 @@ function LoadWorkspacePage() {
         const res = await parseLoadWorkspaceDocument(file, {
           emailThreadId: hasIntakeThread ? intakeThreadId : undefined,
           loadId: !isManual && Number.isFinite(loadIdFromRoute) ? loadIdFromRoute : undefined,
+          continueAnyway,
         });
+        const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
+        if (duplicateCandidates !== null) {
+          setDuplicateReview({ file, candidates: duplicateCandidates });
+          return; // Do not hydrate the form from an empty review-only parse.
+        }
+        setDuplicateReview(null);
         const parseRequestMs = performance.now() - parseWallStarted;
         const hydration = await hydrateLoadWorkspaceFromParseResponse(
           res,
@@ -2001,6 +2023,62 @@ function LoadWorkspacePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--trk-bg)] text-[var(--trk-text)]">
+      {duplicateReview ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Possible duplicate load"
+            className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] p-5 text-[var(--trk-text)] shadow-xl"
+          >
+            <h2 className="text-base font-semibold">This PDF is already on an existing Load</h2>
+            <p className="mt-2 text-xs text-[var(--trk-text-muted)]">
+              Exact PDF match found before AI parsing. Review the existing Load.
+              Cancel saves the AI cost; Continue anyway performs the normal parse.
+            </p>
+            {duplicateReview.candidates.map((match) => (
+              <div key={match.load_id} className="mt-3 space-y-1 rounded border border-[var(--trk-border)] p-3 text-xs">
+                <div className="font-semibold">
+                  <Link className="underline" to={OPS.LOAD_DETAIL(match.load_id)}>
+                    Load {match.load_number}
+                  </Link>
+                  <span className="ml-2 font-normal">Commercial: {match.load_status}</span>
+                </div>
+                <div>Broker: {match.broker_name || "Not recorded"} · Broker reference: {match.broker_load_reference || "—"}</div>
+                <div>{match.pickup || "Pickup unknown"} → {match.delivery || "Delivery unknown"}</div>
+                <div>
+                  Trip: {match.trip_id == null ? "None" : `#${match.trip_id} (${match.trip_status || "unknown"})`}
+                  {" · "}Driver: {match.driver_id ?? "—"} · Truck: {match.truck_id ?? "—"} · Trailer: {match.trailer_id ?? "—"}
+                </div>
+                <p className="text-[10px] text-[var(--trk-text-muted)]">
+                  Trip information describes a matching Load's assignment, not necessarily today's physical equipment.
+                </p>
+              </div>
+            ))}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={parseBusy}
+                className={toolBtnSecondary}
+                onClick={() => {
+                  setDuplicateReview(null);
+                  setToolbarMessage({ text: "Duplicate PDF cancelled before AI parsing.", tone: "warning" });
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={parseBusy}
+                className={toolBtnSecondary}
+                onClick={() => void onParseWorkspacePdf(duplicateReview.file, true)}
+              >
+                Continue anyway — parse PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <header className="z-10 shrink-0 border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
         <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
             <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>

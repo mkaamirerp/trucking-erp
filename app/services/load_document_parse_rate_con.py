@@ -49,6 +49,7 @@ from app.services.load_parser_openai_handoff_v2 import (
 from app.services.load_parser_pdf_acquisition import PDF_SCANNED, acquire_load_parser_pdf_pages
 from app.services.load_parser_pdf_ocr import ocr_load_parser_pdf_pages
 from app.services.load_parser_pdf_safety import validate_load_parser_pdf
+from app.services.load_parser_duplicate_precheck import find_exact_pdf_duplicate_candidates
 from app.services.load_parser_tenant_identity_exclusion import (
     get_load_parser_tenant_identity_exclusion,
 )
@@ -83,6 +84,7 @@ async def parse_pdf_bytes_to_load_document_response(
     filename: str,
     openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     forensic_enabled: bool = False,
+    continue_anyway: bool = False,
 ) -> LoadDocumentParseResponse:
     """Parse a rate-confirmation PDF into ``LoadDocumentParseResponse`` (New Load hydration)."""
     _ = forensic_enabled
@@ -135,7 +137,21 @@ async def parse_pdf_bytes_to_load_document_response(
             acquisition=acquisition,
             base_warnings=base_warnings,
             openai_chat_json_schema=openai_chat_json_schema,
+            continue_anyway=continue_anyway,
         )
+
+    if not continue_anyway:
+        duplicates = await find_exact_pdf_duplicate_candidates(
+            db, tenant_id=int(tenant_id), pdf_bytes=pdf_bytes
+        )
+        if duplicates:
+            return _duplicate_review_response(
+                filename=fn,
+                raw_text=raw_text,
+                acquisition=acquisition,
+                warnings=base_warnings,
+                candidates=duplicates,
+            )
 
     exclusion, excl_warnings = await _load_tenant_identity_exclusion(
         tenant_db=db, tenant_id=int(tenant_id)
@@ -238,6 +254,7 @@ async def _parse_scanned_image_with_ocr(
     acquisition: dict[str, Any],
     base_warnings: list[str],
     openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None,
+    continue_anyway: bool,
 ) -> LoadDocumentParseResponse:
     """Image-only PDF: OCR pages, then same v2 JSON rules/schema → OpenAI (no PDF bytes)."""
     parse_started = time.perf_counter()
@@ -268,6 +285,19 @@ async def _parse_scanned_image_with_ocr(
         for i, p in enumerate(ocr_pages)
     ]
     raw_text = "\n".join(str(p.get("text") or "") for p in handoff_pages)
+
+    if not continue_anyway:
+        duplicates = await find_exact_pdf_duplicate_candidates(
+            db, tenant_id=int(tenant_id), pdf_bytes=pdf_bytes
+        )
+        if duplicates:
+            return _duplicate_review_response(
+                filename=filename,
+                raw_text=raw_text,
+                acquisition=acquisition,
+                warnings=warnings,
+                candidates=duplicates,
+            )
 
     exclusion, excl_warnings = await _load_tenant_identity_exclusion(
         tenant_db=db, tenant_id=int(tenant_id)
@@ -359,6 +389,34 @@ async def _parse_scanned_image_with_ocr(
         semantic_input="ocr_text",
     )
     return postgres_safe_load_document_parse_response(response)
+
+
+def _duplicate_review_response(
+    *,
+    filename: str,
+    raw_text: str,
+    acquisition: dict[str, Any],
+    warnings: list[str],
+    candidates: list[dict],
+) -> LoadDocumentParseResponse:
+    """Return a review-only result. No semantic call or fields are generated."""
+    return postgres_safe_load_document_parse_response(
+        LoadDocumentParseResponse(
+            document=LoadParseDocumentMeta(filename=filename),
+            extracted=LoadParseExtractedFields(),
+            raw_text=raw_text,
+            warnings=warnings,
+            field_confidence={},
+            context={
+                "parse_path": _PARSE_PATH,
+                "pdf_type": acquisition.get("pdf_type"),
+                "page_count": acquisition.get("page_count"),
+                "semantic_outcome": "blocked_duplicate_review",
+                "duplicate_match_basis": "exact_pdf_sha256",
+                "duplicate_candidates": candidates,
+            },
+        )
+    )
 
 
 def _load_parser_reasoning_effort() -> str | None:

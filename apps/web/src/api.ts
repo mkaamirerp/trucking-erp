@@ -1611,10 +1611,11 @@ export type LoadDocumentParseResponse = {
 /** Multipart PDF upload — hydrates workspace fields only; does not create a load. */
 export async function parseLoadWorkspaceDocument(
   file: File,
-  opts?: { emailThreadId?: number | null; loadId?: number | null },
+  opts?: { emailThreadId?: number | null; loadId?: number | null; continueAnyway?: boolean },
 ) {
   const fd = new FormData();
   fd.append("file", file);
+  if (opts?.continueAnyway) fd.append("continue_anyway", "true");
   if (opts?.emailThreadId != null && Number.isFinite(opts.emailThreadId)) {
     fd.append("email_thread_id", String(opts.emailThreadId));
   }
@@ -1628,6 +1629,31 @@ export async function parseLoadWorkspaceDocument(
   return handle<LoadDocumentParseResponse>(res);
 }
 
+export type DuplicateLoadCandidate = {
+  match_type: "exact_pdf_sha256";
+  load_id: number;
+  load_number: string;
+  broker_name: string | null;
+  broker_load_reference: string | null;
+  load_status: string;
+  pickup: string | null;
+  delivery: string | null;
+  trip_id: number | null;
+  trip_status: string | null;
+  driver_id: number | null;
+  truck_id: number | null;
+  trailer_id: number | null;
+};
+
+/** A blocked duplicate review is NOT a completed parse; never hydrate from it. */
+export function duplicateLoadCandidatesFromParse(
+  parse: LoadDocumentParseResponse,
+): DuplicateLoadCandidate[] | null {
+  if (parse.context?.semantic_outcome !== "blocked_duplicate_review") return null;
+  const candidates = parse.context.duplicate_candidates;
+  return Array.isArray(candidates) ? candidates as DuplicateLoadCandidate[] : [];
+}
+
 export type LoadWorkspaceDraftParseResult = {
   draft: LoadWorkspaceDraft;
   parse: LoadDocumentParseResponse;
@@ -1637,10 +1663,11 @@ export type LoadWorkspaceDraftParseResult = {
 export async function parseLoadWorkspaceDraftDocument(
   draftId: string,
   file: File,
-  opts?: { expectedConcurrencyVersion?: number },
+  opts?: { expectedConcurrencyVersion?: number; continueAnyway?: boolean },
 ) {
   const fd = new FormData();
   fd.append("file", file);
+  if (opts?.continueAnyway) fd.append("continue_anyway", "true");
   if (opts?.expectedConcurrencyVersion != null) {
     fd.append("expected_concurrency_version", String(opts.expectedConcurrencyVersion));
   }
