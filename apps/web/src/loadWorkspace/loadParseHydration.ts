@@ -7,6 +7,7 @@ import {
   applyLoadDocumentParseResponse,
   type ApplyLoadDocumentParseCallbacks,
   type ApplyLoadDocumentParseSummary,
+  type ParseIdentityGuard,
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import type { ParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
 import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
@@ -77,8 +78,9 @@ export async function hydrateLoadWorkspaceFromParseResponse(
   res: LoadDocumentParseResponse,
   cbs: ApplyLoadDocumentParseCallbacks,
   parseHydrationState?: ParseHydrationState,
+  identityGuard?: ParseIdentityGuard,
 ): Promise<LoadWorkspacePdfHydrationResult> {
-  const summary = await applyLoadDocumentParseResponse(res, cbs, parseHydrationState);
+  const summary = await applyLoadDocumentParseResponse(res, cbs, parseHydrationState, identityGuard);
   const ux = computeLoadWorkspacePdfHydrationResult(res, summary);
   return { ...ux, parseHydrationState: summary.parseHydrationState };
 }

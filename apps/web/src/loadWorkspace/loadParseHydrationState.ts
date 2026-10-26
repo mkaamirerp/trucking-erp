@@ -6,6 +6,10 @@ import type { LoadDocumentParseResponse } from "@/api";
 import type { ApplyLoadDocumentParseCallbacks } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import type { LoadPersistParams, WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
 import { filterMeaningfulParsedStops, hasUsefulStopIdentity } from "@/loadWorkspace/loadParseStops";
+import {
+  draftLoadReferencesDifferFromParsedExtract,
+  workspaceReferencesFromParse,
+} from "@/loadWorkspace/loadOperationalReferences";
 
 export type ParseContactFieldKey =
   | "brokerContactName"
@@ -40,6 +44,12 @@ export interface ParseHydrationState {
   manualContactFieldKeys: Set<ParseContactFieldKey>;
   /** Operator edited route stops — re-parse must not replace them silently. */
   stopsRouteManuallyEdited: boolean;
+  /** Dispatcher picked or corrected broker id/name — re-parse must not re-resolve MC/DOT. */
+  brokerIdentityLocked: boolean;
+  /** Dispatcher chose a broker contact row — re-parse must not auto-match a different contact. */
+  brokerContactIdManuallySelected: boolean;
+  /** Operator-reviewed load-level references differ from last parser extract. */
+  loadReferencesManuallyEdited: boolean;
 }
 
 export function createEmptyParseHydrationState(): ParseHydrationState {
@@ -50,6 +60,9 @@ export function createEmptyParseHydrationState(): ParseHydrationState {
     lastAppliedContactValues: new Map(),
     manualContactFieldKeys: new Set(),
     stopsRouteManuallyEdited: false,
+    brokerIdentityLocked: false,
+    brokerContactIdManuallySelected: false,
+    loadReferencesManuallyEdited: false,
   };
 }
 
@@ -61,11 +74,53 @@ function cloneParseHydrationState(state: ParseHydrationState): ParseHydrationSta
     lastAppliedContactValues: new Map(state.lastAppliedContactValues),
     manualContactFieldKeys: new Set(state.manualContactFieldKeys),
     stopsRouteManuallyEdited: state.stopsRouteManuallyEdited,
+    brokerIdentityLocked: state.brokerIdentityLocked,
+    brokerContactIdManuallySelected: state.brokerContactIdManuallySelected,
+    loadReferencesManuallyEdited: state.loadReferencesManuallyEdited,
   };
 }
 
 export function markStopsRouteManuallyEdited(state: ParseHydrationState): void {
   state.stopsRouteManuallyEdited = true;
+}
+
+export function markBrokerIdentityLocked(state: ParseHydrationState): void {
+  state.brokerIdentityLocked = true;
+}
+
+export function markBrokerContactIdManuallySelected(state: ParseHydrationState): void {
+  state.brokerContactIdManuallySelected = true;
+}
+
+export function markLoadReferencesManuallyEdited(state: ParseHydrationState): void {
+  state.loadReferencesManuallyEdited = true;
+}
+
+function normBrokerLabel(v: string | null | undefined): string {
+  return (v ?? "").trim().toLowerCase();
+}
+
+/** Reopen draft: broker id/name no longer matches accepted parse broker snapshot. */
+export function inferBrokerIdentityLocked(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): boolean {
+  if (inferParseManualOverridesFromDraft(fields, ex).has("brokerNameSnapshot")) return true;
+  const parsedName = trimmedNonEmpty(ex.broker_name_snapshot);
+  if (fields.brokerId != null && parsedName != null) {
+    if (normBrokerLabel(fields.brokerNameSnapshot) !== normBrokerLabel(parsedName)) return true;
+  }
+  return false;
+}
+
+export function inferBrokerContactIdManuallySelected(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): boolean {
+  if (fields.brokerContactId == null) return false;
+  if (inferParseContactManualFieldKeys(fields, ex).size > 0) return true;
+  if (inferBrokerIdentityLocked(fields, ex)) return true;
+  return false;
 }
 
 function trimmedNonEmpty(v: string | null | undefined): string | null {
@@ -515,6 +570,12 @@ export function hydrationStateFromDraftAndParse(
     state.manualContactFieldKeys.add(key);
   }
   state.stopsRouteManuallyEdited = draftStopsDifferFromParsedExtract(fields, ex);
+  state.brokerIdentityLocked = inferBrokerIdentityLocked(fields, ex);
+  state.brokerContactIdManuallySelected = inferBrokerContactIdManuallySelected(fields, ex);
+  state.loadReferencesManuallyEdited = draftLoadReferencesDifferFromParsedExtract(
+    fields.loadReferences,
+    ex.references,
+  );
   return state;
 }
 

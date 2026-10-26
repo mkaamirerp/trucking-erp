@@ -1,23 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LoadDocumentParseResponse } from "@/api";
+import { listBrokerContacts, resolveBrokerIdentity } from "@/api";
 import {
   applyLoadDocumentParseResponse,
   buildLoadPersistParamsAfterParseApply,
   persistWorkspaceDraftAfterParse,
 } from "./applyLoadDocumentParseResponse";
 import type { ApplyLoadDocumentParseCallbacks } from "./applyLoadDocumentParseResponse";
+import { hydrateLoadWorkspaceFromParseResponse } from "./loadParseHydration";
 import {
   applyParseScalarHydration,
   createEmptyParseHydrationState,
   hydrationStateFromDraftAndParse,
   inferParseContactConfidenceManualKeys,
+  markBrokerIdentityLocked,
   registerManualParseFieldEdit,
 } from "./loadParseHydrationState";
 import {
   buildWorkspaceDraftJson,
   initialWorkspaceFieldsManual,
   workspaceFieldsFromDraftJson,
+  workspaceFieldsFromLoadPersistParams,
 } from "./loadWorkspaceShared";
+
+vi.mock("@/api", () => ({
+  resolveBrokerIdentity: vi.fn(),
+  listBrokerContacts: vi.fn(),
+}));
 
 function emptyRes(
   extracted: Record<string, unknown> = {},
@@ -35,6 +44,9 @@ function emptyRes(
 function mkCbs(state: {
   rate: string;
   brokerName: string;
+  brokerId: number | null;
+  brokerLoadReference: string;
+  loadReferences: { kind: string; value: string; label?: string }[];
   brokerContactName: string;
   draftStops: unknown[];
 }) {
@@ -42,7 +54,9 @@ function mkCbs(state: {
     setBrokerNameSnapshot: vi.fn((v: string) => {
       state.brokerName = v;
     }),
-    setBrokerId: vi.fn(),
+    setBrokerId: vi.fn((v: number | null) => {
+      state.brokerId = v;
+    }),
     setBrokerContactId: vi.fn(),
     setBrokerContacts: vi.fn(),
     setBrokerContactNameSnapshot: vi.fn((v: string) => {
@@ -50,8 +64,12 @@ function mkCbs(state: {
     }),
     setBrokerContactPhoneSnapshot: vi.fn(),
     setBrokerContactEmailSnapshot: vi.fn(),
-    setBrokerLoadReference: vi.fn(),
-    setLoadReferences: vi.fn(),
+    setBrokerLoadReference: vi.fn((v: string) => {
+      state.brokerLoadReference = v;
+    }),
+    setLoadReferences: vi.fn((v) => {
+      state.loadReferences = v;
+    }),
     setFreightMode: vi.fn(),
     setEquipmentType: vi.fn(),
     setTrailerType: vi.fn(),
@@ -71,9 +89,25 @@ function mkCbs(state: {
   } satisfies ApplyLoadDocumentParseCallbacks;
 }
 
+const parseA = {
+  broker_name_snapshot: "Broker A",
+  broker_mc_number_snapshot: "111",
+  broker_load_reference: "100",
+  references: [{ kind: "po_number", value: "555", label: "PO #" }],
+  rate: 1000,
+};
+
 describe("parse → manual edit → re-parse → persist", () => {
   it("keeps manually corrected rate in draft_json (not new AI extract)", async () => {
-    const live = { rate: "", brokerName: "", brokerContactName: "", draftStops: [] as unknown[] };
+    const live = {
+      rate: "",
+      brokerName: "",
+      brokerId: null,
+      brokerLoadReference: "",
+      loadReferences: [] as { kind: string; value: string }[],
+      brokerContactName: "",
+      draftStops: [] as unknown[],
+    };
     const cbs = mkCbs(live);
     let hydration = createEmptyParseHydrationState();
 
@@ -141,7 +175,15 @@ describe("parse → manual edit → re-parse → persist", () => {
         state_or_province: "TX",
       },
     ];
-    const live = { rate: "", brokerName: "", brokerContactName: "", draftStops: stops };
+    const live = {
+      rate: "",
+      brokerName: "",
+      brokerId: null,
+      brokerLoadReference: "",
+      loadReferences: [],
+      brokerContactName: "",
+      draftStops: stops,
+    };
     const cbs = mkCbs(live);
     const hydration = createEmptyParseHydrationState();
     hydration.stopsRouteManuallyEdited = true;
@@ -152,5 +194,142 @@ describe("parse → manual edit → re-parse → persist", () => {
     const result = await applyLoadDocumentParseResponse(res, cbs, hydration);
     expect(live.draftStops).toEqual(stops);
     expect(result.hydrationReviewNotes.length).toBeGreaterThan(0);
+  });
+
+  it("full commercial review survives re-parse, save draft, and reopen", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 1 } as never);
+    vi.mocked(listBrokerContacts).mockResolvedValue({ items: [] } as never);
+
+    const live = {
+      rate: "",
+      brokerName: "",
+      brokerId: null as number | null,
+      brokerLoadReference: "",
+      loadReferences: [] as { kind: string; value: string; label?: string }[],
+      brokerContactName: "",
+      draftStops: [] as unknown[],
+    };
+    const cbs = mkCbs(live);
+
+    const first = await hydrateLoadWorkspaceFromParseResponse(emptyRes(parseA), cbs);
+    expect(live.brokerId).toBe(1);
+    expect(live.rate).toBe("1000");
+    expect(live.brokerLoadReference).toBe("100");
+    expect(live.loadReferences).toEqual([{ kind: "po_number", value: "555", label: "PO #" }]);
+
+    const reviewed = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 5,
+      brokerLoadReference: "101",
+      loadReferences: [{ kind: "po_number", value: "556", label: "PO #" }],
+      rate: "1500",
+      driverId: 10,
+      truckId: 20,
+      trailerAssetId: 30,
+    };
+    const hydration = first.parseHydrationState;
+    markBrokerIdentityLocked(hydration);
+    hydration.brokerContactIdManuallySelected = true;
+    hydration.loadReferencesManuallyEdited = true;
+    registerManualParseFieldEdit(hydration, "brokerLoadReference", "101");
+    registerManualParseFieldEdit(hydration, "rate", "1500");
+    hydration.manualOverrideKeys.add("brokerLoadReference");
+    hydration.manualOverrideKeys.add("rate");
+
+    const workspaceAtReparse = reviewed;
+    live.brokerId = reviewed.brokerId;
+    live.brokerName = reviewed.brokerNameSnapshot;
+    live.brokerLoadReference = reviewed.brokerLoadReference;
+    live.loadReferences = reviewed.loadReferences;
+    live.rate = reviewed.rate;
+    const reparseRes = emptyRes({
+      ...parseA,
+      rate: 900,
+      broker_load_reference: "100",
+      references: [{ kind: "po_number", value: "555" }],
+    });
+
+    const second = await hydrateLoadWorkspaceFromParseResponse(
+      reparseRes,
+      cbs,
+      hydration,
+      workspaceAtReparse,
+    );
+    expect(live.brokerId).toBe(99);
+    expect(live.rate).toBe("1500");
+    expect(live.brokerLoadReference).toBe("101");
+    expect(live.loadReferences).toEqual([{ kind: "po_number", value: "556", label: "PO #" }]);
+    expect(second.warnings.some((w) => w.includes("Broker A"))).toBe(true);
+
+    const merged = buildLoadPersistParamsAfterParseApply(
+      workspaceAtReparse,
+      reparseRes,
+      second.summary,
+      { driverId: 10, truckId: 20, trailerAssetId: 30 },
+    );
+    const draftJson = buildWorkspaceDraftJson({ ...merged, status: "draft" });
+    expect(draftJson.brokerId).toBe(99);
+    expect(draftJson.brokerNameSnapshot).toBe("Broker B");
+    expect(draftJson.brokerContactId).toBe(5);
+    expect(draftJson.brokerLoadReference).toBe("101");
+    expect(draftJson.loadReferences).toEqual([{ kind: "po_number", value: "556", label: "PO #" }]);
+    expect(draftJson.rate).toBe("1500");
+    expect(draftJson.driverId).toBe(10);
+    expect(draftJson.truckId).toBe(20);
+    expect(draftJson.trailerAssetId).toBe(30);
+
+    const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => ({
+      concurrency_version: 2,
+      draft_json: body.draft_json,
+    }));
+    const saved = await persistWorkspaceDraftAfterParse({
+      draftId: "draft-commercial",
+      draftVersion: 1,
+      res: reparseRes,
+      summary: second.summary,
+      workspaceAtParseStart: workspaceAtReparse,
+      status: "draft",
+      seed: {
+        loadNumber: "",
+        hazmat: "unset",
+        palletCaseCount: "",
+        customsBrokerId: null,
+        existingInternalNotes: "",
+        driverId: 10,
+        truckId: 20,
+        trailerAssetId: 30,
+      },
+      updateDraft,
+      buildDraftJson: buildWorkspaceDraftJson,
+    });
+
+    const reopened = workspaceFieldsFromDraftJson(saved.draft_json ?? {});
+    expect(reopened).toMatchObject({
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 5,
+      brokerLoadReference: "101",
+      rate: "1500",
+      driverId: 10,
+      truckId: 20,
+      trailerAssetId: 30,
+    });
+    expect(reopened.loadReferences).toEqual([{ kind: "po_number", value: "556", label: "PO #" }]);
+
+    const displayFields = workspaceFieldsFromLoadPersistParams(merged, {
+      status: "draft",
+      driverId: 10,
+      truckId: 20,
+      trailerAssetId: 30,
+    });
+    expect(displayFields.brokerLoadReference).toBe(reopened.brokerLoadReference);
+    expect(displayFields.rate).toBe(reopened.rate);
+
+    const provenance = hydrationStateFromDraftAndParse(reopened, reparseRes.extracted);
+    expect(provenance.brokerIdentityLocked).toBe(true);
+    expect(provenance.loadReferencesManuallyEdited).toBe(true);
+    expect(provenance.manualOverrideKeys.has("rate")).toBe(true);
   });
 });

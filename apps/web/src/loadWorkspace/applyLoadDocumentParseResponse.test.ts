@@ -7,8 +7,12 @@ import {
   persistWorkspaceDraftAfterParse,
 } from "./applyLoadDocumentParseResponse";
 import type { LoadDocumentParseResponse } from "@/api";
-import { createEmptyParseHydrationState } from "@/loadWorkspace/loadParseHydrationState";
+import {
+  createEmptyParseHydrationState,
+  markBrokerIdentityLocked,
+} from "@/loadWorkspace/loadParseHydrationState";
 import { buildWorkspaceDraftJson, initialWorkspaceFieldsManual } from "@/loadWorkspace/loadWorkspaceShared";
+import { listBrokerContacts, resolveBrokerIdentity } from "@/api";
 
 vi.mock("@/api", () => ({
   resolveBrokerIdentity: vi.fn(),
@@ -494,5 +498,103 @@ describe("persistWorkspaceDraftAfterParse", () => {
       {},
     );
     expect(params.rate).toBe("1500");
+  });
+
+  it("keeps locked broker id/name and reviewed references from workspace snapshot", () => {
+    const hydration = createEmptyParseHydrationState();
+    markBrokerIdentityLocked(hydration);
+    hydration.brokerContactIdManuallySelected = true;
+    hydration.manualOverrideKeys.add("brokerLoadReference");
+    hydration.loadReferencesManuallyEdited = true;
+    hydration.manualOverrideKeys.add("rate");
+    const summary = {
+      resolvedBrokerId: 1,
+      resolvedBrokerContactId: 2,
+      brokerContactMatched: true,
+      mcOrDotAttempted: true,
+      unresolvedStopCount: 0,
+      parseHydrationState: hydration,
+      hydrationReviewNotes: [],
+    };
+    const workspaceAtParseStart = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 5,
+      brokerLoadReference: "101",
+      loadReferences: [{ kind: "po_number", value: "556", label: "PO #" }],
+      rate: "1500",
+      driverId: 10,
+      truckId: 20,
+      trailerAssetId: 30,
+    };
+    const params = buildLoadPersistParamsAfterParseApply(
+      workspaceAtParseStart,
+      emptyRes({
+        broker_name_snapshot: "Broker A",
+        broker_load_reference: "100",
+        references: [{ kind: "po_number", value: "555" }],
+        rate: 900,
+      }),
+      summary,
+      { driverId: 10, truckId: 20, trailerAssetId: 30 },
+    );
+    expect(params.brokerId).toBe(99);
+    expect(params.brokerNameSnapshot).toBe("Broker B");
+    expect(params.brokerContactId).toBe(5);
+    expect(params.brokerLoadReference).toBe("101");
+    expect(params.loadReferences).toEqual([{ kind: "po_number", value: "556", label: "PO #" }]);
+    expect(params.rate).toBe("1500");
+  });
+});
+
+describe("applyLoadDocumentParseResponse broker identity", () => {
+  it("skips MC/DOT broker resolution when broker identity is locked", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 1 } as never);
+    const setBrokerId = vi.fn();
+    const hydration = createEmptyParseHydrationState();
+    hydration.brokerIdentityLocked = true;
+    const guard = {
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: null,
+      loadReferences: [],
+      brokerLoadReference: "",
+    };
+    const cbs = {
+      setBrokerNameSnapshot: vi.fn(),
+      setBrokerId,
+      setBrokerContactId: vi.fn(),
+      setBrokerContacts: vi.fn(),
+      setBrokerContactNameSnapshot: vi.fn(),
+      setBrokerContactPhoneSnapshot: vi.fn(),
+      setBrokerContactEmailSnapshot: vi.fn(),
+      setBrokerLoadReference: vi.fn(),
+      setLoadReferences: vi.fn(),
+      setFreightMode: vi.fn(),
+      setEquipmentType: vi.fn(),
+      setTrailerType: vi.fn(),
+      setTrailerSize: vi.fn(),
+      setCommodity: vi.fn(),
+      setEstimatedWeight: vi.fn(),
+      setTemperatureRequirement: vi.fn(),
+      setRate: vi.fn(),
+      setCustomerRate: vi.fn(),
+      setMiles: vi.fn(),
+      setInternalNotes: vi.fn(),
+      setDraftStops: vi.fn(),
+    };
+    const result = await applyLoadDocumentParseResponse(
+      emptyRes({
+        broker_mc_number_snapshot: "123456",
+        broker_name_snapshot: "Broker A",
+      }),
+      cbs,
+      hydration,
+      guard,
+    );
+    expect(setBrokerId).not.toHaveBeenCalled();
+    expect(result.resolvedBrokerId).toBe(99);
+    expect(result.hydrationReviewNotes.some((n) => n.includes("Broker A"))).toBe(true);
   });
 });

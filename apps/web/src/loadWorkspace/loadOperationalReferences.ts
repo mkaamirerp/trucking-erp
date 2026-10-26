@@ -31,6 +31,31 @@ export function workspaceReferencesFromParse(
   return refs.filter((r) => (r.kind || "").trim().length > 0 && (r.value || "").trim().length > 0);
 }
 
+function normalizedReferenceRows(refs: OperationalReference[]): Array<{ kind: string; value: string; label: string }> {
+  return refs
+    .map((r) => ({
+      kind: (r.kind || "").trim(),
+      value: (r.value || "").trim(),
+      label: (r.label || "").trim(),
+    }))
+    .filter((r) => r.kind.length > 0 && r.value.length > 0)
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.value.localeCompare(b.value) || a.label.localeCompare(b.label));
+}
+
+/** Stable compare for draft vs parse reference collections (kind/value/label preserved). */
+export function operationalReferencesFingerprint(refs: OperationalReference[] | null | undefined): string {
+  return JSON.stringify(normalizedReferenceRows(refs ?? []));
+}
+
+export function draftLoadReferencesDifferFromParsedExtract(
+  draftRefs: OperationalReference[] | null | undefined,
+  parsedRefs: LoadDocumentParseReference[] | null | undefined,
+): boolean {
+  const parsed = workspaceReferencesFromParse(parsedRefs);
+  if (parsed.length === 0) return false;
+  return operationalReferencesFingerprint(draftRefs) !== operationalReferencesFingerprint(parsed);
+}
+
 export function displayOperationalReferenceLabel(ref: OperationalReference): string {
   const source = trimUsefulLabel(ref.label);
   if (source) return source;

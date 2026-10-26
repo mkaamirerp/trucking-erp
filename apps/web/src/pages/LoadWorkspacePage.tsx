@@ -125,6 +125,8 @@ import {
   createEmptyParseHydrationState,
   hydrationStateFromDraftAndParse,
   inferParseContactConfidenceManualKeys,
+  markBrokerContactIdManuallySelected,
+  markBrokerIdentityLocked,
   markStopsRouteManuallyEdited,
   registerManualContactFieldEdit,
   registerManualParseFieldEdit,
@@ -723,14 +725,26 @@ function LoadWorkspacePage() {
 
   const getParseHydrationCallbacks = useCallback(
     (): ApplyLoadDocumentParseCallbacks => ({
-      setBrokerNameSnapshot,
-      setBrokerId,
-      setBrokerContactId,
+      setBrokerNameSnapshot: (v) => {
+        registerManualParseFieldEdit(parseHydrationRef.current, "brokerNameSnapshot", v);
+        setBrokerNameSnapshot(v);
+      },
+      setBrokerId: (id) => {
+        markBrokerIdentityLocked(parseHydrationRef.current);
+        setBrokerId(id);
+      },
+      setBrokerContactId: (id) => {
+        if (id != null) markBrokerContactIdManuallySelected(parseHydrationRef.current);
+        setBrokerContactId(id);
+      },
       setBrokerContacts,
       setBrokerContactNameSnapshot,
       setBrokerContactPhoneSnapshot,
       setBrokerContactEmailSnapshot,
-      setBrokerLoadReference,
+      setBrokerLoadReference: (v) => {
+        registerManualParseFieldEdit(parseHydrationRef.current, "brokerLoadReference", v);
+        setBrokerLoadReference(v);
+      },
       setLoadReferences,
       setFreightMode,
       setEquipmentType,
@@ -1017,6 +1031,18 @@ function LoadWorkspacePage() {
     [markParseConfidenceFieldEdited],
   );
 
+  const setBrokerIdTracked = useCallback((id: number | null) => {
+    markBrokerIdentityLocked(parseHydrationRef.current);
+    setBrokerId(id);
+  }, []);
+
+  const setBrokerContactIdTracked = useCallback((id: number | null) => {
+    if (id != null) {
+      markBrokerContactIdManuallySelected(parseHydrationRef.current);
+    }
+    setBrokerContactId(id);
+  }, []);
+
   const setBrokerNameSnapshotTracked = useCallback(
     (v: string) => {
       trackParseManualScalar("brokerNameSnapshot", v);
@@ -1147,6 +1173,7 @@ function LoadWorkspacePage() {
             res,
             getParseHydrationCallbacks(),
             parseHydrationRef.current,
+            workspaceAtParseStart,
           );
           parseHydrationRef.current = hydration.parseHydrationState;
           syncParseProvenanceFromMerged(res, hydration.summary, workspaceAtParseStart, parseSeed);
@@ -1200,9 +1227,9 @@ function LoadWorkspacePage() {
         const hydration = await hydrateLoadWorkspaceFromParseResponse(
           res,
           {
-            setBrokerNameSnapshot,
-            setBrokerId,
-            setBrokerContactId,
+            setBrokerNameSnapshot: setBrokerNameSnapshotTracked,
+            setBrokerId: setBrokerIdTracked,
+            setBrokerContactId: setBrokerContactIdTracked,
             setBrokerContacts,
             setBrokerContactNameSnapshot,
             setBrokerContactPhoneSnapshot,
@@ -1224,6 +1251,7 @@ function LoadWorkspacePage() {
             setDraftStops,
           },
           parseHydrationRef.current,
+          workspaceAtParseStart,
         );
         parseHydrationRef.current = hydration.parseHydrationState;
         syncParseProvenanceFromMerged(res, hydration.summary, workspaceAtParseStart, parseSeed);
@@ -2815,9 +2843,9 @@ function LoadWorkspacePage() {
             loadNumber={loadNumber}
             setLoadNumber={setLoadNumber}
             brokerId={brokerId}
-            setBrokerId={setBrokerId}
+            setBrokerId={setBrokerIdTracked}
             brokerContactId={brokerContactId}
-            setBrokerContactId={setBrokerContactId}
+            setBrokerContactId={setBrokerContactIdTracked}
             brokerNameSnapshot={brokerNameSnapshot}
             setBrokerNameSnapshot={setBrokerNameSnapshotTracked}
             brokerContactNameSnapshot={brokerContactNameSnapshot}
