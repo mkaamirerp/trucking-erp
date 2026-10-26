@@ -9,7 +9,13 @@ import {
   listLoads,
   listTrips,
 } from "../api";
-import { formatRouteFromStops, firstPickupAppointmentDate } from "../utils/loadStops";
+import {
+  formatPickupAppointmentLabel,
+  formatRouteFromStops,
+  formatStopCityState,
+  firstPickupStop,
+  lastDropStop,
+} from "../utils/loadStops";
 
 /** Canonical open Trip statuses (Trip operational truth — not legacy Load.status). */
 export const OPEN_TRIP_STATUSES = new Set(["planned", "assigned", "in_progress"]);
@@ -44,15 +50,20 @@ export type InboundYardRow = {
   fmpPlanId: number | null;
 };
 
+export type UnassignedLoadQueueRow = {
+  kind: "unassigned_load";
+  id: number;
+  loadNumber: string;
+  brokerReference: string;
+  pickupLabel: string;
+  origin: string;
+  destination: string;
+  href: string;
+  badge: "Unassigned";
+};
+
 export type AssignQueueRow =
-  | {
-      kind: "unassigned_load";
-      id: number;
-      label: string;
-      sublabel: string;
-      href: string;
-      badge: "Unassigned";
-    }
+  | UnassignedLoadQueueRow
   | {
       kind: "fmp";
       id: number;
@@ -74,6 +85,13 @@ export type AssignQueueRow =
 export type PodPanelState = {
   connected: boolean;
   message: string;
+};
+
+export type UnassignedLoadsPagination = {
+  page: number;
+  size: number;
+  total: number;
+  pageCount: number;
 };
 
 export function formatShortEta(iso: string | null | undefined): string {
@@ -202,18 +220,19 @@ export function buildInboundRows(
 
 export const DISPATCH_UNASSIGNED_LOADS_PAGE_SIZE = 50;
 
-export function buildUnassignedLoadAssignRows(loads: Load[]): AssignQueueRow[] {
+export function buildUnassignedLoadAssignRows(loads: Load[]): UnassignedLoadQueueRow[] {
   return loads.map((load) => {
     const loadNumber = (load.load_number || "").trim() || `Load ${load.id}`;
-    const route = formatRouteFromStops(load.stops ?? []);
-    const pickup = firstPickupAppointmentDate(load.stops) || "—";
-    const rate =
-      load.rate != null && String(load.rate).trim() !== "" ? `$${load.rate}` : "—";
+    const brokerReference = (load.broker_load_reference || "").trim() || "—";
+    const stops = load.stops ?? [];
     return {
       kind: "unassigned_load",
       id: load.id,
-      label: loadNumber,
-      sublabel: `${route} · PU ${pickup} · ${rate}`,
+      loadNumber,
+      brokerReference,
+      pickupLabel: formatPickupAppointmentLabel(stops),
+      origin: formatStopCityState(firstPickupStop(stops)),
+      destination: formatStopCityState(lastDropStop(stops)),
       href: `/loads/${load.id}`,
       badge: "Unassigned",
     };
@@ -287,12 +306,21 @@ export function tripsFetchMayBeIncomplete(fetched: TripListItem[], total: number
   return total > fetched.length;
 }
 
+export function unassignedLoadsPageCount(total: number, size: number): number {
+  if (total <= 0) return 1;
+  return Math.max(1, Math.ceil(total / size));
+}
+
 export type DispatchHomeState = {
   loading: boolean;
   error: string | null;
   partialErrors: string[];
   drivers: DriverAvailabilityRow[];
   inbound: InboundYardRow[];
+  unassignedLoadRows: UnassignedLoadQueueRow[];
+  unassignedPagination: UnassignedLoadsPagination;
+  setUnassignedPage: (page: number) => void;
+  tripFmpQueue: AssignQueueRow[];
   assignQueue: AssignQueueRow[];
   podPanel: PodPanelState;
   refetch: () => void;
@@ -304,11 +332,24 @@ export function useDispatchHomeDashboard(): DispatchHomeState {
   const [partialErrors, setPartialErrors] = useState<string[]>([]);
   const [drivers, setDrivers] = useState<DriverAvailabilityRow[]>([]);
   const [inbound, setInbound] = useState<InboundYardRow[]>([]);
-  const [assignQueue, setAssignQueue] = useState<AssignQueueRow[]>([]);
+  const [unassignedLoadRows, setUnassignedLoadRows] = useState<UnassignedLoadQueueRow[]>([]);
+  const [unassignedTotal, setUnassignedTotal] = useState(0);
+  const [unassignedPage, setUnassignedPage] = useState(1);
+  const [tripFmpQueue, setTripFmpQueue] = useState<AssignQueueRow[]>([]);
 
   const podPanel: PodPanelState = useMemo(
     () => ({ connected: false, message: POD_PANEL_DISCONNECTED_MESSAGE }),
     [],
+  );
+
+  const unassignedPagination: UnassignedLoadsPagination = useMemo(
+    () => ({
+      page: unassignedPage,
+      size: DISPATCH_UNASSIGNED_LOADS_PAGE_SIZE,
+      total: unassignedTotal,
+      pageCount: unassignedLoadsPageCount(unassignedTotal, DISPATCH_UNASSIGNED_LOADS_PAGE_SIZE),
+    }),
+    [unassignedPage, unassignedTotal],
   );
 
   const refetch = useCallback(async () => {
@@ -344,18 +385,21 @@ export function useDispatchHomeDashboard(): DispatchHomeState {
     }
 
     let unassignedLoads: Load[] = [];
+    let unassignedListTotal = 0;
     try {
       const unassigned = await listLoads({
         dispatch_unassigned: true,
-        page: 1,
+        page: unassignedPage,
         size: DISPATCH_UNASSIGNED_LOADS_PAGE_SIZE,
       });
       unassignedLoads = unassigned.items ?? [];
+      unassignedListTotal = unassigned.total ?? unassignedLoads.length;
     } catch (e) {
       partial.push(`unassigned loads: ${e instanceof Error ? e.message : "failed"}`);
     }
 
     const tripsIncomplete = tripItems.length > 0 && tripsFetchMayBeIncomplete(tripItems, tripTotal);
+    const tripAndFmp = buildAssignQueue(fmpItems, tripItems);
 
     setDrivers(
       buildDriverRows(driverList, tripItems, {
@@ -363,18 +407,25 @@ export function useDispatchHomeDashboard(): DispatchHomeState {
       }),
     );
     setInbound(buildInboundRows(fmpItems, tripItems));
-    setAssignQueue(mergeAssignQueue(unassignedLoads, buildAssignQueue(fmpItems, tripItems)));
+    setUnassignedLoadRows(buildUnassignedLoadAssignRows(unassignedLoads));
+    setUnassignedTotal(unassignedListTotal);
+    setTripFmpQueue(tripAndFmp);
 
     setPartialErrors(partial);
     setLoading(false);
     if (partial.length && !driverList.length && !tripItems.length) {
       setError(partial.join(" | "));
     }
-  }, []);
+  }, [unassignedPage]);
 
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  const assignQueue = useMemo(
+    () => [...unassignedLoadRows, ...tripFmpQueue],
+    [unassignedLoadRows, tripFmpQueue],
+  );
 
   return useMemo(
     () => ({
@@ -383,10 +434,26 @@ export function useDispatchHomeDashboard(): DispatchHomeState {
       partialErrors,
       drivers,
       inbound,
+      unassignedLoadRows,
+      unassignedPagination,
+      setUnassignedPage,
+      tripFmpQueue,
       assignQueue,
       podPanel,
       refetch,
     }),
-    [loading, error, partialErrors, drivers, inbound, assignQueue, podPanel, refetch],
+    [
+      loading,
+      error,
+      partialErrors,
+      drivers,
+      inbound,
+      unassignedLoadRows,
+      unassignedPagination,
+      tripFmpQueue,
+      assignQueue,
+      podPanel,
+      refetch,
+    ],
   );
 }

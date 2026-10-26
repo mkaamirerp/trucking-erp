@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Iterable, Sequence
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -733,7 +733,44 @@ async def list_loads(
 
 
 DISPATCH_UNASSIGNED_STORED_STATUSES = frozenset({"ready", "unassigned"})
-DISPATCH_UNASSIGNED_MAX_SIZE = 50
+DISPATCH_UNASSIGNED_MAX_SIZE = 200
+
+
+def _first_pickup_stop_subquery(tenant_id: int):
+    """Earliest PICKUP stop per load (lowest sequence) for dispatch queue sorting."""
+    return (
+        select(
+            LoadStop.load_id.label("pu_load_id"),
+            LoadStop.appointment_date.label("pu_appt_date"),
+            LoadStop.appointment_time_text.label("pu_appt_time"),
+        )
+        .where(
+            LoadStop.tenant_id == tenant_id,
+            func.upper(LoadStop.stop_type) == "PICKUP",
+        )
+        .distinct(LoadStop.load_id)
+        .order_by(LoadStop.load_id.asc(), LoadStop.sequence.asc())
+    ).subquery()
+
+
+def _dispatch_unassigned_pickup_order_clauses(pickup_subq):
+    """Overdue first, then today, then upcoming; loads without pickup date last."""
+    today = func.current_date()
+    pu_date = pickup_subq.c.pu_appt_date
+    has_pickup_date = case((pu_date.is_(None), 1), else_=0)
+    pickup_bucket = case(
+        (pu_date.is_(None), 3),
+        (pu_date < today, 0),
+        (pu_date == today, 1),
+        else_=2,
+    )
+    return (
+        has_pickup_date.asc(),
+        pickup_bucket.asc(),
+        pu_date.asc().nulls_last(),
+        pickup_subq.c.pu_appt_time.asc().nulls_last(),
+        Load.id.asc(),
+    )
 
 
 async def _open_planned_trip_map(
@@ -820,20 +857,24 @@ async def list_dispatch_unassigned_loads(
             _trip_load_is_open_planned_clause(),
         )
     )
+    pickup_sq = _first_pickup_stop_subquery(tenant_id)
     stmt = (
         select(Load)
         .options(
             selectinload(Load.driver),
             selectinload(Load.broker),
             selectinload(Load.stops),
+            selectinload(Load.customs_broker),
+            selectinload(Load.customs_snapshot),
         )
+        .outerjoin(pickup_sq, Load.id == pickup_sq.c.pu_load_id)
         .where(
             Load.tenant_id == tenant_id,
             Load.status.in_(tuple(DISPATCH_UNASSIGNED_STORED_STATUSES)),
             Load.active_trip_id.is_(None),
             ~exists(planned_exists),
         )
-        .order_by(Load.id.desc())
+        .order_by(*_dispatch_unassigned_pickup_order_clauses(pickup_sq))
     )
     if await tenant_has_fmp_schema(db):
         fmp_exists = (

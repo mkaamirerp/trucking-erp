@@ -10,6 +10,7 @@ import {
   isLicenseExpired,
   pickOpenTripForDriver,
   tripsFetchMayBeIncomplete,
+  unassignedLoadsPageCount,
 } from "./useDispatchHomeDashboard";
 import type { Driver, FutureMovementPlan, TripListItem } from "../api";
 
@@ -175,32 +176,36 @@ describe("loads to assign", () => {
   });
 
   it("places unassigned load rows before trip rows without duplicating trip queue entries", () => {
-    const loadRows = buildUnassignedLoadAssignRows([
-      {
-        id: 42,
-        load_number: "Oct-26-0042",
-        status: "ready",
-        stops: [
-          { id: 1, load_id: 42, stop_type: "PICKUP", sequence: 0, city: "Dallas", state_or_province: "TX" },
-          { id: 2, load_id: 42, stop_type: "DELIVERY", sequence: 1, city: "Houston", state_or_province: "TX" },
-        ],
-      } as import("../api").Load,
-    ]);
-    const tripRows = buildAssignQueue([], [trip({ id: 7, trip_number: "T-7", status: "planned", driver_id: null })]);
-    const merged = mergeAssignQueue(
-      [
+    const sampleLoad = {
+      id: 42,
+      load_number: "Oct-26-0042",
+      broker_load_reference: "BR-9900",
+      status: "ready",
+      stops: [
         {
-          id: 42,
-          load_number: "Oct-26-0042",
-          status: "ready",
-          stops: [],
-        } as import("../api").Load,
+          id: 1,
+          load_id: 42,
+          stop_type: "PICKUP",
+          sequence: 0,
+          city: "Dallas",
+          state_or_province: "TX",
+          appointment_date: "2026-10-26",
+          appointment_time_text: "08:00",
+        },
+        { id: 2, load_id: 42, stop_type: "DELIVERY", sequence: 1, city: "Houston", state_or_province: "TX" },
       ],
-      tripRows,
-    );
+    } as import("../api").Load;
+    const loadRows = buildUnassignedLoadAssignRows([sampleLoad]);
+    const tripRows = buildAssignQueue([], [trip({ id: 7, trip_number: "T-7", status: "planned", driver_id: null })]);
+    const merged = mergeAssignQueue([sampleLoad], tripRows);
     expect(merged[0].kind).toBe("unassigned_load");
     expect(merged.some((r) => r.kind === "trip")).toBe(true);
     expect(loadRows[0].badge).toBe("Unassigned");
+    expect(loadRows[0].loadNumber).toBe("Oct-26-0042");
+    expect(loadRows[0].brokerReference).toBe("BR-9900");
+    expect(loadRows[0].pickupLabel).toContain("2026-10-26");
+    expect(loadRows[0].origin).toBe("Dallas, TX");
+    expect(loadRows[0].destination).toBe("Houston, TX");
   });
 
   it("keeps open FMP separate from numbered trips", () => {
@@ -220,6 +225,14 @@ describe("loads to assign", () => {
     );
     expect(rows.some((r) => r.kind === "fmp")).toBe(true);
     expect(rows.some((r) => r.kind === "trip" && r.label === "T-7")).toBe(true);
+  });
+});
+
+describe("unassigned loads pagination", () => {
+  it("computes page count for totals above page size", () => {
+    expect(unassignedLoadsPageCount(101, 50)).toBe(3);
+    expect(unassignedLoadsPageCount(50, 50)).toBe(1);
+    expect(unassignedLoadsPageCount(0, 50)).toBe(1);
   });
 });
 

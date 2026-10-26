@@ -69,7 +69,10 @@ export default function DispatchHomeDashboard() {
     partialErrors,
     drivers,
     inbound,
-    assignQueue,
+    unassignedLoadRows,
+    unassignedPagination,
+    setUnassignedPage,
+    tripFmpQueue,
     podPanel,
     refetch,
   } = useDispatchHomeDashboard();
@@ -188,33 +191,96 @@ export default function DispatchHomeDashboard() {
         </aside>
 
         <main className="flex min-h-0 flex-col gap-2 dispatch-home-center">
-          <Panel title="Loads to assign" count={assignQueue.length} className="flex-[1.2] min-h-0">
-            {loading && !assignQueue.length ? (
-              <p className="px-2.5 py-2 text-[11px] text-slate-500">Loading queue…</p>
-            ) : assignQueue.length === 0 ? (
-              <p className="px-2.5 py-2 text-[11px] text-slate-500">
-                No unassigned loads, open future plans, or planned trips need attention.
-              </p>
+          <Panel
+            title="Unassigned loads"
+            count={unassignedPagination.total}
+            className="flex-[1.2] min-h-0"
+          >
+            {loading && !unassignedLoadRows.length ? (
+              <p className="px-2.5 py-2 text-[11px] text-slate-500">Loading unassigned loads…</p>
+            ) : unassignedPagination.total === 0 ? (
+              <p className="px-2.5 py-2 text-[11px] text-slate-500">No unassigned loads need a first-leg trip.</p>
+            ) : (
+              <>
+                <ul>
+                  {unassignedLoadRows.map((row) => (
+                    <li key={`unassigned-${row.id}`}>
+                      <Link
+                        to={row.href}
+                        className="block border-b border-slate-100 px-2.5 py-1.5 text-left transition-colors hover:bg-slate-50 last:border-b-0"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-[12px] font-medium text-slate-900">{row.loadNumber}</div>
+                            <div className="truncate text-[10px] text-slate-500">
+                              Broker ref {row.brokerReference}
+                            </div>
+                            <div className="truncate text-[10px] text-slate-500">
+                              PU {row.pickupLabel} · {row.origin} → {row.destination}
+                            </div>
+                          </div>
+                          <span className="shrink-0 text-[10px] font-medium text-slate-500">{row.badge}</span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {unassignedPagination.pageCount > 1 ? (
+                  <div
+                    className="flex items-center justify-between gap-2 border-t border-slate-100 px-2.5 py-1.5"
+                    data-testid="unassigned-loads-pagination"
+                  >
+                    <span className="text-[10px] text-slate-500">
+                      Page {unassignedPagination.page} of {unassignedPagination.pageCount} ·{" "}
+                      {unassignedPagination.total} total
+                    </span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        disabled={loading || unassignedPagination.page <= 1}
+                        onClick={() => setUnassignedPage(unassignedPagination.page - 1)}
+                        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        disabled={loading || unassignedPagination.page >= unassignedPagination.pageCount}
+                        onClick={() => setUnassignedPage(unassignedPagination.page + 1)}
+                        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border-t border-slate-100 px-2.5 py-1 text-[10px] text-slate-500">
+                    {unassignedPagination.total} unassigned load{unassignedPagination.total === 1 ? "" : "s"}
+                  </div>
+                )}
+              </>
+            )}
+          </Panel>
+
+          <Panel title="Planned trips & future plans" count={tripFmpQueue.length} className="min-h-0 flex-1">
+            {loading && !tripFmpQueue.length ? (
+              <p className="px-2.5 py-2 text-[11px] text-slate-500">Loading…</p>
+            ) : tripFmpQueue.length === 0 ? (
+              <p className="px-2.5 py-2 text-[11px] text-slate-500">No planned trips or future movement plans need attention.</p>
             ) : (
               <ul>
-                {assignQueue.map((row) => (
+                {tripFmpQueue.map((row) => (
                   <li key={`${row.kind}-${row.id}`}>
                     <RowButton
                       to={row.href}
                       primary={row.label}
-                      secondary={
-                        row.kind === "unassigned_load"
-                          ? row.sublabel
-                          : `${row.sublabel} · ${row.loadCount} load(s)`
-                      }
+                      secondary={`${row.sublabel} · ${row.loadCount} load(s)`}
                       badge={
-                        row.kind === "unassigned_load"
-                          ? row.badge
-                          : row.kind === "fmp"
-                            ? "FMP"
-                            : row.queueKind === "needs_driver"
-                              ? "Driver"
-                              : "Equip"
+                        row.kind === "fmp"
+                          ? "FMP"
+                          : row.queueKind === "needs_driver"
+                            ? "Driver"
+                            : "Equip"
                       }
                     />
                   </li>
@@ -222,8 +288,7 @@ export default function DispatchHomeDashboard() {
               </ul>
             )}
             <div className="border-t border-slate-100 px-2.5 py-1 text-[10px] text-slate-500">
-              Unassigned loads open in the load workspace. Planned trips and future movement plans use their
-              own links above.
+              Unassigned loads open in the load workspace. Trip and FMP links open their execution surfaces.
             </div>
           </Panel>
 

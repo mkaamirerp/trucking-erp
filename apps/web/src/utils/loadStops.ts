@@ -38,6 +38,18 @@ export function firstPickupAppointmentDate(stops: LoadStop[] | null | undefined)
   return firstPickupStop(stops)?.appointment_date ?? null;
 }
 
+/** Dispatch queue: pickup appointment date and time text when present. */
+export function formatPickupAppointmentLabel(stops: LoadStop[] | null | undefined): string {
+  const pu = firstPickupStop(stops);
+  if (!pu) return "—";
+  const d = pu.appointment_date?.trim();
+  const t = pu.appointment_time_text?.trim();
+  if (d && t) return `${d} ${t}`;
+  if (d) return d;
+  if (t) return t;
+  return "—";
+}
+
 /** Load list / dispatch: origin → destination from stops. */
 export function formatRouteFromStops(stops: LoadStop[] | null | undefined): string {
   const from = formatStopCityState(firstPickupStop(stops));
