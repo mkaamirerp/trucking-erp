@@ -89,6 +89,13 @@ import {
 import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttribution";
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
 import {
+  confidenceTierForAppliedLabel,
+  parseConfidenceAppliedChipClasses,
+  parseConfidenceRcPanelClasses,
+  parseConfidenceTierLabel,
+  type ParseConfidenceTier,
+} from "@/loadWorkspace/parseFieldConfidenceUi";
+import {
   draftHasReadyRateConfirmationPdf,
   loadDocumentParseFromAcceptedJson,
   workspacePdfHydrationUxFromDraft,
@@ -536,6 +543,10 @@ function LoadWorkspacePage() {
   } | null>(null);
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
+  const [lastParseFieldConfidence, setLastParseFieldConfidence] = useState<Record<string, string>>({});
+  const [lastParseConfidenceTier, setLastParseConfidenceTier] = useState<ParseConfidenceTier | null>(
+    null,
+  );
   const [lastParseEngineAttribution, setLastParseEngineAttribution] = useState<string | null>(null);
   const [workspaceReferenceText, setWorkspaceReferenceText] = useState("");
   const [workspacePdfPreviewUrl, setWorkspacePdfPreviewUrl] = useState<string | null>(null);
@@ -616,6 +627,8 @@ function LoadWorkspacePage() {
       const ux = workspacePdfHydrationUxFromDraft(draft);
       setParseWarnings(ux.warnings);
       setLastParseAppliedLabels(ux.appliedLabels);
+      setLastParseFieldConfidence(ux.fieldConfidence);
+      setLastParseConfidenceTier(ux.parseConfidenceTier);
       if (draftHasReadyRateConfirmationPdf(draft)) {
         const url = await fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(draft.id);
         replaceWorkspacePdfPreviewUrl(url);
@@ -999,6 +1012,8 @@ function LoadWorkspacePage() {
       setParseWarnings([]);
       setToolbarMessage(null);
       setLastParseAppliedLabels(null);
+      setLastParseFieldConfidence({});
+      setLastParseConfidenceTier(null);
       setLastParseEngineAttribution(null);
       const parseWallStarted = performance.now();
       try {
@@ -1039,6 +1054,8 @@ function LoadWorkspacePage() {
             tone: hydration.toolbar.tone,
           });
           setLastParseAppliedLabels(hydration.appliedLabels);
+          setLastParseFieldConfidence(hydration.fieldConfidence);
+          setLastParseConfidenceTier(hydration.parseConfidenceTier);
           setDraftConflict(null);
           const saved = await persistWorkspaceDraftAfterParse({
             draftId: manualDraftId,
@@ -1122,6 +1139,8 @@ function LoadWorkspacePage() {
           tone,
         });
         setLastParseAppliedLabels(hydration.appliedLabels);
+        setLastParseFieldConfidence(hydration.fieldConfidence);
+        setLastParseConfidenceTier(hydration.parseConfidenceTier);
       } catch (e: unknown) {
         const c = parseLoadWorkspaceDraftVersionConflict(e);
         if (c && isDraftWorkspace) {
@@ -1135,6 +1154,8 @@ function LoadWorkspacePage() {
           setToolbarMessage({ text: msg, tone: "error" });
         }
         setLastParseAppliedLabels(null);
+        setLastParseFieldConfidence({});
+        setLastParseConfidenceTier(null);
         setLastParseEngineAttribution(null);
       } finally {
         setParseBusy(false);
@@ -2451,31 +2472,50 @@ function LoadWorkspacePage() {
           </div>
         ) : null}
         {parseWarnings.length > 0 ? (
-          <div className="mx-auto max-w-[1600px] px-4 py-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-200/90">
-              Parse notes
-            </div>
+          <details className="mx-auto max-w-[1600px] border-b border-[var(--trk-border)] px-4 py-2">
+            <summary className="cursor-pointer list-none text-[10px] font-semibold uppercase tracking-wide text-amber-600 marker:content-none dark:text-amber-200/90 [&::-webkit-details-marker]:hidden">
+              Parse notes ({parseWarnings.length}) — expand for detail
+            </summary>
             <ul className="mt-1 max-h-32 list-disc space-y-0.5 overflow-y-auto pl-4 text-[11px] leading-snug text-[var(--trk-text)]">
               {parseWarnings.map((w, i) => (
                 <li key={i}>{w}</li>
               ))}
             </ul>
-          </div>
+          </details>
         ) : null}
         {lastParseAppliedLabels && lastParseAppliedLabels.length > 0 ? (
-          <div className="mx-auto max-w-[1600px] border-t border-[var(--trk-border)] px-4 py-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
+          <div className="mx-auto max-w-[1600px] border-t border-[var(--trk-border)] px-4 py-2.5">
+            {lastParseConfidenceTier ? (
+              <div
+                className={`mb-2 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold ${parseConfidenceAppliedChipClasses(lastParseConfidenceTier)}`}
+              >
+                RC parse — {parseConfidenceTierLabel(lastParseConfidenceTier)}
+                {lastParseConfidenceTier !== "high"
+                  ? " · Open the RC PDF and verify or edit fields before dispatch."
+                  : " · Spot-check stops and rate before create load."}
+              </div>
+            ) : null}
+            <div
+              className={`text-[11px] font-bold uppercase tracking-wide ${
+                lastParseConfidenceTier
+                  ? parseConfidenceRcPanelClasses(lastParseConfidenceTier).title
+                  : "text-[var(--trk-text-muted)]"
+              }`}
+            >
               Parsed fields applied
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {lastParseAppliedLabels.map((label, i) => (
-                <span
-                  key={`${i}-${label}`}
-                  className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-0.5 font-mono text-[10px] text-[var(--trk-text-muted)]"
-                >
-                  {label}
-                </span>
-              ))}
+              {lastParseAppliedLabels.map((label, i) => {
+                const chipTier = confidenceTierForAppliedLabel(label, lastParseFieldConfidence);
+                return (
+                  <span
+                    key={`${i}-${label}`}
+                    className={`rounded border px-2 py-0.5 text-[11px] font-medium ${parseConfidenceAppliedChipClasses(chipTier)}`}
+                  >
+                    {label}
+                  </span>
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -2499,6 +2539,7 @@ function LoadWorkspacePage() {
               <RateConfirmationPdfPanel
                 objectUrl={workspacePdfPreviewUrl}
                 openInNewTabPath={rateConPdfOpenInNewTabPath}
+                parseConfidenceTier={lastParseConfidenceTier}
               />
             ) : null}
             <div className="overflow-hidden rounded-lg border border-[var(--trk-border)]">

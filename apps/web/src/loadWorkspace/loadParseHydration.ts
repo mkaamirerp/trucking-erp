@@ -12,6 +12,10 @@ import type { ParseHydrationState } from "@/loadWorkspace/loadParseHydrationStat
 import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAppliedLabels";
 import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttribution";
 import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
+import {
+  type ParseConfidenceTier,
+  worstParseConfidenceTier,
+} from "@/loadWorkspace/parseFieldConfidenceUi";
 
 /** Toolbar tone after parse hydration (matches LoadWorkspacePage WorkspaceToolbarTone). */
 export type LoadWorkspacePdfHydrationTone = "success" | "warning" | "error" | "neutral";
@@ -24,6 +28,8 @@ export interface LoadWorkspacePdfHydrationResult {
   toolbar: { text: string; tone: LoadWorkspacePdfHydrationTone };
   appliedLabels: string[] | null;
   engineAttribution: string | null;
+  fieldConfidence: Record<string, string>;
+  parseConfidenceTier: ParseConfidenceTier;
 }
 
 /**
@@ -49,12 +55,16 @@ export function computeLoadWorkspacePdfHydrationResult(
     brokerContactMatched: summary.brokerContactMatched,
   });
   const engineAttribution = buildParseEngineAttribution(res.context ?? undefined);
+  const fieldConfidence = { ...(res.field_confidence ?? {}) };
+  const parseConfidenceTier = worstParseConfidenceTier(fieldConfidence, warnings);
   return {
     summary,
     warnings,
     toolbar: { text: outcome.headline, tone },
     appliedLabels: appliedLabels.length > 0 ? appliedLabels : null,
     engineAttribution,
+    fieldConfidence,
+    parseConfidenceTier,
   };
 }
 

@@ -60,13 +60,20 @@ import {
 
 const L = wsLabelClass;
 const I = wsInputClass;
-/** Dense stop cards — same type scale as rest of form; tighten padding/gaps only */
-const stopLb = `${L} !mb-0 leading-tight`;
-const stopIc = `${I} !py-1 !px-1.5`;
-/** Inner grid inside each stop card (half-width on lg — two columns of stops) */
-const stopGridCol = "grid grid-cols-2 gap-x-1.5 gap-y-0.5";
+/** Dense stop cards — dispatcher scan: location → schedule → notes in few rows */
+const stopLb = `${L} !mb-0 !text-[9px] leading-none tracking-wide`;
+const stopIc = `${I} !py-0.5 !px-1 !text-[12px] leading-tight`;
+const stopGridCol =
+  "grid grid-cols-6 gap-x-1 gap-y-0.5 sm:grid-cols-12 sm:gap-x-1.5";
 const stopIconBtn =
-  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--trk-border)] text-[13px] disabled:opacity-40";
+  "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--trk-border)] text-[12px] disabled:opacity-40";
+
+function stopListGridClass(stopCount: number): string {
+  if (stopCount <= 1) return "grid grid-cols-1 gap-1";
+  if (stopCount === 2) return "grid grid-cols-1 gap-1 lg:grid-cols-2 lg:items-start";
+  if (stopCount === 3) return "grid grid-cols-1 gap-1 md:grid-cols-2 xl:grid-cols-3 xl:items-start";
+  return "grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 xl:items-start";
+}
 
 type StopDenseCardProps = {
   stop: DraftStop;
@@ -102,16 +109,17 @@ function StopDenseCard({
       : "border border-[var(--trk-border)] bg-[var(--trk-surface-2)] text-[var(--trk-text-muted)]";
 
   return (
-    <div className="min-w-0 rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-1.5 py-1">
+    <div className="min-w-0 rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-1 py-0.5">
       <div className="mb-0.5 flex flex-wrap items-center justify-between gap-x-1 gap-y-0.5">
         <div className="flex min-w-0 flex-wrap items-center gap-1">
           <span
-            className={`inline-flex h-7 shrink-0 items-center rounded px-1.5 text-[10px] font-bold uppercase tracking-wide ${pillClass}`}
+            className={`inline-flex h-6 shrink-0 items-center rounded px-1.5 text-[10px] font-bold uppercase tracking-wide ${pillClass}`}
+            title={`Stop ${idx + 1} · sequence ${stop.sequence ?? idx}`}
           >
             {idx + 1}
           </span>
           <select
-            className={`${stopIc} !w-auto min-w-[6.5rem] !py-0.5`}
+            className={`${stopIc} !w-auto min-w-[5.75rem]`}
             aria-label="Stop type"
             value={stop.stop_type}
             onChange={(e) => updateStop(stop._key, { stop_type: e.target.value })}
@@ -120,14 +128,6 @@ function StopDenseCard({
             <option value="DROP">DROP</option>
             <option value="DELIVERY">DELIVERY</option>
           </select>
-          <input
-            className={`${stopIc} !w-12 !px-1 text-center`}
-            inputMode="numeric"
-            title="Sequence"
-            aria-label="Sequence"
-            value={String(stop.sequence ?? 0)}
-            onChange={(e) => updateStop(stop._key, { sequence: parseInt(e.target.value, 10) || 0 })}
-          />
         </div>
         <div className="flex items-center gap-0.5">
           <button
@@ -159,7 +159,7 @@ function StopDenseCard({
         </div>
       </div>
       <div className={stopGridCol}>
-        <div className="col-span-2">
+        <div className="col-span-4 sm:col-span-8">
           <label className={stopLb}>Facility</label>
           <input
             className={stopIc}
@@ -169,17 +169,7 @@ function StopDenseCard({
             {...bind(docFocusForStopFacility(stop, sectionIndex))}
           />
         </div>
-        <div className="col-span-2">
-          <label className={stopLb}>Street</label>
-          <input
-            className={stopIc}
-            value={stop.street ?? ""}
-            tabIndex={verificationTabIndex.get(`${stop._key}::street`)}
-            onChange={(e) => updateStop(stop._key, { street: e.target.value })}
-            {...bind(docFocusForStopStreet(stop, sectionIndex))}
-          />
-        </div>
-        <div className="col-span-2">
+        <div className="col-span-2 sm:col-span-4">
           <label className={stopLb}>Ref #</label>
           <input
             className={stopIc}
@@ -189,7 +179,17 @@ function StopDenseCard({
             {...bind(docFocusForStopReference(stop, sectionIndex))}
           />
         </div>
-        <div>
+        <div className="col-span-6 sm:col-span-12">
+          <label className={stopLb}>Street</label>
+          <input
+            className={stopIc}
+            value={stop.street ?? ""}
+            tabIndex={verificationTabIndex.get(`${stop._key}::street`)}
+            onChange={(e) => updateStop(stop._key, { street: e.target.value })}
+            {...bind(docFocusForStopStreet(stop, sectionIndex))}
+          />
+        </div>
+        <div className="col-span-3 sm:col-span-5">
           <label className={stopLb}>City</label>
           <input
             className={stopIc}
@@ -199,8 +199,8 @@ function StopDenseCard({
             {...bind(docFocusForStopCity(stop, sectionIndex))}
           />
         </div>
-        <div>
-          <label className={stopLb}>State</label>
+        <div className="col-span-1 sm:col-span-2">
+          <label className={stopLb}>St</label>
           <input
             className={stopIc}
             value={stop.state_or_province ?? ""}
@@ -209,7 +209,7 @@ function StopDenseCard({
             {...bind(docFocusForStopState(stop, sectionIndex))}
           />
         </div>
-        <div>
+        <div className="col-span-1 sm:col-span-3">
           <label className={stopLb}>Postal</label>
           <input
             className={stopIc}
@@ -219,7 +219,7 @@ function StopDenseCard({
             {...bind(docFocusForStopPostal(stop, sectionIndex))}
           />
         </div>
-        <div>
+        <div className="col-span-1 sm:col-span-2">
           <label className={stopLb}>Ctry</label>
           <input
             className={stopIc}
@@ -230,7 +230,7 @@ function StopDenseCard({
             onChange={(e) => updateStop(stop._key, { country: e.target.value })}
           />
         </div>
-        <div>
+        <div className="col-span-2 sm:col-span-4">
           <label className={stopLb}>Date</label>
           <input
             className={stopIc}
@@ -245,7 +245,7 @@ function StopDenseCard({
             {...bind(docFocusForStopAppointmentDate(stop, sectionIndex))}
           />
         </div>
-        <div>
+        <div className="col-span-2 sm:col-span-4">
           <label className={stopLb}>Time</label>
           <input
             className={stopIc}
@@ -255,7 +255,7 @@ function StopDenseCard({
             {...bind(docFocusForStopAppointmentTime(stop, sectionIndex))}
           />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-2 sm:col-span-4">
           <label className={stopLb}>Appt type</label>
           <input
             className={stopIc}
@@ -265,10 +265,10 @@ function StopDenseCard({
             {...bind(docFocusForStopAppointmentType(stop, sectionIndex))}
           />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-3 sm:col-span-6">
           <label className={`${stopLb} text-[var(--trk-heading)]`}>Stop notes</label>
           <textarea
-            className={`${stopIc} min-h-[2rem] resize-y`}
+            className={`${stopIc} min-h-[1.35rem] resize-y`}
             rows={1}
             data-testid="stop-notes-input"
             value={stop.notes ?? ""}
@@ -276,10 +276,10 @@ function StopDenseCard({
             {...bind(docFocusForStopNotes(stop, sectionIndex, stop.notes ?? ""))}
           />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-3 sm:col-span-6">
           <label className={`${stopLb} text-[var(--trk-heading)]`}>Commodity notes</label>
           <textarea
-            className={`${stopIc} min-h-[2rem] resize-y`}
+            className={`${stopIc} min-h-[1.35rem] resize-y`}
             rows={1}
             data-testid="commodity-notes-input"
             value={stop.commodity_notes ?? ""}
@@ -759,7 +759,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             Intake: {ip.pickupDeliverySummary}
           </p>
         ) : null}
-        <div className="grid w-full grid-cols-1 gap-1 lg:grid-cols-2 lg:items-start">
+        <div className={stopListGridClass(p.sortedDraftStops.length)}>
           {p.sortedDraftStops.length === 0 ? (
             <p className="col-span-full py-1.5 text-center text-[11px] text-[var(--trk-text-muted)]">
               No stops yet — add pickup and delivery.

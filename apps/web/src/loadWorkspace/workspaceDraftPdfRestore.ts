@@ -20,7 +20,12 @@ export function workspaceReferenceTextFromDraft(draft: LoadWorkspaceDraft): stri
 export function workspacePdfHydrationUxFromDraft(draft: LoadWorkspaceDraft) {
   const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
   if (!accepted) {
-    return { warnings: [] as string[], appliedLabels: null as string[] | null };
+    return {
+      warnings: [] as string[],
+      appliedLabels: null as string[] | null,
+      fieldConfidence: {} as Record<string, string>,
+      parseConfidenceTier: "medium" as const,
+    };
   }
   const ux = computeLoadWorkspacePdfHydrationResult(accepted, {
     resolvedBrokerId: null,
@@ -30,7 +35,12 @@ export function workspacePdfHydrationUxFromDraft(draft: LoadWorkspaceDraft) {
     unresolvedStopCount: 0,
     parseHydrationState: createEmptyParseHydrationState(),
   });
-  return { warnings: ux.warnings, appliedLabels: ux.appliedLabels };
+  return {
+    warnings: ux.warnings,
+    appliedLabels: ux.appliedLabels,
+    fieldConfidence: ux.fieldConfidence,
+    parseConfidenceTier: ux.parseConfidenceTier,
+  };
 }
 
 export function draftHasReadyRateConfirmationPdf(draft: LoadWorkspaceDraft | null | undefined): boolean {
