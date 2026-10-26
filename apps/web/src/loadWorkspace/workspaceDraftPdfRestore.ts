@@ -24,7 +24,7 @@ export function workspacePdfHydrationUxFromDraft(draft: LoadWorkspaceDraft) {
       warnings: [] as string[],
       appliedLabels: null as string[] | null,
       fieldConfidence: {} as Record<string, string>,
-      parseConfidenceTier: "medium" as const,
+      parseConfidenceTier: "neutral" as const,
     };
   }
   const ux = computeLoadWorkspacePdfHydrationResult(accepted, {

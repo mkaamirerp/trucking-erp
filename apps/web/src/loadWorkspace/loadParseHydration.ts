@@ -13,8 +13,8 @@ import { buildWorkspacePdfParseAppliedLabels } from "@/loadWorkspace/loadParseAp
 import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttribution";
 import { describeWorkspacePdfParseOutcome } from "@/loadWorkspace/loadParseOutcome";
 import {
-  type ParseConfidenceTier,
-  worstParseConfidenceTier,
+  type DocumentReviewTier,
+  computeDocumentReviewTier,
 } from "@/loadWorkspace/parseFieldConfidenceUi";
 
 /** Toolbar tone after parse hydration (matches LoadWorkspacePage WorkspaceToolbarTone). */
@@ -29,7 +29,7 @@ export interface LoadWorkspacePdfHydrationResult {
   appliedLabels: string[] | null;
   engineAttribution: string | null;
   fieldConfidence: Record<string, string>;
-  parseConfidenceTier: ParseConfidenceTier;
+  parseConfidenceTier: DocumentReviewTier;
 }
 
 /**
@@ -56,7 +56,7 @@ export function computeLoadWorkspacePdfHydrationResult(
   });
   const engineAttribution = buildParseEngineAttribution(res.context ?? undefined);
   const fieldConfidence = { ...(res.field_confidence ?? {}) };
-  const parseConfidenceTier = worstParseConfidenceTier(fieldConfidence, warnings);
+  const parseConfidenceTier = computeDocumentReviewTier(res.extracted, fieldConfidence, warnings);
   return {
     summary,
     warnings,

@@ -2,8 +2,8 @@ import { API_BASE } from "../api";
 import {
   parseConfidenceAppliedChipClasses,
   parseConfidenceRcPanelClasses,
-  parseConfidenceTierLabel,
-  type ParseConfidenceTier,
+  documentReviewTierLabel,
+  type DocumentReviewTier,
 } from "@/loadWorkspace/parseFieldConfidenceUi";
 
 type Props = {
@@ -11,7 +11,7 @@ type Props = {
   /** When set, show “Open in new tab” for the same PDF bytes (cookie auth on same origin). */
   openInNewTabPath?: string | null;
   /** Overall parse confidence — drives RC panel accent for dispatch review. */
-  parseConfidenceTier?: ParseConfidenceTier | null;
+  parseConfidenceTier?: DocumentReviewTier | null;
 };
 
 export function loadRateConfirmationPdfDownloadPath(loadId: number): string {
@@ -25,9 +25,9 @@ export function draftRateConfirmationPdfDownloadPath(draftId: string): string {
 export function RateConfirmationPdfPanel({
   objectUrl,
   openInNewTabPath,
-  parseConfidenceTier = "medium",
+  parseConfidenceTier = null,
 }: Props) {
-  const tier = parseConfidenceTier ?? "medium";
+  const tier: DocumentReviewTier = parseConfidenceTier ?? "neutral";
   const rc = parseConfidenceRcPanelClasses(tier);
   return (
     <div
@@ -47,7 +47,7 @@ export function RateConfirmationPdfPanel({
           <span
             className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${parseConfidenceAppliedChipClasses(tier)}`}
           >
-            {parseConfidenceTierLabel(tier)}
+            {documentReviewTierLabel(tier)}
           </span>
         </div>
         {openInNewTabPath ? (

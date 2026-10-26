@@ -57,6 +57,12 @@ import {
   VISIBLE_INTERNAL_LOAD_NUMBER_LABEL,
   VISIBLE_REFERENCES_SECTION_LABEL,
 } from "./loadOperationalReferences";
+import {
+  ParseConfidenceField,
+  confidenceTierForFieldKey,
+  parseConfidenceTierLabel,
+} from "@/loadWorkspace/parseFieldConfidenceUi";
+import type { ParseScalarFieldKey } from "@/loadWorkspace/loadParseHydrationState";
 
 const L = wsLabelClass;
 const I = wsInputClass;
@@ -76,11 +82,14 @@ function stopCardShellClass(isPu: boolean, isDr: boolean): string {
   return `${base} border-l-2 border-l-[var(--trk-border-strong)]`;
 }
 
-function stopListGridClass(stopCount: number): string {
-  if (stopCount <= 1) return "grid grid-cols-1 gap-1";
-  if (stopCount === 2) return "grid grid-cols-1 gap-1 lg:grid-cols-2 lg:items-start";
-  if (stopCount === 3) return "grid grid-cols-1 gap-1 md:grid-cols-2 xl:grid-cols-3 xl:items-start";
-  return "grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 xl:items-start";
+/** Column count follows the stops section container width (sidebar constrains content — not viewport alone). */
+function stopListGridClass(): string {
+  return "grid grid-cols-1 gap-1 @[26rem]/stops:grid-cols-2 @[40rem]/stops:grid-cols-3 @[54rem]/stops:grid-cols-4 @[26rem]/stops:items-start";
+}
+
+function autoGrowStopNotes(el: HTMLTextAreaElement) {
+  el.style.height = "2rem";
+  el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
 }
 
 type StopDenseCardProps = {
@@ -275,6 +284,7 @@ function StopDenseCard({
             data-testid="stop-notes-input"
             value={stop.notes ?? ""}
             onChange={(e) => updateStop(stop._key, { notes: e.target.value })}
+            onInput={(e) => autoGrowStopNotes(e.currentTarget)}
             {...bind(docFocusForStopNotes(stop, sectionIndex, stop.notes ?? ""))}
           />
         </div>
@@ -286,6 +296,7 @@ function StopDenseCard({
             data-testid="commodity-notes-input"
             value={stop.commodity_notes ?? ""}
             onChange={(e) => updateStop(stop._key, { commodity_notes: e.target.value })}
+            onInput={(e) => autoGrowStopNotes(e.currentTarget)}
             {...bind(docFocusForStopNotes(stop, sectionIndex, stop.commodity_notes ?? ""))}
           />
         </div>
@@ -394,6 +405,9 @@ export type LoadWorkspaceFormProps = {
   readOnly?: boolean;
   /** When false, Notes render outside this form (page sidebar). Default true. */
   renderNotes?: boolean;
+  /** Parser field_confidence map for input-level review accents. */
+  fieldConfidence?: Record<string, string>;
+  parseManualOverrideKeys?: Set<ParseScalarFieldKey>;
 };
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
@@ -414,6 +428,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
 
   const compactReferences = compactLoadReferencesForDisplay(p.loadReferences ?? [], p.sortedDraftStops);
   const bindFieldDoc = (opts: DocFocusOpts) => bindDocFocus(p.focusDoc, opts);
+  const fieldConfidence = p.fieldConfidence ?? {};
+  const manualScalar = (key: ParseScalarFieldKey) => p.parseManualOverrideKeys?.has(key) ?? false;
+  const stopsRouteConfidence = confidenceTierForFieldKey("stops", fieldConfidence);
 
   const driver = p.driverId != null ? p.drivers.find((d) => d.id === p.driverId) : undefined;
   const driverLabel =
@@ -441,18 +458,26 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
-          <BrokerCarrierCombobox
-            brokers={p.freightBrokers}
-            brokerId={p.brokerId}
-            brokerNameSnapshot={p.brokerNameSnapshot}
-            disabled={!!p.readOnly}
-            onPick={(id, name) => {
-              p.setBrokerId(id);
-              p.setBrokerNameSnapshot(name);
-              if (id === null) p.setBrokerContactId(null);
-            }}
-            docFocusHandlers={bindFieldDoc(docFocusForBroker(p.brokerNameSnapshot))}
-          />
+          <ParseConfidenceField
+            label="Broker / carrier"
+            labelClassName={L}
+            confidenceKey="broker_name_snapshot"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("brokerNameSnapshot")}
+          >
+            <BrokerCarrierCombobox
+              brokers={p.freightBrokers}
+              brokerId={p.brokerId}
+              brokerNameSnapshot={p.brokerNameSnapshot}
+              disabled={!!p.readOnly}
+              onPick={(id, name) => {
+                p.setBrokerId(id);
+                p.setBrokerNameSnapshot(name);
+                if (id === null) p.setBrokerContactId(null);
+              }}
+              docFocusHandlers={bindFieldDoc(docFocusForBroker(p.brokerNameSnapshot))}
+            />
+          </ParseConfidenceField>
           <div>
             <label className={L}>Contact</label>
             <select
@@ -473,17 +498,25 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               ))}
             </select>
           </div>
-          <div>
-            <label className={L}>Contact name</label>
+          <ParseConfidenceField
+            label="Contact name"
+            labelClassName={L}
+            confidenceKey="broker_contact_name_snapshot"
+            fieldConfidence={fieldConfidence}
+          >
             <input
               className={I}
               value={p.brokerContactNameSnapshot}
               onChange={(e) => p.setBrokerContactNameSnapshot(e.target.value)}
               {...bindFieldDoc(docFocusForBrokerContactName(p.brokerContactNameSnapshot))}
             />
-          </div>
-          <div>
-            <label className={L}>Contact phone</label>
+          </ParseConfidenceField>
+          <ParseConfidenceField
+            label="Contact phone"
+            labelClassName={L}
+            confidenceKey="broker_contact_phone_snapshot"
+            fieldConfidence={fieldConfidence}
+          >
             <input
               className={I}
               value={p.brokerContactPhoneSnapshot}
@@ -495,7 +528,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 ),
               )}
             />
-          </div>
+          </ParseConfidenceField>
           <div>
             <label className={L}>Extension</label>
             <input
@@ -510,25 +543,36 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               )}
             />
           </div>
-          <div>
-            <label className={L}>Contact email</label>
+          <ParseConfidenceField
+            label="Contact email"
+            labelClassName={L}
+            confidenceKey="broker_contact_email_snapshot"
+            fieldConfidence={fieldConfidence}
+          >
             <input
               className={I}
               value={p.brokerContactEmailSnapshot}
               onChange={(e) => p.setBrokerContactEmailSnapshot(e.target.value)}
               {...bindFieldDoc(docFocusForBrokerContactEmail(p.brokerContactEmailSnapshot))}
             />
-          </div>
+          </ParseConfidenceField>
           <div className="sm:col-span-2">
-            <label className={L}>{VISIBLE_BROKER_LOAD_REFERENCE_LABEL}</label>
-            <input
-              className={I}
-              value={p.brokerLoadReference}
-              tabIndex={p.verificationTabIndex.get("brokerLoadReference")}
-              onChange={(e) => p.setBrokerLoadReference(e.target.value)}
-              placeholder="Load number from broker"
-              {...bindFieldDoc(docFocusForBrokerLoadReference(p.brokerLoadReference))}
-            />
+            <ParseConfidenceField
+              label={VISIBLE_BROKER_LOAD_REFERENCE_LABEL}
+              labelClassName={L}
+              confidenceKey="broker_load_reference"
+              fieldConfidence={fieldConfidence}
+              manualOverride={manualScalar("brokerLoadReference")}
+            >
+              <input
+                className={I}
+                value={p.brokerLoadReference}
+                tabIndex={p.verificationTabIndex.get("brokerLoadReference")}
+                onChange={(e) => p.setBrokerLoadReference(e.target.value)}
+                placeholder="Load number from broker"
+                {...bindFieldDoc(docFocusForBrokerLoadReference(p.brokerLoadReference))}
+              />
+            </ParseConfidenceField>
           </div>
           {compactReferences.length > 0 ? (
             <div className="sm:col-span-2">
@@ -561,17 +605,25 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             ) : null}
           </div>
           {editable("Equipment") && !p.readOnly ? (
-            <input
-              className="w-[8.5rem] shrink-0 rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 text-right font-mono text-sm font-bold text-[var(--trk-success)] placeholder:text-emerald-700/60 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600/40"
-              inputMode="decimal"
-              value={p.rate}
-              tabIndex={p.verificationTabIndex.get("rate")}
-              onChange={(e) => p.setRate(e.target.value)}
-              {...bindFieldDoc(docFocusForMoneyField(p.rate, "linehaul"))}
-              aria-label="Linehaul rate"
-              placeholder="Linehaul"
-              title="Linehaul rate from rate confirmation — edit anytime before save"
-            />
+            <ParseConfidenceField
+              label=""
+              confidenceKey="rate"
+              fieldConfidence={fieldConfidence}
+              manualOverride={manualScalar("rate")}
+              className="shrink-0"
+            >
+              <input
+                className="w-[8.5rem] shrink-0 rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 text-right font-mono text-sm font-bold text-[var(--trk-success)] placeholder:text-emerald-700/60 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600/40"
+                inputMode="decimal"
+                value={p.rate}
+                tabIndex={p.verificationTabIndex.get("rate")}
+                onChange={(e) => p.setRate(e.target.value)}
+                {...bindFieldDoc(docFocusForMoneyField(p.rate, "linehaul"))}
+                aria-label="Linehaul rate"
+                placeholder="Linehaul"
+                title="Linehaul rate from rate confirmation — edit anytime before save"
+              />
+            </ParseConfidenceField>
           ) : (
             <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 font-mono text-sm font-bold text-[var(--trk-success)]">
               {formatLinehaulDisplay(p.rate) ?? "—"}
@@ -589,8 +641,13 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               Assigned when the load is created; cannot be edited.
             </p>
           </div>
-          <div>
-            <label className={L}>Customer rate</label>
+          <ParseConfidenceField
+            label="Customer rate"
+            labelClassName={L}
+            confidenceKey="customer_rate"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("customerRate")}
+          >
             <input
               className={I}
               inputMode="decimal"
@@ -604,9 +661,14 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 ),
               )}
             />
-          </div>
-          <div>
-            <label className={L}>Miles (loaded)</label>
+          </ParseConfidenceField>
+          <ParseConfidenceField
+            label="Miles (loaded)"
+            labelClassName={L}
+            confidenceKey="miles"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("miles")}
+          >
             <input
               className={I}
               inputMode="numeric"
@@ -614,7 +676,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               onChange={(e) => p.setMiles(e.target.value)}
               {...bindFieldDoc(docFocusForMoneyField(p.miles, "miles"))}
             />
-          </div>
+          </ParseConfidenceField>
         </div>
         </div>
       </section>}
@@ -743,6 +805,24 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         <div className={`${wsSectionHeader} !py-1.5`}>
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0">
             <span className={wsSectionTitle}>Stops</span>
+            {stopsRouteConfidence ? (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--trk-text-muted)]"
+                title={`Route stops (overall): ${parseConfidenceTierLabel(stopsRouteConfidence)}`}
+              >
+                <span
+                  className={`inline-block h-1.5 w-1.5 rounded-full ${
+                    stopsRouteConfidence === "high"
+                      ? "bg-emerald-500"
+                      : stopsRouteConfidence === "medium"
+                        ? "bg-amber-500"
+                        : "bg-red-500"
+                  }`}
+                  aria-hidden
+                />
+                Stops confidence
+              </span>
+            ) : null}
             <span className={wsSectionMeta}>
               {p.sortedDraftStops.length} · {formatRouteFromStops(p.sortedDraftStops)}
             </span>
@@ -761,7 +841,8 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             Intake: {ip.pickupDeliverySummary}
           </p>
         ) : null}
-        <div className={`${stopListGridClass(p.sortedDraftStops.length)} gap-2`}>
+        <div className="@container/stops w-full">
+        <div className={`${stopListGridClass()} gap-2`}>
           {p.sortedDraftStops.length === 0 ? (
             <p className="col-span-full py-1.5 text-center text-[11px] text-[var(--trk-text-muted)]">
               No stops yet — add pickup and delivery.
@@ -790,6 +871,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
           )}
         </div>
         </div>
+        </div>
       </section>}
 
       {/* Freight & equipment — WorkspaceSection: Equipment */}
@@ -799,17 +881,27 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
-          <div>
-            <label className={L}>Mode</label>
+          <ParseConfidenceField
+            label="Mode"
+            labelClassName={L}
+            confidenceKey="mode"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("freightMode")}
+          >
             <input
               className={I}
               value={p.freightMode}
               onChange={(e) => p.setFreightMode(e.target.value)}
               {...bindFieldDoc(docFocusForFreightHints(p.freightMode, ["mode", "ftl", "ltl", "freight"]))}
             />
-          </div>
-          <div>
-            <label className={L}>Equipment type</label>
+          </ParseConfidenceField>
+          <ParseConfidenceField
+            label="Equipment type"
+            labelClassName={L}
+            confidenceKey="equipment_type"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("equipmentType")}
+          >
             <input
               className={I}
               value={p.equipmentType}
@@ -819,9 +911,14 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 docFocusForFreightHints(p.equipmentType, ["equipment", "trailer", "van", "reefer", "flatbed"]),
               )}
             />
-          </div>
-          <div>
-            <label className={L}>Trailer type</label>
+          </ParseConfidenceField>
+          <ParseConfidenceField
+            label="Trailer type"
+            labelClassName={L}
+            confidenceKey="trailer_type"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("trailerType")}
+          >
             <input
               className={I}
               value={p.trailerType}
@@ -840,37 +937,54 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 ]),
               )}
             />
-          </div>
-          <div>
-            <label className={L}>Trailer size</label>
+          </ParseConfidenceField>
+          <ParseConfidenceField
+            label="Trailer size"
+            labelClassName={L}
+            confidenceKey="trailer_size"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("trailerSize")}
+          >
             <input
               className={I}
               value={p.trailerSize}
               onChange={(e) => p.setTrailerSize(e.target.value)}
               {...bindFieldDoc(docFocusForFreightHints(p.trailerSize, ["trailer size", "length", "53", "48", "ft"]))}
             />
-          </div>
+          </ParseConfidenceField>
           <div className="sm:col-span-2">
-            <label className={L}>Commodity</label>
-            <input
-              className={I}
-              value={p.commodity}
-              tabIndex={p.verificationTabIndex.get("commodity")}
-              onChange={(e) => p.setCommodity(e.target.value)}
-              {...bindFieldDoc(
-                docFocusForFreightHints(p.commodity, [
-                  "commodity",
-                  "product",
-                  "freight",
-                  "description",
-                  "cargo",
-                  "sku",
-                ]),
-              )}
-            />
+            <ParseConfidenceField
+              label="Commodity"
+              labelClassName={L}
+              confidenceKey="commodity"
+              fieldConfidence={fieldConfidence}
+              manualOverride={manualScalar("commodity")}
+            >
+              <input
+                className={I}
+                value={p.commodity}
+                tabIndex={p.verificationTabIndex.get("commodity")}
+                onChange={(e) => p.setCommodity(e.target.value)}
+                {...bindFieldDoc(
+                  docFocusForFreightHints(p.commodity, [
+                    "commodity",
+                    "product",
+                    "freight",
+                    "description",
+                    "cargo",
+                    "sku",
+                  ]),
+                )}
+              />
+            </ParseConfidenceField>
           </div>
-          <div>
-            <label className={L}>Est. weight (lb)</label>
+          <ParseConfidenceField
+            label="Est. weight (lb)"
+            labelClassName={L}
+            confidenceKey="estimated_weight"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("estimatedWeight")}
+          >
             <input
               className={I}
               inputMode="numeric"
@@ -888,7 +1002,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 ]),
               )}
             />
-          </div>
+          </ParseConfidenceField>
           <div>
             <label className={L}>Hazmat</label>
             <select
@@ -902,8 +1016,13 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               <option value="no">No</option>
             </select>
           </div>
-          <div>
-            <label className={L}>Temperature</label>
+          <ParseConfidenceField
+            label="Temperature"
+            labelClassName={L}
+            confidenceKey="temperature_requirement"
+            fieldConfidence={fieldConfidence}
+            manualOverride={manualScalar("temperatureRequirement")}
+          >
             <input
               className={I}
               value={p.temperatureRequirement}
@@ -918,7 +1037,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
                 ]),
               )}
             />
-          </div>
+          </ParseConfidenceField>
           <div>
             <label className={L}>Pallet / case count</label>
             <input

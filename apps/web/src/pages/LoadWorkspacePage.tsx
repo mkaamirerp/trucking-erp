@@ -79,6 +79,7 @@ import {
   emptyIntakeProposed,
   initialManualCreateStops,
   newDraftStop,
+  reorderDraftStopsByKey,
   SECTION_CONFIG,
   stopsToDraft,
   wsSectionTitle,
@@ -91,9 +92,9 @@ import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParse
 import {
   confidenceTierForAppliedLabel,
   parseConfidenceAppliedChipClasses,
+  documentReviewTierLabel,
   parseConfidenceRcPanelClasses,
-  parseConfidenceTierLabel,
-  type ParseConfidenceTier,
+  type DocumentReviewTier,
 } from "@/loadWorkspace/parseFieldConfidenceUi";
 import {
   draftHasReadyRateConfirmationPdf,
@@ -119,7 +120,9 @@ import {
 } from "@/loadWorkspace/workspaceCreateLoadValidation";
 import {
   createEmptyParseHydrationState,
+  hydrationStateFromDraftAndParse,
   registerManualParseFieldEdit,
+  type ParseScalarFieldKey,
   type ParseHydrationState,
   type ParseScalarFieldKey,
 } from "@/loadWorkspace/loadParseHydrationState";
@@ -544,13 +547,16 @@ function LoadWorkspacePage() {
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
   const [lastParseFieldConfidence, setLastParseFieldConfidence] = useState<Record<string, string>>({});
-  const [lastParseConfidenceTier, setLastParseConfidenceTier] = useState<ParseConfidenceTier | null>(
+  const [lastParseConfidenceTier, setLastParseConfidenceTier] = useState<DocumentReviewTier | null>(
     null,
   );
   const [lastParseEngineAttribution, setLastParseEngineAttribution] = useState<string | null>(null);
   const [workspaceReferenceText, setWorkspaceReferenceText] = useState("");
   const [workspacePdfPreviewUrl, setWorkspacePdfPreviewUrl] = useState<string | null>(null);
   const parseHydrationRef = useRef<ParseHydrationState>(createEmptyParseHydrationState());
+  const [parseManualOverrideKeys, setParseManualOverrideKeys] = useState<Set<ParseScalarFieldKey>>(
+    () => new Set(),
+  );
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
   const docLineRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
@@ -629,6 +635,12 @@ function LoadWorkspacePage() {
       setLastParseAppliedLabels(ux.appliedLabels);
       setLastParseFieldConfidence(ux.fieldConfidence);
       setLastParseConfidenceTier(ux.parseConfidenceTier);
+      const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
+      if (accepted) {
+        const fields = workspaceFieldsFromDraftJson(draft.draft_json ?? {});
+        parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
+        setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+      }
       if (draftHasReadyRateConfirmationPdf(draft)) {
         const url = await fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(draft.id);
         replaceWorkspacePdfPreviewUrl(url);
@@ -737,6 +749,8 @@ function LoadWorkspacePage() {
       const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
       if (accepted) {
         applyEmptyWorkspaceFieldsFromParseResponse(fields, accepted, getParseHydrationCallbacks());
+        parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
+        setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
         if (accepted.raw_text) {
           setWorkspaceReferenceText(accepted.raw_text);
         }
@@ -913,7 +927,11 @@ function LoadWorkspacePage() {
     workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail";
 
   const trackParseManualScalar = useCallback((key: ParseScalarFieldKey, value: string) => {
+    const before = parseHydrationRef.current.manualOverrideKeys.size;
     registerManualParseFieldEdit(parseHydrationRef.current, key, value);
+    if (parseHydrationRef.current.manualOverrideKeys.size !== before) {
+      setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+    }
   }, []);
 
   const setBrokerNameSnapshotTracked = useCallback(
@@ -1015,6 +1033,8 @@ function LoadWorkspacePage() {
       setLastParseFieldConfidence({});
       setLastParseConfidenceTier(null);
       setLastParseEngineAttribution(null);
+      parseHydrationRef.current = createEmptyParseHydrationState();
+      setParseManualOverrideKeys(new Set());
       const parseWallStarted = performance.now();
       try {
         if (workspaceMode === "manual") {
@@ -1042,6 +1062,7 @@ function LoadWorkspacePage() {
             parseHydrationRef.current,
           );
           parseHydrationRef.current = hydration.parseHydrationState;
+          setParseManualOverrideKeys(new Set(hydration.parseHydrationState.manualOverrideKeys));
           setParseWarnings(hydration.warnings);
           const engineLine =
             buildParseEngineAttribution(res.context ?? undefined, {
@@ -1126,6 +1147,7 @@ function LoadWorkspacePage() {
           parseHydrationRef.current,
         );
         parseHydrationRef.current = hydration.parseHydrationState;
+        setParseManualOverrideKeys(new Set(hydration.parseHydrationState.manualOverrideKeys));
         setParseWarnings(hydration.warnings);
         const engineLine =
           buildParseEngineAttribution(res.context ?? undefined, {
@@ -1927,21 +1949,7 @@ function LoadWorkspacePage() {
   }
 
   function moveStop(key: string, dir: -1 | 1) {
-    setDraftStops((rows) => {
-      const sorted = [...rows].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-      const i = sorted.findIndex((r) => r._key === key);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= sorted.length) return rows;
-      const a = sorted[i];
-      const b = sorted[j];
-      const seqA = a.sequence;
-      const seqB = b.sequence;
-      return rows.map((r) => {
-        if (r._key === a._key) return { ...r, sequence: seqB };
-        if (r._key === b._key) return { ...r, sequence: seqA };
-        return r;
-      });
-    });
+    setDraftStops((rows) => reorderDraftStopsByKey(rows, key, dir));
   }
 
   const onCustomsBrokerChangeManual = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -2489,10 +2497,12 @@ function LoadWorkspacePage() {
               <div
                 className={`mb-2 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold ${parseConfidenceAppliedChipClasses(lastParseConfidenceTier)}`}
               >
-                RC parse — {parseConfidenceTierLabel(lastParseConfidenceTier)}
-                {lastParseConfidenceTier !== "high"
-                  ? " · Open the RC PDF and verify or edit fields before dispatch."
-                  : " · Spot-check stops and rate before create load."}
+                RC parse — {documentReviewTierLabel(lastParseConfidenceTier)}
+                {lastParseConfidenceTier === "high"
+                  ? " · Spot-check stops and rate before create load."
+                  : lastParseConfidenceTier === "neutral"
+                    ? " · Confidence not available for this draft — verify fields against the PDF."
+                    : " · Open the RC PDF and verify or edit fields before dispatch."}
               </div>
             ) : null}
             <div
@@ -2781,6 +2791,8 @@ function LoadWorkspacePage() {
             removeStop={removeStop}
             addStop={addStop}
             moveStop={moveStop}
+            fieldConfidence={lastParseFieldConfidence}
+            parseManualOverrideKeys={parseManualOverrideKeys}
           />
 
           {/* Settlement — visible in payroll and audit modes */}

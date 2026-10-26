@@ -999,6 +999,28 @@ function isManualPickupDeliveryPair(a: DraftStop, b: DraftStop): boolean {
   );
 }
 
+/** Assign unique 0-based sequence values in current sort order. */
+export function normalizeDraftStopSequences<T extends { sequence?: number }>(stops: T[]): T[] {
+  return stops.map((s, idx) => ({ ...s, sequence: idx }));
+}
+
+/** Swap one stop up/down in route order; renumbers sequences so duplicate values cannot break reorder. */
+export function reorderDraftStopsByKey<T extends { _key: string; sequence?: number }>(
+  rows: T[],
+  key: string,
+  dir: -1 | 1,
+): T[] {
+  const sorted = [...rows].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+  const i = sorted.findIndex((r) => r._key === key);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= sorted.length) return rows;
+  const reordered = [...sorted];
+  const tmp = reordered[i];
+  reordered[i] = reordered[j];
+  reordered[j] = tmp;
+  return normalizeDraftStopSequences(reordered);
+}
+
 /**
  * Second line of defense: when more than two rows exist, drop stop rows with no useful
  * identity, **except** the leading PICKUP + DELIVERY (or DELIVERY + PICKUP) pair when

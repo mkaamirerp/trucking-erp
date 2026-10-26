@@ -134,16 +134,19 @@ describe("Issue 0A — legacy assignment UI unreachable", () => {
     const page = source("../pages/LoadWorkspacePage.tsx");
     expect(page).not.toMatch(/DispatchAssignmentStrip|dispatchAssign|onDispatchAssign/);
     expect(page).not.toMatch(/status:\s*"assigned"/);
-    expect(page).not.toMatch(/driver_id:\s*driverId/);
+    expect(page).toContain("createTripForLoadAssignment");
+    expect(page).not.toMatch(/buildLoadPersistPayload[\s\S]{0,400}driver_id/);
 
     const board = source("../pages/DeprecatedDispatchPage.tsx");
     expect(board).not.toMatch(/dispatchAssign|LOAD_DISPATCH_ASSIGN_QUERY/);
   });
 
-  it("21b. Load form renders status and assignment as read-only (no setters, no selects)", () => {
+  it("21b. Load form keeps status read-only; optional draft assignment uses guarded setters", () => {
     const form = source("./LoadWorkspaceForm.tsx");
-    expect(form).not.toMatch(/setStatus|setDriverId|setTruckId|setTrailerAssetId|LOAD_STATUSES/);
+    expect(form).not.toMatch(/setStatus|LOAD_STATUSES/);
     expect(form).toContain('data-testid="load-status-readonly"');
+    expect(form).toContain("setDriverId?:");
+    expect(form).toContain('data-testid="load-driver-select"');
     expect(form).toContain('data-testid="load-driver-readonly"');
   });
 });

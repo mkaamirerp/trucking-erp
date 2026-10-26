@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyParseScalarHydration,
   createEmptyParseHydrationState,
+  hydrationStateFromDraftAndParse,
+  inferParseManualOverridesFromDraft,
   registerManualParseFieldEdit,
 } from "./loadParseHydrationState";
+import { initialWorkspaceFieldsManual } from "./loadWorkspaceShared";
 import type { ApplyLoadDocumentParseCallbacks } from "./applyLoadDocumentParseResponse";
 
 function mkCbs() {
@@ -51,5 +54,19 @@ describe("loadParseHydrationState", () => {
     vi.mocked(cbs.setCommodity).mockClear();
     state = applyParseScalarHydration({} as never, cbs, state);
     expect(cbs.setCommodity).not.toHaveBeenCalled();
+  });
+
+  it("infers manual overrides when draft value differs from accepted parse", () => {
+    const fields = {
+      ...initialWorkspaceFieldsManual(),
+      rate: "1500",
+      commodity: "Steel",
+    };
+    const ex = { rate: 1200, commodity: "Steel" } as never;
+    const overrides = inferParseManualOverridesFromDraft(fields, ex);
+    expect(overrides.has("rate")).toBe(true);
+    expect(overrides.has("commodity")).toBe(false);
+    const state = hydrationStateFromDraftAndParse(fields, ex);
+    expect(state.manualOverrideKeys.has("rate")).toBe(true);
   });
 });

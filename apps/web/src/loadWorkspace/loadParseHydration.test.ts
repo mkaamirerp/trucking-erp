@@ -48,6 +48,23 @@ describe("computeLoadWorkspacePdfHydrationResult", () => {
     const result = computeLoadWorkspacePdfHydrationResult(res, baseSummary());
     expect(result.warnings).toEqual(["weak pdf"]);
     expect(result.toolbar.tone).toBe("warning");
+    expect(result.parseConfidenceTier).toBe("medium");
+  });
+
+  it("document tier is not green from a single high-confidence field", () => {
+    const res = mkRes(
+      {
+        ...emptyExtracted(),
+        rate: 900,
+        broker_name_snapshot: "Broker Co",
+        stops: [{ stop_type: "pickup", sequence: 0, city: "Austin" }],
+      },
+      "t",
+      [],
+    );
+    res.field_confidence = { rate: "high" };
+    const result = computeLoadWorkspacePdfHydrationResult(res, baseSummary());
+    expect(result.parseConfidenceTier).toBe("medium");
   });
 
   it("appliedLabels null when no labels from builder", () => {

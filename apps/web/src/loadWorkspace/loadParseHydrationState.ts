@@ -4,6 +4,7 @@
  */
 import type { LoadDocumentParseResponse } from "@/api";
 import type { ApplyLoadDocumentParseCallbacks } from "@/loadWorkspace/applyLoadDocumentParseResponse";
+import type { WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
 
 export type ParseScalarFieldKey =
   | "brokerNameSnapshot"
@@ -232,4 +233,104 @@ export function registerManualParseFieldEdit(
   if (newValue !== last) {
     state.manualOverrideKeys.add(key);
   }
+}
+
+function scalarStringFromExtracted(
+  key: ParseScalarFieldKey,
+  ex: LoadDocumentParseResponse["extracted"],
+): string | null {
+  switch (key) {
+    case "brokerNameSnapshot":
+      return trimmedNonEmpty(ex.broker_name_snapshot);
+    case "brokerLoadReference":
+      return trimmedNonEmpty(ex.broker_load_reference);
+    case "freightMode":
+      return trimmedNonEmpty(ex.mode);
+    case "equipmentType":
+      return trimmedNonEmpty(ex.equipment_type);
+    case "trailerType":
+      return trimmedNonEmpty(ex.trailer_type);
+    case "trailerSize":
+      return trimmedNonEmpty(ex.trailer_size);
+    case "commodity":
+      return trimmedNonEmpty(ex.commodity);
+    case "estimatedWeight":
+      return ex.estimated_weight != null ? String(ex.estimated_weight) : null;
+    case "temperatureRequirement":
+      return trimmedNonEmpty(ex.temperature_requirement);
+    case "rate":
+      return ex.rate != null ? String(ex.rate) : null;
+    case "customerRate":
+      return ex.customer_rate != null ? String(ex.customer_rate) : null;
+    case "miles":
+      return ex.miles != null ? String(Math.round(ex.miles)) : null;
+    default:
+      return null;
+  }
+}
+
+/** After Save Draft / reopen: infer operator edits by diffing draft fields to accepted parse extract. */
+export function inferParseManualOverridesFromDraft(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): Set<ParseScalarFieldKey> {
+  const overrides = new Set<ParseScalarFieldKey>();
+  const norm = (v: string) => v.trim();
+  for (const key of extractPresentParseScalarKeys(ex)) {
+    const parsed = scalarStringFromExtracted(key, ex);
+    if (parsed == null) continue;
+    const current = norm(scalarDraftValue(fields, key));
+    if (current !== norm(parsed)) overrides.add(key);
+  }
+  return overrides;
+}
+
+function scalarDraftValue(fields: WorkspaceDraftFields, key: ParseScalarFieldKey): string {
+  switch (key) {
+    case "brokerNameSnapshot":
+      return fields.brokerNameSnapshot ?? "";
+    case "brokerLoadReference":
+      return fields.brokerLoadReference ?? "";
+    case "freightMode":
+      return fields.freightMode ?? "";
+    case "equipmentType":
+      return fields.equipmentType ?? "";
+    case "trailerType":
+      return fields.trailerType ?? "";
+    case "trailerSize":
+      return fields.trailerSize ?? "";
+    case "commodity":
+      return fields.commodity ?? "";
+    case "estimatedWeight":
+      return fields.estimatedWeight ?? "";
+    case "temperatureRequirement":
+      return fields.temperatureRequirement ?? "";
+    case "rate":
+      return fields.rate ?? "";
+    case "customerRate":
+      return fields.customerRate ?? "";
+    case "miles":
+      return fields.miles ?? "";
+    default:
+      return "";
+  }
+}
+
+/** Restore session hydration metadata when reopening a draft with accepted_parse_json. */
+export function hydrationStateFromDraftAndParse(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): ParseHydrationState {
+  const state = createEmptyParseHydrationState();
+  for (const key of extractPresentParseScalarKeys(ex)) {
+    const applied = scalarStringFromExtracted(key, ex);
+    if (applied != null) {
+      state.lastAppliedKeys.add(key);
+      state.lastAppliedValues.set(key, applied);
+    }
+  }
+  for (const key of inferParseManualOverridesFromDraft(fields, ex)) {
+    state.manualOverrideKeys.add(key);
+  }
+  return state;
 }
