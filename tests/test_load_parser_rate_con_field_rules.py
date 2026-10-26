@@ -62,7 +62,7 @@ def _production_rules_blob() -> str:
 def test_canonical_contract_shape() -> None:
     fr = get_load_rate_con_field_rules()
     assert fr["profile"] == "rate_confirmation"
-    assert fr["version"] == "load_rate_con_field_rules_v2_full_canonical_semantics"
+    assert fr["version"] == "load_rate_con_field_rules_v2_full_canonical_semantics_appt_type_v1"
     assert isinstance(fr["global_rules"], list) and len(fr["global_rules"]) == 9
     assert APPROVED_FIELD_RULE_KEYS == _EXPECTED_KEYS
     assert list(_rules().keys()) == list(_EXPECTED_KEYS)
@@ -94,6 +94,21 @@ def test_semantic_product_fields() -> None:
     assert rules["estimated_weight"]["product_fields"] == ["estimated_weight"]
     assert rules["temperature_requirement"]["product_fields"] == ["temperature_requirement"]
     assert rules["miles"]["product_fields"] == ["miles"]
+
+
+def test_appointment_type_has_canonical_field_rules() -> None:
+    from app.schemas.load_document_parse import LoadParseStopItem
+
+    rules = _rules()
+    assert rules["appointment_date_time"]["product_fields"] == [
+        "stops[].appointment_type", "stops[].appointment_date", "stops[].appointment_time_text"
+    ]
+    assert "appointment_type" in rules["stops"]["stop_fields"]
+    assert "appointment_type" in LoadParseStopItem.model_fields
+    content = json.dumps(rules["appointment_date_time"])
+    assert "OPEN WINDOW" in content
+    assert "Do not infer APPT or FCFS from a time range" in content
+    assert "no separate appointment-type field" not in content
 
 
 def test_rate_is_primary_freight_not_total_compensation() -> None:
