@@ -272,9 +272,9 @@ describe("draft_json field ownership and broker contact fetch guard", () => {
 });
 
 describe("RC and customer rate persistence defaults", () => {
-  it("fills a blank customer rate with the RC rate in draft JSON and the Load API payload", () => {
+  it("keeps mirrored customer rate blank in draft JSON but defaults on Load API payload", () => {
     const params = minimalPersist({ rate: "2000", customerRate: "" });
-    expect(buildWorkspaceDraftJson(params).customerRate).toBe("2000");
+    expect(buildWorkspaceDraftJson(params).customerRate).toBe("");
     expect(buildLoadPersistPayload(params)).toMatchObject({ rate: 2000, customer_rate: 2000 });
   });
 

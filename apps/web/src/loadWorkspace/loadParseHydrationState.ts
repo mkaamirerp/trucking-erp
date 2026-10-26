@@ -143,6 +143,37 @@ function trimmedNonEmpty(v: string | null | undefined): string | null {
   return t ? t : null;
 }
 
+/** Parser-owned customer rate: explicit customer_rate, else RC rate when present. */
+export function effectiveParseCustomerRateString(
+  ex: LoadDocumentParseResponse["extracted"],
+): string | null {
+  if (ex.customer_rate != null) return String(ex.customer_rate);
+  if (ex.rate != null) return String(ex.rate);
+  return null;
+}
+
+function customerRateStorageFromParse(
+  ex: LoadDocumentParseResponse["extracted"],
+): { display: string; effective: string } | null {
+  const effective = effectiveParseCustomerRateString(ex);
+  if (effective == null) return null;
+  if (ex.customer_rate != null) return { display: effective, effective };
+  return { display: "", effective };
+}
+
+function applyCustomerRateFromParse(
+  ex: LoadDocumentParseResponse["extracted"],
+  cbs: ApplyLoadDocumentParseCallbacks,
+  state: ParseHydrationState,
+): string | null {
+  const parsed = customerRateStorageFromParse(ex);
+  if (parsed == null) return null;
+  cbs.setCustomerRate(parsed.display);
+  state.lastAppliedKeys.add("customerRate");
+  state.lastAppliedValues.set("customerRate", parsed.effective);
+  return parsed.effective;
+}
+
 export function extractPresentParseScalarKeys(
   ex: LoadDocumentParseResponse["extracted"],
 ): Set<ParseScalarFieldKey> {
@@ -157,7 +188,7 @@ export function extractPresentParseScalarKeys(
   if (ex.estimated_weight != null) keys.add("estimatedWeight");
   if (trimmedNonEmpty(ex.temperature_requirement)) keys.add("temperatureRequirement");
   if (ex.rate != null) keys.add("rate");
-  if (ex.customer_rate != null) keys.add("customerRate");
+  if (effectiveParseCustomerRateString(ex) != null) keys.add("customerRate");
   if (ex.miles != null) keys.add("miles");
   return keys;
 }
@@ -205,10 +236,17 @@ function clearParseScalarField(key: ParseScalarFieldKey, cbs: ApplyLoadDocumentP
   }
 }
 
+function draftExplicitCustomerRate(fields: WorkspaceDraftFields): boolean {
+  const cr = (fields.customerRate ?? "").trim();
+  const r = (fields.rate ?? "").trim();
+  return cr !== "" && cr !== r;
+}
+
 function applyParseScalarField(
   key: ParseScalarFieldKey,
   ex: LoadDocumentParseResponse["extracted"],
   cbs: ApplyLoadDocumentParseCallbacks,
+  state: ParseHydrationState,
 ): string | null {
   switch (key) {
     case "brokerNameSnapshot": {
@@ -268,12 +306,7 @@ function applyParseScalarField(
       return null;
     }
     case "customerRate": {
-      if (ex.customer_rate != null) {
-        const v = String(ex.customer_rate);
-        cbs.setCustomerRate(v);
-        return v;
-      }
-      return null;
+      return applyCustomerRateFromParse(ex, cbs, state);
     }
     case "miles": {
       if (ex.miles != null) {
@@ -312,7 +345,7 @@ export function applyParseScalarHydration(
 
   for (const key of present) {
     if (skipScalarHydration(key)) continue;
-    const applied = applyParseScalarField(key, ex, cbs);
+    const applied = applyParseScalarField(key, ex, cbs, next);
     if (applied != null) {
       next.lastAppliedKeys.add(key);
       next.lastAppliedValues.set(key, applied);
@@ -508,7 +541,7 @@ function scalarStringFromExtracted(
     case "rate":
       return ex.rate != null ? String(ex.rate) : null;
     case "customerRate":
-      return ex.customer_rate != null ? String(ex.customer_rate) : null;
+      return effectiveParseCustomerRateString(ex);
     case "miles":
       return ex.miles != null ? String(Math.round(ex.miles)) : null;
     default:
@@ -524,6 +557,10 @@ export function inferParseManualOverridesFromDraft(
   const overrides = new Set<ParseScalarFieldKey>();
   const norm = (v: string) => v.trim();
   for (const key of extractPresentParseScalarKeys(ex)) {
+    if (key === "customerRate") {
+      if (draftExplicitCustomerRate(fields)) overrides.add(key);
+      continue;
+    }
     const parsed = scalarStringFromExtracted(key, ex);
     if (parsed == null) continue;
     const current = norm(scalarDraftValue(fields, key));

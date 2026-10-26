@@ -36,6 +36,20 @@ def test_merge_broker_load_reference_from_accepted_parse_fills_blank_only() -> N
 from app.services.load_workspace_draft_mapper import draft_json_to_load_create
 
 
+def test_draft_json_customer_rate_defaults_from_rc_rate_on_promote_mapping() -> None:
+    payload = draft_json_to_load_create({"rate": "1800.00", "customerRate": "", "draftStops": []})
+    assert payload.rate == 1800
+    assert payload.customer_rate == 1800
+
+
+def test_draft_json_keeps_separate_customer_rate() -> None:
+    payload = draft_json_to_load_create(
+        {"rate": "2000", "customerRate": "1600", "draftStops": []},
+    )
+    assert payload.rate == 2000
+    assert payload.customer_rate == 1600
+
+
 def test_reviewed_parser_stops_are_mapped_into_load_create() -> None:
     payload = draft_json_to_load_create({
         "brokerNameSnapshot": "Armstrong Carrier",

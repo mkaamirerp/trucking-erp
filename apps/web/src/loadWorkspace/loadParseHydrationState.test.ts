@@ -99,6 +99,43 @@ describe("loadParseHydrationState", () => {
     expect(state.brokerContactIdManuallySelected).toBe(false);
   });
 
+  it("hydrates customer rate from RC rate when parser omits customer_rate", () => {
+    const cbs = mkCbs();
+    let state = createEmptyParseHydrationState();
+    state = applyParseScalarHydration({ rate: 2500 } as never, cbs, state);
+    expect(cbs.setCustomerRate).toHaveBeenCalledWith("");
+    expect(state.lastAppliedValues.get("customerRate")).toBe("2500");
+  });
+
+  it("follows RC rate on re-parse when customer mirrors rate", () => {
+    const cbs = mkCbs();
+    let state = createEmptyParseHydrationState();
+    state = applyParseScalarHydration({ rate: 1000 } as never, cbs, state);
+    vi.mocked(cbs.setCustomerRate).mockClear();
+    state = applyParseScalarHydration({ rate: 900 } as never, cbs, state);
+    expect(cbs.setCustomerRate).toHaveBeenCalledWith("");
+    expect(state.lastAppliedValues.get("customerRate")).toBe("900");
+  });
+
+  it("does not overwrite manually edited customer rate on re-parse", () => {
+    const cbs = mkCbs();
+    let state = createEmptyParseHydrationState();
+    state = applyParseScalarHydration({ rate: 1000 } as never, cbs, state);
+    registerManualParseFieldEdit(state, "customerRate", "1200");
+    vi.mocked(cbs.setCustomerRate).mockClear();
+    state = applyParseScalarHydration({ rate: 800 } as never, cbs, state);
+    expect(cbs.setCustomerRate).not.toHaveBeenCalled();
+    expect(state.manualOverrideKeys.has("customerRate")).toBe(true);
+  });
+
+  it("infers customer manual override only for explicit separate values on reopen", () => {
+    const ex = { rate: 2000 } as never;
+    const mirrored = { ...initialWorkspaceFieldsManual(), rate: "2000", customerRate: "" };
+    expect(inferParseManualOverridesFromDraft(mirrored, ex).has("customerRate")).toBe(false);
+    const separate = { ...initialWorkspaceFieldsManual(), rate: "2000", customerRate: "1600" };
+    expect(inferParseManualOverridesFromDraft(separate, ex).has("customerRate")).toBe(true);
+  });
+
   it("infers manual overrides when draft value differs from accepted parse", () => {
     const fields = {
       ...initialWorkspaceFieldsManual(),

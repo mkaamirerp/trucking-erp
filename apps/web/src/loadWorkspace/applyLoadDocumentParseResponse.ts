@@ -17,6 +17,7 @@ import {
   applyScalarDraftValueToLoadPersist,
   brokerContactIdInContactList,
   createEmptyParseHydrationState,
+  effectiveParseCustomerRateString,
   type ParseContactFieldKey,
   type ParseHydrationState,
 } from "@/loadWorkspace/loadParseHydrationState";
@@ -222,9 +223,9 @@ export function applyEmptyWorkspaceFieldsFromParseResponse(
   if (
     !draftJsonDefinesField(draftJson, ["customerRate", "customer_rate"]) &&
     workspaceFieldEmpty(fields.customerRate) &&
-    ex.customer_rate != null
+    effectiveParseCustomerRateString(ex) != null
   ) {
-    cbs.setCustomerRate(String(ex.customer_rate));
+    cbs.setCustomerRate(ex.customer_rate != null ? String(ex.customer_rate) : "");
   }
   if (
     !draftJsonDefinesField(draftJson, ["miles"]) &&

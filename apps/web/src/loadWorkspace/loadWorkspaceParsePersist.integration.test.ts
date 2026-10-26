@@ -43,6 +43,7 @@ function emptyRes(
 
 function mkCbs(state: {
   rate: string;
+  customerRate: string;
   brokerName: string;
   brokerId: number | null;
   brokerLoadReference: string;
@@ -80,7 +81,9 @@ function mkCbs(state: {
     setRate: vi.fn((v: string) => {
       state.rate = v;
     }),
-    setCustomerRate: vi.fn(),
+    setCustomerRate: vi.fn((v: string) => {
+      state.customerRate = v;
+    }),
     setMiles: vi.fn(),
     setInternalNotes: vi.fn(),
     setDraftStops: vi.fn((v) => {
@@ -101,6 +104,7 @@ describe("parse → manual edit → re-parse → persist", () => {
   it("keeps manually corrected rate in draft_json (not new AI extract)", async () => {
     const live = {
       rate: "",
+      customerRate: "",
       brokerName: "",
       brokerId: null,
       brokerLoadReference: "",
@@ -165,6 +169,78 @@ describe("parse → manual edit → re-parse → persist", () => {
     expect(inferParseContactConfidenceManualKeys(reopened, accepted.extracted).size).toBe(0);
   });
 
+  it("customer rate: parse default, manual edit, save, reopen, reparse with new RC rate", async () => {
+    const live = {
+      rate: "",
+      customerRate: "",
+      brokerName: "",
+      brokerId: null,
+      brokerLoadReference: "",
+      loadReferences: [] as { kind: string; value: string }[],
+      brokerContactName: "",
+      draftStops: [] as unknown[],
+    };
+    const cbs = mkCbs(live);
+    let hydration = createEmptyParseHydrationState();
+
+    hydration = applyParseScalarHydration({ rate: 1000 } as never, cbs, hydration);
+    expect(live.rate).toBe("1000");
+    expect(live.customerRate).toBe("");
+
+    hydration = applyParseScalarHydration({ rate: 1100 } as never, cbs, hydration);
+    expect(live.rate).toBe("1100");
+    expect(hydration.lastAppliedValues.get("customerRate")).toBe("1100");
+
+    registerManualParseFieldEdit(hydration, "customerRate", "1350");
+    live.customerRate = "1350";
+    const workspaceAtReparse = {
+      ...initialWorkspaceFieldsManual(),
+      rate: "1100",
+      customerRate: "1350",
+    };
+
+    hydration = applyParseScalarHydration({ rate: 900 } as never, cbs, hydration);
+    expect(live.customerRate).toBe("1350");
+    expect(live.rate).toBe("900");
+
+    const res = emptyRes({ rate: 900 });
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: hydration,
+      hydrationReviewNotes: [],
+    };
+    const params = buildLoadPersistParamsAfterParseApply(workspaceAtReparse, res, summary, {});
+    expect(params.rate).toBe("900");
+    expect(params.customerRate).toBe("1350");
+
+    const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => ({
+      concurrency_version: 2,
+      draft_json: body.draft_json,
+    }));
+    const saved = await persistWorkspaceDraftAfterParse({
+      draftId: "draft-cr",
+      draftVersion: 1,
+      res,
+      summary,
+      workspaceAtParseStart: workspaceAtReparse,
+      status: "draft",
+      seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
+      updateDraft,
+      buildDraftJson: buildWorkspaceDraftJson,
+    });
+    expect(saved.draft_json?.rate).toBe("900");
+    expect(saved.draft_json?.customerRate).toBe("1350");
+
+    const reopened = workspaceFieldsFromDraftJson(saved.draft_json ?? {});
+    expect(reopened.customerRate).toBe("1350");
+    const provenance = hydrationStateFromDraftAndParse(reopened, res.extracted);
+    expect(provenance.manualOverrideKeys.has("customerRate")).toBe(true);
+  });
+
   it("does not replace manually edited stops on re-parse", async () => {
     const stops = [
       {
@@ -177,6 +253,7 @@ describe("parse → manual edit → re-parse → persist", () => {
     ];
     const live = {
       rate: "",
+      customerRate: "",
       brokerName: "",
       brokerId: null,
       brokerLoadReference: "",
@@ -202,6 +279,7 @@ describe("parse → manual edit → re-parse → persist", () => {
 
     const live = {
       rate: "",
+      customerRate: "",
       brokerName: "",
       brokerId: null as number | null,
       brokerLoadReference: "",
@@ -340,6 +418,7 @@ describe("parse → manual edit → re-parse → persist", () => {
   it("locked broker name survives re-parse in draft_json when parse proposes another name", async () => {
     const live = {
       rate: "",
+      customerRate: "",
       brokerName: "Acme Logistics",
       brokerId: 99 as number | null,
       brokerLoadReference: "",

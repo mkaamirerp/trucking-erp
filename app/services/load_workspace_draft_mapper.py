@@ -180,7 +180,7 @@ def draft_json_to_load_create(draft_json: dict[str, Any]) -> LoadCreate:
     """Build LoadCreate from workspace draft_json; ignores assignment / trip fields."""
     if not isinstance(draft_json, dict):
         raise DraftJsonMappingError("draft_json", "must be a JSON object")
-    return LoadCreate(
+    load_create = LoadCreate(
         status="draft",
         load_number=None,
         broker_id=_parse_optional_id(draft_json.get("brokerId") or draft_json.get("broker_id"), "brokerId"),
@@ -243,3 +243,6 @@ def draft_json_to_load_create(draft_json: dict[str, Any]) -> LoadCreate:
         references=_references(draft_json),
         stops=_stops(draft_json) or None,
     )
+    if load_create.customer_rate is None and load_create.rate is not None:
+        load_create = load_create.model_copy(update={"customer_rate": load_create.rate})
+    return load_create

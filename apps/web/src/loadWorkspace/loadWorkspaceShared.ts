@@ -161,7 +161,7 @@ export function buildWorkspaceDraftJson(
     temperatureRequirement: params.temperatureRequirement,
     palletCaseCount: params.palletCaseCount,
     rate: params.rate,
-    customerRate: params.customerRate.trim() === "" ? params.rate.trim() : params.customerRate,
+    customerRate: params.customerRate,
     miles: params.miles,
     /** Draft-only proposed trip assignment — not operational Load assignment. */
     driverId: params.driverId ?? null,
