@@ -236,14 +236,8 @@ export function buildLoadPersistParamsAfterParseApply(
     params.brokerId = workspaceAtParseStart.brokerId;
     params.brokerNameSnapshot = workspaceAtParseStart.brokerNameSnapshot;
   }
-  if (
-    hydration.brokerContactIdManuallySelected ||
-    hydration.manualContactFieldKeys.size > 0 ||
-    hydration.brokerIdentityLocked ||
-    hydration.manualOverrideKeys.has("brokerNameSnapshot")
-  ) {
-    params.brokerContactId = workspaceAtParseStart.brokerContactId;
-  }
+  /** Authoritative contact id after apply (null when cleared or unmatched). */
+  params.brokerContactId = summary.resolvedBrokerContactId;
   const guardRefs = workspaceAtParseStart.loadReferences ?? [];
   const parsedRefs = workspaceReferencesFromParse(res.extracted.references);
   if (
@@ -430,8 +424,18 @@ export async function applyLoadDocumentParseResponse(
   const hydrationReviewNotes: string[] = [];
   const brokerIdentityProtected =
     nextHydration.brokerIdentityLocked || nextHydration.manualOverrideKeys.has("brokerNameSnapshot");
-  const contactIdProtected =
-    nextHydration.brokerContactIdManuallySelected || nextHydration.manualContactFieldKeys.size > 0;
+
+  const contactSelectionProtected = (): boolean =>
+    nextHydration.brokerContactIdManuallySelected ||
+    nextHydration.manualContactFieldKeys.size > 0;
+
+  const clearBrokerContactSelection = (reviewNote?: string) => {
+    cbs.setBrokerContactId(null);
+    nextHydration.brokerContactIdManuallySelected = false;
+    resolvedBrokerContactIdForSummary = null;
+    brokerContactMatchedForSummary = false;
+    if (reviewNote) hydrationReviewNotes.push(reviewNote);
+  };
 
   const applyContact = (
     key: ParseContactFieldKey,
@@ -489,21 +493,24 @@ export async function applyLoadDocumentParseResponse(
           const items = paged.items || [];
           cbs.setBrokerContacts(items);
           if (
-            contactIdProtected &&
+            contactSelectionProtected() &&
             priorContactId != null &&
             brokerContactIdInContactList(priorContactId, items)
           ) {
             resolvedBrokerContactIdForSummary = priorContactId;
+            cbs.setBrokerContactId(priorContactId);
           } else if (priorContactId != null) {
-            hydrationReviewNotes.push(
+            clearBrokerContactSelection(
               "The selected broker contact does not belong to the chosen broker and was cleared. Pick a contact for this broker.",
             );
-            cbs.setBrokerContactId(null);
-            nextHydration.brokerContactIdManuallySelected = false;
-            resolvedBrokerContactIdForSummary = null;
           }
         } catch {
           cbs.setBrokerContacts([]);
+          if (priorContactId != null) {
+            clearBrokerContactSelection(
+              "Could not verify broker contact membership; the contact was not kept. Review before save.",
+            );
+          }
         }
       }
     } else {
@@ -513,13 +520,11 @@ export async function applyLoadDocumentParseResponse(
       const brokerChanged =
         resolvedBrokerId != null && priorBrokerId != null && resolvedBrokerId !== priorBrokerId;
       if (brokerChanged && priorContactId != null) {
-        hydrationReviewNotes.push(
+        clearBrokerContactSelection(
           "Parser identified a different broker; the previous broker contact was cleared. Select a contact for the new broker.",
         );
-        cbs.setBrokerContactId(null);
-        nextHydration.brokerContactIdManuallySelected = false;
-      } else if (!contactIdProtected) {
-        cbs.setBrokerContactId(null);
+      } else if (!contactSelectionProtected()) {
+        clearBrokerContactSelection();
       }
 
       if (resolvedBrokerId != null) {
@@ -532,7 +537,7 @@ export async function applyLoadDocumentParseResponse(
           const items = paged.items || [];
           cbs.setBrokerContacts(items);
           if (
-            contactIdProtected &&
+            contactSelectionProtected() &&
             !brokerChanged &&
             priorContactId != null &&
             priorBrokerId === resolvedBrokerId &&
@@ -541,17 +546,14 @@ export async function applyLoadDocumentParseResponse(
             resolvedBrokerContactIdForSummary = priorContactId;
             cbs.setBrokerContactId(priorContactId);
           } else if (
-            contactIdProtected &&
+            contactSelectionProtected() &&
             priorContactId != null &&
             (brokerChanged || !brokerContactIdInContactList(priorContactId, items))
           ) {
-            hydrationReviewNotes.push(
+            clearBrokerContactSelection(
               "The selected broker contact does not belong to the identified broker and was cleared.",
             );
-            cbs.setBrokerContactId(null);
-            nextHydration.brokerContactIdManuallySelected = false;
-            resolvedBrokerContactIdForSummary = null;
-          } else if (!contactIdProtected) {
+          } else if (!contactSelectionProtected()) {
             const matchedContact = matchBrokerContactFromParsed(items, {
               name: ex.broker_contact_name_snapshot,
               email: ex.broker_contact_email_snapshot,
@@ -561,13 +563,23 @@ export async function applyLoadDocumentParseResponse(
               brokerContactMatchedForSummary = true;
               resolvedBrokerContactIdForSummary = matchedContact.id;
               cbs.setBrokerContactId(matchedContact.id);
+            } else {
+              resolvedBrokerContactIdForSummary = null;
             }
           }
         } catch {
           cbs.setBrokerContacts([]);
+          if (priorContactId != null) {
+            clearBrokerContactSelection(
+              "Could not verify broker contact membership; the contact was not kept. Review before save.",
+            );
+          } else {
+            resolvedBrokerContactIdForSummary = null;
+          }
         }
-      } else if (!contactIdProtected) {
+      } else if (!contactSelectionProtected()) {
         cbs.setBrokerContacts([]);
+        resolvedBrokerContactIdForSummary = null;
       }
     }
   }

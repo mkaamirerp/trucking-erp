@@ -56,6 +56,23 @@ describe("loadParseHydrationState", () => {
     expect(cbs.setCommodity).not.toHaveBeenCalled();
   });
 
+  it("reopen preserves broker/contact pair when both saved on draft", () => {
+    const fields = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerNameSnapshot: "Acme Freight",
+      brokerContactId: 10,
+    };
+    const ex = {
+      broker_name_snapshot: "Acme Freight",
+      broker_mc_number_snapshot: "123",
+      broker_contact_name_snapshot: "Sam",
+    } as never;
+    const state = hydrationStateFromDraftAndParse(fields, ex);
+    expect(state.brokerIdentityLocked).toBe(true);
+    expect(state.brokerContactIdManuallySelected).toBe(true);
+  });
+
   it("locks broker identity on reopen when draft broker id differs from MC/DOT re-resolution", () => {
     const fields = {
       ...initialWorkspaceFieldsManual(),

@@ -5,6 +5,7 @@ import {
   buildLoadPersistParamsAfterParseApply,
   buildLoadPersistParamsFromParseResponse,
   persistWorkspaceDraftAfterParse,
+  type ApplyLoadDocumentParseSummary,
 } from "./applyLoadDocumentParseResponse";
 import type { LoadDocumentParseResponse } from "@/api";
 import {
@@ -508,8 +509,8 @@ describe("persistWorkspaceDraftAfterParse", () => {
     hydration.loadReferencesManuallyEdited = true;
     hydration.manualOverrideKeys.add("rate");
     const summary = {
-      resolvedBrokerId: 1,
-      resolvedBrokerContactId: 2,
+      resolvedBrokerId: 99,
+      resolvedBrokerContactId: 5,
       brokerContactMatched: true,
       mcOrDotAttempted: true,
       unresolvedStopCount: 0,
@@ -597,6 +598,7 @@ describe("applyLoadDocumentParseResponse broker identity", () => {
       guard,
     );
     expect(setBrokerContactId).toHaveBeenCalledWith(null);
+    expect(result.resolvedBrokerContactId).toBeNull();
     expect(result.parseHydrationState.brokerContactIdManuallySelected).toBe(false);
     expect(result.hydrationReviewNotes.some((n) => n.includes("contact"))).toBe(true);
   });
@@ -648,5 +650,194 @@ describe("applyLoadDocumentParseResponse broker identity", () => {
     expect(setBrokerId).not.toHaveBeenCalled();
     expect(result.resolvedBrokerId).toBe(99);
     expect(result.hydrationReviewNotes.some((n) => n.includes("Broker A"))).toBe(true);
+  });
+});
+
+describe("contact id in persisted draft_json", () => {
+  const mkCbs = () => ({
+    setBrokerNameSnapshot: vi.fn(),
+    setBrokerId: vi.fn(),
+    setBrokerContactId: vi.fn(),
+    setBrokerContacts: vi.fn(),
+    setBrokerContactNameSnapshot: vi.fn(),
+    setBrokerContactPhoneSnapshot: vi.fn(),
+    setBrokerContactEmailSnapshot: vi.fn(),
+    setBrokerLoadReference: vi.fn(),
+    setLoadReferences: vi.fn(),
+    setFreightMode: vi.fn(),
+    setEquipmentType: vi.fn(),
+    setTrailerType: vi.fn(),
+    setTrailerSize: vi.fn(),
+    setCommodity: vi.fn(),
+    setEstimatedWeight: vi.fn(),
+    setTemperatureRequirement: vi.fn(),
+    setRate: vi.fn(),
+    setCustomerRate: vi.fn(),
+    setMiles: vi.fn(),
+    setInternalNotes: vi.fn(),
+    setDraftStops: vi.fn(),
+  });
+
+  async function draftContactIdAfterParseApply(
+    apply: () => Promise<ApplyLoadDocumentParseSummary>,
+    workspaceAtParseStart: ReturnType<typeof initialWorkspaceFieldsManual> & {
+      brokerId?: number | null;
+      brokerContactId?: number | null;
+      brokerNameSnapshot?: string;
+    },
+    res: LoadDocumentParseResponse,
+  ): Promise<number | null> {
+    const summary = await apply();
+    const params = buildLoadPersistParamsAfterParseApply(workspaceAtParseStart, res, summary, {});
+    const json = buildWorkspaceDraftJson({ ...params, status: "draft" });
+    return (json.brokerContactId ?? null) as number | null;
+  }
+
+  it("locked broker + invalid contact clears contact in saved draft_json", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 99 } as never);
+    vi.mocked(listBrokerContacts).mockResolvedValue({ items: [{ id: 50, name: "Other" }] } as never);
+    const hydration = createEmptyParseHydrationState();
+    hydration.brokerIdentityLocked = true;
+    hydration.brokerContactIdManuallySelected = true;
+    const workspace = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 10,
+    };
+    const guard = {
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 10,
+      loadReferences: [],
+      brokerLoadReference: "",
+    };
+    const id = await draftContactIdAfterParseApply(
+      () =>
+        applyLoadDocumentParseResponse(
+          emptyRes({ broker_mc_number_snapshot: "1", broker_name_snapshot: "Broker B" }),
+          mkCbs(),
+          hydration,
+          guard,
+        ),
+      workspace,
+      emptyRes({ broker_mc_number_snapshot: "1" }),
+    );
+    expect(id).toBeNull();
+  });
+
+  it("parser broker change with no matching contact leaves saved contact null", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 2 } as never);
+    vi.mocked(listBrokerContacts).mockResolvedValue({ items: [] } as never);
+    const hydration = createEmptyParseHydrationState();
+    hydration.brokerContactIdManuallySelected = true;
+    const workspace = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 1,
+      brokerContactId: 10,
+    };
+    const guard = {
+      brokerId: 1,
+      brokerNameSnapshot: "A",
+      brokerContactId: 10,
+      loadReferences: [],
+      brokerLoadReference: "",
+    };
+    const id = await draftContactIdAfterParseApply(
+      () =>
+        applyLoadDocumentParseResponse(
+          emptyRes({ broker_mc_number_snapshot: "9", broker_name_snapshot: "B" }),
+          mkCbs(),
+          hydration,
+          guard,
+        ),
+      workspace,
+      emptyRes({ broker_mc_number_snapshot: "9" }),
+    );
+    expect(id).toBeNull();
+  });
+
+  it("locked broker + valid belonging contact is preserved in draft_json", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 99 } as never);
+    vi.mocked(listBrokerContacts).mockResolvedValue({
+      items: [{ id: 10, name: "Contact A" }],
+    } as never);
+    const hydration = createEmptyParseHydrationState();
+    hydration.brokerIdentityLocked = true;
+    hydration.brokerContactIdManuallySelected = true;
+    const workspace = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 10,
+    };
+    const guard = {
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 10,
+      loadReferences: [],
+      brokerLoadReference: "",
+    };
+    const id = await draftContactIdAfterParseApply(
+      () =>
+        applyLoadDocumentParseResponse(
+          emptyRes({ broker_mc_number_snapshot: "1", broker_name_snapshot: "Broker B" }),
+          mkCbs(),
+          hydration,
+          guard,
+        ),
+      workspace,
+      emptyRes({ broker_mc_number_snapshot: "1" }),
+    );
+    expect(id).toBe(10);
+  });
+
+  it("contact lookup failure does not persist unverified contact", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 99 } as never);
+    vi.mocked(listBrokerContacts).mockRejectedValue(new Error("network"));
+    const hydration = createEmptyParseHydrationState();
+    hydration.brokerIdentityLocked = true;
+    hydration.brokerContactIdManuallySelected = true;
+    const workspace = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerContactId: 10,
+    };
+    const guard = {
+      brokerId: 99,
+      brokerNameSnapshot: "Broker B",
+      brokerContactId: 10,
+      loadReferences: [],
+      brokerLoadReference: "",
+    };
+    const summary = await applyLoadDocumentParseResponse(
+      emptyRes({ broker_mc_number_snapshot: "1" }),
+      mkCbs(),
+      hydration,
+      guard,
+    );
+    expect(summary.resolvedBrokerContactId).toBeNull();
+    expect(summary.hydrationReviewNotes.some((n) => n.includes("verify"))).toBe(true);
+    const params = buildLoadPersistParamsAfterParseApply(workspace, emptyRes({}), summary, {});
+    expect(params.brokerContactId).toBeNull();
+  });
+
+  it("initial parse auto-match does not mark manual contact selection", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 1 } as never);
+    vi.mocked(listBrokerContacts).mockResolvedValue({
+      items: [{ id: 7, name: "Sam", email: "sam@x.com", phone: "" }],
+    } as never);
+    const hydration = createEmptyParseHydrationState();
+    const summary = await applyLoadDocumentParseResponse(
+      emptyRes({
+        broker_mc_number_snapshot: "1",
+        broker_contact_name_snapshot: "Sam",
+        broker_contact_email_snapshot: "sam@x.com",
+      }),
+      mkCbs(),
+      hydration,
+    );
+    expect(summary.resolvedBrokerContactId).toBe(7);
+    expect(summary.parseHydrationState.brokerContactIdManuallySelected).toBe(false);
   });
 });
