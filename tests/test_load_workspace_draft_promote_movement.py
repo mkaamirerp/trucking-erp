@@ -290,3 +290,100 @@ async def test_promote_assignment_failure_rolls_back_load_and_keeps_draft() -> N
             factory, tenant_id=tenant_id, load_id=None, draft_id=draft_id, trip_id=None
         )
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_rejects_malformed_driver_id_without_creating_load() -> None:
+    _skip_if_demo_or_not_disposable()
+    engine, factory = _session()
+    draft_id = None
+    tenant_id = 0
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            loads_before = int(await db.scalar(text("SELECT COUNT(*) FROM loads")))
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json=_promotable_draft_json(driverId="not-a-driver"),
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+        async with factory() as db:
+            with pytest.raises(HTTPException) as exc:
+                await promote_workspace_draft(
+                    db,
+                    tenant_id,
+                    draft_id,
+                    LoadWorkspaceDraftPromote(
+                        expected_concurrency_version=1,
+                        promotion_idempotency_key=f"promo-bad-driver-str-{uuid.uuid4().hex}",
+                    ),
+                    promoted_by_platform_user_id="integration-test-user",
+                )
+            assert exc.value.status_code == 422
+            await db.rollback()
+        async with factory() as db:
+            assert int(await db.scalar(text("SELECT COUNT(*) FROM loads"))) == loads_before
+    finally:
+        await _delete_promoted_artifacts(
+            factory, tenant_id=tenant_id, load_id=None, draft_id=draft_id, trip_id=None
+        )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_returns_trip_id_after_trip_progresses() -> None:
+    _skip_if_demo_or_not_disposable()
+    engine, factory = _session()
+    draft_id = load_id = trip_id = None
+    tenant_id = 0
+    promo_key = f"promo-progressed-{uuid.uuid4().hex}"
+    try:
+        async with factory() as db:
+            tenant_id = await _resolve_tenant_id(db)
+            driver_id = await _first_driver_id(db, tenant_id)
+            draft = await create_workspace_draft(
+                db,
+                tenant_id,
+                LoadWorkspaceDraftCreate(
+                    source_channel="manual",
+                    draft_json=_promotable_draft_json(driverId=driver_id),
+                ),
+                created_by_platform_user_id="integration-test-user",
+            )
+            draft_id = draft.id
+        async with factory() as db:
+            result = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(expected_concurrency_version=1, promotion_idempotency_key=promo_key),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            load_id = result.load_id
+            trip_id = result.trip_id
+            assert trip_id is not None
+            await db.execute(
+                text("UPDATE trips SET status = 'assigned' WHERE tenant_id = :t AND id = :id"),
+                {"t": tenant_id, "id": trip_id},
+            )
+            await db.commit()
+        async with factory() as db:
+            replay = await promote_workspace_draft(
+                db,
+                tenant_id,
+                draft_id,
+                LoadWorkspaceDraftPromote(expected_concurrency_version=2, promotion_idempotency_key=promo_key),
+                promoted_by_platform_user_id="integration-test-user",
+            )
+            assert replay.idempotent_replay is True
+            assert replay.trip_id == trip_id
+    finally:
+        await _delete_promoted_artifacts(
+            factory, tenant_id=tenant_id, load_id=load_id, draft_id=draft_id, trip_id=trip_id
+        )
+        await engine.dispose()

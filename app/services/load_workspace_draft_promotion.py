@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.concurrency.draft_conflicts import workspace_draft_version_conflict_exception
@@ -20,11 +20,11 @@ from app.services.load_rate_confirmation_duplicate import assert_promote_rate_co
 from app.schemas.trip_read import TripAssignmentBody
 from app.services.loads import (
     _insert_commercial_load_uncommitted,
-    _open_planned_trip_map,
     _write_load_audit,
     get_load,
 )
-from app.services.trips import create_planned_trip, update_trip_assignment
+from app.models.trip import Trip, TripLoad
+from app.services.trips import _validate_assignment_targets, create_planned_trip, update_trip_assignment
 
 
 class PromotionResult:
@@ -65,10 +65,65 @@ def proposed_assignment_from_draft_json(draft_json: dict) -> tuple[int | None, i
     return driver_id, truck_id, trailer_id
 
 
-async def _open_planned_trip_id_for_load(db: AsyncSession, tenant_id: int, load_id: int) -> int | None:
-    planned = await _open_planned_trip_map(db, tenant_id, [int(load_id)])
-    row = planned.get(int(load_id))
-    return int(row[0]) if row else None
+def draft_json_has_non_empty_driver_reference(draft_json: dict) -> bool:
+    """True when the operator set a driver on the draft (including invalid non-numeric values)."""
+    raw = draft_json.get("driverId")
+    if raw is None:
+        raw = draft_json.get("driver_id")
+    if raw is None:
+        return False
+    if isinstance(raw, bool):
+        return False
+    if isinstance(raw, str):
+        return bool(raw.strip())
+    if isinstance(raw, (int, float)):
+        try:
+            return int(raw) > 0
+        except (TypeError, ValueError):
+            return True
+    return True
+
+
+async def assert_draft_movement_assignment_promotable(
+    db: AsyncSession,
+    tenant_id: int,
+    draft_json: dict,
+) -> tuple[int | None, int | None, int | None]:
+    """Reject promotion when draft shows driver intent but assignment cannot be honored."""
+    driver_id, truck_id, trailer_id = proposed_assignment_from_draft_json(draft_json)
+    if draft_json_has_non_empty_driver_reference(draft_json) and driver_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "LOAD_WORKSPACE_DRAFT_INVALID_DRIVER",
+                "detail": "Driver assignment on the draft is invalid. Clear or fix the driver before creating the load.",
+            },
+        )
+    if driver_id is not None:
+        await _validate_assignment_targets(
+            db,
+            tenant_id,
+            driver_id=driver_id,
+            truck_id=truck_id,
+            trailer_id=trailer_id,
+        )
+    return driver_id, truck_id, trailer_id
+
+
+async def _trip_id_for_promoted_load(db: AsyncSession, tenant_id: int, load_id: int) -> int | None:
+    """First non-cancelled trip membership for the load (any status), for idempotent promote replay."""
+    trip_id = await db.scalar(
+        select(TripLoad.trip_id)
+        .join(Trip, and_(Trip.tenant_id == TripLoad.tenant_id, Trip.id == TripLoad.trip_id))
+        .where(
+            TripLoad.tenant_id == tenant_id,
+            TripLoad.load_id == int(load_id),
+            Trip.cancelled_at.is_(None),
+        )
+        .order_by(TripLoad.id.asc())
+        .limit(1)
+    )
+    return int(trip_id) if trip_id is not None else None
 
 
 async def _create_planned_trip_for_promoted_load(
@@ -126,7 +181,7 @@ async def _idempotent_replay(
     if draft.status == "promoted" and draft.promoted_load_id is not None:
         if draft.promotion_idempotency_key == key:
             load_id = int(draft.promoted_load_id)
-            trip_id = await _open_planned_trip_id_for_load(db, tenant_id, load_id)
+            trip_id = await _trip_id_for_promoted_load(db, tenant_id, load_id)
             return PromotionResult(
                 draft=draft,
                 load_id=load_id,
@@ -233,6 +288,9 @@ async def promote_workspace_draft(
         broker_id=load_create.broker_id,
         acknowledge_soft=payload.acknowledge_soft_rate_confirmation_duplicate,
     )
+    movement_assignment = await assert_draft_movement_assignment_promotable(
+        db, tenant_id, draft.draft_json or {}
+    )
     now = datetime.now(timezone.utc)
 
     load, _stop_create_diff = await _insert_commercial_load_uncommitted(
@@ -284,7 +342,7 @@ async def promote_workspace_draft(
     )
 
     trip_id: int | None = None
-    driver_id, truck_id, trailer_id = proposed_assignment_from_draft_json(draft.draft_json or {})
+    driver_id, truck_id, trailer_id = movement_assignment
     if driver_id is not None:
         trip_id = await _create_planned_trip_for_promoted_load(
             db,

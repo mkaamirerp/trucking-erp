@@ -582,6 +582,8 @@ function LoadWorkspacePage() {
   const [activeDocLine, setActiveDocLine] = useState<number | null>(null);
   const loadConcurrencyRef = useRef<number | null>(null);
   const formDirtyRef = useRef(false);
+  /** Stable per create-load attempt so retries do not mint duplicate loads/trips. */
+  const createLoadPromotionIdempotencyKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     loadConcurrencyRef.current = load?.concurrency_version ?? null;
@@ -1471,6 +1473,10 @@ function LoadWorkspacePage() {
   ]);
 
   useEffect(() => {
+    createLoadPromotionIdempotencyKeyRef.current = null;
+  }, [draftIdFromRoute]);
+
+  useEffect(() => {
     if (workspaceMode !== "intake" || !hasIntakeThread) {
       setIntakeMessages([]);
       setIntakeThread(null);
@@ -1882,9 +1888,12 @@ function LoadWorkspacePage() {
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(saved);
+      if (!createLoadPromotionIdempotencyKeyRef.current) {
+        createLoadPromotionIdempotencyKeyRef.current = crypto.randomUUID();
+      }
       const result = await promoteLoadWorkspaceDraft(id, {
         expected_concurrency_version: saved.concurrency_version,
-        promotion_idempotency_key: crypto.randomUUID(),
+        promotion_idempotency_key: createLoadPromotionIdempotencyKeyRef.current,
         acknowledge_soft_rate_confirmation_duplicate: acknowledgeSoftDuplicate,
       });
       const loadId = Number(result.load_id);

@@ -1,6 +1,17 @@
 """Unit tests for draft-json movement assignment extraction (no database)."""
 
-from app.services.load_workspace_draft_promotion import proposed_assignment_from_draft_json
+from app.services.load_workspace_draft_promotion import (
+    draft_json_has_non_empty_driver_reference,
+    proposed_assignment_from_draft_json,
+)
+
+
+def test_draft_json_has_non_empty_driver_reference() -> None:
+    assert draft_json_has_non_empty_driver_reference({"driverId": 5}) is True
+    assert draft_json_has_non_empty_driver_reference({"driverId": "12"}) is True
+    assert draft_json_has_non_empty_driver_reference({"driverId": "bad"}) is True
+    assert draft_json_has_non_empty_driver_reference({"driverId": 0}) is False
+    assert draft_json_has_non_empty_driver_reference({}) is False
 
 
 def test_proposed_assignment_reads_camel_and_snake_case() -> None:
