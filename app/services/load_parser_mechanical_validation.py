@@ -60,6 +60,17 @@ _SUSPICIOUS_REFERENCE_VALUES = frozenset(
 
 _ALLOWED_STOP_TYPES = frozenset({"pickup", "delivery", "drop", "other"})
 
+# Mechanical backstop for explicit prefixes only; the v2 AI field_rules own semantics.
+_APPOINTMENT_PREFIX_RE = re.compile(
+    r"^(?P<type>APPT|APPOINTMENT|FCFS|OPEN[\s-]+WINDOW)(?=$|[\s:–—-])"
+    r"(?:[\s:–—-]+(?P<remaining>.*))?$",
+    re.IGNORECASE,
+)
+_APPOINTMENT_TYPE_ALIASES = {
+    "APPT": "APPT", "APPOINTMENT": "APPT", "FCFS": "FCFS",
+    "OPEN WINDOW": "OPEN WINDOW",
+}
+
 # Frozen generic company mailbox local-parts (rejection backstop only; no replacement).
 _GENERIC_COMPANY_MAILBOX_LOCALS = frozenset(
     {
@@ -643,14 +654,25 @@ def _validate_stops(
         s["sequence"] = seq
         seen_sequences[seq] = seen_sequences.get(seq, 0) + 1
 
-        # Syntactic appointment prefix normalize.
+        # Split explicit scheduling prefixes without losing contradictory evidence.
         time_text = str(s.get("appointment_time_text") or "").strip()
-        if time_text.casefold().startswith("appt "):
-            s["appointment_type"] = s.get("appointment_type") or "APPT"
-            s["appointment_time_text"] = time_text[5:].strip()
-        elif time_text.casefold().startswith("fcfs "):
-            s["appointment_type"] = s.get("appointment_type") or "FCFS"
-            s["appointment_time_text"] = time_text[5:].strip()
+        prefix = _APPOINTMENT_PREFIX_RE.fullmatch(time_text)
+        if prefix:
+            remaining = (prefix.group("remaining") or "").strip()
+            # "Appt #ABC123" is an identifier, not an appointment clock time.
+            if not re.match(r"^(?:#|no\.?\b|number\b)", remaining, re.IGNORECASE):
+                parsed_type = prefix.group("type").replace("-", " ").upper()
+                normalized_type = _APPOINTMENT_TYPE_ALIASES[parsed_type]
+                existing = str(s.get("appointment_type") or "").strip()
+                existing_key = " ".join(existing.replace("-", " ").upper().split())
+                existing_type = _APPOINTMENT_TYPE_ALIASES.get(existing_key, existing_key)
+                if existing and existing_type != normalized_type:
+                    warnings.append(f"appointment_type_conflict: stops[{idx}]")
+                    fc["stops"] = "low"
+                    # Preserve original time text; stripping it would hide the conflict.
+                else:
+                    s["appointment_type"] = normalized_type
+                    s["appointment_time_text"] = remaining or None
 
         # Calendar date validation.
         appt = s.get("appointment_date")
