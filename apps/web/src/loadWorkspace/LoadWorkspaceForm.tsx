@@ -60,13 +60,21 @@ import {
 
 const L = wsLabelClass;
 const I = wsInputClass;
-/** Dense stop cards — dispatcher scan: location → schedule → notes in few rows */
-const stopLb = `${L} !mb-0 !text-[9px] leading-none tracking-wide`;
-const stopIc = `${I} !py-0.5 !px-1 !text-[12px] leading-tight`;
+/** Dense stop cards — same tokens as Financials / Freight sections; layout only differs */
+const stopLb = `${L} !mb-0.5`;
+const stopIc = `${I} !py-1 !px-2 !text-[13px]`;
 const stopGridCol =
-  "grid grid-cols-6 gap-x-1 gap-y-0.5 sm:grid-cols-12 sm:gap-x-1.5";
+  "grid grid-cols-6 gap-x-1.5 gap-y-1 sm:grid-cols-12 sm:gap-x-2 sm:gap-y-1";
 const stopIconBtn =
-  "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--trk-border)] text-[12px] disabled:opacity-40";
+  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--trk-border)] bg-[var(--trk-bg)] text-[var(--trk-text-muted)] text-[12px] hover:border-[var(--trk-heading)]/40 disabled:opacity-40";
+
+function stopCardShellClass(isPu: boolean, isDr: boolean): string {
+  const base =
+    "min-w-0 rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface-2)] px-2 py-1.5 shadow-none";
+  if (isPu) return `${base} border-l-2 border-l-[var(--trk-success)]`;
+  if (isDr) return `${base} border-l-2 border-l-[var(--trk-heading)]`;
+  return `${base} border-l-2 border-l-[var(--trk-border-strong)]`;
+}
 
 function stopListGridClass(stopCount: number): string {
   if (stopCount <= 1) return "grid grid-cols-1 gap-1";
@@ -102,24 +110,18 @@ function StopDenseCard({
   const u = (stop.stop_type || "").toUpperCase();
   const isPu = u === "PICKUP";
   const isDr = u === "DELIVERY" || u === "DROP";
-  const pillClass = isPu
-    ? "border border-emerald-800 bg-emerald-950/50 text-emerald-400"
-    : isDr
-      ? "border border-sky-800 bg-sky-950/40 text-sky-300"
-      : "border border-[var(--trk-border)] bg-[var(--trk-surface-2)] text-[var(--trk-text-muted)]";
-
   return (
-    <div className="min-w-0 rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-1 py-0.5">
-      <div className="mb-0.5 flex flex-wrap items-center justify-between gap-x-1 gap-y-0.5">
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <div className={stopCardShellClass(isPu, isDr)}>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-1 gap-y-0.5 border-b border-[var(--trk-border)]/80 pb-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span
-            className={`inline-flex h-6 shrink-0 items-center rounded px-1.5 text-[10px] font-bold uppercase tracking-wide ${pillClass}`}
+            className="inline-flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-1.5 text-[10px] font-bold text-[var(--trk-heading)]"
             title={`Stop ${idx + 1} · sequence ${stop.sequence ?? idx}`}
           >
             {idx + 1}
           </span>
           <select
-            className={`${stopIc} !w-auto min-w-[5.75rem]`}
+            className={`${stopIc} !w-auto min-w-[6.5rem] !bg-[var(--trk-bg)]`}
             aria-label="Stop type"
             value={stop.stop_type}
             onChange={(e) => updateStop(stop._key, { stop_type: e.target.value })}
@@ -266,9 +268,9 @@ function StopDenseCard({
           />
         </div>
         <div className="col-span-3 sm:col-span-6">
-          <label className={`${stopLb} text-[var(--trk-heading)]`}>Stop notes</label>
+          <label className={stopLb}>Stop notes</label>
           <textarea
-            className={`${stopIc} min-h-[1.35rem] resize-y`}
+            className={`${stopIc} min-h-[2rem] resize-y`}
             rows={1}
             data-testid="stop-notes-input"
             value={stop.notes ?? ""}
@@ -277,9 +279,9 @@ function StopDenseCard({
           />
         </div>
         <div className="col-span-3 sm:col-span-6">
-          <label className={`${stopLb} text-[var(--trk-heading)]`}>Commodity notes</label>
+          <label className={stopLb}>Commodity notes</label>
           <textarea
-            className={`${stopIc} min-h-[1.35rem] resize-y`}
+            className={`${stopIc} min-h-[2rem] resize-y`}
             rows={1}
             data-testid="commodity-notes-input"
             value={stop.commodity_notes ?? ""}
@@ -753,13 +755,13 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             + Add stop
           </button>
         </div>
-        <div className="px-2 py-1.5">
+        <div className={`${wsSectionBody} !py-2`}>
         {isIntake && ip?.pickupDeliverySummary ? (
           <p className="mb-1.5 rounded border border-sky-900/40 bg-sky-950/30 px-2 py-1 text-[10px] text-sky-400">
             Intake: {ip.pickupDeliverySummary}
           </p>
         ) : null}
-        <div className={stopListGridClass(p.sortedDraftStops.length)}>
+        <div className={`${stopListGridClass(p.sortedDraftStops.length)} gap-2`}>
           {p.sortedDraftStops.length === 0 ? (
             <p className="col-span-full py-1.5 text-center text-[11px] text-[var(--trk-text-muted)]">
               No stops yet — add pickup and delivery.
