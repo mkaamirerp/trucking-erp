@@ -549,6 +549,58 @@ describe("persistWorkspaceDraftAfterParse", () => {
 });
 
 describe("applyLoadDocumentParseResponse broker identity", () => {
+  it("clears manual contact when parser resolves a different broker", async () => {
+    vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 2 } as never);
+    vi.mocked(listBrokerContacts).mockResolvedValue({
+      items: [{ id: 20, name: "Contact B" }],
+    } as never);
+    const setBrokerContactId = vi.fn();
+    const hydration = createEmptyParseHydrationState();
+    hydration.brokerContactIdManuallySelected = true;
+    const guard = {
+      brokerId: 1,
+      brokerNameSnapshot: "Broker A",
+      brokerContactId: 10,
+      loadReferences: [],
+      brokerLoadReference: "",
+    };
+    const cbs = {
+      setBrokerNameSnapshot: vi.fn(),
+      setBrokerId: vi.fn(),
+      setBrokerContactId,
+      setBrokerContacts: vi.fn(),
+      setBrokerContactNameSnapshot: vi.fn(),
+      setBrokerContactPhoneSnapshot: vi.fn(),
+      setBrokerContactEmailSnapshot: vi.fn(),
+      setBrokerLoadReference: vi.fn(),
+      setLoadReferences: vi.fn(),
+      setFreightMode: vi.fn(),
+      setEquipmentType: vi.fn(),
+      setTrailerType: vi.fn(),
+      setTrailerSize: vi.fn(),
+      setCommodity: vi.fn(),
+      setEstimatedWeight: vi.fn(),
+      setTemperatureRequirement: vi.fn(),
+      setRate: vi.fn(),
+      setCustomerRate: vi.fn(),
+      setMiles: vi.fn(),
+      setInternalNotes: vi.fn(),
+      setDraftStops: vi.fn(),
+    };
+    const result = await applyLoadDocumentParseResponse(
+      emptyRes({
+        broker_mc_number_snapshot: "999",
+        broker_name_snapshot: "Broker B",
+      }),
+      cbs,
+      hydration,
+      guard,
+    );
+    expect(setBrokerContactId).toHaveBeenCalledWith(null);
+    expect(result.parseHydrationState.brokerContactIdManuallySelected).toBe(false);
+    expect(result.hydrationReviewNotes.some((n) => n.includes("contact"))).toBe(true);
+  });
+
   it("skips MC/DOT broker resolution when broker identity is locked", async () => {
     vi.mocked(resolveBrokerIdentity).mockResolvedValue({ broker_id: 1 } as never);
     const setBrokerId = vi.fn();

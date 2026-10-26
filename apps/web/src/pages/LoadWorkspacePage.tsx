@@ -725,26 +725,14 @@ function LoadWorkspacePage() {
 
   const getParseHydrationCallbacks = useCallback(
     (): ApplyLoadDocumentParseCallbacks => ({
-      setBrokerNameSnapshot: (v) => {
-        registerManualParseFieldEdit(parseHydrationRef.current, "brokerNameSnapshot", v);
-        setBrokerNameSnapshot(v);
-      },
-      setBrokerId: (id) => {
-        markBrokerIdentityLocked(parseHydrationRef.current);
-        setBrokerId(id);
-      },
-      setBrokerContactId: (id) => {
-        if (id != null) markBrokerContactIdManuallySelected(parseHydrationRef.current);
-        setBrokerContactId(id);
-      },
+      setBrokerNameSnapshot,
+      setBrokerId,
+      setBrokerContactId,
       setBrokerContacts,
       setBrokerContactNameSnapshot,
       setBrokerContactPhoneSnapshot,
       setBrokerContactEmailSnapshot,
-      setBrokerLoadReference: (v) => {
-        registerManualParseFieldEdit(parseHydrationRef.current, "brokerLoadReference", v);
-        setBrokerLoadReference(v);
-      },
+      setBrokerLoadReference,
       setLoadReferences,
       setFreightMode,
       setEquipmentType,
@@ -1031,10 +1019,18 @@ function LoadWorkspacePage() {
     [markParseConfidenceFieldEdited],
   );
 
-  const setBrokerIdTracked = useCallback((id: number | null) => {
-    markBrokerIdentityLocked(parseHydrationRef.current);
-    setBrokerId(id);
-  }, []);
+  const setBrokerIdTracked = useCallback(
+    (id: number | null) => {
+      markBrokerIdentityLocked(parseHydrationRef.current);
+      const prevId = brokerId;
+      setBrokerId(id);
+      if (id !== prevId) {
+        parseHydrationRef.current.brokerContactIdManuallySelected = false;
+        setBrokerContactId(null);
+      }
+    },
+    [brokerId],
+  );
 
   const setBrokerContactIdTracked = useCallback((id: number | null) => {
     if (id != null) {

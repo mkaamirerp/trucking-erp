@@ -100,19 +100,25 @@ function normBrokerLabel(v: string | null | undefined): string {
   return (v ?? "").trim().toLowerCase();
 }
 
-/** Reopen draft: broker id/name no longer matches accepted parse broker snapshot. */
+/** Reopen draft: explicit broker id in draft_json must not be re-resolved from MC/DOT alone. */
 export function inferBrokerIdentityLocked(
   fields: WorkspaceDraftFields,
   ex: LoadDocumentParseResponse["extracted"],
 ): boolean {
   if (inferParseManualOverridesFromDraft(fields, ex).has("brokerNameSnapshot")) return true;
+  if (fields.brokerId == null) return false;
+  const hasMcDot = Boolean(
+    trimmedNonEmpty(ex.broker_mc_number_snapshot) || trimmedNonEmpty(ex.broker_dot_number_snapshot),
+  );
+  if (hasMcDot) return true;
   const parsedName = trimmedNonEmpty(ex.broker_name_snapshot);
-  if (fields.brokerId != null && parsedName != null) {
-    if (normBrokerLabel(fields.brokerNameSnapshot) !== normBrokerLabel(parsedName)) return true;
+  if (parsedName != null && normBrokerLabel(fields.brokerNameSnapshot) !== normBrokerLabel(parsedName)) {
+    return true;
   }
   return false;
 }
 
+/** Reopen draft: saved broker contact id is an explicit selection paired with the saved broker. */
 export function inferBrokerContactIdManuallySelected(
   fields: WorkspaceDraftFields,
   ex: LoadDocumentParseResponse["extracted"],
@@ -120,7 +126,16 @@ export function inferBrokerContactIdManuallySelected(
   if (fields.brokerContactId == null) return false;
   if (inferParseContactManualFieldKeys(fields, ex).size > 0) return true;
   if (inferBrokerIdentityLocked(fields, ex)) return true;
+  if (fields.brokerId != null) return true;
   return false;
+}
+
+export function brokerContactIdInContactList(
+  contactId: number | null | undefined,
+  contacts: Array<{ id: number }>,
+): boolean {
+  if (contactId == null) return false;
+  return contacts.some((c) => c.id === contactId);
 }
 
 function trimmedNonEmpty(v: string | null | undefined): string | null {

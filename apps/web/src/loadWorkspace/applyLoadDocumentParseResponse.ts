@@ -7,11 +7,15 @@ import type { BrokerContact, LoadDocumentParseReference, LoadDocumentParseRespon
 import { resolveBrokerIdentity, listBrokerContacts } from "@/api";
 import { matchBrokerContactFromParsed } from "@/utils/matchBrokerFromSnapshot";
 import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
-import { workspaceReferencesFromParse } from "@/loadWorkspace/loadOperationalReferences";
+import {
+  shouldPreserveWorkspaceLoadReferences,
+  workspaceReferencesFromParse,
+} from "@/loadWorkspace/loadOperationalReferences";
 import {
   applyContactDraftValueToLoadPersist,
   applyParseScalarHydration,
   applyScalarDraftValueToLoadPersist,
+  brokerContactIdInContactList,
   createEmptyParseHydrationState,
   type ParseContactFieldKey,
   type ParseHydrationState,
@@ -240,8 +244,16 @@ export function buildLoadPersistParamsAfterParseApply(
   ) {
     params.brokerContactId = workspaceAtParseStart.brokerContactId;
   }
-  if (hydration.loadReferencesManuallyEdited) {
-    params.loadReferences = workspaceAtParseStart.loadReferences ?? [];
+  const guardRefs = workspaceAtParseStart.loadReferences ?? [];
+  const parsedRefs = workspaceReferencesFromParse(res.extracted.references);
+  if (
+    shouldPreserveWorkspaceLoadReferences(
+      guardRefs,
+      res.extracted.references,
+      hydration.loadReferencesManuallyEdited,
+    )
+  ) {
+    params.loadReferences = guardRefs;
   }
   return params;
 }
@@ -449,32 +461,67 @@ export async function applyLoadDocumentParseResponse(
       resolvedBrokerId = null;
     }
 
+    const priorBrokerId = identityGuard?.brokerId ?? null;
+    const priorContactId = identityGuard?.brokerContactId ?? null;
+    const parserBrokerDiffers =
+      resolvedBrokerId != null && priorBrokerId != null && resolvedBrokerId !== priorBrokerId;
+
     if (brokerIdentityProtected && identityGuard) {
       resolvedBrokerIdForSummary = identityGuard.brokerId;
-      resolvedBrokerContactIdForSummary = contactIdProtected
-        ? identityGuard.brokerContactId
-        : resolvedBrokerContactIdForSummary;
       const parsedName = trimmedOrEmpty(ex.broker_name_snapshot);
       const keptName = trimmedOrEmpty(identityGuard.brokerNameSnapshot);
       if (parsedName && keptName && parsedName !== keptName) {
         hydrationReviewNotes.push(
           `Parser extracted broker "${parsedName}"; your broker "${keptName}" was kept. Review before save.`,
         );
-      } else if (
-        resolvedBrokerId != null &&
-        identityGuard.brokerId != null &&
-        resolvedBrokerId !== identityGuard.brokerId
-      ) {
+      } else if (parserBrokerDiffers) {
         hydrationReviewNotes.push(
           "Parser MC/DOT matches a different broker record; your broker selection was kept. Review before save.",
         );
       }
+      if (identityGuard.brokerId != null) {
+        try {
+          const paged = await listBrokerContacts(identityGuard.brokerId, {
+            page: 1,
+            size: 200,
+            include_archived: false,
+          });
+          const items = paged.items || [];
+          cbs.setBrokerContacts(items);
+          if (
+            contactIdProtected &&
+            priorContactId != null &&
+            brokerContactIdInContactList(priorContactId, items)
+          ) {
+            resolvedBrokerContactIdForSummary = priorContactId;
+          } else if (priorContactId != null) {
+            hydrationReviewNotes.push(
+              "The selected broker contact does not belong to the chosen broker and was cleared. Pick a contact for this broker.",
+            );
+            cbs.setBrokerContactId(null);
+            nextHydration.brokerContactIdManuallySelected = false;
+            resolvedBrokerContactIdForSummary = null;
+          }
+        } catch {
+          cbs.setBrokerContacts([]);
+        }
+      }
     } else {
       resolvedBrokerIdForSummary = resolvedBrokerId;
       cbs.setBrokerId(resolvedBrokerId);
-      if (!contactIdProtected) {
+
+      const brokerChanged =
+        resolvedBrokerId != null && priorBrokerId != null && resolvedBrokerId !== priorBrokerId;
+      if (brokerChanged && priorContactId != null) {
+        hydrationReviewNotes.push(
+          "Parser identified a different broker; the previous broker contact was cleared. Select a contact for the new broker.",
+        );
+        cbs.setBrokerContactId(null);
+        nextHydration.brokerContactIdManuallySelected = false;
+      } else if (!contactIdProtected) {
         cbs.setBrokerContactId(null);
       }
+
       if (resolvedBrokerId != null) {
         try {
           const paged = await listBrokerContacts(resolvedBrokerId, {
@@ -484,17 +531,37 @@ export async function applyLoadDocumentParseResponse(
           });
           const items = paged.items || [];
           cbs.setBrokerContacts(items);
-          const matchedContact = matchBrokerContactFromParsed(items, {
-            name: ex.broker_contact_name_snapshot,
-            email: ex.broker_contact_email_snapshot,
-            phone: ex.broker_contact_phone_snapshot,
-          });
-          if (matchedContact && !contactIdProtected) {
-            brokerContactMatchedForSummary = true;
-            resolvedBrokerContactIdForSummary = matchedContact.id;
-            cbs.setBrokerContactId(matchedContact.id);
-          } else if (contactIdProtected && identityGuard) {
-            resolvedBrokerContactIdForSummary = identityGuard.brokerContactId;
+          if (
+            contactIdProtected &&
+            !brokerChanged &&
+            priorContactId != null &&
+            priorBrokerId === resolvedBrokerId &&
+            brokerContactIdInContactList(priorContactId, items)
+          ) {
+            resolvedBrokerContactIdForSummary = priorContactId;
+            cbs.setBrokerContactId(priorContactId);
+          } else if (
+            contactIdProtected &&
+            priorContactId != null &&
+            (brokerChanged || !brokerContactIdInContactList(priorContactId, items))
+          ) {
+            hydrationReviewNotes.push(
+              "The selected broker contact does not belong to the identified broker and was cleared.",
+            );
+            cbs.setBrokerContactId(null);
+            nextHydration.brokerContactIdManuallySelected = false;
+            resolvedBrokerContactIdForSummary = null;
+          } else if (!contactIdProtected) {
+            const matchedContact = matchBrokerContactFromParsed(items, {
+              name: ex.broker_contact_name_snapshot,
+              email: ex.broker_contact_email_snapshot,
+              phone: ex.broker_contact_phone_snapshot,
+            });
+            if (matchedContact) {
+              brokerContactMatchedForSummary = true;
+              resolvedBrokerContactIdForSummary = matchedContact.id;
+              cbs.setBrokerContactId(matchedContact.id);
+            }
           }
         } catch {
           cbs.setBrokerContacts([]);
@@ -509,7 +576,13 @@ export async function applyLoadDocumentParseResponse(
   applyContact("brokerContactPhone", ex.broker_contact_phone_snapshot, cbs.setBrokerContactPhoneSnapshot);
   applyContact("brokerContactEmail", ex.broker_contact_email_snapshot, cbs.setBrokerContactEmailSnapshot);
   const parsedRefs = workspaceReferencesFromParse(ex.references);
-  if (nextHydration.loadReferencesManuallyEdited) {
+  const guardRefs = identityGuard?.loadReferences ?? [];
+  const preserveRefs = shouldPreserveWorkspaceLoadReferences(
+    guardRefs,
+    ex.references,
+    nextHydration.loadReferencesManuallyEdited,
+  );
+  if (preserveRefs) {
     if (parsedRefs.length > 0) {
       hydrationReviewNotes.push(
         "Parser returned updated load references; your reviewed references were kept. Compare with the PDF before save.",

@@ -3,7 +3,9 @@ import { extractedStopsToDraft } from "./applyLoadDocumentParseResponse";
 import {
   compactLoadReferencesForDisplay,
   displayOperationalReferenceLabel,
+  draftLoadReferencesDifferFromParsedExtract,
   loadReferencesFromLoad,
+  shouldPreserveWorkspaceLoadReferences,
   VISIBLE_BROKER_LOAD_REFERENCE_LABEL,
   VISIBLE_INTERNAL_LOAD_NUMBER_LABEL,
   workspaceReferencesFromParse,
@@ -31,6 +33,12 @@ describe("workspace reference hydration", () => {
     expect(stops[0].reference_number).toBeNull();
     expect(stops[1].reference_number).toBe("STOP-OWNED");
     expect(stops.every((s) => s.reference_number !== "PU-GENERIC")).toBe(true);
+  });
+
+  it("treats saved references as reviewed when accepted parse has none", () => {
+    const saved = [{ kind: "bol_number", value: "BOL-9", label: "BOL #" }];
+    expect(draftLoadReferencesDifferFromParsedExtract(saved, [])).toBe(true);
+    expect(shouldPreserveWorkspaceLoadReferences(saved, [], false)).toBe(true);
   });
 
   it("reopen restores references from GET load payload", () => {

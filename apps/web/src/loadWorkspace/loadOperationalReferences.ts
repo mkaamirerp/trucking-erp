@@ -51,9 +51,23 @@ export function draftLoadReferencesDifferFromParsedExtract(
   draftRefs: OperationalReference[] | null | undefined,
   parsedRefs: LoadDocumentParseReference[] | null | undefined,
 ): boolean {
+  const draft = draftRefs ?? [];
   const parsed = workspaceReferencesFromParse(parsedRefs);
-  if (parsed.length === 0) return false;
-  return operationalReferencesFingerprint(draftRefs) !== operationalReferencesFingerprint(parsed);
+  if (draft.length === 0) return false;
+  if (parsed.length === 0) return true;
+  return operationalReferencesFingerprint(draft) !== operationalReferencesFingerprint(parsed);
+}
+
+/** Keep saved reference rows when parse omitted references or operator reviewed them. */
+export function shouldPreserveWorkspaceLoadReferences(
+  draftRefs: OperationalReference[] | null | undefined,
+  parsedRefs: LoadDocumentParseReference[] | null | undefined,
+  manuallyEdited: boolean,
+): boolean {
+  if (manuallyEdited) return true;
+  const draft = draftRefs ?? [];
+  const parsed = workspaceReferencesFromParse(parsedRefs);
+  return draft.length > 0 && parsed.length === 0;
 }
 
 export function displayOperationalReferenceLabel(ref: OperationalReference): string {

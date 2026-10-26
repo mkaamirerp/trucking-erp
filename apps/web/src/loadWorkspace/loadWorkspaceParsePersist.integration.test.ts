@@ -332,4 +332,45 @@ describe("parse → manual edit → re-parse → persist", () => {
     expect(provenance.loadReferencesManuallyEdited).toBe(true);
     expect(provenance.manualOverrideKeys.has("rate")).toBe(true);
   });
+
+  it("keeps saved PO/BOL references when re-parse returns an empty reference list", async () => {
+    const setLoadReferences = vi.fn();
+    const hydration = createEmptyParseHydrationState();
+    hydration.loadReferencesManuallyEdited = true;
+    const guard = {
+      brokerId: null,
+      brokerNameSnapshot: "",
+      brokerContactId: null,
+      brokerLoadReference: "",
+      loadReferences: [{ kind: "po_number", value: "556", label: "PO #" }],
+    };
+    const cbs = mkCbs({
+      rate: "",
+      brokerName: "",
+      brokerId: null,
+      brokerLoadReference: "",
+      loadReferences: guard.loadReferences,
+      brokerContactName: "",
+      draftStops: [],
+    });
+    cbs.setLoadReferences = setLoadReferences;
+    await applyLoadDocumentParseResponse(emptyRes({ references: [] }), cbs, hydration, guard);
+    expect(setLoadReferences).not.toHaveBeenCalled();
+
+    const params = buildLoadPersistParamsAfterParseApply(
+      { ...initialWorkspaceFieldsManual(), loadReferences: guard.loadReferences },
+      emptyRes({ references: [] }),
+      {
+        resolvedBrokerId: null,
+        resolvedBrokerContactId: null,
+        brokerContactMatched: false,
+        mcOrDotAttempted: false,
+        unresolvedStopCount: 0,
+        parseHydrationState: hydration,
+        hydrationReviewNotes: [],
+      },
+      {},
+    );
+    expect(params.loadReferences).toEqual(guard.loadReferences);
+  });
 });
