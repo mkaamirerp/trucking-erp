@@ -251,6 +251,10 @@ describe("parse → manual edit → re-parse → persist", () => {
       references: [{ kind: "po_number", value: "555" }],
     });
 
+    vi.mocked(listBrokerContacts).mockResolvedValue({
+      items: [{ id: 5, name: "Contact B" }],
+    } as never);
+
     const second = await hydrateLoadWorkspaceFromParseResponse(
       reparseRes,
       cbs,
