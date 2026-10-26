@@ -10,6 +10,7 @@ const baseSummary = () => ({
   mcOrDotAttempted: false,
   unresolvedStopCount: 0,
   parseHydrationState: createEmptyParseHydrationState(),
+  hydrationReviewNotes: [],
 });
 
 const emptyExtracted = (): LoadDocumentParseExtracted => ({

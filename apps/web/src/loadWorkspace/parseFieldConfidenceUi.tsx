@@ -207,6 +207,10 @@ const TIER_DOT: Record<ParseConfidenceTier, string> = {
   low: "bg-red-500",
 };
 
+export function parseConfidenceDotClass(tier: ParseConfidenceTier): string {
+  return `inline-block h-1.5 w-1.5 shrink-0 rounded-full ${TIER_DOT[tier]}`;
+}
+
 const TIER_ACCENT: Record<ParseConfidenceTier, string> = {
   high: "bg-emerald-500/80",
   medium: "bg-amber-500/80",

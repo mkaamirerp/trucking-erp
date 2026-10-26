@@ -34,6 +34,7 @@ export function workspacePdfHydrationUxFromDraft(draft: LoadWorkspaceDraft) {
     mcOrDotAttempted: false,
     unresolvedStopCount: 0,
     parseHydrationState: createEmptyParseHydrationState(),
+    hydrationReviewNotes: [],
   });
   return {
     warnings: ux.warnings,

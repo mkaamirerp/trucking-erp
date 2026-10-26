@@ -9,8 +9,11 @@ import { matchBrokerContactFromParsed } from "@/utils/matchBrokerFromSnapshot";
 import { filterMeaningfulParsedStops } from "@/loadWorkspace/loadParseStops";
 import { workspaceReferencesFromParse } from "@/loadWorkspace/loadOperationalReferences";
 import {
+  applyContactDraftValueToLoadPersist,
   applyParseScalarHydration,
+  applyScalarDraftValueToLoadPersist,
   createEmptyParseHydrationState,
+  type ParseContactFieldKey,
   type ParseHydrationState,
 } from "@/loadWorkspace/loadParseHydrationState";
 import type {
@@ -123,6 +126,8 @@ export interface ApplyLoadDocumentParseSummary {
   unresolvedStopCount: number;
   /** Session-only parse ownership (Issue I18). */
   parseHydrationState: ParseHydrationState;
+  /** Operator-visible notes when parse hydration kept manual edits (e.g. stops). */
+  hydrationReviewNotes: string[];
 }
 
 function trimmedOrEmpty(v: string | null | undefined): string {
@@ -193,11 +198,43 @@ export function applyEmptyWorkspaceFieldsFromParseResponse(
   }
 }
 
+/** Merge parse extract with operator manual edits captured at parse start (not async React state). */
+export function buildLoadPersistParamsAfterParseApply(
+  workspaceAtParseStart: WorkspaceDraftFields,
+  res: LoadDocumentParseResponse,
+  summary: ApplyLoadDocumentParseSummary,
+  seed: {
+    loadNumber?: string;
+    hazmat?: LoadPersistParams["hazmat"];
+    palletCaseCount?: string;
+    customsBrokerId?: number | null;
+    existingInternalNotes?: string;
+    driverId?: number | null;
+    truckId?: number | null;
+    trailerAssetId?: number | null;
+  } = {},
+): LoadPersistParams {
+  const params = buildLoadPersistParamsFromParseResponse(res, summary, seed);
+  const hydration = summary.parseHydrationState;
+  for (const key of hydration.manualOverrideKeys) {
+    applyScalarDraftValueToLoadPersist(params, key, workspaceAtParseStart);
+  }
+  for (const key of hydration.manualContactFieldKeys) {
+    applyContactDraftValueToLoadPersist(params, key, workspaceAtParseStart);
+  }
+  if (hydration.stopsRouteManuallyEdited) {
+    params.draftStops = workspaceAtParseStart.draftStops;
+  }
+  return params;
+}
+
 export type PersistWorkspaceDraftAfterParseInput = {
   draftId: string;
   draftVersion: number;
   res: LoadDocumentParseResponse;
   summary: ApplyLoadDocumentParseSummary;
+  /** Workspace commercial snapshot taken synchronously before parse hydration runs. */
+  workspaceAtParseStart: WorkspaceDraftFields;
   status: string;
   seed: {
     loadNumber: string;
@@ -220,16 +257,21 @@ export type PersistWorkspaceDraftAfterParseInput = {
 export async function persistWorkspaceDraftAfterParse(
   input: PersistWorkspaceDraftAfterParseInput,
 ): Promise<{ concurrency_version: number; draft_json?: Record<string, unknown> }> {
-  const persistParams = buildLoadPersistParamsFromParseResponse(input.res, input.summary, {
-    loadNumber: input.seed.loadNumber,
-    hazmat: input.seed.hazmat,
-    palletCaseCount: input.seed.palletCaseCount,
-    customsBrokerId: input.seed.customsBrokerId,
-    existingInternalNotes: input.seed.existingInternalNotes,
-    driverId: input.seed.driverId,
-    truckId: input.seed.truckId,
-    trailerAssetId: input.seed.trailerAssetId,
-  });
+  const persistParams = buildLoadPersistParamsAfterParseApply(
+    input.workspaceAtParseStart,
+    input.res,
+    input.summary,
+    {
+      loadNumber: input.seed.loadNumber,
+      hazmat: input.seed.hazmat,
+      palletCaseCount: input.seed.palletCaseCount,
+      customsBrokerId: input.seed.customsBrokerId,
+      existingInternalNotes: input.seed.existingInternalNotes,
+      driverId: input.seed.driverId,
+      truckId: input.seed.truckId,
+      trailerAssetId: input.seed.trailerAssetId,
+    },
+  );
   try {
     const draftJson = input.buildDraftJson({ ...persistParams, status: input.status });
     const saved = await input.updateDraft(input.draftId, {
@@ -349,6 +391,19 @@ export async function applyLoadDocumentParseResponse(
   let brokerContactMatchedForSummary = false;
 
   const nextHydration = applyParseScalarHydration(ex, cbs, hydration);
+  const hydrationReviewNotes: string[] = [];
+
+  const applyContact = (
+    key: ParseContactFieldKey,
+    parsed: string | null | undefined,
+    set: (v: string) => void,
+  ) => {
+    if (nextHydration.manualContactFieldKeys.has(key)) return;
+    const v = trimmedOrEmpty(parsed);
+    if (!v) return;
+    set(v);
+    nextHydration.lastAppliedContactValues.set(key, v);
+  };
 
   const mcSnap = ex.broker_mc_number_snapshot?.trim() ?? "";
   const dotSnap = ex.broker_dot_number_snapshot?.trim() ?? "";
@@ -395,15 +450,9 @@ export async function applyLoadDocumentParseResponse(
     }
   }
 
-  if (ex.broker_contact_name_snapshot?.trim()) {
-    cbs.setBrokerContactNameSnapshot(ex.broker_contact_name_snapshot.trim());
-  }
-  if (ex.broker_contact_phone_snapshot?.trim()) {
-    cbs.setBrokerContactPhoneSnapshot(ex.broker_contact_phone_snapshot.trim());
-  }
-  if (ex.broker_contact_email_snapshot?.trim()) {
-    cbs.setBrokerContactEmailSnapshot(ex.broker_contact_email_snapshot.trim());
-  }
+  applyContact("brokerContactName", ex.broker_contact_name_snapshot, cbs.setBrokerContactNameSnapshot);
+  applyContact("brokerContactPhone", ex.broker_contact_phone_snapshot, cbs.setBrokerContactPhoneSnapshot);
+  applyContact("brokerContactEmail", ex.broker_contact_email_snapshot, cbs.setBrokerContactEmailSnapshot);
   cbs.setLoadReferences(workspaceReferencesFromParse(ex.references));
 
   if (ex.customs_broker_name?.trim()) {
@@ -417,7 +466,14 @@ export async function applyLoadDocumentParseResponse(
   if (meaningfulStops.length > 0) {
     const draft = extractedStopsToDraft(meaningfulStops);
     unresolvedStopCount = draft.filter((d) => (d.stop_type || "").toUpperCase() === "UNRESOLVED").length;
-    cbs.setDraftStops(draft);
+    if (nextHydration.stopsRouteManuallyEdited) {
+      hydrationReviewNotes.push(
+        "Parser returned updated stops; your edited route was kept. Review stops against the PDF before save.",
+      );
+    } else {
+      cbs.setDraftStops(draft);
+      nextHydration.stopsRouteManuallyEdited = false;
+    }
   }
 
   return {
@@ -427,5 +483,6 @@ export async function applyLoadDocumentParseResponse(
     mcOrDotAttempted,
     unresolvedStopCount,
     parseHydrationState: nextHydration,
+    hydrationReviewNotes,
   };
 }

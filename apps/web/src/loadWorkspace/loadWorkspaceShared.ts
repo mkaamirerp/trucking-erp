@@ -249,6 +249,43 @@ export function workspaceFieldsFromDraftJson(j: Record<string, unknown>): Worksp
   };
 }
 
+export function workspaceFieldsFromLoadPersistParams(
+  p: LoadPersistParams,
+  extra: Pick<WorkspaceDraftFields, "status" | "driverId" | "truckId" | "trailerAssetId">,
+): WorkspaceDraftFields {
+  return {
+    status: extra.status,
+    loadNumber: p.loadNumber,
+    brokerId: p.brokerId,
+    brokerContactId: p.brokerContactId,
+    brokerNameSnapshot: p.brokerNameSnapshot,
+    brokerContactNameSnapshot: p.brokerContactNameSnapshot,
+    brokerContactPhoneSnapshot: p.brokerContactPhoneSnapshot,
+    brokerContactExtensionSnapshot: p.brokerContactExtensionSnapshot,
+    brokerContactEmailSnapshot: p.brokerContactEmailSnapshot,
+    brokerLoadReference: p.brokerLoadReference,
+    loadReferences: p.loadReferences ?? [],
+    freightMode: p.mode,
+    equipmentType: p.equipmentType,
+    trailerType: p.trailerType,
+    trailerSize: p.trailerSize,
+    commodity: p.commodity,
+    estimatedWeight: p.estimatedWeight,
+    hazmat: p.hazmat,
+    temperatureRequirement: p.temperatureRequirement,
+    palletCaseCount: p.palletCaseCount,
+    rate: p.rate,
+    customerRate: p.customerRate,
+    miles: p.miles,
+    driverId: extra.driverId,
+    truckId: extra.truckId,
+    trailerAssetId: extra.trailerAssetId,
+    customsBrokerId: p.customsBrokerId,
+    internalNotes: p.internalNotes,
+    draftStops: p.draftStops,
+  };
+}
+
 export function workspaceFieldsFromLoad(l: Load): WorkspaceDraftFields {
   return {
     status: l.status,

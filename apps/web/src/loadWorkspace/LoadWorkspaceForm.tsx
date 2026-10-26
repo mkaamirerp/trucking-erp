@@ -87,7 +87,7 @@ function stopCardShellClass(isPu: boolean, isDr: boolean): string {
 
 /** Column count follows the stops section container width (sidebar constrains content — not viewport alone). */
 function stopListGridClass(): string {
-  return "grid grid-cols-1 gap-1 @[26rem]/stops:grid-cols-2 @[40rem]/stops:grid-cols-3 @[54rem]/stops:grid-cols-4 @[26rem]/stops:items-start";
+  return "grid grid-cols-1 gap-1 @[36rem]/stops:grid-cols-2 @[56rem]/stops:grid-cols-3 @[36rem]/stops:items-start";
 }
 
 function autoGrowStopNotes(el: HTMLTextAreaElement) {
@@ -479,8 +479,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
           <ParseConfidenceField
-            label="Broker / carrier"
-            labelClassName={L}
+            label=""
             confidenceKey="broker_name_snapshot"
             fieldConfidence={fieldConfidence}
             manualOverride={manualScalar("brokerNameSnapshot")}
@@ -490,6 +489,11 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               brokerId={p.brokerId}
               brokerNameSnapshot={p.brokerNameSnapshot}
               disabled={!!p.readOnly}
+              confidenceTier={
+                manualScalar("brokerNameSnapshot")
+                  ? null
+                  : confidenceTierForFieldKey("broker_name_snapshot", fieldConfidence)
+              }
               onPick={(id, name) => {
                 p.setBrokerId(id);
                 p.setBrokerNameSnapshot(name);

@@ -4,7 +4,19 @@
  */
 import type { LoadDocumentParseResponse } from "@/api";
 import type { ApplyLoadDocumentParseCallbacks } from "@/loadWorkspace/applyLoadDocumentParseResponse";
-import type { WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
+import type { LoadPersistParams, WorkspaceDraftFields } from "@/loadWorkspace/loadWorkspaceShared";
+import { filterMeaningfulParsedStops, hasUsefulStopIdentity } from "@/loadWorkspace/loadParseStops";
+
+export type ParseContactFieldKey =
+  | "brokerContactName"
+  | "brokerContactPhone"
+  | "brokerContactEmail";
+
+export const PARSE_CONTACT_FIELD_CONFIDENCE_KEYS: Record<ParseContactFieldKey, string> = {
+  brokerContactName: "broker_contact_name_snapshot",
+  brokerContactPhone: "broker_contact_phone_snapshot",
+  brokerContactEmail: "broker_contact_email_snapshot",
+};
 
 export type ParseScalarFieldKey =
   | "brokerNameSnapshot"
@@ -24,6 +36,10 @@ export interface ParseHydrationState {
   lastAppliedKeys: Set<ParseScalarFieldKey>;
   manualOverrideKeys: Set<ParseScalarFieldKey>;
   lastAppliedValues: Map<ParseScalarFieldKey, string>;
+  lastAppliedContactValues: Map<ParseContactFieldKey, string>;
+  manualContactFieldKeys: Set<ParseContactFieldKey>;
+  /** Operator edited route stops — re-parse must not replace them silently. */
+  stopsRouteManuallyEdited: boolean;
 }
 
 export function createEmptyParseHydrationState(): ParseHydrationState {
@@ -31,6 +47,9 @@ export function createEmptyParseHydrationState(): ParseHydrationState {
     lastAppliedKeys: new Set(),
     manualOverrideKeys: new Set(),
     lastAppliedValues: new Map(),
+    lastAppliedContactValues: new Map(),
+    manualContactFieldKeys: new Set(),
+    stopsRouteManuallyEdited: false,
   };
 }
 
@@ -39,7 +58,14 @@ function cloneParseHydrationState(state: ParseHydrationState): ParseHydrationSta
     lastAppliedKeys: new Set(state.lastAppliedKeys),
     manualOverrideKeys: new Set(state.manualOverrideKeys),
     lastAppliedValues: new Map(state.lastAppliedValues),
+    lastAppliedContactValues: new Map(state.lastAppliedContactValues),
+    manualContactFieldKeys: new Set(state.manualContactFieldKeys),
+    stopsRouteManuallyEdited: state.stopsRouteManuallyEdited,
   };
+}
+
+export function markStopsRouteManuallyEdited(state: ParseHydrationState): void {
+  state.stopsRouteManuallyEdited = true;
 }
 
 function trimmedNonEmpty(v: string | null | undefined): string | null {
@@ -235,6 +261,153 @@ export function registerManualParseFieldEdit(
   }
 }
 
+export function registerManualContactFieldEdit(
+  state: ParseHydrationState,
+  key: ParseContactFieldKey,
+  newValue: string,
+): void {
+  if (!state.lastAppliedContactValues.has(key)) return;
+  const last = state.lastAppliedContactValues.get(key) ?? "";
+  if (newValue.trim() !== last.trim()) {
+    state.manualContactFieldKeys.add(key);
+  }
+}
+
+function contactStringFromExtracted(
+  key: ParseContactFieldKey,
+  ex: LoadDocumentParseResponse["extracted"],
+): string | null {
+  switch (key) {
+    case "brokerContactName":
+      return trimmedNonEmpty(ex.broker_contact_name_snapshot);
+    case "brokerContactPhone":
+      return trimmedNonEmpty(ex.broker_contact_phone_snapshot);
+    case "brokerContactEmail":
+      return trimmedNonEmpty(ex.broker_contact_email_snapshot);
+    default:
+      return null;
+  }
+}
+
+function contactDraftValue(fields: WorkspaceDraftFields, key: ParseContactFieldKey): string {
+  switch (key) {
+    case "brokerContactName":
+      return fields.brokerContactNameSnapshot ?? "";
+    case "brokerContactPhone":
+      return fields.brokerContactPhoneSnapshot ?? "";
+    case "brokerContactEmail":
+      return fields.brokerContactEmailSnapshot ?? "";
+    default:
+      return "";
+  }
+}
+
+const PARSE_CONTACT_FIELD_KEYS: ParseContactFieldKey[] = [
+  "brokerContactName",
+  "brokerContactPhone",
+  "brokerContactEmail",
+];
+
+/** field_confidence keys for UI when contact differs from accepted parse extract. */
+export function inferParseContactConfidenceManualKeys(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): Set<string> {
+  const out = new Set<string>();
+  const norm = (v: string) => v.trim();
+  for (const key of PARSE_CONTACT_FIELD_KEYS) {
+    const parsed = contactStringFromExtracted(key, ex);
+    if (parsed == null) continue;
+    if (norm(contactDraftValue(fields, key)) !== norm(parsed)) {
+      out.add(PARSE_CONTACT_FIELD_CONFIDENCE_KEYS[key]);
+    }
+  }
+  return out;
+}
+
+export function inferParseContactManualFieldKeys(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): Set<ParseContactFieldKey> {
+  const out = new Set<ParseContactFieldKey>();
+  const norm = (v: string) => v.trim();
+  for (const key of PARSE_CONTACT_FIELD_KEYS) {
+    const parsed = contactStringFromExtracted(key, ex);
+    if (parsed == null) continue;
+    if (norm(contactDraftValue(fields, key)) !== norm(parsed)) {
+      out.add(key);
+    }
+  }
+  return out;
+}
+
+export function applyScalarDraftValueToLoadPersist(
+  params: LoadPersistParams,
+  key: ParseScalarFieldKey,
+  fields: WorkspaceDraftFields,
+): void {
+  switch (key) {
+    case "brokerNameSnapshot":
+      params.brokerNameSnapshot = fields.brokerNameSnapshot;
+      break;
+    case "brokerLoadReference":
+      params.brokerLoadReference = fields.brokerLoadReference;
+      break;
+    case "freightMode":
+      params.mode = fields.freightMode;
+      break;
+    case "equipmentType":
+      params.equipmentType = fields.equipmentType;
+      break;
+    case "trailerType":
+      params.trailerType = fields.trailerType;
+      break;
+    case "trailerSize":
+      params.trailerSize = fields.trailerSize;
+      break;
+    case "commodity":
+      params.commodity = fields.commodity;
+      break;
+    case "estimatedWeight":
+      params.estimatedWeight = fields.estimatedWeight;
+      break;
+    case "temperatureRequirement":
+      params.temperatureRequirement = fields.temperatureRequirement;
+      break;
+    case "rate":
+      params.rate = fields.rate;
+      break;
+    case "customerRate":
+      params.customerRate = fields.customerRate;
+      break;
+    case "miles":
+      params.miles = fields.miles;
+      break;
+    default:
+      break;
+  }
+}
+
+export function applyContactDraftValueToLoadPersist(
+  params: LoadPersistParams,
+  key: ParseContactFieldKey,
+  fields: WorkspaceDraftFields,
+): void {
+  switch (key) {
+    case "brokerContactName":
+      params.brokerContactNameSnapshot = fields.brokerContactNameSnapshot;
+      break;
+    case "brokerContactPhone":
+      params.brokerContactPhoneSnapshot = fields.brokerContactPhoneSnapshot;
+      break;
+    case "brokerContactEmail":
+      params.brokerContactEmailSnapshot = fields.brokerContactEmailSnapshot;
+      break;
+    default:
+      break;
+  }
+}
+
 function scalarStringFromExtracted(
   key: ParseScalarFieldKey,
   ex: LoadDocumentParseResponse["extracted"],
@@ -332,5 +505,70 @@ export function hydrationStateFromDraftAndParse(
   for (const key of inferParseManualOverridesFromDraft(fields, ex)) {
     state.manualOverrideKeys.add(key);
   }
+  for (const key of PARSE_CONTACT_FIELD_KEYS) {
+    const applied = contactStringFromExtracted(key, ex);
+    if (applied != null) {
+      state.lastAppliedContactValues.set(key, applied);
+    }
+  }
+  for (const key of inferParseContactManualFieldKeys(fields, ex)) {
+    state.manualContactFieldKeys.add(key);
+  }
+  state.stopsRouteManuallyEdited = draftStopsDifferFromParsedExtract(fields, ex);
   return state;
+}
+
+/** True when saved draft stops are not a straight reflection of parsed stop rows. */
+export function draftStopsDifferFromParsedExtract(
+  fields: WorkspaceDraftFields,
+  ex: LoadDocumentParseResponse["extracted"],
+): boolean {
+  const parsed = filterMeaningfulParsedStops(ex.stops ?? []);
+  if (parsed.length === 0) return false;
+  const draft = [...fields.draftStops]
+    .filter((s) => hasUsefulStopIdentity(s))
+    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+  if (draft.length !== parsed.length) return true;
+  const fingerprint = (s: {
+    stop_type?: string | null;
+    city?: string | null;
+    state_or_province?: string | null;
+    facility_name?: string | null;
+    appointment_date?: string | null;
+    appointment_time_text?: string | null;
+    reference_number?: string | null;
+    notes?: string | null;
+  }) =>
+    [
+      (s.stop_type ?? "").toUpperCase(),
+      (s.city ?? "").trim(),
+      (s.state_or_province ?? "").trim(),
+      (s.facility_name ?? "").trim(),
+      (s.appointment_date ?? "").trim(),
+      (s.appointment_time_text ?? "").trim(),
+      (s.reference_number ?? "").trim(),
+      (s.notes ?? "").trim(),
+    ].join("|");
+  for (let i = 0; i < parsed.length; i++) {
+    const p = parsed[i];
+    const d = draft[i];
+    const pt = (p.stop_type ?? "").toLowerCase();
+    const mapped =
+      pt === "pickup" ? "PICKUP" : pt === "delivery" ? "DELIVERY" : pt === "drop" ? "DROP" : "UNRESOLVED";
+    if (
+      fingerprint({
+        stop_type: mapped,
+        city: p.city,
+        state_or_province: p.state_or_province,
+        facility_name: p.facility_name,
+        appointment_date: p.appointment_date,
+        appointment_time_text: p.appointment_time_text,
+        reference_number: p.reference_number,
+        notes: p.notes,
+      }) !== fingerprint(d)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

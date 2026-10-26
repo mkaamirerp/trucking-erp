@@ -14,6 +14,7 @@ describe("Tailwind container queries for stops grid", () => {
   it("stop grid class uses named container queries", () => {
     const form = readFileSync(resolve(__dirname, "LoadWorkspaceForm.tsx"), "utf8");
     expect(form).toContain("@container/stops");
-    expect(form).toMatch(/@\[26rem\]\/stops:grid-cols-2/);
+    expect(form).toMatch(/@\[36rem\]\/stops:grid-cols-2/);
+    expect(form).not.toMatch(/grid-cols-4/);
   });
 });

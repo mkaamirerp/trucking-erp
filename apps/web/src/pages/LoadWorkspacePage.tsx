@@ -51,6 +51,7 @@ import {
   type InboxMessageItem,
   type InboxThreadListItem,
   type Load,
+  type LoadDocumentParseResponse,
   type LoadDocumentParseReference,
   type LoadNote,
   type AuditEventRow,
@@ -71,6 +72,7 @@ import {
   buildLoadPersistPayload,
   buildWorkspaceDraftJson,
   workspaceFieldsFromDraftJson,
+  workspaceFieldsFromLoadPersistParams,
   type WorkspaceDraftFields,
   buildVerificationTabIndexMap,
   findBestDocLineIndex,
@@ -104,8 +106,10 @@ import {
 } from "@/loadWorkspace/workspaceDraftPdfRestore";
 import {
   applyEmptyWorkspaceFieldsFromParseResponse,
+  buildLoadPersistParamsAfterParseApply,
   persistWorkspaceDraftAfterParse,
   type ApplyLoadDocumentParseCallbacks,
+  type ApplyLoadDocumentParseSummary,
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import {
   commercialGatePrimaryActionLabel,
@@ -120,6 +124,9 @@ import {
 import {
   createEmptyParseHydrationState,
   hydrationStateFromDraftAndParse,
+  inferParseContactConfidenceManualKeys,
+  markStopsRouteManuallyEdited,
+  registerManualContactFieldEdit,
   registerManualParseFieldEdit,
   type ParseHydrationState,
   type ParseScalarFieldKey,
@@ -642,6 +649,8 @@ function LoadWorkspacePage() {
         const fields = workspaceFieldsFromDraftJson(draft.draft_json ?? {});
         parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
         setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+        setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(fields, accepted.extracted));
+        setStopsRouteConfidenceSuppressed(parseHydrationRef.current.stopsRouteManuallyEdited);
       }
       if (draftHasReadyRateConfirmationPdf(draft)) {
         const url = await fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(draft.id);
@@ -753,6 +762,8 @@ function LoadWorkspacePage() {
         applyEmptyWorkspaceFieldsFromParseResponse(fields, accepted, getParseHydrationCallbacks());
         parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
         setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+        setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(fields, accepted.extracted));
+        setStopsRouteConfidenceSuppressed(parseHydrationRef.current.stopsRouteManuallyEdited);
         if (accepted.raw_text) {
           setWorkspaceReferenceText(accepted.raw_text);
         }
@@ -945,8 +956,45 @@ function LoadWorkspacePage() {
     });
   }, []);
 
+  const syncParseProvenanceFromMerged = useCallback(
+    (
+      res: LoadDocumentParseResponse,
+      summary: ApplyLoadDocumentParseSummary,
+      workspaceAtParseStart: WorkspaceDraftFields,
+      seed: {
+        loadNumber: string;
+        hazmat: LoadPersistParams["hazmat"];
+        palletCaseCount: string;
+        customsBrokerId: number | null;
+        existingInternalNotes: string;
+        driverId: number | null;
+        truckId: number | null;
+        trailerAssetId: number | null;
+      },
+    ) => {
+      const merged = buildLoadPersistParamsAfterParseApply(workspaceAtParseStart, res, summary, seed);
+      const mergedFields = workspaceFieldsFromLoadPersistParams(merged, {
+        status,
+        driverId: seed.driverId,
+        truckId: seed.truckId,
+        trailerAssetId: seed.trailerAssetId,
+      });
+      parseHydrationRef.current = hydrationStateFromDraftAndParse(mergedFields, res.extracted);
+      setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+      setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(mergedFields, res.extracted));
+      setStopsRouteConfidenceSuppressed(parseHydrationRef.current.stopsRouteManuallyEdited);
+    },
+    [status],
+  );
+
+  const markStopsRouteEdited = useCallback(() => {
+    markStopsRouteManuallyEdited(parseHydrationRef.current);
+    setStopsRouteConfidenceSuppressed(true);
+  }, []);
+
   const setBrokerContactNameSnapshotTracked = useCallback(
     (v: string) => {
+      registerManualContactFieldEdit(parseHydrationRef.current, "brokerContactName", v);
       markParseConfidenceFieldEdited("broker_contact_name_snapshot");
       setBrokerContactNameSnapshot(v);
     },
@@ -954,6 +1002,7 @@ function LoadWorkspacePage() {
   );
   const setBrokerContactPhoneSnapshotTracked = useCallback(
     (v: string) => {
+      registerManualContactFieldEdit(parseHydrationRef.current, "brokerContactPhone", v);
       markParseConfidenceFieldEdited("broker_contact_phone_snapshot");
       setBrokerContactPhoneSnapshot(v);
     },
@@ -961,6 +1010,7 @@ function LoadWorkspacePage() {
   );
   const setBrokerContactEmailSnapshotTracked = useCallback(
     (v: string) => {
+      registerManualContactFieldEdit(parseHydrationRef.current, "brokerContactEmail", v);
       markParseConfidenceFieldEdited("broker_contact_email_snapshot");
       setBrokerContactEmailSnapshot(v);
     },
@@ -1061,6 +1111,17 @@ function LoadWorkspacePage() {
       // Load Lab / parser: hydrate commercial fields only — no trip creation, assignment, dispatch_trips, or dispatched status.
       setParseBusy(true);
       if (!continueAnyway) setToolbarMessage(null);
+      const workspaceAtParseStart = currentWorkspaceFieldsRef.current();
+      const parseSeed = {
+        loadNumber,
+        hazmat,
+        palletCaseCount,
+        customsBrokerId,
+        existingInternalNotes: internalNotes,
+        driverId,
+        truckId,
+        trailerAssetId: trailerId,
+      };
       const parseWallStarted = performance.now();
       try {
         if (workspaceMode === "manual") {
@@ -1088,8 +1149,7 @@ function LoadWorkspacePage() {
             parseHydrationRef.current,
           );
           parseHydrationRef.current = hydration.parseHydrationState;
-          setParseManualOverrideKeys(new Set(hydration.parseHydrationState.manualOverrideKeys));
-          setStopsRouteConfidenceSuppressed(false);
+          syncParseProvenanceFromMerged(res, hydration.summary, workspaceAtParseStart, parseSeed);
           setParseWarnings(hydration.warnings);
           const engineLine =
             buildParseEngineAttribution(res.context ?? undefined, {
@@ -1110,17 +1170,9 @@ function LoadWorkspacePage() {
             draftVersion: persisted.draft.concurrency_version,
             res,
             summary: hydration.summary,
+            workspaceAtParseStart,
             status,
-            seed: {
-              loadNumber,
-              hazmat,
-              palletCaseCount,
-              customsBrokerId,
-              existingInternalNotes: internalNotes,
-              driverId,
-              truckId,
-              trailerAssetId: trailerId,
-            },
+            seed: parseSeed,
             updateDraft: updateLoadWorkspaceDraft,
             buildDraftJson: buildWorkspaceDraftJson,
           });
@@ -1174,8 +1226,7 @@ function LoadWorkspacePage() {
           parseHydrationRef.current,
         );
         parseHydrationRef.current = hydration.parseHydrationState;
-        setParseManualOverrideKeys(new Set(hydration.parseHydrationState.manualOverrideKeys));
-        setStopsRouteConfidenceSuppressed(false);
+        syncParseProvenanceFromMerged(res, hydration.summary, workspaceAtParseStart, parseSeed);
         setParseWarnings(hydration.warnings);
         const engineLine =
           buildParseEngineAttribution(res.context ?? undefined, {
@@ -1228,6 +1279,7 @@ function LoadWorkspacePage() {
       driverId,
       truckId,
       trailerId,
+      syncParseProvenanceFromMerged,
     ],
   );
 
@@ -1962,21 +2014,24 @@ function LoadWorkspacePage() {
   }
 
   function updateStop(key: string, patch: Partial<DraftStop>) {
-    setStopsRouteConfidenceSuppressed(true);
+    markStopsRouteEdited();
     setDraftStops((rows) => rows.map((r) => (r._key === key ? { ...r, ...patch } : r)));
   }
 
   function removeStop(key: string) {
+    markStopsRouteEdited();
     setDraftStops((rows) => rows.filter((r) => r._key !== key));
   }
 
   function addStop() {
+    markStopsRouteEdited();
     const maxSeq =
       draftStops.length === 0 ? 0 : Math.max(...draftStops.map((s) => s.sequence ?? 0)) + 1;
     setDraftStops((rows) => [...rows, newDraftStop(maxSeq)]);
   }
 
   function moveStop(key: string, dir: -1 | 1) {
+    markStopsRouteEdited();
     setDraftStops((rows) => reorderDraftStopsByKey(rows, key, dir));
   }
 

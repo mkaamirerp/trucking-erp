@@ -1,6 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Broker } from "@/api";
 import { brokerDisplayName } from "@/loadWorkspace/workspaceCreateLoadValidation";
+import {
+  parseConfidenceDotClass,
+  parseConfidenceTierLabel,
+  type ParseConfidenceTier,
+} from "@/loadWorkspace/parseFieldConfidenceUi";
 
 const inputClass =
   "w-full rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-2 text-sm text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-amber-500 focus:outline-none";
@@ -12,6 +17,7 @@ type Props = {
   disabled?: boolean;
   onPick: (brokerId: number | null, nameSnapshot: string) => void;
   docFocusHandlers?: { onFocus?: () => void; onClick?: () => void };
+  confidenceTier?: ParseConfidenceTier | null;
 };
 
 export default function BrokerCarrierCombobox({
@@ -21,6 +27,7 @@ export default function BrokerCarrierCombobox({
   disabled,
   onPick,
   docFocusHandlers,
+  confidenceTier = null,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(brokerNameSnapshot);
@@ -73,7 +80,14 @@ export default function BrokerCarrierCombobox({
 
   return (
     <div ref={rootRef} className="relative sm:col-span-2" data-testid="broker-carrier-combobox">
-      <label className="mb-0.5 block text-xs font-medium text-[var(--trk-text-muted)]">
+      <label className="mb-0.5 flex items-center gap-1.5 text-xs font-medium text-[var(--trk-text-muted)]">
+        {confidenceTier ? (
+          <span
+            className={parseConfidenceDotClass(confidenceTier)}
+            title={`AI extraction: ${parseConfidenceTierLabel(confidenceTier)}`}
+            aria-hidden
+          />
+        ) : null}
         Broker/Carrier
       </label>
       <input

@@ -5,7 +5,7 @@ import {
   registerManualParseFieldEdit,
 } from "./loadParseHydrationState";
 import type { ApplyLoadDocumentParseCallbacks } from "./applyLoadDocumentParseResponse";
-import { buildWorkspaceDraftJson } from "./loadWorkspaceShared";
+import { buildWorkspaceDraftJson, initialWorkspaceFieldsManual } from "./loadWorkspaceShared";
 import { persistWorkspaceDraftAfterParse } from "./applyLoadDocumentParseResponse";
 import { createEmptyParseHydrationState as emptySummaryState } from "./loadParseHydrationState";
 
@@ -72,7 +72,9 @@ describe("persistWorkspaceDraftAfterParse assignment seed", () => {
         mcOrDotAttempted: false,
         unresolvedStopCount: 0,
         parseHydrationState: emptySummaryState(),
+        hydrationReviewNotes: [],
       },
+      workspaceAtParseStart: initialWorkspaceFieldsManual(),
       status: "draft",
       seed: {
         loadNumber: "",

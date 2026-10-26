@@ -40,7 +40,7 @@ export function computeLoadWorkspacePdfHydrationResult(
   res: LoadDocumentParseResponse,
   summary: ApplyLoadDocumentParseSummary,
 ): LoadWorkspacePdfHydrationResult {
-  const warnings = [...(res.warnings ?? [])];
+  const warnings = [...(res.warnings ?? []), ...(summary.hydrationReviewNotes ?? [])];
   if (summary.unresolvedStopCount > 0) {
     warnings.push(
       `${summary.unresolvedStopCount} stop(s) need an explicit type (Pickup, Delivery, or Drop) before save.`,

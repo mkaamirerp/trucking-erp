@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyEmptyWorkspaceFieldsFromParseResponse,
   applyLoadDocumentParseResponse,
+  buildLoadPersistParamsAfterParseApply,
   buildLoadPersistParamsFromParseResponse,
   persistWorkspaceDraftAfterParse,
 } from "./applyLoadDocumentParseResponse";
@@ -283,6 +284,7 @@ describe("buildLoadPersistParamsFromParseResponse", () => {
       mcOrDotAttempted: false,
       unresolvedStopCount: 0,
       parseHydrationState: createEmptyParseHydrationState(),
+      hydrationReviewNotes: [],
     };
     const params = buildLoadPersistParamsFromParseResponse(emptyRes(), summary, {
       driverId: 30,
@@ -305,6 +307,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
       mcOrDotAttempted: false,
       unresolvedStopCount: 0,
       parseHydrationState: createEmptyParseHydrationState(),
+      hydrationReviewNotes: [],
     };
     await expect(
       persistWorkspaceDraftAfterParse({
@@ -312,6 +315,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
         draftVersion: 2,
         res: emptyRes({ broker_load_reference: "3872125-1" }),
         summary,
+        workspaceAtParseStart: initialWorkspaceFieldsManual(),
         status: "draft",
         seed: {
           loadNumber: "",
@@ -340,12 +344,14 @@ describe("persistWorkspaceDraftAfterParse", () => {
       mcOrDotAttempted: false,
       unresolvedStopCount: 0,
       parseHydrationState: createEmptyParseHydrationState(),
+      hydrationReviewNotes: [],
     };
     const saved = await persistWorkspaceDraftAfterParse({
       draftId: "draft-1",
       draftVersion: 2,
       res: emptyRes({ broker_load_reference: "3872125-1" }),
       summary,
+      workspaceAtParseStart: initialWorkspaceFieldsManual(),
       status: "draft",
       seed: {
         loadNumber: "",
@@ -368,6 +374,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
       mcOrDotAttempted: false,
       unresolvedStopCount: 0,
       parseHydrationState: createEmptyParseHydrationState(),
+      hydrationReviewNotes: [],
     };
     const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => ({
       concurrency_version: 3,
@@ -385,6 +392,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
         ],
       }),
       summary,
+      workspaceAtParseStart: initialWorkspaceFieldsManual(),
       status: "draft",
       seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
       updateDraft,
@@ -407,6 +415,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
       mcOrDotAttempted: false,
       unresolvedStopCount: 0,
       parseHydrationState: createEmptyParseHydrationState(),
+      hydrationReviewNotes: [],
     };
     const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => ({
       concurrency_version: 3,
@@ -422,6 +431,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
         ],
       }),
       summary,
+      workspaceAtParseStart: initialWorkspaceFieldsManual(),
       status: "draft",
       seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
       updateDraft,
@@ -437,6 +447,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
       mcOrDotAttempted: false,
       unresolvedStopCount: 0,
       parseHydrationState: createEmptyParseHydrationState(),
+      hydrationReviewNotes: [],
     };
     const updateDraft = vi.fn().mockImplementation(async (_id: string, body: { draft_json: Record<string, unknown> }) => {
       const rows = body.draft_json.draftStops as Array<Record<string, unknown>>;
@@ -455,6 +466,7 @@ describe("persistWorkspaceDraftAfterParse", () => {
         ],
       }),
       summary,
+      workspaceAtParseStart: initialWorkspaceFieldsManual(),
       status: "draft",
       seed: { loadNumber: "", hazmat: "unset", palletCaseCount: "", customsBrokerId: null, existingInternalNotes: "" },
       updateDraft,
@@ -462,4 +474,25 @@ describe("persistWorkspaceDraftAfterParse", () => {
     })).rejects.toThrow("not preserved");
   });
 
+  it("uses workspace snapshot for manual scalar overrides instead of parse extract", () => {
+    const hydration = createEmptyParseHydrationState();
+    hydration.manualOverrideKeys.add("rate");
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: hydration,
+      hydrationReviewNotes: [],
+    };
+    const workspaceAtParseStart = { ...initialWorkspaceFieldsManual(), rate: "1500" };
+    const params = buildLoadPersistParamsAfterParseApply(
+      workspaceAtParseStart,
+      emptyRes({ rate: 900 }),
+      summary,
+      {},
+    );
+    expect(params.rate).toBe("1500");
+  });
 });
