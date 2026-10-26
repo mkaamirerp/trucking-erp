@@ -130,6 +130,7 @@ export type LoadWorkspaceDraft = {
 export type LoadWorkspaceDraftPromoteResult = {
   draft: LoadWorkspaceDraft;
   load_id: number;
+  trip_id?: number | null;
   idempotent_replay: boolean;
 };
 

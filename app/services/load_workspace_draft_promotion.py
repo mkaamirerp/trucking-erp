@@ -17,18 +17,88 @@ from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
 from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.load_rate_confirmation_duplicate import assert_promote_rate_confirmation_not_duplicate
+from app.schemas.trip_read import TripAssignmentBody
 from app.services.loads import (
     _insert_commercial_load_uncommitted,
+    _open_planned_trip_map,
     _write_load_audit,
     get_load,
 )
+from app.services.trips import create_planned_trip, update_trip_assignment
 
 
 class PromotionResult:
-    def __init__(self, *, draft: LoadWorkspaceDraft, load_id: int, idempotent_replay: bool) -> None:
+    def __init__(
+        self,
+        *,
+        draft: LoadWorkspaceDraft,
+        load_id: int,
+        idempotent_replay: bool,
+        trip_id: int | None = None,
+    ) -> None:
         self.draft = draft
         self.load_id = load_id
         self.idempotent_replay = idempotent_replay
+        self.trip_id = trip_id
+
+
+def _positive_int_from_draft(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def proposed_assignment_from_draft_json(draft_json: dict) -> tuple[int | None, int | None, int | None]:
+    """Pre-promote movement assignment stored in draft_json (not on Load)."""
+    driver_id = _positive_int_from_draft(draft_json.get("driverId") or draft_json.get("driver_id"))
+    truck_id = _positive_int_from_draft(draft_json.get("truckId") or draft_json.get("truck_id"))
+    trailer_id = _positive_int_from_draft(
+        draft_json.get("trailerAssetId")
+        or draft_json.get("trailer_asset_id")
+        or draft_json.get("trailerId")
+        or draft_json.get("trailer_id")
+    )
+    return driver_id, truck_id, trailer_id
+
+
+async def _open_planned_trip_id_for_load(db: AsyncSession, tenant_id: int, load_id: int) -> int | None:
+    planned = await _open_planned_trip_map(db, tenant_id, [int(load_id)])
+    row = planned.get(int(load_id))
+    return int(row[0]) if row else None
+
+
+async def _create_planned_trip_for_promoted_load(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    driver_id: int,
+    truck_id: int | None,
+    trailer_id: int | None,
+    promoted_by_platform_user_id: str | None,
+) -> int:
+    trip_detail = await create_planned_trip(
+        db,
+        tenant_id,
+        driver_id=driver_id,
+        truck_id=truck_id,
+        trailer_id=trailer_id,
+        load_ids=[int(load_id)],
+    )
+    trip_id = int(trip_detail.id)
+    await update_trip_assignment(
+        db,
+        tenant_id,
+        trip_id,
+        TripAssignmentBody(driver_id=driver_id, truck_id=truck_id, trailer_id=trailer_id),
+        actor_user_id=None,
+        actor_label=promoted_by_platform_user_id,
+    )
+    return trip_id
 
 
 def merge_broker_load_reference_from_accepted_parse(
@@ -55,7 +125,14 @@ async def _idempotent_replay(
 ) -> PromotionResult | None:
     if draft.status == "promoted" and draft.promoted_load_id is not None:
         if draft.promotion_idempotency_key == key:
-            return PromotionResult(draft=draft, load_id=int(draft.promoted_load_id), idempotent_replay=True)
+            load_id = int(draft.promoted_load_id)
+            trip_id = await _open_planned_trip_id_for_load(db, tenant_id, load_id)
+            return PromotionResult(
+                draft=draft,
+                load_id=load_id,
+                idempotent_replay=True,
+                trip_id=trip_id,
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -206,6 +283,24 @@ async def promote_workspace_draft(
         best_effort=False,
     )
 
+    trip_id: int | None = None
+    driver_id, truck_id, trailer_id = proposed_assignment_from_draft_json(draft.draft_json or {})
+    if driver_id is not None:
+        trip_id = await _create_planned_trip_for_promoted_load(
+            db,
+            tenant_id,
+            int(load.id),
+            driver_id=driver_id,
+            truck_id=truck_id,
+            trailer_id=trailer_id,
+            promoted_by_platform_user_id=promoted_by_platform_user_id,
+        )
+
     await db.commit()
     await db.refresh(draft)
-    return PromotionResult(draft=draft, load_id=int(load.id), idempotent_replay=False)
+    return PromotionResult(
+        draft=draft,
+        load_id=int(load.id),
+        idempotent_replay=False,
+        trip_id=trip_id,
+    )

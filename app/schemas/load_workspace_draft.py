@@ -116,6 +116,7 @@ class LoadWorkspaceDraftParseOut(BaseModel):
 class LoadWorkspaceDraftPromoteOut(BaseModel):
     draft: LoadWorkspaceDraftOut
     load_id: int
+    trip_id: int | None = None
     idempotent_replay: bool = False
 
 

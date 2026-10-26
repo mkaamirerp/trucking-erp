@@ -13,7 +13,6 @@ import {
   addLoadNote,
   confirmLoadDocumentSnapshot,
   createPlannedTrip,
-  createTripForLoadAssignment,
   createLoadWorkspaceDraft,
   getDriverAssignmentHints,
   getTruckAssignmentHints,
@@ -1892,16 +1891,7 @@ function LoadWorkspacePage() {
       if (!Number.isFinite(loadId) || loadId <= 0) {
         throw new Error("Create load succeeded but the server did not return a load id.");
       }
-      if (driverId != null && driverId > 0) {
-        const trip = await createTripForLoadAssignment(loadId, {
-          driver_id: driverId,
-          truck_id: truckId,
-          trailer_id: trailerId,
-        });
-        navigate(OPS.TRIP_DETAIL(trip.id), { replace: true });
-      } else {
-        navigate(OPS.DASHBOARD, { replace: true });
-      }
+      navigate(OPS.DASHBOARD, { replace: true });
     } catch (e: unknown) {
       const c = parseLoadWorkspaceDraftVersionConflict(e);
       if (c) {

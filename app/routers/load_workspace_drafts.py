@@ -201,5 +201,6 @@ async def promote_load_workspace_draft(
     return LoadWorkspaceDraftPromoteOut(
         draft=LoadWorkspaceDraftOut.model_validate(result.draft),
         load_id=result.load_id,
+        trip_id=result.trip_id,
         idempotent_replay=result.idempotent_replay,
     )
