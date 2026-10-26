@@ -83,28 +83,27 @@ async def test_digital_exact_match_blocks_ai_before_exclusion_or_handoff(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_digital_continue_anyway_skips_review_and_invokes_normal_ai(monkeypatch):
-    async def unexpected(*args, **kwargs):
-        raise AssertionError("Continue bypass must not re-block exact file")
+async def test_digital_continue_anyway_does_not_bypass_sha256_duplicate(monkeypatch):
     ai_calls = []
+
     async def ai(**kwargs):
         ai_calls.append(kwargs)
-        return {
-            "document": {"filename": "same.pdf"},
-            "extracted": {"broker_load_reference": "ABC-99", "references": [], "stops": []},
-            "warnings": [],
-            "field_confidence": {},
-            "context": {},
-        }
-    monkeypatch.setattr(parser, "find_exact_pdf_duplicate_candidates", unexpected)
+        raise AssertionError("AI MUST NOT run when exact PDF duplicate exists")
+
+    async def lookup(db, **kwargs):
+        return [EXACT_MATCH]
+
+    monkeypatch.setattr(parser, "find_exact_pdf_duplicate_candidates", lookup)
     out = await parser.parse_pdf_bytes_to_load_document_response(
-        AsyncMock(), tenant_id=53, pdf_bytes=PDF.read_bytes(),
-        filename="same.pdf", openai_chat_json_schema=ai,
+        AsyncMock(),
+        tenant_id=53,
+        pdf_bytes=PDF.read_bytes(),
+        filename="same.pdf",
+        openai_chat_json_schema=ai,
         continue_anyway=True,
     )
-    assert len(ai_calls) == 1
-    assert ai_calls[0]["input_file_bytes"] == PDF.read_bytes()
-    assert out.context.get("semantic_outcome") != "blocked_duplicate_review"
+    assert out.context["semantic_outcome"] == "blocked_duplicate_review"
+    assert ai_calls == []
 
 
 @pytest.mark.asyncio
@@ -176,6 +175,7 @@ async def test_draft_review_does_not_upload_replace_or_commit(monkeypatch):
     current = SimpleNamespace(
         id=draft_id, tenant_id=53, status="draft", concurrency_version=4,
         pdf_sha256="previous-sha", accepted_parse_json={"existing": "keep"},
+        draft_json={},
     )
     db = AsyncMock()
     db.scalar.return_value = current
@@ -216,13 +216,15 @@ def test_existing_evidence_index_and_tenant_scoped_sha_in_query_source():
     assert "Load.tenant_id == tenant_id" in src
     assert "LoadCommercialEvidence.tenant_id == tenant_id" in src
     assert "load_id == Load.id" in src
+    assert 'Load.status != "cancelled"' in src
     assert "sha256(pdf_bytes).hexdigest()" in src
 
 
-def test_browser_duplicate_modal_has_cancel_continue_and_no_hydration_on_review():
+def test_browser_duplicate_modal_blocks_hydration_and_has_open_load():
     root = Path(__file__).resolve().parents[1]
     page = (root / "apps/web/src/pages/LoadWorkspacePage.tsx").read_text()
     assert "duplicateLoadCandidatesFromParse(res)" in page
-    assert "return; // No accepted parse, stored PDF replacement or form hydration." in page
-    assert "Continue anyway — parse PDF" in page
+    assert "This load already exists" in page
+    assert "Open load" in page
+    assert "Continue anyway — parse PDF" not in page
     assert "setDuplicateReview(null)" in page

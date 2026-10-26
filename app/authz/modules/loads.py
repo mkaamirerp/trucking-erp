@@ -22,6 +22,7 @@ CATALOG = ModuleCatalog(
             "operational",
             "Does not replace mark_load_ready transition rules.",
         ),
+        _spec("loads.records", "cancel", "operational", "Commercial cancel; preserves row and audit history."),
         _spec("loads.documents", "parse", "operational"),
         _spec("loads.documents", "confirm", "operational"),
         _spec("loads.custody", "view", "read", "Read model only. Custody changes belong to trips."),

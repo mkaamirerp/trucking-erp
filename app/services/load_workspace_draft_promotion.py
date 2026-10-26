@@ -16,6 +16,7 @@ from app.schemas.load import LoadCreate
 from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
 from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
+from app.services.load_rate_confirmation_duplicate import assert_promote_rate_confirmation_not_duplicate
 from app.services.loads import (
     _insert_commercial_load_uncommitted,
     _write_load_audit,
@@ -148,6 +149,13 @@ async def promote_workspace_draft(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "LOAD_WORKSPACE_DRAFT_MAPPING_INVALID", "field": exc.field, "message": str(exc)},
         ) from exc
+    await assert_promote_rate_confirmation_not_duplicate(
+        db,
+        tenant_id=tenant_id,
+        broker_load_reference=load_create.broker_load_reference,
+        broker_id=load_create.broker_id,
+        acknowledge_soft=payload.acknowledge_soft_rate_confirmation_duplicate,
+    )
     now = datetime.now(timezone.utc)
 
     load, _stop_create_diff = await _insert_commercial_load_uncommitted(

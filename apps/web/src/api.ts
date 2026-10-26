@@ -199,7 +199,11 @@ export async function discardLoadWorkspaceDraft(
 
 export async function promoteLoadWorkspaceDraft(
   draftId: string,
-  payload: { expected_concurrency_version: number; promotion_idempotency_key: string },
+  payload: {
+    expected_concurrency_version: number;
+    promotion_idempotency_key: string;
+    acknowledge_soft_rate_confirmation_duplicate?: boolean;
+  },
 ) {
   const res = await fetchWithTenant(
     `${API_BASE}/load-workspace-drafts/${encodeURIComponent(draftId)}/promote`,
@@ -1652,6 +1656,24 @@ export function duplicateLoadCandidatesFromParse(
   if (parse.context?.semantic_outcome !== "blocked_duplicate_review") return null;
   const candidates = parse.context.duplicate_candidates;
   return Array.isArray(candidates) ? candidates as DuplicateLoadCandidate[] : [];
+}
+
+export function softRateConfirmationDuplicateFromParse(
+  parse: LoadDocumentParseResponse,
+): DuplicateLoadCandidate[] | null {
+  if (!parse.context?.rate_confirmation_duplicate_warning) return null;
+  const candidates = parse.context.duplicate_candidates;
+  return Array.isArray(candidates) ? candidates as DuplicateLoadCandidate[] : [];
+}
+
+export function parseApiDetailCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const detail = (error as { detail?: unknown }).detail;
+  if (detail && typeof detail === "object" && detail !== null && "code" in detail) {
+    const code = (detail as { code?: unknown }).code;
+    return typeof code === "string" ? code : null;
+  }
+  return null;
 }
 
 export type LoadWorkspaceDraftParseResult = {

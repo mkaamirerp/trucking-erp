@@ -58,6 +58,10 @@ class LoadWorkspaceDraftUpdate(BaseModel):
 class LoadWorkspaceDraftPromote(BaseModel):
     expected_concurrency_version: int = Field(..., ge=1)
     promotion_idempotency_key: str = Field(..., min_length=1, max_length=128)
+    acknowledge_soft_rate_confirmation_duplicate: bool = Field(
+        default=False,
+        description="Required when promote hits a soft broker-reference duplicate (different/unknown broker).",
+    )
 
 
 class LoadWorkspaceDraftDiscard(BaseModel):

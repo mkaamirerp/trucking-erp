@@ -84,12 +84,24 @@ async def parse_and_attach_workspace_draft_pdf(
     except UnsafeLoadPdfError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    draft_json = current.draft_json if isinstance(current.draft_json, dict) else {}
+    broker_raw = draft_json.get("brokerId") or draft_json.get("broker_id")
+    incoming_broker_id: int | None = None
+    if broker_raw is not None and str(broker_raw).strip():
+        try:
+            parsed_broker = int(broker_raw)
+            if parsed_broker > 0:
+                incoming_broker_id = parsed_broker
+        except (TypeError, ValueError):
+            incoming_broker_id = None
+
     parse = await parse_load_workspace_document_orchestrated(
         pdf_bytes,
         filename=filename,
         tenant_id=tenant_id,
         db=db,
         continue_anyway=continue_anyway,
+        incoming_broker_id=incoming_broker_id,
     )
     if parse.context.get("semantic_outcome") == "blocked_duplicate_review":
         # Review gate must not store/replace the draft PDF, accepted parse,

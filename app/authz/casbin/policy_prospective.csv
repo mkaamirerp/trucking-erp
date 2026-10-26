@@ -118,6 +118,11 @@ p, ADMIN, *, loads.records, mark_ready, allow
 p, TENANT_ADMIN, *, loads.records, mark_ready, allow
 p, TENANT_OWNER, *, loads.records, mark_ready, allow
 p, OPERATIONAL_FULL_ACCESS, *, loads.records, mark_ready, allow
+p, OWNER, *, loads.records, cancel, allow
+p, ADMIN, *, loads.records, cancel, allow
+p, TENANT_ADMIN, *, loads.records, cancel, allow
+p, TENANT_OWNER, *, loads.records, cancel, allow
+p, OPERATIONAL_FULL_ACCESS, *, loads.records, cancel, allow
 p, OWNER, *, loads.documents, parse, allow
 p, ADMIN, *, loads.documents, parse, allow
 p, TENANT_ADMIN, *, loads.documents, parse, allow

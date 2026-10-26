@@ -23,6 +23,7 @@ import {
   getLoadWorkspaceDraft,
   parseLoadWorkspaceDraftDocument,
   duplicateLoadCandidatesFromParse,
+  softRateConfirmationDuplicateFromParse,
   type DuplicateLoadCandidate,
   promoteLoadWorkspaceDraft,
   parseLoadWorkspaceDraftVersionConflict,
@@ -551,6 +552,10 @@ function LoadWorkspacePage() {
     file: File;
     candidates: DuplicateLoadCandidate[];
   } | null>(null);
+  const [softDuplicateReview, setSoftDuplicateReview] = useState<{
+    candidates: DuplicateLoadCandidate[];
+  } | null>(null);
+  const [acknowledgeSoftDuplicate, setAcknowledgeSoftDuplicate] = useState(false);
   /** Labels for field groups applied by the latest successful PDF parse (read-only summary). */
   const [lastParseAppliedLabels, setLastParseAppliedLabels] = useState<string[] | null>(null);
   const [lastParseFieldConfidence, setLastParseFieldConfidence] = useState<Record<string, string>>({});
@@ -1169,9 +1174,14 @@ function LoadWorkspacePage() {
           const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
           if (duplicateCandidates !== null) {
             setDuplicateReview({ file, candidates: duplicateCandidates });
+            setSoftDuplicateReview(null);
+            setAcknowledgeSoftDuplicate(false);
             return;
           }
           setDuplicateReview(null);
+          const softDup = softRateConfirmationDuplicateFromParse(res);
+          setSoftDuplicateReview(softDup ? { candidates: softDup } : null);
+          setAcknowledgeSoftDuplicate(false);
           setWorkspaceDraft(persisted.draft);
           setWorkspaceReferenceText(res.raw_text || "");
           replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
@@ -1226,9 +1236,14 @@ function LoadWorkspacePage() {
         const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
         if (duplicateCandidates !== null) {
           setDuplicateReview({ file, candidates: duplicateCandidates });
+          setSoftDuplicateReview(null);
+          setAcknowledgeSoftDuplicate(false);
           return; // Do not hydrate the form from an empty review-only parse.
         }
         setDuplicateReview(null);
+        const softDup = softRateConfirmationDuplicateFromParse(res);
+        setSoftDuplicateReview(softDup ? { candidates: softDup } : null);
+        setAcknowledgeSoftDuplicate(false);
         const parseRequestMs = performance.now() - parseWallStarted;
         const hydration = await hydrateLoadWorkspaceFromParseResponse(
           res,
@@ -1567,6 +1582,8 @@ function LoadWorkspacePage() {
     : formatManualHardMissingLine(manualCreateHardMissing);
   const createLoadBlockedByHardGate =
     !hasParsedPdfIntoDraft && manualCreateHardMissing.length > 0;
+  const createLoadBlockedByDuplicate =
+    duplicateReview !== null || (softDuplicateReview !== null && !acknowledgeSoftDuplicate);
 
   async function ensureServerDraft(
     options: { syncRoute?: boolean } = {},
@@ -1807,6 +1824,7 @@ function LoadWorkspacePage() {
       const result = await promoteLoadWorkspaceDraft(id, {
         expected_concurrency_version: saved.concurrency_version,
         promotion_idempotency_key: crypto.randomUUID(),
+        acknowledge_soft_rate_confirmation_duplicate: acknowledgeSoftDuplicate,
       });
       const loadId = Number(result.load_id);
       if (!Number.isFinite(loadId) || loadId <= 0) {
@@ -1830,6 +1848,36 @@ function LoadWorkspacePage() {
           text: "Draft was modified elsewhere — save or reload before creating the load.",
           tone: "warning",
         });
+      } else if (e instanceof Error) {
+        let duplicateCode: string | null = null;
+        let duplicateCandidates: DuplicateLoadCandidate[] = [];
+        try {
+          const parsed = JSON.parse(e.message || "") as {
+            detail?: { code?: string; candidates?: DuplicateLoadCandidate[] };
+          };
+          const detail = parsed.detail;
+          if (detail && typeof detail === "object") {
+            duplicateCode = typeof detail.code === "string" ? detail.code : null;
+            duplicateCandidates = Array.isArray(detail.candidates) ? detail.candidates : [];
+          }
+        } catch {
+          /* not a structured API error */
+        }
+        if (duplicateCode === "LOAD_RATE_CONFIRMATION_DUPLICATE_SOFT") {
+          setSoftDuplicateReview({ candidates: duplicateCandidates });
+          setAcknowledgeSoftDuplicate(false);
+          setToolbarMessage({
+            text: "Another load uses this broker reference. Open the existing load or confirm this is a different load.",
+            tone: "warning",
+          });
+        } else if (duplicateCode === "LOAD_RATE_CONFIRMATION_DUPLICATE") {
+          setToolbarMessage({
+            text: "This load already exists. Open the existing load from the list.",
+            tone: "error",
+          });
+        } else {
+          setToolbarMessage({ text: formatApiErrorMessage(e, "Could not create load"), tone: "error" });
+        }
       } else {
         setToolbarMessage({ text: formatApiErrorMessage(e, "Could not create load"), tone: "error" });
       }
@@ -2172,10 +2220,10 @@ function LoadWorkspacePage() {
             aria-label="Possible duplicate load"
             className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] p-5 text-[var(--trk-text)] shadow-xl"
           >
-            <h2 className="text-base font-semibold">This PDF is already on an existing Load</h2>
+            <h2 className="text-base font-semibold">This load already exists</h2>
             <p className="mt-2 text-xs text-[var(--trk-text-muted)]">
-              Exact PDF match found before AI parsing. Review the existing Load.
-              Cancel saves the AI cost; Continue anyway performs the normal parse.
+              This rate confirmation matches an existing load. Open that load to continue; Create load
+              stays disabled until you use a different file or reference.
             </p>
             {duplicateReview.candidates.map((match) => (
               <div key={match.load_id} className="mt-3 space-y-1 rounded border border-[var(--trk-border)] p-3 text-xs">
@@ -2197,26 +2245,54 @@ function LoadWorkspacePage() {
               </div>
             ))}
             <div className="mt-4 flex flex-wrap justify-end gap-2">
+              {duplicateReview.candidates[0] ? (
+                <Link
+                  className={toolBtnSecondary}
+                  to={OPS.LOAD_DETAIL(duplicateReview.candidates[0].load_id)}
+                >
+                  Open load
+                </Link>
+              ) : null}
               <button
                 type="button"
                 disabled={parseBusy}
                 className={toolBtnSecondary}
                 onClick={() => {
                   setDuplicateReview(null);
-                  setToolbarMessage({ text: "Duplicate PDF cancelled before AI parsing.", tone: "warning" });
+                  setToolbarMessage({ text: "Duplicate review closed.", tone: "warning" });
                 }}
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={parseBusy}
-                className={toolBtnSecondary}
-                onClick={() => void onParseWorkspacePdf(duplicateReview.file, true)}
-              >
-                Continue anyway — parse PDF
+                Close
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {softDuplicateReview && !duplicateReview ? (
+        <div className="border-b border-amber-600/40 bg-amber-950/30 px-4 py-3 text-xs text-[var(--trk-text)]">
+          <p className="font-semibold">Another load may use this broker reference number</p>
+          <p className="mt-1 text-[var(--trk-text-muted)]">
+            This is not a hard block when the broker differs or is unknown. Open the existing load or
+            confirm this is a different load before Create load.
+          </p>
+          {softDuplicateReview.candidates.map((match) => (
+            <div key={match.load_id} className="mt-2">
+              <Link className="underline" to={OPS.LOAD_DETAIL(match.load_id)}>
+                Open load {match.load_number}
+              </Link>
+              <span className="ml-2 text-[var(--trk-text-muted)]">
+                Broker ref: {match.broker_load_reference || "—"}
+              </span>
+            </div>
+          ))}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={toolBtnSecondary}
+              onClick={() => setAcknowledgeSoftDuplicate(true)}
+            >
+              This is a different load, continue
+            </button>
           </div>
         </div>
       ) : null}
@@ -2332,7 +2408,14 @@ function LoadWorkspacePage() {
               <Button
                 variant="primary"
                 type="button"
-                disabled={saving || markReadyBusy || parseBusy || !isDraftEditable || createLoadBlockedByHardGate}
+                disabled={
+                  saving ||
+                  markReadyBusy ||
+                  parseBusy ||
+                  !isDraftEditable ||
+                  createLoadBlockedByHardGate ||
+                  createLoadBlockedByDuplicate
+                }
                 title={createUnderButtonLine ?? undefined}
                 onClick={() => void onPromoteDraft()}
               >

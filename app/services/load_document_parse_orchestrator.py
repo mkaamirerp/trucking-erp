@@ -26,6 +26,7 @@ async def parse_load_workspace_document_orchestrated(
     tenant_id: int | None = None,
     db: AsyncSession | None = None,
     continue_anyway: bool = False,
+    incoming_broker_id: int | None = None,
 ) -> LoadDocumentParseResponse:
     """
     Parse PDF for workspace hydration only (no DB, no load/trip mutation).
@@ -45,6 +46,8 @@ async def parse_load_workspace_document_orchestrated(
         filename=fn,
         openai_chat_json_schema=openai_chat_json_schema,
         continue_anyway=continue_anyway,
+        exclude_load_id=load_id,
+        incoming_broker_id=incoming_broker_id,
     )
     ctx = dict(out.context or {})
     if email_thread_id is not None:

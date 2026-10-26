@@ -12,23 +12,16 @@ from __future__ import annotations
 
 from hashlib import sha256
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.load import Load, LoadStop
+from app.models.load import Load
 from app.models.load_commercial_evidence import LoadCommercialEvidence
-from app.models.trip import Trip, TripLoad
+from app.services.load_rate_confirmation_duplicate import snapshot_existing_load
 
 
 class DuplicatePrecheckUnavailable(RuntimeError):
     """Fail closed: do not spend AI tokens when the DB precheck could not run."""
-
-
-def _place(stop: LoadStop | None) -> str | None:
-    if stop is None:
-        return None
-    value = ", ".join(p for p in (stop.city, stop.state_or_province) if p)
-    return value or None
 
 
 async def find_exact_pdf_duplicate_candidates(
@@ -36,6 +29,7 @@ async def find_exact_pdf_duplicate_candidates(
     *,
     tenant_id: int,
     pdf_bytes: bytes,
+    exclude_load_id: int | None = None,
     limit: int = 5,
 ) -> list[dict]:
     """Return existing Load snapshots for an exact hash match in this tenant.
@@ -48,10 +42,6 @@ async def find_exact_pdf_duplicate_candidates(
     if not pdf_bytes:
         raise ValueError("pdf_bytes required")
 
-    # Unit tests for the existing parser use AsyncMock in lieu of tenant DB.
-    if db.__class__.__module__.startswith("unittest.mock"):
-        return []
-
     try:
         existing = await db.scalar(select(func.to_regclass("public.load_commercial_evidence")))
         if existing is None:
@@ -60,7 +50,7 @@ async def find_exact_pdf_duplicate_candidates(
             return []
 
         digest = sha256(pdf_bytes).hexdigest()
-        results = await db.execute(
+        stmt = (
             select(Load)
             .join(
                 LoadCommercialEvidence,
@@ -74,63 +64,19 @@ async def find_exact_pdf_duplicate_candidates(
                 LoadCommercialEvidence.tenant_id == tenant_id,
                 LoadCommercialEvidence.file_sha256 == digest,
                 LoadCommercialEvidence.evidence_kind == "rate_confirmation_pdf",
+                Load.status != "cancelled",
             )
             .order_by(LoadCommercialEvidence.promoted_at.desc())
             .limit(max(1, min(limit, 10)))
         )
+        if exclude_load_id is not None and int(exclude_load_id) > 0:
+            stmt = stmt.where(Load.id != int(exclude_load_id))
+        results = await db.execute(stmt)
         loads = list(results.scalars().all())
         candidates: list[dict] = []
         for load in loads:
-            stops = (
-                await db.execute(
-                    select(LoadStop)
-                    .where(LoadStop.tenant_id == tenant_id, LoadStop.load_id == load.id)
-                    .order_by(LoadStop.sequence.asc(), LoadStop.id.asc())
-                )
-            ).scalars().all()
-            pickup = next((s for s in stops if (s.stop_type or "").upper() == "PICKUP"), None)
-            delivery = next(
-                (s for s in reversed(stops) if (s.stop_type or "").upper() in {"DROP", "DELIVERY"}), None
-            )
-            trip = await db.scalar(
-                select(Trip)
-                .join(
-                    TripLoad,
-                    and_(TripLoad.tenant_id == Trip.tenant_id, TripLoad.trip_id == Trip.id),
-                )
-                .where(
-                    Trip.tenant_id == tenant_id,
-                    TripLoad.tenant_id == tenant_id,
-                    TripLoad.load_id == load.id,
-                )
-                .order_by(
-                    case(
-                        (Trip.status == "in_progress", 0),
-                        (Trip.status == "assigned", 1),
-                        (Trip.status == "planned", 2),
-                        else_=3,
-                    ),
-                    Trip.updated_at.desc(),
-                )
-                .limit(1)
-            )
-            candidates.append(
-                {
-                    "match_type": "exact_pdf_sha256",
-                    "load_id": int(load.id),
-                    "load_number": str(load.load_number),
-                    "broker_name": load.broker_name_snapshot,
-                    "broker_load_reference": load.broker_load_reference,
-                    "load_status": str(load.status),
-                    "pickup": _place(pickup),
-                    "delivery": _place(delivery),
-                    "trip_id": int(trip.id) if trip else None,
-                    "trip_status": str(trip.status) if trip else None,
-                    "driver_id": int(trip.driver_id) if trip and trip.driver_id is not None else None,
-                    "truck_id": int(trip.truck_id) if trip and trip.truck_id is not None else None,
-                    "trailer_id": int(trip.trailer_id) if trip and trip.trailer_id is not None else None,
-                }
-            )
+            snap = await snapshot_existing_load(db, tenant_id, load)
+            candidates.append({"match_type": "exact_pdf_sha256", **snap})
         return candidates
     except Exception as exc:
         raise DuplicatePrecheckUnavailable("Duplicate check unavailable; AI parse not started") from exc

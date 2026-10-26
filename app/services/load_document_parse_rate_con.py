@@ -50,6 +50,10 @@ from app.services.load_parser_pdf_acquisition import PDF_SCANNED, acquire_load_p
 from app.services.load_parser_pdf_ocr import ocr_load_parser_pdf_pages
 from app.services.load_parser_pdf_safety import validate_load_parser_pdf
 from app.services.load_parser_duplicate_precheck import find_exact_pdf_duplicate_candidates
+from app.services.load_rate_confirmation_duplicate import (
+    apply_broker_reference_duplicate_to_parse_context,
+    evaluate_broker_reference_duplicate,
+)
 from app.services.load_parser_tenant_identity_exclusion import (
     get_load_parser_tenant_identity_exclusion,
 )
@@ -85,9 +89,11 @@ async def parse_pdf_bytes_to_load_document_response(
     openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     forensic_enabled: bool = False,
     continue_anyway: bool = False,
+    exclude_load_id: int | None = None,
+    incoming_broker_id: int | None = None,
 ) -> LoadDocumentParseResponse:
     """Parse a rate-confirmation PDF into ``LoadDocumentParseResponse`` (New Load hydration)."""
-    _ = forensic_enabled
+    _ = forensic_enabled, continue_anyway
     fn = (filename or "upload.pdf")[:512]
     parse_started = time.perf_counter()
 
@@ -137,21 +143,25 @@ async def parse_pdf_bytes_to_load_document_response(
             acquisition=acquisition,
             base_warnings=base_warnings,
             openai_chat_json_schema=openai_chat_json_schema,
-            continue_anyway=continue_anyway,
+            exclude_load_id=exclude_load_id,
+            incoming_broker_id=incoming_broker_id,
         )
 
-    if not continue_anyway:
-        duplicates = await find_exact_pdf_duplicate_candidates(
-            db, tenant_id=int(tenant_id), pdf_bytes=pdf_bytes
+    duplicates = await find_exact_pdf_duplicate_candidates(
+        db,
+        tenant_id=int(tenant_id),
+        pdf_bytes=pdf_bytes,
+        exclude_load_id=exclude_load_id,
+    )
+    if duplicates:
+        return _duplicate_review_response(
+            filename=fn,
+            raw_text=raw_text,
+            acquisition=acquisition,
+            warnings=base_warnings,
+            candidates=duplicates,
+            match_basis="exact_pdf_sha256",
         )
-        if duplicates:
-            return _duplicate_review_response(
-                filename=fn,
-                raw_text=raw_text,
-                acquisition=acquisition,
-                warnings=base_warnings,
-                candidates=duplicates,
-            )
 
     exclusion, excl_warnings = await _load_tenant_identity_exclusion(
         tenant_db=db, tenant_id=int(tenant_id)
@@ -242,6 +252,17 @@ async def parse_pdf_bytes_to_load_document_response(
         total_ms=total_ms,
         semantic_input="pdf_bytes",
     )
+    response = await _apply_broker_reference_duplicate_after_parse(
+        db,
+        tenant_id=int(tenant_id),
+        response=response,
+        filename=fn,
+        raw_text=raw_text,
+        acquisition=acquisition,
+        warnings=base_warnings,
+        exclude_load_id=exclude_load_id,
+        incoming_broker_id=incoming_broker_id,
+    )
     return postgres_safe_load_document_parse_response(response)
 
 
@@ -254,7 +275,8 @@ async def _parse_scanned_image_with_ocr(
     acquisition: dict[str, Any],
     base_warnings: list[str],
     openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None,
-    continue_anyway: bool,
+    exclude_load_id: int | None,
+    incoming_broker_id: int | None,
 ) -> LoadDocumentParseResponse:
     """Image-only PDF: OCR pages, then same v2 JSON rules/schema → OpenAI (no PDF bytes)."""
     parse_started = time.perf_counter()
@@ -286,18 +308,21 @@ async def _parse_scanned_image_with_ocr(
     ]
     raw_text = "\n".join(str(p.get("text") or "") for p in handoff_pages)
 
-    if not continue_anyway:
-        duplicates = await find_exact_pdf_duplicate_candidates(
-            db, tenant_id=int(tenant_id), pdf_bytes=pdf_bytes
+    duplicates = await find_exact_pdf_duplicate_candidates(
+        db,
+        tenant_id=int(tenant_id),
+        pdf_bytes=pdf_bytes,
+        exclude_load_id=exclude_load_id,
+    )
+    if duplicates:
+        return _duplicate_review_response(
+            filename=filename,
+            raw_text=raw_text,
+            acquisition=acquisition,
+            warnings=warnings,
+            candidates=duplicates,
+            match_basis="exact_pdf_sha256",
         )
-        if duplicates:
-            return _duplicate_review_response(
-                filename=filename,
-                raw_text=raw_text,
-                acquisition=acquisition,
-                warnings=warnings,
-                candidates=duplicates,
-            )
 
     exclusion, excl_warnings = await _load_tenant_identity_exclusion(
         tenant_db=db, tenant_id=int(tenant_id)
@@ -388,7 +413,70 @@ async def _parse_scanned_image_with_ocr(
         total_ms=int((time.perf_counter() - parse_started) * 1000),
         semantic_input="ocr_text",
     )
+    response = await _apply_broker_reference_duplicate_after_parse(
+        db,
+        tenant_id=int(tenant_id),
+        response=response,
+        filename=filename,
+        raw_text=raw_text,
+        acquisition=acquisition,
+        warnings=warnings,
+        exclude_load_id=exclude_load_id,
+        incoming_broker_id=incoming_broker_id,
+    )
     return postgres_safe_load_document_parse_response(response)
+
+
+async def _apply_broker_reference_duplicate_after_parse(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    response: LoadDocumentParseResponse,
+    filename: str,
+    raw_text: str,
+    acquisition: dict[str, Any],
+    warnings: list[str],
+    exclude_load_id: int | None,
+    incoming_broker_id: int | None,
+) -> LoadDocumentParseResponse:
+    ctx = dict(response.context or {})
+    if ctx.get("semantic_outcome") == "blocked_duplicate_review":
+        return response
+    broker_ref = (response.extracted.broker_load_reference or "").strip()
+    if not broker_ref:
+        return response
+    broker_id = incoming_broker_id
+    if broker_id is None:
+        name = (response.extracted.broker_name_snapshot or "").strip()
+        if name:
+            broker = await _find_broker_by_name_or_alias(db, tenant_id=tenant_id, name=name)
+            if broker is not None:
+                broker_id = int(broker.id)
+    severity, candidates = await evaluate_broker_reference_duplicate(
+        db,
+        tenant_id=tenant_id,
+        broker_load_reference=broker_ref,
+        broker_id=broker_id,
+        exclude_load_id=exclude_load_id,
+    )
+    if severity is None:
+        return response
+    if severity == "hard":
+        return _duplicate_review_response(
+            filename=filename,
+            raw_text=raw_text,
+            acquisition=acquisition,
+            warnings=warnings,
+            candidates=candidates,
+            match_basis="broker_load_reference",
+        )
+    merged_warnings = list(response.warnings) + [
+        "rate_confirmation_duplicate_warning: another load uses this broker reference number"
+    ]
+    new_ctx = apply_broker_reference_duplicate_to_parse_context(
+        ctx, severity=severity, candidates=candidates
+    )
+    return response.model_copy(update={"warnings": merged_warnings, "context": new_ctx})
 
 
 def _duplicate_review_response(
@@ -398,8 +486,11 @@ def _duplicate_review_response(
     acquisition: dict[str, Any],
     warnings: list[str],
     candidates: list[dict],
+    match_basis: str,
 ) -> LoadDocumentParseResponse:
     """Return a review-only result. No semantic call or fields are generated."""
+    from app.services.load_rate_confirmation_duplicate import LOAD_RATE_CONFIRMATION_DUPLICATE
+
     return postgres_safe_load_document_parse_response(
         LoadDocumentParseResponse(
             document=LoadParseDocumentMeta(filename=filename),
@@ -412,7 +503,9 @@ def _duplicate_review_response(
                 "pdf_type": acquisition.get("pdf_type"),
                 "page_count": acquisition.get("page_count"),
                 "semantic_outcome": "blocked_duplicate_review",
-                "duplicate_match_basis": "exact_pdf_sha256",
+                "duplicate_match_basis": match_basis,
+                "duplicate_severity": "hard",
+                "duplicate_code": LOAD_RATE_CONFIRMATION_DUPLICATE,
                 "duplicate_candidates": candidates,
             },
         )
@@ -462,11 +555,7 @@ async def _load_tenant_identity_exclusion(
     tenant_db: AsyncSession,
     tenant_id: int,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Load exclusion from platform DB. Mock tenant sessions get an empty exclusion."""
-    if tenant_db.__class__.__module__.startswith("unittest.mock"):
-        return dict(_EMPTY_EXCLUSION), [
-            "tenant_identity_exclusion: skipped (test/mock tenant session)"
-        ]
+    """Load exclusion from platform DB."""
     try:
         async with AsyncSessionLocal() as platform_db:
             excl = await get_load_parser_tenant_identity_exclusion(
@@ -558,8 +647,6 @@ async def _canonicalize_broker_snapshot_from_tenant_registry(
     """If broker_name matches tenant broker registry, prefer display_name (hydration only)."""
     name = (response.extracted.broker_name_snapshot or "").strip()
     if not name:
-        return response
-    if db.__class__.__module__.startswith("unittest.mock"):
         return response
 
     try:
