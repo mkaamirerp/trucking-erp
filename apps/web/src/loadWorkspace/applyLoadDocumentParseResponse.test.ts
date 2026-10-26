@@ -278,6 +278,41 @@ describe("applyEmptyWorkspaceFieldsFromParseResponse", () => {
     );
     expect(cbs.setBrokerLoadReference).not.toHaveBeenCalled();
   });
+
+  it("does not resurrect intentionally cleared scalars saved on draft_json", () => {
+    const cbs = mockParseCallbacks();
+    const fields = {
+      ...initialWorkspaceFieldsManual(),
+      rate: "",
+      brokerLoadReference: "",
+      brokerContactNameSnapshot: "",
+      commodity: "",
+    };
+    const draftJson = buildWorkspaceDraftJson({
+      ...initialWorkspaceFieldsManual(),
+      rate: "",
+      brokerLoadReference: "",
+      brokerContactNameSnapshot: "",
+      commodity: "",
+      mode: "",
+      status: "draft",
+    });
+    applyEmptyWorkspaceFieldsFromParseResponse(
+      fields,
+      emptyRes({
+        rate: 1200,
+        broker_load_reference: "REF-9",
+        broker_contact_name_snapshot: "Sam",
+        commodity: "Steel",
+      }),
+      cbs,
+      draftJson,
+    );
+    expect(cbs.setRate).not.toHaveBeenCalled();
+    expect(cbs.setBrokerLoadReference).not.toHaveBeenCalled();
+    expect(cbs.setBrokerContactNameSnapshot).not.toHaveBeenCalled();
+    expect(cbs.setCommodity).not.toHaveBeenCalled();
+  });
 });
 
 describe("buildLoadPersistParamsFromParseResponse", () => {

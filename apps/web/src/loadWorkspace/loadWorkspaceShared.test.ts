@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildLoadPersistPayload,
   buildWorkspaceDraftJson,
+  draftJsonDefinesField,
   formatEquipmentTempChip,
   formatLinehaulDisplay,
   initialManualCreateStops,
   newDraftStop,
   selectDraftStopsForPersist,
+  shouldApplyBrokerContactsList,
   workspaceFieldsFromDraftJson,
 } from "./loadWorkspaceShared";
 import type { DraftStop, LoadPersistParams } from "./loadWorkspaceShared";
@@ -253,6 +255,19 @@ describe("draft proposed assignment persistence", () => {
     );
     expect(workspaceFieldsFromDraftJson(first).driverId).toBe(16);
     expect(workspaceFieldsFromDraftJson(second).truckId).toBe(6);
+  });
+});
+
+describe("draft_json field ownership and broker contact fetch guard", () => {
+  it("draftJsonDefinesField treats empty string as an explicit saved value", () => {
+    const json = buildWorkspaceDraftJson(minimalPersist({ rate: "" }));
+    expect(draftJsonDefinesField(json, ["rate"])).toBe(true);
+  });
+
+  it("shouldApplyBrokerContactsList rejects stale broker responses", () => {
+    expect(shouldApplyBrokerContactsList(1, 2, true)).toBe(false);
+    expect(shouldApplyBrokerContactsList(2, 2, true)).toBe(true);
+    expect(shouldApplyBrokerContactsList(2, 2, false)).toBe(false);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   createEmptyParseHydrationState,
   hydrationStateFromDraftAndParse,
   inferParseManualOverridesFromDraft,
+  markBrokerIdentityLocked,
   registerManualParseFieldEdit,
 } from "./loadParseHydrationState";
 import { initialWorkspaceFieldsManual } from "./loadWorkspaceShared";
@@ -44,6 +45,16 @@ describe("loadParseHydrationState", () => {
     vi.mocked(cbs.setCommodity).mockClear();
     state = applyParseScalarHydration({} as never, cbs, state);
     expect(cbs.setCommodity).toHaveBeenCalledWith("");
+  });
+
+  it("does not overwrite broker name when broker identity is locked", () => {
+    const cbs = mkCbs();
+    let state = createEmptyParseHydrationState();
+    state = applyParseScalarHydration({ broker_name_snapshot: "Broker A" } as never, cbs, state);
+    markBrokerIdentityLocked(state);
+    vi.mocked(cbs.setBrokerNameSnapshot).mockClear();
+    state = applyParseScalarHydration({ broker_name_snapshot: "Broker B" } as never, cbs, state);
+    expect(cbs.setBrokerNameSnapshot).not.toHaveBeenCalledWith("Broker B");
   });
 
   it("keeps manual override when next document omits field", () => {

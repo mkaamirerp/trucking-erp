@@ -117,6 +117,24 @@ export function initialWorkspaceFieldsManual(): WorkspaceDraftFields {
   };
 }
 
+/** True when draft_json explicitly persisted a field (empty string counts as intentional clear). */
+export function draftJsonDefinesField(
+  draftJson: Record<string, unknown> | null | undefined,
+  keys: string[],
+): boolean {
+  if (!draftJson) return false;
+  return keys.some((k) => Object.prototype.hasOwnProperty.call(draftJson, k));
+}
+
+/** Ignore stale listBrokerContacts responses after brokerId changes. */
+export function shouldApplyBrokerContactsList(
+  requestedBrokerId: number,
+  currentBrokerId: number | null,
+  effectActive: boolean,
+): boolean {
+  return effectActive && currentBrokerId === requestedBrokerId;
+}
+
 /** Serialize workspace form state for load_workspace_drafts.draft_json (camelCase). */
 export function buildWorkspaceDraftJson(
   params: LoadPersistParams & { status?: string },

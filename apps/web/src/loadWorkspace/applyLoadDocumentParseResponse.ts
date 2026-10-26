@@ -20,10 +20,11 @@ import {
   type ParseContactFieldKey,
   type ParseHydrationState,
 } from "@/loadWorkspace/loadParseHydrationState";
-import type {
-  DraftStop,
-  LoadPersistParams,
-  WorkspaceDraftFields,
+import {
+  draftJsonDefinesField,
+  type DraftStop,
+  type LoadPersistParams,
+  type WorkspaceDraftFields,
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { initialManualCreateStops } from "@/loadWorkspace/loadWorkspaceShared";
 import { hasUsefulStopIdentity } from "@/loadWorkspace/loadParseStops";
@@ -147,44 +148,96 @@ export function applyEmptyWorkspaceFieldsFromParseResponse(
   fields: WorkspaceDraftFields,
   res: LoadDocumentParseResponse,
   cbs: ApplyLoadDocumentParseCallbacks,
+  draftJson?: Record<string, unknown>,
 ): void {
   const ex = res.extracted;
   const fillString = (
     current: string,
     parsed: string | null | undefined,
     set: (v: string) => void,
+    draftKeys: string[],
   ) => {
+    if (draftJsonDefinesField(draftJson, draftKeys)) return;
     if (!workspaceFieldEmpty(current)) return;
     const next = trimmedOrEmpty(parsed);
     if (next) set(next);
   };
 
-  fillString(fields.brokerNameSnapshot, ex.broker_name_snapshot, cbs.setBrokerNameSnapshot);
-  fillString(fields.brokerLoadReference, ex.broker_load_reference, cbs.setBrokerLoadReference);
-  fillString(fields.brokerContactNameSnapshot, ex.broker_contact_name_snapshot, cbs.setBrokerContactNameSnapshot);
-  fillString(fields.brokerContactPhoneSnapshot, ex.broker_contact_phone_snapshot, cbs.setBrokerContactPhoneSnapshot);
-  fillString(fields.brokerContactEmailSnapshot, ex.broker_contact_email_snapshot, cbs.setBrokerContactEmailSnapshot);
-  fillString(fields.freightMode, ex.mode, cbs.setFreightMode);
-  fillString(fields.equipmentType, ex.equipment_type, cbs.setEquipmentType);
-  fillString(fields.trailerType, ex.trailer_type, cbs.setTrailerType);
-  fillString(fields.trailerSize, ex.trailer_size, cbs.setTrailerSize);
-  fillString(fields.commodity, ex.commodity, cbs.setCommodity);
-  fillString(fields.temperatureRequirement, ex.temperature_requirement, cbs.setTemperatureRequirement);
+  fillString(
+    fields.brokerNameSnapshot,
+    ex.broker_name_snapshot,
+    cbs.setBrokerNameSnapshot,
+    ["brokerNameSnapshot", "broker_name_snapshot"],
+  );
+  fillString(
+    fields.brokerLoadReference,
+    ex.broker_load_reference,
+    cbs.setBrokerLoadReference,
+    ["brokerLoadReference", "broker_load_reference"],
+  );
+  fillString(
+    fields.brokerContactNameSnapshot,
+    ex.broker_contact_name_snapshot,
+    cbs.setBrokerContactNameSnapshot,
+    ["brokerContactNameSnapshot", "broker_contact_name_snapshot"],
+  );
+  fillString(
+    fields.brokerContactPhoneSnapshot,
+    ex.broker_contact_phone_snapshot,
+    cbs.setBrokerContactPhoneSnapshot,
+    ["brokerContactPhoneSnapshot", "broker_contact_phone_snapshot"],
+  );
+  fillString(
+    fields.brokerContactEmailSnapshot,
+    ex.broker_contact_email_snapshot,
+    cbs.setBrokerContactEmailSnapshot,
+    ["brokerContactEmailSnapshot", "broker_contact_email_snapshot"],
+  );
+  fillString(fields.freightMode, ex.mode, cbs.setFreightMode, ["freightMode", "mode"]);
+  fillString(fields.equipmentType, ex.equipment_type, cbs.setEquipmentType, ["equipmentType", "equipment_type"]);
+  fillString(fields.trailerType, ex.trailer_type, cbs.setTrailerType, ["trailerType", "trailer_type"]);
+  fillString(fields.trailerSize, ex.trailer_size, cbs.setTrailerSize, ["trailerSize", "trailer_size"]);
+  fillString(fields.commodity, ex.commodity, cbs.setCommodity, ["commodity"]);
+  fillString(
+    fields.temperatureRequirement,
+    ex.temperature_requirement,
+    cbs.setTemperatureRequirement,
+    ["temperatureRequirement", "temperature_requirement"],
+  );
 
-  if (workspaceFieldEmpty(fields.estimatedWeight) && ex.estimated_weight != null) {
+  if (
+    !draftJsonDefinesField(draftJson, ["estimatedWeight", "estimated_weight"]) &&
+    workspaceFieldEmpty(fields.estimatedWeight) &&
+    ex.estimated_weight != null
+  ) {
     cbs.setEstimatedWeight(String(ex.estimated_weight));
   }
-  if (workspaceFieldEmpty(fields.rate) && ex.rate != null) {
+  if (
+    !draftJsonDefinesField(draftJson, ["rate"]) &&
+    workspaceFieldEmpty(fields.rate) &&
+    ex.rate != null
+  ) {
     cbs.setRate(String(ex.rate));
   }
-  if (workspaceFieldEmpty(fields.customerRate) && ex.customer_rate != null) {
+  if (
+    !draftJsonDefinesField(draftJson, ["customerRate", "customer_rate"]) &&
+    workspaceFieldEmpty(fields.customerRate) &&
+    ex.customer_rate != null
+  ) {
     cbs.setCustomerRate(String(ex.customer_rate));
   }
-  if (workspaceFieldEmpty(fields.miles) && ex.miles != null) {
+  if (
+    !draftJsonDefinesField(draftJson, ["miles"]) &&
+    workspaceFieldEmpty(fields.miles) &&
+    ex.miles != null
+  ) {
     cbs.setMiles(String(Math.round(ex.miles)));
   }
 
-  if ((fields.loadReferences?.length ?? 0) === 0) {
+  if (
+    !draftJsonDefinesField(draftJson, ["loadReferences", "references"]) &&
+    (fields.loadReferences?.length ?? 0) === 0
+  ) {
     const refs = workspaceReferencesFromParse(ex.references);
     if (refs.length > 0) cbs.setLoadReferences(refs);
   }

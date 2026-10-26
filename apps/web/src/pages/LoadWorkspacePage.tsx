@@ -561,6 +561,7 @@ function LoadWorkspacePage() {
   const [workspaceReferenceText, setWorkspaceReferenceText] = useState("");
   const [workspacePdfPreviewUrl, setWorkspacePdfPreviewUrl] = useState<string | null>(null);
   const parseHydrationRef = useRef<ParseHydrationState>(createEmptyParseHydrationState());
+  const brokerIdRef = useRef<number | null>(null);
   const [parseManualOverrideKeys, setParseManualOverrideKeys] = useState<Set<ParseScalarFieldKey>>(
     () => new Set(),
   );
@@ -761,7 +762,12 @@ function LoadWorkspacePage() {
       }
       const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
       if (accepted) {
-        applyEmptyWorkspaceFieldsFromParseResponse(fields, accepted, getParseHydrationCallbacks());
+        applyEmptyWorkspaceFieldsFromParseResponse(
+          fields,
+          accepted,
+          getParseHydrationCallbacks(),
+          draft.draft_json ?? {},
+        );
         parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
         setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
         setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(fields, accepted.extracted));
@@ -1032,12 +1038,16 @@ function LoadWorkspacePage() {
     [brokerId],
   );
 
-  const setBrokerContactIdTracked = useCallback((id: number | null) => {
-    if (id != null) {
-      markBrokerContactIdManuallySelected(parseHydrationRef.current);
-    }
-    setBrokerContactId(id);
-  }, []);
+  const setBrokerContactIdTracked = useCallback(
+    (id: number | null) => {
+      if (id != null) {
+        if (!brokerContacts.some((c) => c.id === id)) return;
+        markBrokerContactIdManuallySelected(parseHydrationRef.current);
+      }
+      setBrokerContactId(id);
+    },
+    [brokerContacts],
+  );
 
   const setBrokerNameSnapshotTracked = useCallback(
     (v: string) => {
@@ -1419,13 +1429,25 @@ function LoadWorkspacePage() {
   }, [workspaceMode, hasIntakeThread, intakeThreadId]);
 
   useEffect(() => {
+    brokerIdRef.current = brokerId;
     if (!brokerId) {
       setBrokerContacts([]);
       return;
     }
-    listBrokerContacts(brokerId, { page: 1, size: 200, include_archived: false })
-      .then((p) => setBrokerContacts(p.items || []))
-      .catch(() => setBrokerContacts([]));
+    const requestedBrokerId = brokerId;
+    let active = true;
+    listBrokerContacts(requestedBrokerId, { page: 1, size: 200, include_archived: false })
+      .then((p) => {
+        if (!active || brokerIdRef.current !== requestedBrokerId) return;
+        setBrokerContacts(p.items || []);
+      })
+      .catch(() => {
+        if (!active || brokerIdRef.current !== requestedBrokerId) return;
+        setBrokerContacts([]);
+      });
+    return () => {
+      active = false;
+    };
   }, [brokerId]);
 
   const intakeProposed = useMemo((): IntakeProposedFields | null => {

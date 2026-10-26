@@ -299,15 +299,19 @@ export function applyParseScalarHydration(
   const next = cloneParseHydrationState(state);
   const present = extractPresentParseScalarKeys(ex);
 
+  const skipScalarHydration = (key: ParseScalarFieldKey): boolean =>
+    next.manualOverrideKeys.has(key) ||
+    (key === "brokerNameSnapshot" && next.brokerIdentityLocked);
+
   for (const key of next.lastAppliedKeys) {
-    if (present.has(key) || next.manualOverrideKeys.has(key)) continue;
+    if (present.has(key) || skipScalarHydration(key)) continue;
     clearParseScalarField(key, cbs);
     next.lastAppliedKeys.delete(key);
     next.lastAppliedValues.delete(key);
   }
 
   for (const key of present) {
-    if (next.manualOverrideKeys.has(key)) continue;
+    if (skipScalarHydration(key)) continue;
     const applied = applyParseScalarField(key, ex, cbs);
     if (applied != null) {
       next.lastAppliedKeys.add(key);

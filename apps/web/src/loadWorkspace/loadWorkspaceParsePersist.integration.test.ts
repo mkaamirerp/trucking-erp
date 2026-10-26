@@ -337,6 +337,53 @@ describe("parse → manual edit → re-parse → persist", () => {
     expect(provenance.manualOverrideKeys.has("rate")).toBe(true);
   });
 
+  it("locked broker name survives re-parse in draft_json when parse proposes another name", async () => {
+    const live = {
+      rate: "",
+      brokerName: "Acme Logistics",
+      brokerId: 99 as number | null,
+      brokerLoadReference: "",
+      loadReferences: [] as { kind: string; value: string }[],
+      brokerContactName: "",
+      draftStops: [] as unknown[],
+    };
+    const cbs = mkCbs(live);
+    const hydration = createEmptyParseHydrationState();
+    markBrokerIdentityLocked(hydration);
+    const workspace = {
+      ...initialWorkspaceFieldsManual(),
+      brokerId: 99,
+      brokerNameSnapshot: "Acme Logistics",
+    };
+    const summary = await applyLoadDocumentParseResponse(
+      emptyRes({ broker_name_snapshot: "Acme Logistics", broker_mc_number_snapshot: "1" }),
+      cbs,
+      hydration,
+      {
+        brokerId: 99,
+        brokerNameSnapshot: "Acme Logistics",
+        brokerContactId: null,
+        loadReferences: [],
+        brokerLoadReference: "",
+      },
+    );
+    const reparseRes = emptyRes({
+      broker_name_snapshot: "Other Carrier",
+      broker_mc_number_snapshot: "1",
+    });
+    const second = await applyLoadDocumentParseResponse(reparseRes, cbs, summary.parseHydrationState, workspace);
+    expect(live.brokerName).toBe("Acme Logistics");
+    const draftJson = buildWorkspaceDraftJson({
+      ...buildLoadPersistParamsAfterParseApply(workspace, reparseRes, second, {}),
+      status: "draft",
+    });
+    expect(draftJson.brokerId).toBe(99);
+    expect(draftJson.brokerNameSnapshot).toBe("Acme Logistics");
+    const reopened = workspaceFieldsFromDraftJson(draftJson);
+    expect(reopened.brokerNameSnapshot).toBe("Acme Logistics");
+    expect(reopened.brokerId).toBe(99);
+  });
+
   it("keeps saved PO/BOL references when re-parse returns an empty reference list", async () => {
     const setLoadReferences = vi.fn();
     const hydration = createEmptyParseHydrationState();
