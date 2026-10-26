@@ -13,27 +13,57 @@ os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("ALLOW_TENANT_RESOLUTION_SHORTCUTS", "true")
 os.environ.setdefault("TEST_BYPASS_AUTH", "1")
 
+from app.core.integration_db_guard import (
+    IntegrationIsolationError,
+    assert_tenant_database_url_allowed,
+    database_name_from_url,
+)
 from app.main import app
-from tests.support.demo_clone_integration import install_demo_clone_tenant_db_override
 from tests.support.integration_auth import (
     clear_current_user_and_tenant_overrides,
     install_host_aligned_current_user_and_tenant,
+    install_integration_tenant_database_override,
+)
+from tests.support.integration_isolation import integration_auth_headers
+
+AUTH_HEADERS = integration_auth_headers()
+REQUIRES_DB = not os.environ.get("DATABASE_URL")
+REQUIRES_DISPOSABLE_TENANT_DB = not (
+    os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL")
 )
 
-def _dispatch_test_auth_headers() -> dict[str, str]:
-    if (os.environ.get("TRUCKERP_DEV_PLAYGROUND") or "").strip().lower() in ("1", "true", "yes"):
-        return {"host": "demo.truckerp.me"}
-    return {"host": "pytest.truckerp.me"}
 
-
-AUTH_HEADERS = _dispatch_test_auth_headers()
-REQUIRES_DB = not os.environ.get("DATABASE_URL")
+def _disposable_integration_tenant_db_configured() -> bool:
+    raw = os.environ.get("TENANT_DATABASE_URL") or os.environ.get("ALEMBIC_TENANT_DATABASE_URL")
+    if not raw or not str(raw).strip():
+        return False
+    try:
+        assert_tenant_database_url_allowed(str(raw).strip(), context="dispatch_unassigned_tests")
+    except IntegrationIsolationError:
+        return False
+    return database_name_from_url(str(raw)) != "tenant_demo"
 
 
 @pytest.fixture
-def override_auth_tenant():
+def test_bypass_env():
+    old = os.environ.get("TEST_BYPASS_AUTH")
+    os.environ["TEST_BYPASS_AUTH"] = "1"
+    yield
+    if old is None:
+        os.environ.pop("TEST_BYPASS_AUTH", None)
+    else:
+        os.environ["TEST_BYPASS_AUTH"] = old
+
+
+@pytest.fixture
+def override_auth_tenant(test_bypass_env):
+    if not _disposable_integration_tenant_db_configured():
+        pytest.skip(
+            "dispatch unassigned tests require TENANT_DATABASE_URL on a disposable integration DB "
+            "(e.g. tenant_pytest or tenant_clone_*), never tenant_demo"
+        )
+    install_integration_tenant_database_override(app)
     install_host_aligned_current_user_and_tenant(app)
-    install_demo_clone_tenant_db_override(app)
     yield
     clear_current_user_and_tenant_overrides(app)
 
@@ -45,6 +75,7 @@ async def client():
 
 
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
+@pytest.mark.skipif(REQUIRES_DISPOSABLE_TENANT_DB, reason="TENANT_DATABASE_URL required")
 class TestDispatchUnassignedLoadsList:
     async def test_dispatch_unassigned_returns_ready_load(self, client: AsyncClient, override_auth_tenant) -> None:
         cr = await client.post("/api/v1/loads", headers=AUTH_HEADERS, json={"status": "draft"})
