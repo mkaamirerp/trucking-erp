@@ -12,7 +12,7 @@
   },
   "field_rules": {
     "profile": "rate_confirmation",
-    "version": "load_rate_con_field_rules_v2_full_canonical_semantics",
+    "version": "load_rate_con_field_rules_v2_full_canonical_semantics_appt_type_v1",
     "global_rules": [
       "tenant_identity_exclusion is the fully materialized identity of our authenticated TruckERP tenant/carrier. Use it only as exclusion evidence; never emit matching tenant values as broker company, broker authority, broker agent, or third-party contact data.",
       "The carrier named in a PDF may differ from the authenticated TruckERP tenant, especially for borrowed or historical documents. Independently classify document parties by role; never select any identified carrier as the freight broker merely because it is not in tenant_identity_exclusion.",
@@ -1680,6 +1680,7 @@
           "postal",
           "country",
           "reference_number",
+          "appointment_type",
           "appointment_date",
           "appointment_time_text",
           "notes"
@@ -1933,10 +1934,11 @@
       },
       "appointment_date_time": {
         "product_fields": [
+          "stops[].appointment_type",
           "stops[].appointment_date",
           "stops[].appointment_time_text"
         ],
-        "meaning": "Appointment date/time information belongs to its corresponding physical route stop.",
+        "meaning": "Appointment type/date/time information belongs to its corresponding physical route stop.",
         "possible_labels_examples": [
           "Pickup",
           "Delivery",
@@ -1977,8 +1979,12 @@
           "Normalize an unambiguous supported date to YYYY-MM-DD.",
           "Preserve appointment windows rather than truncating them to the first time.",
           "Preserve the source time/range in appointment_time_text.",
+          "Populate stops[].appointment_type only with evidence of that specific stop's schedule: APPT for an explicitly appointment-designated visit, FCFS for first-come-first-served, or OPEN WINDOW when the source explicitly says open window. Do not infer APPT or FCFS from a time range or clock time alone.",
+          "Keep scheduling type separate from appointment_time_text, which preserves the actual clock time or full range without truncation.",
+          "When only FCFS, APPT, or OPEN WINDOW is stated without a clock time, set appointment_type and leave appointment_time_text null.",
+          "Appointment required or call to schedule does not prove that an appointment is booked; preserve that distinction rather than inventing a confirmed time.",
+          "If appointment-type evidence is ambiguous, leave appointment_type null and preserve useful source wording in appointment_time_text or notes where supported.",
           "If a stop date is supported but no time is provided, keep the date and leave time null.",
-          "If the stop is FCFS, open-window, or similar and the current response has no separate appointment-type field, preserve that semantic wording in appointment_time_text when supported.",
           "Do not confuse document creation, confirmation, signature, audit, digital acceptance, invoice/payment deadline, detention, policy, or unrelated timestamps with stop appointments.",
           "Do not transfer an appointment from one stop to another because flattened PDF text places the fields near each other.",
           "If date/time ownership is ambiguous, leave the ambiguous field null rather than guessing."
