@@ -205,6 +205,9 @@ export type PersistWorkspaceDraftAfterParseInput = {
     palletCaseCount: string;
     customsBrokerId: number | null;
     existingInternalNotes: string;
+    driverId?: number | null;
+    truckId?: number | null;
+    trailerAssetId?: number | null;
   };
   updateDraft: (
     draftId: string,
@@ -278,6 +281,9 @@ export function buildLoadPersistParamsFromParseResponse(
     palletCaseCount?: string;
     customsBrokerId?: number | null;
     existingInternalNotes?: string;
+    driverId?: number | null;
+    truckId?: number | null;
+    trailerAssetId?: number | null;
   } = {},
 ): LoadPersistParams {
   const ex = res.extracted;
@@ -317,6 +323,9 @@ export function buildLoadPersistParamsFromParseResponse(
     customsBrokerId: seed.customsBrokerId ?? null,
     internalNotes,
     draftStops,
+    driverId: seed.driverId ?? null,
+    truckId: seed.truckId ?? null,
+    trailerAssetId: seed.trailerAssetId ?? null,
   };
 }
 

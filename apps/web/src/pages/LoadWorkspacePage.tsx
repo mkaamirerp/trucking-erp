@@ -677,9 +677,9 @@ function LoadWorkspacePage() {
     setRate(fields.rate);
     setCustomerRate(fields.customerRate);
     setMiles(fields.miles);
-    setDriverId(null);
-    setTruckId(null);
-    setTrailerId(null);
+    setDriverId(fields.driverId);
+    setTruckId(fields.truckId);
+    setTrailerId(fields.trailerAssetId);
     setCustomsBrokerId(fields.customsBrokerId);
     setInternalNotes(fields.internalNotes);
     setDraftStops(fields.draftStops);
@@ -1052,6 +1052,9 @@ function LoadWorkspacePage() {
               palletCaseCount,
               customsBrokerId,
               existingInternalNotes: internalNotes,
+              driverId,
+              truckId,
+              trailerAssetId: trailerId,
             },
             updateDraft: updateLoadWorkspaceDraft,
             buildDraftJson: buildWorkspaceDraftJson,
@@ -1359,6 +1362,9 @@ function LoadWorkspacePage() {
     rate,
     customerRate,
     miles,
+    driverId,
+    truckId,
+    trailerAssetId: trailerId,
     customsBrokerId,
     internalNotes,
     draftStops,
@@ -1392,9 +1398,9 @@ function LoadWorkspacePage() {
       rate: p.rate,
       customerRate: p.customerRate,
       miles: p.miles,
-      driverId: null,
-      truckId: null,
-      trailerAssetId: null,
+      driverId: p.driverId ?? null,
+      truckId: p.truckId ?? null,
+      trailerAssetId: p.trailerAssetId ?? null,
       customsBrokerId: p.customsBrokerId,
       internalNotes: p.internalNotes,
       draftStops: p.draftStops,

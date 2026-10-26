@@ -7,6 +7,7 @@ import {
   initialManualCreateStops,
   newDraftStop,
   selectDraftStopsForPersist,
+  workspaceFieldsFromDraftJson,
 } from "./loadWorkspaceShared";
 import type { DraftStop, LoadPersistParams } from "./loadWorkspaceShared";
 
@@ -219,6 +220,41 @@ describe("load workspace header glances", () => {
   });
 });
 
+
+describe("draft proposed assignment persistence", () => {
+  it("round-trips driver, truck, and trailer in draft_json only", () => {
+    const params = minimalPersist({ driverId: 30, truckId: 3, trailerAssetId: 2 });
+    const json = buildWorkspaceDraftJson(params);
+    expect(json).toMatchObject({ driverId: 30, truckId: 3, trailerAssetId: 2 });
+    const fields = workspaceFieldsFromDraftJson(json);
+    expect(fields.driverId).toBe(30);
+    expect(fields.truckId).toBe(3);
+    expect(fields.trailerAssetId).toBe(2);
+    const loadBody = buildLoadPersistPayload(params) as Record<string, unknown>;
+    expect(loadBody).not.toHaveProperty("driver_id");
+    expect(loadBody).not.toHaveProperty("truck_id");
+    expect(loadBody).not.toHaveProperty("trailer_id");
+  });
+
+  it("older drafts without assignment keys hydrate as null", () => {
+    const fields = workspaceFieldsFromDraftJson({ status: "draft", brokerLoadReference: "X" });
+    expect(fields.driverId).toBeNull();
+    expect(fields.truckId).toBeNull();
+    expect(fields.trailerAssetId).toBeNull();
+    expect(fields.brokerLoadReference).toBe("X");
+  });
+
+  it("restores latest equipment selection after change", () => {
+    const first = buildWorkspaceDraftJson(
+      minimalPersist({ driverId: 16, truckId: 1, trailerAssetId: 1 }),
+    );
+    const second = buildWorkspaceDraftJson(
+      minimalPersist({ driverId: 30, truckId: 6, trailerAssetId: 2 }),
+    );
+    expect(workspaceFieldsFromDraftJson(first).driverId).toBe(16);
+    expect(workspaceFieldsFromDraftJson(second).truckId).toBe(6);
+  });
+});
 
 describe("RC and customer rate persistence defaults", () => {
   it("fills a blank customer rate with the RC rate in draft JSON and the Load API payload", () => {

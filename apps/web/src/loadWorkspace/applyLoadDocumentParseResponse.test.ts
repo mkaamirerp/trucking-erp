@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyEmptyWorkspaceFieldsFromParseResponse,
   applyLoadDocumentParseResponse,
+  buildLoadPersistParamsFromParseResponse,
   persistWorkspaceDraftAfterParse,
 } from "./applyLoadDocumentParseResponse";
 import type { LoadDocumentParseResponse } from "@/api";
@@ -270,6 +271,26 @@ describe("applyEmptyWorkspaceFieldsFromParseResponse", () => {
       cbs,
     );
     expect(cbs.setBrokerLoadReference).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildLoadPersistParamsFromParseResponse", () => {
+  it("carries draft-only proposed assignment from seed through draft_json build", async () => {
+    const summary = {
+      resolvedBrokerId: null,
+      resolvedBrokerContactId: null,
+      brokerContactMatched: false,
+      mcOrDotAttempted: false,
+      unresolvedStopCount: 0,
+      parseHydrationState: createEmptyParseHydrationState(),
+    };
+    const params = buildLoadPersistParamsFromParseResponse(emptyRes(), summary, {
+      driverId: 30,
+      truckId: 6,
+      trailerAssetId: 2,
+    });
+    const json = buildWorkspaceDraftJson({ ...params, status: "draft" });
+    expect(json).toMatchObject({ driverId: 30, truckId: 6, trailerAssetId: 2 });
   });
 });
 

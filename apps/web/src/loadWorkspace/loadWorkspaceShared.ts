@@ -145,6 +145,10 @@ export function buildWorkspaceDraftJson(
     rate: params.rate,
     customerRate: params.customerRate.trim() === "" ? params.rate.trim() : params.customerRate,
     miles: params.miles,
+    /** Draft-only proposed trip assignment — not operational Load assignment. */
+    driverId: params.driverId ?? null,
+    truckId: params.truckId ?? null,
+    trailerAssetId: params.trailerAssetId ?? null,
     customsBrokerId: params.customsBrokerId,
     internalNotes: params.internalNotes,
     draftStops: params.draftStops.map((stop, index) => {
@@ -183,6 +187,12 @@ function draftStopsFromDraftJson(raw: unknown): DraftStop[] {
       _key: `draft-stop-${index}-${id}`,
     };
   });
+}
+
+function draftProposedAssignmentId(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
 
 /** Hydrate workspace field snapshot from persisted draft_json. */
@@ -228,9 +238,11 @@ export function workspaceFieldsFromDraftJson(j: Record<string, unknown>): Worksp
     rate: String(j.rate ?? ""),
     customerRate: String(j.customerRate ?? j.customer_rate ?? ""),
     miles: String(j.miles ?? ""),
-    driverId: null,
-    truckId: null,
-    trailerAssetId: null,
+    driverId: draftProposedAssignmentId(j.driverId ?? j.driver_id),
+    truckId: draftProposedAssignmentId(j.truckId ?? j.truck_id),
+    trailerAssetId: draftProposedAssignmentId(
+      j.trailerAssetId ?? j.trailer_asset_id ?? j.trailerId ?? j.trailer_id,
+    ),
     customsBrokerId: (j.customsBrokerId ?? j.customs_broker_id ?? null) as number | null,
     internalNotes: String(j.internalNotes ?? j.internal_notes ?? ""),
     draftStops: draftStopsFromDraftJson(j.draftStops ?? j.stops),
@@ -1030,6 +1042,10 @@ export type LoadPersistParams = {
   rate: string;
   customerRate: string;
   miles: string;
+  /** Draft-only proposed trip assignment (draft_json); never sent on Load PATCH. */
+  driverId?: number | null;
+  truckId?: number | null;
+  trailerAssetId?: number | null;
   customsBrokerId: number | null;
   internalNotes: string;
   draftStops: DraftStop[];
