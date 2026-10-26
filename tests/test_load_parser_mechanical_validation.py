@@ -399,6 +399,54 @@ def test_appt_prefix_syntactic_normalize() -> None:
     assert out.extracted.stops[0].appointment_time_text == "08:00-12:00"
 
 
+@pytest.mark.parametrize(
+    ("source", "expected_type", "expected_time"),
+    [
+        ("FCFS", "FCFS", None),
+        ("FCFS: 07:00-15:00", "FCFS", "07:00-15:00"),
+        ("FCFS - 07:00–15:00", "FCFS", "07:00–15:00"),
+        ("APPT: 10:30", "APPT", "10:30"),
+        ("Appointment 10:30", "APPT", "10:30"),
+        ("OPEN WINDOW: 08:00-16:00", "OPEN WINDOW", "08:00-16:00"),
+        ("Open window", "OPEN WINDOW", None),
+        ("08:00-16:00", None, "08:00-16:00"),
+        ("Appt #ABC123", None, "Appt #ABC123"),
+    ],
+)
+def test_appointment_prefix_normalization(source, expected_type, expected_time):
+    response = _base_response(extracted={"stops": [{
+        "stop_type": "pickup", "sequence": 0, "facility_name": "Pickup Site",
+        "appointment_time_text": source,
+    }]})
+    stop = apply_load_parser_mechanical_validation(response).extracted.stops[0]
+    assert stop.appointment_type == expected_type
+    assert stop.appointment_time_text == expected_time
+
+
+def test_appointment_conflict_preserves_both_fields_and_warns():
+    response = _base_response(extracted={"stops": [{
+        "stop_type": "pickup", "sequence": 0, "facility_name": "Pickup Site",
+        "appointment_type": "APPT", "appointment_time_text": "FCFS 08:00-12:00",
+    }]})
+    out = apply_load_parser_mechanical_validation(response)
+    assert out.extracted.stops[0].appointment_type == "APPT"
+    assert out.extracted.stops[0].appointment_time_text == "FCFS 08:00-12:00"
+    assert "appointment_type_conflict: stops[0]" in out.warnings
+    assert out.field_confidence["stops"] == "low"
+
+
+def test_matching_appointment_type_is_idempotent():
+    response = _base_response(extracted={"stops": [{
+        "stop_type": "pickup", "sequence": 0, "facility_name": "Pickup Site",
+        "appointment_type": "FCFS", "appointment_time_text": "FCFS: 08:00–12:00",
+    }]})
+    once = apply_load_parser_mechanical_validation(response)
+    twice = apply_load_parser_mechanical_validation(once)
+    assert once.extracted.stops[0].appointment_type == "FCFS"
+    assert once.extracted.stops[0].appointment_time_text == "08:00–12:00"
+    assert twice.extracted.stops[0].appointment_time_text == "08:00–12:00"
+
+
 # --- Literal presence ---
 
 
