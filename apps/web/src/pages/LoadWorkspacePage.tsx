@@ -33,6 +33,7 @@ import {
   getEmailThreadMessages,
   getLoad,
   getLoadNotes,
+  getTrip,
   listBrokers,
   listBrokerContacts,
   listCustomsBrokers,
@@ -446,6 +447,8 @@ function LoadWorkspacePage() {
   const isDraftEditable =
     isLocalNewDraft || (isDraftWorkspace && workspaceDraft?.status === "draft");
   const showManualDraftActions = workspaceMode === "manual" && (isDraftWorkspace || isManualCreate);
+  /** Pre-promote driver/truck/trailer — editable only while the workspace draft row is still open. */
+  const canEditDraftAssignment = workspaceMode === "manual" && isDraftEditable;
   const [draftConflict, setDraftConflict] = useState<{ serverVersion: number | null } | null>(null);
   const [baselineFormSignature, setBaselineFormSignature] = useState<string | null>(null);
 
@@ -840,6 +843,35 @@ function LoadWorkspacePage() {
     setDraftStops(stopsToDraft(l.stops));
   }, []);
 
+  /** Movement assignment is stored on Trip; mirror open planned/active trip onto workspace display state. */
+  const syncMovementAssignmentFromLoad = useCallback(async (l: Load) => {
+    const tripId = l.open_planned_trip_id ?? l.active_trip_id ?? null;
+    if (tripId == null || tripId <= 0) {
+      setDriverId(l.driver_id ?? null);
+      setTruckId(l.truck_id ?? null);
+      setTrailerId(l.trailer_id ?? null);
+      return;
+    }
+    try {
+      const trip = await getTrip(tripId);
+      setDriverId(trip.driver_id ?? null);
+      setTruckId(trip.truck_id ?? null);
+      setTrailerId(trip.trailer_id ?? null);
+    } catch {
+      setDriverId(l.driver_id ?? null);
+      setTruckId(l.truck_id ?? null);
+      setTrailerId(l.trailer_id ?? null);
+    }
+  }, []);
+
+  const applyLoadDetailToWorkspace = useCallback(
+    async (l: Load) => {
+      hydrateFromLoad(l);
+      await syncMovementAssignmentFromLoad(l);
+    },
+    [hydrateFromLoad, syncMovementAssignmentFromLoad],
+  );
+
   const currentFormSignature = useMemo(
     () =>
       JSON.stringify(
@@ -939,7 +971,7 @@ function LoadWorkspacePage() {
       if (!formDirtyRef.current) {
         const notes = await getLoadNotes(lid).catch(() => [] as LoadNote[]);
         setLoad(remote);
-        hydrateFromLoad(remote);
+        await applyLoadDetailToWorkspace(remote);
         setLoadNotes(Array.isArray(notes) ? notes : []);
         setServerConflict(null);
         setToolbarMessage(null);
@@ -947,7 +979,7 @@ function LoadWorkspacePage() {
     } catch {
       /* background refresh — ignore */
     }
-  }, [workspaceMode, loadIdFromRoute, hydrateFromLoad]);
+  }, [workspaceMode, loadIdFromRoute, applyLoadDetailToWorkspace]);
 
   const canWorkspaceParsePdf =
     workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail";
@@ -1317,10 +1349,36 @@ function LoadWorkspacePage() {
   });
 
   useEffect(() => {
-    if (workspaceMode === "manual" && isManualCreate) {
-      setLoading(false);
+    if (workspaceMode === "manual" && isManualCreate && !draftIdFromRoute) {
+      let cancelled = false;
+      setLoading(true);
       setError(null);
-      return;
+      Promise.all([
+        listCustomsBrokers({ page: 1, size: 200, include_inactive: false }),
+        listBrokers({ page: 1, size: 200, sort: "name_asc" }),
+        listDrivers({ limit: 500, include_inactive: false }),
+        listTrucks({ page: 1, size: 200, status: ["active"] }),
+        listTrailers({ page: 1, size: 200, status: ["active"] }),
+      ])
+        .then(([customsPaged, brPaged, dr, trk, trl]) => {
+          if (cancelled) return;
+          setCustomsBrokers(customsPaged.items || []);
+          setFreightBrokers(brPaged.items || []);
+          setDrivers(dr);
+          setTrucks(trk.items || []);
+          setTrailers(trl.items || []);
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setError((e as Error)?.message || "Failed to load workspace catalogs");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (workspaceMode === "manual" && isDraftWorkspace && draftIdFromRoute) {
@@ -1383,7 +1441,7 @@ function LoadWorkspacePage() {
       .then(([l, customsPaged, brPaged, dr, trk, trl, notes]) => {
         if (cancelled) return;
         setLoad(l);
-        hydrateFromLoad(l);
+        void applyLoadDetailToWorkspace(l);
         setCustomsBrokers(customsPaged.items || []);
         setFreightBrokers(brPaged.items || []);
         setDrivers(dr);
@@ -1410,6 +1468,7 @@ function LoadWorkspacePage() {
     draftIdFromRoute,
     navigate,
     applyWorkspaceDraft,
+    applyLoadDetailToWorkspace,
   ]);
 
   useEffect(() => {
@@ -1697,7 +1756,7 @@ function LoadWorkspacePage() {
     try {
       const updated = await cancelLoad(load.id, expectedVersion, trimmed);
       setLoad(updated);
-      hydrateFromLoad(updated);
+      await applyLoadDetailToWorkspace(updated);
       setToolbarMessage({ text: "Load cancelled.", tone: "success" });
     } catch (e: unknown) {
       const mc = parseLoadVersionConflict(e);
@@ -1709,7 +1768,7 @@ function LoadWorkspacePage() {
         setToolbarMessage({ text: "Cancel conflicted — reload and retry.", tone: "warning" });
         if (mc.server_snapshot) {
           setLoad(mc.server_snapshot);
-          hydrateFromLoad(mc.server_snapshot);
+          await applyLoadDetailToWorkspace(mc.server_snapshot);
         }
       } else {
         setToolbarMessage({ text: formatLoadCancelError(e), tone: "error" });
@@ -1754,6 +1813,9 @@ function LoadWorkspacePage() {
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(updated, { restorePdf: true });
+      if (draftIdFromRoute !== id) {
+        navigate(OPS.LOAD_DRAFT(id), { replace: true });
+      }
       setToolbarMessage({
         text: "Draft saved for later. Use Create load when you are ready to assign it.",
         tone: "success",
@@ -1897,7 +1959,7 @@ function LoadWorkspacePage() {
         getLoadNotes(load.id).catch(() => [] as LoadNote[]),
       ]);
       setLoad(remote);
-      hydrateFromLoad(remote);
+      await applyLoadDetailToWorkspace(remote);
       setLoadNotes(Array.isArray(notes) ? notes : []);
       setToolbarMessage({ text: "Loaded latest from server.", tone: "neutral" });
     } catch (e: unknown) {
@@ -1924,7 +1986,7 @@ function LoadWorkspacePage() {
         expected_concurrency_version: expectedVersion,
       });
       setLoad(updated);
-      hydrateFromLoad(updated);
+      await applyLoadDetailToWorkspace(updated);
       setToolbarMessage({ text: "Saved.", tone: "success" });
       setServerConflict(null);
     } catch (e: unknown) {
@@ -1958,12 +2020,12 @@ function LoadWorkspacePage() {
         expected_concurrency_version: expectedVersion,
       });
       setLoad(afterSave);
-      hydrateFromLoad(afterSave);
+      await applyLoadDetailToWorkspace(afterSave);
       setServerConflict(null);
       try {
         const ready = await markLoadReady(load.id, afterSave.concurrency_version ?? 1);
         setLoad(ready);
-        hydrateFromLoad(ready);
+        await applyLoadDetailToWorkspace(ready);
         setToolbarMessage({ text: "Load marked ready.", tone: "success" });
         setServerConflict(null);
       } catch (me: unknown) {
@@ -1979,7 +2041,7 @@ function LoadWorkspacePage() {
           });
           if (mc.server_snapshot) {
             setLoad(mc.server_snapshot);
-            hydrateFromLoad(mc.server_snapshot);
+            await applyLoadDetailToWorkspace(mc.server_snapshot);
           }
         } else {
           setToolbarMessage({
@@ -2050,7 +2112,7 @@ function LoadWorkspacePage() {
     try {
       const updated = await confirmLoadDocumentSnapshot(load.id, expectedVersion);
       setLoad(updated);
-      hydrateFromLoad(updated);
+      await applyLoadDetailToWorkspace(updated);
       setCustomsMessage("Document snapshot confirmed.");
       setServerConflict(null);
     } catch (e: unknown) {
@@ -2964,13 +3026,17 @@ function LoadWorkspacePage() {
             driverId={driverId}
             truckId={truckId}
             trailerAssetId={trailerId}
-            setDriverId={showManualDraftActions ? setDriverId : undefined}
-            setTruckId={showManualDraftActions ? setTruckId : undefined}
-            setTrailerAssetId={showManualDraftActions ? setTrailerId : undefined}
+            setDriverId={canEditDraftAssignment ? setDriverId : undefined}
+            setTruckId={canEditDraftAssignment ? setTruckId : undefined}
+            setTrailerAssetId={canEditDraftAssignment ? setTrailerId : undefined}
             assignmentWarnings={assignmentWarnings}
-            onAssignmentDriverChange={showManualDraftActions ? onAssignmentDriverChange : undefined}
-            onAssignmentTruckChange={showManualDraftActions ? onAssignmentTruckChange : undefined}
-            activeTripId={workspaceMode === "detail" && load ? load.active_trip_id ?? null : null}
+            onAssignmentDriverChange={canEditDraftAssignment ? onAssignmentDriverChange : undefined}
+            onAssignmentTruckChange={canEditDraftAssignment ? onAssignmentTruckChange : undefined}
+            activeTripId={
+              workspaceMode === "detail" && load
+                ? load.active_trip_id ?? load.open_planned_trip_id ?? null
+                : null
+            }
             customsBrokerId={customsBrokerId}
             internalNotes={internalNotes}
             setInternalNotes={setInternalNotes}

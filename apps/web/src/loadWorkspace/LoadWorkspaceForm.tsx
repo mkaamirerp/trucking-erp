@@ -817,9 +817,9 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
         </p>
         {p.activeTripId != null && p.activeTripId > 0 ? (
           <p className="mt-1.5 text-[10px] leading-snug text-[var(--trk-text-muted)]">
-            This load is on a trip — use{" "}
-            <span className="font-medium text-[var(--trk-text)]">View / Assign on Trip</span> in the header to set driver,
-            truck, and trailer.
+            Driver, truck, and trailer below reflect the open trip for this load. To change them, use{" "}
+            <span className="font-medium text-[var(--trk-text)]">Open planned trip</span> or{" "}
+            <span className="font-medium text-[var(--trk-text)]">View / Assign on Trip</span> in the header.
           </p>
         ) : null}
         </div>
