@@ -109,7 +109,6 @@ import {
 } from "@/loadWorkspace/applyLoadDocumentParseResponse";
 import {
   commercialGatePrimaryActionLabel,
-  listCreateLoadHardMissing,
   draftHasParsedPdf,
   formatManualHardMissingLine,
   formatSoftNotProvidedLine,
@@ -122,7 +121,6 @@ import {
   createEmptyParseHydrationState,
   hydrationStateFromDraftAndParse,
   registerManualParseFieldEdit,
-  type ParseScalarFieldKey,
   type ParseHydrationState,
   type ParseScalarFieldKey,
 } from "@/loadWorkspace/loadParseHydrationState";
@@ -557,6 +555,10 @@ function LoadWorkspacePage() {
   const [parseManualOverrideKeys, setParseManualOverrideKeys] = useState<Set<ParseScalarFieldKey>>(
     () => new Set(),
   );
+  const [parseConfidenceManualKeys, setParseConfidenceManualKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [stopsRouteConfidenceSuppressed, setStopsRouteConfidenceSuppressed] = useState(false);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const docScrollRef = useRef<HTMLDivElement | null>(null);
   const docLineRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
@@ -934,6 +936,37 @@ function LoadWorkspacePage() {
     }
   }, []);
 
+  const markParseConfidenceFieldEdited = useCallback((fieldConfidenceKey: string) => {
+    setParseConfidenceManualKeys((prev) => {
+      if (prev.has(fieldConfidenceKey)) return prev;
+      const next = new Set(prev);
+      next.add(fieldConfidenceKey);
+      return next;
+    });
+  }, []);
+
+  const setBrokerContactNameSnapshotTracked = useCallback(
+    (v: string) => {
+      markParseConfidenceFieldEdited("broker_contact_name_snapshot");
+      setBrokerContactNameSnapshot(v);
+    },
+    [markParseConfidenceFieldEdited],
+  );
+  const setBrokerContactPhoneSnapshotTracked = useCallback(
+    (v: string) => {
+      markParseConfidenceFieldEdited("broker_contact_phone_snapshot");
+      setBrokerContactPhoneSnapshot(v);
+    },
+    [markParseConfidenceFieldEdited],
+  );
+  const setBrokerContactEmailSnapshotTracked = useCallback(
+    (v: string) => {
+      markParseConfidenceFieldEdited("broker_contact_email_snapshot");
+      setBrokerContactEmailSnapshot(v);
+    },
+    [markParseConfidenceFieldEdited],
+  );
+
   const setBrokerNameSnapshotTracked = useCallback(
     (v: string) => {
       trackParseManualScalar("brokerNameSnapshot", v);
@@ -1027,14 +1060,7 @@ function LoadWorkspacePage() {
       if (!continueAnyway) setDuplicateReview(null);
       // Load Lab / parser: hydrate commercial fields only — no trip creation, assignment, dispatch_trips, or dispatched status.
       setParseBusy(true);
-      setParseWarnings([]);
-      setToolbarMessage(null);
-      setLastParseAppliedLabels(null);
-      setLastParseFieldConfidence({});
-      setLastParseConfidenceTier(null);
-      setLastParseEngineAttribution(null);
-      parseHydrationRef.current = createEmptyParseHydrationState();
-      setParseManualOverrideKeys(new Set());
+      if (!continueAnyway) setToolbarMessage(null);
       const parseWallStarted = performance.now();
       try {
         if (workspaceMode === "manual") {
@@ -1050,7 +1076,7 @@ function LoadWorkspacePage() {
           const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
           if (duplicateCandidates !== null) {
             setDuplicateReview({ file, candidates: duplicateCandidates });
-            return; // No accepted parse, stored PDF replacement or form hydration.
+            return;
           }
           setDuplicateReview(null);
           setWorkspaceDraft(persisted.draft);
@@ -1063,6 +1089,7 @@ function LoadWorkspacePage() {
           );
           parseHydrationRef.current = hydration.parseHydrationState;
           setParseManualOverrideKeys(new Set(hydration.parseHydrationState.manualOverrideKeys));
+          setStopsRouteConfidenceSuppressed(false);
           setParseWarnings(hydration.warnings);
           const engineLine =
             buildParseEngineAttribution(res.context ?? undefined, {
@@ -1148,6 +1175,7 @@ function LoadWorkspacePage() {
         );
         parseHydrationRef.current = hydration.parseHydrationState;
         setParseManualOverrideKeys(new Set(hydration.parseHydrationState.manualOverrideKeys));
+        setStopsRouteConfidenceSuppressed(false);
         setParseWarnings(hydration.warnings);
         const engineLine =
           buildParseEngineAttribution(res.context ?? undefined, {
@@ -1175,10 +1203,6 @@ function LoadWorkspacePage() {
           const msg = e instanceof Error ? e.message : "PDF parse failed";
           setToolbarMessage({ text: msg, tone: "error" });
         }
-        setLastParseAppliedLabels(null);
-        setLastParseFieldConfidence({});
-        setLastParseConfidenceTier(null);
-        setLastParseEngineAttribution(null);
       } finally {
         setParseBusy(false);
       }
@@ -1201,6 +1225,9 @@ function LoadWorkspacePage() {
       customsBrokerId,
       status,
       navigate,
+      driverId,
+      truckId,
+      trailerId,
     ],
   );
 
@@ -1935,6 +1962,7 @@ function LoadWorkspacePage() {
   }
 
   function updateStop(key: string, patch: Partial<DraftStop>) {
+    setStopsRouteConfidenceSuppressed(true);
     setDraftStops((rows) => rows.map((r) => (r._key === key ? { ...r, ...patch } : r)));
   }
 
@@ -2738,13 +2766,13 @@ function LoadWorkspacePage() {
             brokerNameSnapshot={brokerNameSnapshot}
             setBrokerNameSnapshot={setBrokerNameSnapshotTracked}
             brokerContactNameSnapshot={brokerContactNameSnapshot}
-            setBrokerContactNameSnapshot={setBrokerContactNameSnapshot}
+            setBrokerContactNameSnapshot={setBrokerContactNameSnapshotTracked}
             brokerContactPhoneSnapshot={brokerContactPhoneSnapshot}
-            setBrokerContactPhoneSnapshot={setBrokerContactPhoneSnapshot}
+            setBrokerContactPhoneSnapshot={setBrokerContactPhoneSnapshotTracked}
             brokerContactExtensionSnapshot={brokerContactExtensionSnapshot}
             setBrokerContactExtensionSnapshot={setBrokerContactExtensionSnapshot}
             brokerContactEmailSnapshot={brokerContactEmailSnapshot}
-            setBrokerContactEmailSnapshot={setBrokerContactEmailSnapshot}
+            setBrokerContactEmailSnapshot={setBrokerContactEmailSnapshotTracked}
             brokerLoadReference={brokerLoadReference}
             setBrokerLoadReference={setBrokerLoadReferenceTracked}
             loadReferences={loadReferences}
@@ -2793,6 +2821,8 @@ function LoadWorkspacePage() {
             moveStop={moveStop}
             fieldConfidence={lastParseFieldConfidence}
             parseManualOverrideKeys={parseManualOverrideKeys}
+            parseConfidenceManualKeys={parseConfidenceManualKeys}
+            suppressStopsRouteConfidence={stopsRouteConfidenceSuppressed}
           />
 
           {/* Settlement — visible in payroll and audit modes */}

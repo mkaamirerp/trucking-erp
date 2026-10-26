@@ -1,6 +1,7 @@
 /**
  * Canonical editable load form — shared by LoadWorkspace (manual / detail / intake modes).
  */
+import { useEffect, useRef } from "react";
 import Button from "@/components/Button";
 import type {
   Broker,
@@ -69,6 +70,8 @@ const I = wsInputClass;
 /** Dense stop cards — same tokens as Financials / Freight sections; layout only differs */
 const stopLb = `${L} !mb-0.5`;
 const stopIc = `${I} !py-1 !px-2 !text-[13px]`;
+const linehaulInputClass =
+  "w-[8.5rem] shrink-0 rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2.5 py-0.5 text-right font-mono text-sm font-semibold text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/25";
 const stopGridCol =
   "grid grid-cols-6 gap-x-1.5 gap-y-1 sm:grid-cols-12 sm:gap-x-2 sm:gap-y-1";
 const stopIconBtn =
@@ -115,6 +118,14 @@ function StopDenseCard({
   focusDoc,
   sectionIndex,
 }: StopDenseCardProps) {
+  const stopNotesRef = useRef<HTMLTextAreaElement>(null);
+  const commodityNotesRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (stopNotesRef.current) autoGrowStopNotes(stopNotesRef.current);
+  }, [stop.notes]);
+  useEffect(() => {
+    if (commodityNotesRef.current) autoGrowStopNotes(commodityNotesRef.current);
+  }, [stop.commodity_notes]);
   const bind = (opts: DocFocusOpts) => bindDocFocus(focusDoc, opts);
   const u = (stop.stop_type || "").toUpperCase();
   const isPu = u === "PICKUP";
@@ -279,6 +290,7 @@ function StopDenseCard({
         <div className="col-span-3 sm:col-span-6">
           <label className={stopLb}>Stop notes</label>
           <textarea
+            ref={stopNotesRef}
             className={`${stopIc} min-h-[2rem] resize-y`}
             rows={1}
             data-testid="stop-notes-input"
@@ -291,6 +303,7 @@ function StopDenseCard({
         <div className="col-span-3 sm:col-span-6">
           <label className={stopLb}>Commodity notes</label>
           <textarea
+            ref={commodityNotesRef}
             className={`${stopIc} min-h-[2rem] resize-y`}
             rows={1}
             data-testid="commodity-notes-input"
@@ -408,6 +421,9 @@ export type LoadWorkspaceFormProps = {
   /** Parser field_confidence map for input-level review accents. */
   fieldConfidence?: Record<string, string>;
   parseManualOverrideKeys?: Set<ParseScalarFieldKey>;
+  /** Non-scalar field_confidence keys the operator edited (contacts, etc.). */
+  parseConfidenceManualKeys?: Set<string>;
+  suppressStopsRouteConfidence?: boolean;
 };
 
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
@@ -430,7 +446,11 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   const bindFieldDoc = (opts: DocFocusOpts) => bindDocFocus(p.focusDoc, opts);
   const fieldConfidence = p.fieldConfidence ?? {};
   const manualScalar = (key: ParseScalarFieldKey) => p.parseManualOverrideKeys?.has(key) ?? false;
-  const stopsRouteConfidence = confidenceTierForFieldKey("stops", fieldConfidence);
+  const confKeyManual = (key: string) => p.parseConfidenceManualKeys?.has(key) ?? false;
+  const stopsRouteConfidence =
+    p.suppressStopsRouteConfidence
+      ? null
+      : confidenceTierForFieldKey("stops", fieldConfidence);
 
   const driver = p.driverId != null ? p.drivers.find((d) => d.id === p.driverId) : undefined;
   const driverLabel =
@@ -503,6 +523,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             labelClassName={L}
             confidenceKey="broker_contact_name_snapshot"
             fieldConfidence={fieldConfidence}
+            manualOverride={confKeyManual("broker_contact_name_snapshot")}
           >
             <input
               className={I}
@@ -516,6 +537,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             labelClassName={L}
             confidenceKey="broker_contact_phone_snapshot"
             fieldConfidence={fieldConfidence}
+            manualOverride={confKeyManual("broker_contact_phone_snapshot")}
           >
             <input
               className={I}
@@ -548,6 +570,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
             labelClassName={L}
             confidenceKey="broker_contact_email_snapshot"
             fieldConfidence={fieldConfidence}
+            manualOverride={confKeyManual("broker_contact_email_snapshot")}
           >
             <input
               className={I}
@@ -613,7 +636,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               className="shrink-0"
             >
               <input
-                className="w-[8.5rem] shrink-0 rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 text-right font-mono text-sm font-bold text-[var(--trk-success)] placeholder:text-emerald-700/60 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600/40"
+                className={linehaulInputClass}
                 inputMode="decimal"
                 value={p.rate}
                 tabIndex={p.verificationTabIndex.get("rate")}
@@ -625,7 +648,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               />
             </ParseConfidenceField>
           ) : (
-            <span className="rounded border border-emerald-900/50 bg-emerald-950/40 px-2.5 py-0.5 font-mono text-sm font-bold text-[var(--trk-success)]">
+            <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2.5 py-0.5 font-mono text-sm font-semibold text-[var(--trk-text)]">
               {formatLinehaulDisplay(p.rate) ?? "—"}
             </span>
           )}

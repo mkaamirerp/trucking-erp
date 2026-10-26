@@ -28,6 +28,12 @@ describe("computeDocumentReviewTier", () => {
     expect(computeDocumentReviewTier(ex(), {}, [])).toBe("neutral");
   });
 
+  it("does not return green when critical fields are absent from extract (only rate present)", () => {
+    expect(
+      computeDocumentReviewTier(ex({ rate: 1200 }), { rate: "high" }, []),
+    ).toBe("medium");
+  });
+
   it("does not go green when only rate is high but broker and stops are unrated", () => {
     const tier = computeDocumentReviewTier(
       ex({

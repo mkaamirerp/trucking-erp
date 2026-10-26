@@ -59,6 +59,7 @@ export function computeLoadWorkspacePdfHydrationResult(
   const parseConfidenceTier = computeDocumentReviewTier(res.extracted, fieldConfidence, warnings);
   return {
     summary,
+    parseHydrationState: summary.parseHydrationState,
     warnings,
     toolbar: { text: outcome.headline, tone },
     appliedLabels: appliedLabels.length > 0 ? appliedLabels : null,

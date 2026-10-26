@@ -98,8 +98,10 @@ export function computeDocumentReviewTier(
   const hasConfidence = hasAnyRatedConfidence(fc);
 
   const criticalInPlay = CRITICAL_FIELD_CONFIDENCE_KEYS.filter((k) => criticalFieldIsPresent(ex, k));
+  const allCritical = [...CRITICAL_FIELD_CONFIDENCE_KEYS];
+  const hasParseContext = hasConfidence || criticalInPlay.length > 0;
 
-  if (!hasConfidence && criticalInPlay.length === 0) {
+  if (!hasParseContext) {
     return warningClass ? "medium" : "neutral";
   }
 
@@ -107,18 +109,19 @@ export function computeDocumentReviewTier(
     return "low";
   }
 
-  const keysToJudge =
-    criticalInPlay.length > 0 ? criticalInPlay : [...CRITICAL_FIELD_CONFIDENCE_KEYS];
-
-  const tiers = keysToJudge.map((k) => normalizeConfidenceValue(fc[k]));
+  const missingCriticalExtract = allCritical.some((k) => !criticalFieldIsPresent(ex, k));
+  const tiers = allCritical.map((k) => {
+    if (!criticalFieldIsPresent(ex, k)) return null;
+    return normalizeConfidenceValue(fc[k]);
+  });
   const missingRating = tiers.some((t) => t == null);
   const hasLow = tiers.some((t) => t === "low");
   const hasMedium = tiers.some((t) => t === "medium");
 
   if (hasLow) return "low";
   if (warningClass === "review") return "medium";
-  if (hasMedium || missingRating) return "medium";
-  if (tiers.length > 0 && tiers.every((t) => t === "high")) return "high";
+  if (missingCriticalExtract || missingRating || hasMedium) return "medium";
+  if (tiers.every((t) => t === "high")) return "high";
   if (!hasConfidence) return "neutral";
   return "medium";
 }

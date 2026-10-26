@@ -226,6 +226,9 @@ export async function persistWorkspaceDraftAfterParse(
     palletCaseCount: input.seed.palletCaseCount,
     customsBrokerId: input.seed.customsBrokerId,
     existingInternalNotes: input.seed.existingInternalNotes,
+    driverId: input.seed.driverId,
+    truckId: input.seed.truckId,
+    trailerAssetId: input.seed.trailerAssetId,
   });
   try {
     const draftJson = input.buildDraftJson({ ...persistParams, status: input.status });
