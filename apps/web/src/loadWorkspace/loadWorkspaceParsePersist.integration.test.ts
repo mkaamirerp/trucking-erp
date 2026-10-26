@@ -14,11 +14,13 @@ import {
   hydrationStateFromDraftAndParse,
   inferParseContactConfidenceManualKeys,
   markBrokerIdentityLocked,
+  markOperatorEditedParseScalar,
   registerManualParseFieldEdit,
 } from "./loadParseHydrationState";
 import {
   buildWorkspaceDraftJson,
   initialWorkspaceFieldsManual,
+  parseManualOverrideKeysFromDraftJson,
   workspaceFieldsFromDraftJson,
   workspaceFieldsFromLoadPersistParams,
 } from "./loadWorkspaceShared";
@@ -191,7 +193,7 @@ describe("parse → manual edit → re-parse → persist", () => {
     expect(live.rate).toBe("1100");
     expect(hydration.lastAppliedValues.get("customerRate")).toBe("1100");
 
-    registerManualParseFieldEdit(hydration, "customerRate", "1350");
+    markOperatorEditedParseScalar(hydration, "customerRate");
     live.customerRate = "1350";
     const workspaceAtReparse = {
       ...initialWorkspaceFieldsManual(),
@@ -234,10 +236,14 @@ describe("parse → manual edit → re-parse → persist", () => {
     });
     expect(saved.draft_json?.rate).toBe("900");
     expect(saved.draft_json?.customerRate).toBe("1350");
+    expect(parseManualOverrideKeysFromDraftJson(saved.draft_json ?? {}).has("customerRate")).toBe(
+      true,
+    );
 
     const reopened = workspaceFieldsFromDraftJson(saved.draft_json ?? {});
     expect(reopened.customerRate).toBe("1350");
-    const provenance = hydrationStateFromDraftAndParse(reopened, res.extracted);
+    const persisted = parseManualOverrideKeysFromDraftJson(saved.draft_json ?? {});
+    const provenance = hydrationStateFromDraftAndParse(reopened, res.extracted, persisted);
     expect(provenance.manualOverrideKeys.has("customerRate")).toBe(true);
   });
 

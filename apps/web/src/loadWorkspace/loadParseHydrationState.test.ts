@@ -5,6 +5,7 @@ import {
   hydrationStateFromDraftAndParse,
   inferParseManualOverridesFromDraft,
   markBrokerIdentityLocked,
+  markOperatorEditedParseScalar,
   registerManualParseFieldEdit,
 } from "./loadParseHydrationState";
 import { initialWorkspaceFieldsManual } from "./loadWorkspaceShared";
@@ -121,19 +122,39 @@ describe("loadParseHydrationState", () => {
     const cbs = mkCbs();
     let state = createEmptyParseHydrationState();
     state = applyParseScalarHydration({ rate: 1000 } as never, cbs, state);
-    registerManualParseFieldEdit(state, "customerRate", "1200");
+    markOperatorEditedParseScalar(state, "customerRate");
     vi.mocked(cbs.setCustomerRate).mockClear();
     state = applyParseScalarHydration({ rate: 800 } as never, cbs, state);
     expect(cbs.setCustomerRate).not.toHaveBeenCalled();
     expect(state.manualOverrideKeys.has("customerRate")).toBe(true);
   });
 
-  it("infers customer manual override only for explicit separate values on reopen", () => {
+  it("parsed customer stays parser-owned until operator edits", () => {
+    const cbs = mkCbs();
+    let state = createEmptyParseHydrationState();
+    state = applyParseScalarHydration({ rate: 2000, customer_rate: 1500 } as never, cbs, state);
+    expect(cbs.setCustomerRate).toHaveBeenCalledWith("1500");
+    vi.mocked(cbs.setCustomerRate).mockClear();
+    state = applyParseScalarHydration({ rate: 2000, customer_rate: 1400 } as never, cbs, state);
+    expect(cbs.setCustomerRate).toHaveBeenCalledWith("1400");
+    expect(state.manualOverrideKeys.has("customerRate")).toBe(false);
+  });
+
+  it("operator-entered customer matching RC is protected when persisted on reopen", () => {
     const ex = { rate: 2000 } as never;
-    const mirrored = { ...initialWorkspaceFieldsManual(), rate: "2000", customerRate: "" };
-    expect(inferParseManualOverridesFromDraft(mirrored, ex).has("customerRate")).toBe(false);
-    const separate = { ...initialWorkspaceFieldsManual(), rate: "2000", customerRate: "1600" };
-    expect(inferParseManualOverridesFromDraft(separate, ex).has("customerRate")).toBe(true);
+    const fields = { ...initialWorkspaceFieldsManual(), rate: "2000", customerRate: "2000" };
+    const persisted = new Set(["customerRate" as const]);
+    const state = hydrationStateFromDraftAndParse(fields, ex, persisted);
+    expect(state.manualOverrideKeys.has("customerRate")).toBe(true);
+  });
+
+  it("reopen uses persisted keys not customer-vs-rate heuristic", () => {
+    const ex = { rate: 2000 } as never;
+    const fields = { ...initialWorkspaceFieldsManual(), rate: "2000", customerRate: "2000" };
+    expect(inferParseManualOverridesFromDraft(fields, ex).has("customerRate")).toBe(false);
+    expect(
+      inferParseManualOverridesFromDraft(fields, ex, new Set(["customerRate"])).has("customerRate"),
+    ).toBe(true);
   });
 
   it("infers manual overrides when draft value differs from accepted parse", () => {

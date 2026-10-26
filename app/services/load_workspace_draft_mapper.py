@@ -12,6 +12,37 @@ from app.schemas.load import LoadCreate, LoadStopCreate
 from app.schemas.load_document_parse import LoadParseReferenceItem
 from app.utils.load_commercial_money import parse_load_customer_rate, parse_load_rate
 
+PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD = "parseManualOverrideKeys"
+ALLOWED_PARSE_MANUAL_OVERRIDE_KEYS = frozenset(
+    {
+        "brokerNameSnapshot",
+        "brokerLoadReference",
+        "freightMode",
+        "equipmentType",
+        "trailerType",
+        "trailerSize",
+        "commodity",
+        "estimatedWeight",
+        "temperatureRequirement",
+        "rate",
+        "customerRate",
+        "miles",
+    }
+)
+
+
+def parse_manual_override_keys_from_draft_json(draft_json: dict | None) -> list[str]:
+    if not isinstance(draft_json, dict):
+        return []
+    raw = draft_json.get(PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD)
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str) and entry in ALLOWED_PARSE_MANUAL_OVERRIDE_KEYS:
+            out.append(entry)
+    return out
+
 
 class DraftJsonMappingError(ValueError):
     def __init__(self, field: str, message: str) -> None:

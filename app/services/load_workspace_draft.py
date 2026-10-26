@@ -31,6 +31,34 @@ class LoadWorkspaceDraftError(Exception):
         self.status_code = status_code
 
 
+async def merge_origin_draft_parse_manual_override_keys(
+    db: AsyncSession,
+    tenant_id: int,
+    draft_id: uuid.UUID,
+    keys: list[str],
+) -> None:
+    """Persist operator parse-field edits on promoted workspace draft_json (no status gate)."""
+    from app.services.load_workspace_draft_mapper import (
+        ALLOWED_PARSE_MANUAL_OVERRIDE_KEYS,
+        PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD,
+    )
+
+    current = await get_workspace_draft(db, tenant_id, draft_id)
+    if current is None:
+        return
+    sanitized = [k for k in keys if k in ALLOWED_PARSE_MANUAL_OVERRIDE_KEYS]
+    merged = dict(current.draft_json or {})
+    merged[PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD] = sanitized
+    await db.execute(
+        update(LoadWorkspaceDraft)
+        .where(
+            LoadWorkspaceDraft.tenant_id == tenant_id,
+            LoadWorkspaceDraft.id == draft_id,
+        )
+        .values(draft_json=merged, updated_at=func.now())
+    )
+
+
 async def get_workspace_draft(
     db: AsyncSession, tenant_id: int, draft_id: uuid.UUID
 ) -> LoadWorkspaceDraft | None:

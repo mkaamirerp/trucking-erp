@@ -504,7 +504,10 @@ def _load_data_from_payload(payload: LoadCreate | LoadUpdate) -> dict:
         data = payload.model_dump(exclude={"stops", "references"})
         data["operational_references"] = sanitize_load_operational_references(payload.references)
         return data
-    data = payload.model_dump(exclude_unset=True, exclude={"stops", "expected_concurrency_version", "references"})
+    data = payload.model_dump(
+        exclude_unset=True,
+        exclude={"stops", "expected_concurrency_version", "references", "parse_manual_override_keys"},
+    )
     if "references" in payload.model_fields_set:
         data["operational_references"] = sanitize_load_operational_references(payload.references or [])
     return data
@@ -908,6 +911,10 @@ async def update_load(
     _reject_commercial_mutation_if_cancelled(load)
     _guard_update_payload(load, payload)
 
+    parse_override_keys: list[str] | None = None
+    if "parse_manual_override_keys" in payload.model_fields_set:
+        parse_override_keys = list(payload.parse_manual_override_keys or [])
+
     expected = payload.expected_concurrency_version
     old_status = (load.status or "").strip().lower()
     old_driver_id = load.driver_id
@@ -1128,6 +1135,16 @@ async def update_load(
             source=source,
             changed_fields={"customs_broker_id": {"before": old_customs_broker_id, "after": out.customs_broker_id}},
             best_effort=False,
+        )
+
+    if parse_override_keys is not None and out.promotion_origin_workspace_draft_id is not None:
+        from app.services.load_workspace_draft import merge_origin_draft_parse_manual_override_keys
+
+        await merge_origin_draft_parse_manual_override_keys(
+            db,
+            tenant_id,
+            out.promotion_origin_workspace_draft_id,
+            parse_override_keys,
         )
 
     await db.commit()
@@ -1618,6 +1635,27 @@ def verification_extracted_text_from_accepted_parse(accepted: dict | None) -> st
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
     return None
+
+
+async def get_load_parse_manual_override_keys(
+    db: AsyncSession,
+    tenant_id: int,
+    load: Load,
+) -> list[str]:
+    from app.models.load_workspace_draft import LoadWorkspaceDraft
+    from app.services.load_workspace_draft_mapper import parse_manual_override_keys_from_draft_json
+
+    if load.promotion_origin_workspace_draft_id is None:
+        return []
+    draft = await db.scalar(
+        select(LoadWorkspaceDraft).where(
+            LoadWorkspaceDraft.tenant_id == tenant_id,
+            LoadWorkspaceDraft.id == load.promotion_origin_workspace_draft_id,
+        )
+    )
+    if draft is None:
+        return []
+    return parse_manual_override_keys_from_draft_json(draft.draft_json)
 
 
 async def get_load_verification_extracted_text(

@@ -179,6 +179,9 @@ async def get_load_detail(
     verification_text = await loads_service.get_load_verification_extracted_text(db, tenant_id, load_id)
     if verification_text:
         resp = resp.model_copy(update={"verification_extracted_text": verification_text})
+    override_keys = await loads_service.get_load_parse_manual_override_keys(db, tenant_id, load)
+    if override_keys:
+        resp = resp.model_copy(update={"parse_manual_override_keys": override_keys})
     return resp
 
 

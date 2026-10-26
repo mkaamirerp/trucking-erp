@@ -72,6 +72,7 @@ import {
   baselineSignatureFromLoad,
   buildLoadPersistPayload,
   buildWorkspaceDraftJson,
+  parseManualOverrideKeysFromDraftJson,
   workspaceFieldsFromDraftJson,
   workspaceFieldsFromLoadPersistParams,
   type WorkspaceDraftFields,
@@ -126,8 +127,10 @@ import {
   createEmptyParseHydrationState,
   hydrationStateFromDraftAndParse,
   inferParseContactConfidenceManualKeys,
+  isParseScalarFieldKey,
   markBrokerContactIdManuallySelected,
   markBrokerIdentityLocked,
+  markOperatorEditedParseScalar,
   markStopsRouteManuallyEdited,
   registerManualContactFieldEdit,
   registerManualParseFieldEdit,
@@ -659,7 +662,12 @@ function LoadWorkspacePage() {
       const accepted = loadDocumentParseFromAcceptedJson(draft.accepted_parse_json ?? null);
       if (accepted) {
         const fields = workspaceFieldsFromDraftJson(draft.draft_json ?? {});
-        parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
+        const persisted = parseManualOverrideKeysFromDraftJson(draft.draft_json ?? {});
+        parseHydrationRef.current = hydrationStateFromDraftAndParse(
+          fields,
+          accepted.extracted,
+          persisted,
+        );
         setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
         setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(fields, accepted.extracted));
         setStopsRouteConfidenceSuppressed(parseHydrationRef.current.stopsRouteManuallyEdited);
@@ -777,7 +785,12 @@ function LoadWorkspacePage() {
           getParseHydrationCallbacks(),
           draft.draft_json ?? {},
         );
-        parseHydrationRef.current = hydrationStateFromDraftAndParse(fields, accepted.extracted);
+        const persisted = parseManualOverrideKeysFromDraftJson(draft.draft_json ?? {});
+        parseHydrationRef.current = hydrationStateFromDraftAndParse(
+          fields,
+          accepted.extracted,
+          persisted,
+        );
         setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
         setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(fields, accepted.extracted));
         setStopsRouteConfidenceSuppressed(parseHydrationRef.current.stopsRouteManuallyEdited);
@@ -865,12 +878,24 @@ function LoadWorkspacePage() {
     }
   }, []);
 
+  const applyParseManualOverridesFromLoad = useCallback((l: Load) => {
+    const keys = l.parse_manual_override_keys ?? [];
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      if (isParseScalarFieldKey(key)) {
+        parseHydrationRef.current.manualOverrideKeys.add(key);
+      }
+    }
+    setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+  }, []);
+
   const applyLoadDetailToWorkspace = useCallback(
     async (l: Load) => {
       hydrateFromLoad(l);
+      applyParseManualOverridesFromLoad(l);
       await syncMovementAssignmentFromLoad(l);
     },
-    [hydrateFromLoad, syncMovementAssignmentFromLoad],
+    [hydrateFromLoad, applyParseManualOverridesFromLoad, syncMovementAssignmentFromLoad],
   );
 
   const currentFormSignature = useMemo(
@@ -1025,7 +1050,12 @@ function LoadWorkspacePage() {
         truckId: seed.truckId,
         trailerAssetId: seed.trailerAssetId,
       });
-      parseHydrationRef.current = hydrationStateFromDraftAndParse(mergedFields, res.extracted);
+      const persisted = new Set(merged.parseManualOverrideKeys ?? []);
+      parseHydrationRef.current = hydrationStateFromDraftAndParse(
+        mergedFields,
+        res.extracted,
+        persisted,
+      );
       setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
       setParseConfidenceManualKeys(inferParseContactConfidenceManualKeys(mergedFields, res.extracted));
       setStopsRouteConfidenceSuppressed(parseHydrationRef.current.stopsRouteManuallyEdited);
@@ -1157,13 +1187,11 @@ function LoadWorkspacePage() {
     },
     [trackParseManualScalar],
   );
-  const setCustomerRateTracked = useCallback(
-    (v: string) => {
-      trackParseManualScalar("customerRate", v);
-      setCustomerRate(v);
-    },
-    [trackParseManualScalar],
-  );
+  const setCustomerRateTracked = useCallback((v: string) => {
+    markOperatorEditedParseScalar(parseHydrationRef.current, "customerRate");
+    setParseManualOverrideKeys(new Set(parseHydrationRef.current.manualOverrideKeys));
+    setCustomerRate(v);
+  }, []);
   const setMilesTracked = useCallback(
     (v: string) => {
       trackParseManualScalar("miles", v);
@@ -1592,6 +1620,7 @@ function LoadWorkspacePage() {
     customsBrokerId,
     internalNotes,
     draftStops,
+    parseManualOverrideKeys: [...parseHydrationRef.current.manualOverrideKeys],
   });
 
   const buildWorkspacePersistPayload = () => buildLoadPersistPayload(workspacePersistParams());

@@ -185,6 +185,8 @@ class LoadUpdate(BaseModel):
     #: Present in model_fields_set only when the client sent ``references``.
     #: Omitted → preserve DB value; ``[]`` → clear; list → replace. Null is rejected.
     references: Optional[list[LoadParseReferenceItem]] = Field(default=None, max_length=40)
+    #: Not stored on loads — synced to promotion-origin workspace draft_json on PATCH.
+    parse_manual_override_keys: Optional[list[str]] = Field(default=None, max_length=32)
 
     @model_validator(mode="before")
     @classmethod
@@ -288,6 +290,8 @@ class LoadResponse(LoadBase):
     open_future_movement_plan_id: Optional[int] = None
     #: Rate-con parse raw text from commercial evidence (GET enrichment only).
     verification_extracted_text: Optional[str] = None
+    #: From promotion-origin workspace draft_json (GET enrichment only).
+    parse_manual_override_keys: list[str] = Field(default_factory=list)
     #: Operational custody read-model (e.g. final delivery without changing loads.status).
     custody_owner: Optional[str] = None
     broker_match_method: Optional[str] = Field(default=None, max_length=32)

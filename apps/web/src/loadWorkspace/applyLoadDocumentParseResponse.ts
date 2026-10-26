@@ -303,6 +303,9 @@ export function buildLoadPersistParamsAfterParseApply(
   ) {
     params.loadReferences = guardRefs;
   }
+  if (hydration.manualOverrideKeys.size > 0) {
+    params.parseManualOverrideKeys = [...hydration.manualOverrideKeys];
+  }
   return params;
 }
 

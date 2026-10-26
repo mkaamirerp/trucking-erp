@@ -2,6 +2,8 @@
  * Shared helpers and UI tokens for the canonical load workspace (create + edit).
  */
 import type { Load, LoadDocumentParseReference, LoadStop, LoadStopWrite, LoadWritePayload } from "@/api";
+import type { ParseScalarFieldKey } from "@/loadWorkspace/loadParseHydrationState";
+import { isParseScalarFieldKey } from "@/loadWorkspace/loadParseHydrationState";
 import { sortedStops as sortStops } from "@/utils/loadStops";
 import { hasUsefulStopIdentity } from "./loadParseStops";
 
@@ -75,6 +77,8 @@ export interface WorkspaceDraftFields {
   rate: string;
   customerRate: string;
   miles: string;
+  /** Persisted in draft_json — operator parse-field edits (session + DB). */
+  parseManualOverrideKeys?: ParseScalarFieldKey[];
   driverId: number | null;
   truckId: number | null;
   trailerAssetId: number | null;
@@ -135,10 +139,26 @@ export function shouldApplyBrokerContactsList(
   return effectActive && currentBrokerId === requestedBrokerId;
 }
 
+export const PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD = "parseManualOverrideKeys";
+
+export function parseManualOverrideKeysFromDraftJson(
+  j: Record<string, unknown> | null | undefined,
+): Set<ParseScalarFieldKey> {
+  const out = new Set<ParseScalarFieldKey>();
+  const raw = j?.[PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD];
+  if (!Array.isArray(raw)) return out;
+  for (const entry of raw) {
+    if (typeof entry === "string" && isParseScalarFieldKey(entry)) out.add(entry);
+  }
+  return out;
+}
+
 /** Serialize workspace form state for load_workspace_drafts.draft_json (camelCase). */
 export function buildWorkspaceDraftJson(
   params: LoadPersistParams & { status?: string },
 ): Record<string, unknown> {
+  const parseManualOverrideKeys =
+    params.parseManualOverrideKeys?.filter((k) => isParseScalarFieldKey(k)) ?? [];
   return {
     status: params.status ?? "draft",
     loadNumber: params.loadNumber,
@@ -173,6 +193,9 @@ export function buildWorkspaceDraftJson(
       const { _key, load_id: _loadId, ...rest } = stop;
       return { ...rest, sequence: rest.sequence ?? index };
     }),
+    ...(parseManualOverrideKeys.length > 0
+      ? { [PARSE_MANUAL_OVERRIDE_KEYS_DRAFT_FIELD]: parseManualOverrideKeys }
+      : {}),
   };
 }
 
@@ -1119,6 +1142,7 @@ export type LoadPersistParams = {
   rate: string;
   customerRate: string;
   miles: string;
+  parseManualOverrideKeys?: ParseScalarFieldKey[];
   /** Draft-only proposed trip assignment (draft_json); never sent on Load PATCH. */
   driverId?: number | null;
   truckId?: number | null;
@@ -1165,6 +1189,9 @@ export function buildLoadPersistPayload(params: LoadPersistParams): LoadWritePay
     customs_broker_id: params.customsBrokerId,
     internal_notes: params.internalNotes.trim() || null,
     stops: stopsPayload,
+    ...(params.parseManualOverrideKeys && params.parseManualOverrideKeys.length > 0
+      ? { parse_manual_override_keys: [...params.parseManualOverrideKeys] }
+      : {}),
   };
 }
 

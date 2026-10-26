@@ -236,10 +236,12 @@ function clearParseScalarField(key: ParseScalarFieldKey, cbs: ApplyLoadDocumentP
   }
 }
 
-function draftExplicitCustomerRate(fields: WorkspaceDraftFields): boolean {
-  const cr = (fields.customerRate ?? "").trim();
-  const r = (fields.rate ?? "").trim();
-  return cr !== "" && cr !== r;
+/** Operator touched a parse-hydrated field in the UI (not parser hydration). */
+export function markOperatorEditedParseScalar(
+  state: ParseHydrationState,
+  key: ParseScalarFieldKey,
+): void {
+  state.manualOverrideKeys.add(key);
 }
 
 function applyParseScalarField(
@@ -553,12 +555,20 @@ function scalarStringFromExtracted(
 export function inferParseManualOverridesFromDraft(
   fields: WorkspaceDraftFields,
   ex: LoadDocumentParseResponse["extracted"],
+  persistedManualOverrideKeys?: ReadonlySet<ParseScalarFieldKey>,
 ): Set<ParseScalarFieldKey> {
   const overrides = new Set<ParseScalarFieldKey>();
   const norm = (v: string) => v.trim();
   for (const key of extractPresentParseScalarKeys(ex)) {
     if (key === "customerRate") {
-      if (draftExplicitCustomerRate(fields)) overrides.add(key);
+      if (persistedManualOverrideKeys?.has("customerRate")) {
+        overrides.add(key);
+        continue;
+      }
+      const explicit = norm(fields.customerRate ?? "");
+      if (explicit === "") continue;
+      const parsed = effectiveParseCustomerRateString(ex);
+      if (parsed != null && explicit !== norm(parsed)) overrides.add(key);
       continue;
     }
     const parsed = scalarStringFromExtracted(key, ex);
@@ -601,9 +611,29 @@ function scalarDraftValue(fields: WorkspaceDraftFields, key: ParseScalarFieldKey
 }
 
 /** Restore session hydration metadata when reopening a draft with accepted_parse_json. */
+const PARSE_SCALAR_FIELD_KEY_SET = new Set<ParseScalarFieldKey>([
+  "brokerNameSnapshot",
+  "brokerLoadReference",
+  "freightMode",
+  "equipmentType",
+  "trailerType",
+  "trailerSize",
+  "commodity",
+  "estimatedWeight",
+  "temperatureRequirement",
+  "rate",
+  "customerRate",
+  "miles",
+]);
+
+export function isParseScalarFieldKey(value: string): value is ParseScalarFieldKey {
+  return PARSE_SCALAR_FIELD_KEY_SET.has(value as ParseScalarFieldKey);
+}
+
 export function hydrationStateFromDraftAndParse(
   fields: WorkspaceDraftFields,
   ex: LoadDocumentParseResponse["extracted"],
+  persistedManualOverrideKeys?: ReadonlySet<ParseScalarFieldKey>,
 ): ParseHydrationState {
   const state = createEmptyParseHydrationState();
   for (const key of extractPresentParseScalarKeys(ex)) {
@@ -613,7 +643,12 @@ export function hydrationStateFromDraftAndParse(
       state.lastAppliedValues.set(key, applied);
     }
   }
-  for (const key of inferParseManualOverridesFromDraft(fields, ex)) {
+  if (persistedManualOverrideKeys) {
+    for (const key of persistedManualOverrideKeys) {
+      if (isParseScalarFieldKey(key)) state.manualOverrideKeys.add(key);
+    }
+  }
+  for (const key of inferParseManualOverridesFromDraft(fields, ex, persistedManualOverrideKeys)) {
     state.manualOverrideKeys.add(key);
   }
   for (const key of PARSE_CONTACT_FIELD_KEYS) {

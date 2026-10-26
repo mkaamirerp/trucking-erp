@@ -4413,6 +4413,8 @@ export type Load = {
   internal_notes?: string | null;
   rate?: number | null;
   customer_rate?: number | null;
+  /** GET enrichment from promotion-origin workspace draft_json. */
+  parse_manual_override_keys?: string[];
   miles?: number | null;
   /** Denormalized from active dispatch trip; read-only in UI. */
   trip_number?: string | null;

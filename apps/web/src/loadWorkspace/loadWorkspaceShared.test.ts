@@ -272,6 +272,16 @@ describe("draft_json field ownership and broker contact fetch guard", () => {
 });
 
 describe("RC and customer rate persistence defaults", () => {
+  it("persists parse manual override keys in draft_json", () => {
+    const params = minimalPersist({
+      rate: "2000",
+      customerRate: "2000",
+      parseManualOverrideKeys: ["customerRate"],
+    });
+    const json = buildWorkspaceDraftJson(params);
+    expect(json.parseManualOverrideKeys).toEqual(["customerRate"]);
+  });
+
   it("keeps mirrored customer rate blank in draft JSON but defaults on Load API payload", () => {
     const params = minimalPersist({ rate: "2000", customerRate: "" });
     expect(buildWorkspaceDraftJson(params).customerRate).toBe("");
