@@ -3000,8 +3000,15 @@ function LoadWorkspacePage() {
           ) : null}
 
           {loadIsCancelled ? (
-            <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">
-              This load is cancelled. The parser fields are locked so they cannot be saved or parsed again.
+            <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-100">
+              <p className="font-semibold text-red-200">Cancelled — audit only. This cannot be dispatched or saved again.</p>
+              <p className="mt-1">
+                Cancelled by <span className="font-semibold text-[var(--trk-text)]">{load?.cancelled_by || "Unknown"}</span>
+                {load?.cancelled_at ? ` on ${new Date(load.cancelled_at).toLocaleString()}` : ""}.
+              </p>
+              <p className="mt-1">
+                Reason: <span className="font-semibold text-[var(--trk-text)]">{load?.cancel_reason || "No reason recorded"}</span>
+              </p>
             </div>
           ) : null}
           <LoadWorkspaceForm

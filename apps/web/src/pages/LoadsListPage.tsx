@@ -43,6 +43,7 @@ export default function LoadsListPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
   const [workspaceDrafts, setWorkspaceDrafts] = useState<LoadWorkspaceDraft[]>([]);
+  const [cancelledLoads, setCancelledLoads] = useState<Load[]>([]);
   const [draftLoads, setDraftLoads] = useState<Load[]>([]);
   const runQuery = useCallback((q: string, opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? false;
@@ -62,11 +63,13 @@ export default function LoadsListPage() {
         page: 1,
         size: 20,
       })),
+      listLoads({ page: 1, size: 50, status: ["cancelled"], search: q || undefined }),
     ])
-      .then(([loadsRes, draftLoadsRes, draftsRes]) => {
+      .then(([loadsRes, draftLoadsRes, draftsRes, cancelledRes]) => {
         setLoads(loadsRes.items || []);
         setDraftLoads(draftLoadsRes.items || []);
         setWorkspaceDrafts(draftsRes.items || []);
+        setCancelledLoads(cancelledRes.items || []);
       })
       .catch((e) => {
         if (!silent) setError(e?.message || "Failed to load loads");
@@ -278,6 +281,47 @@ export default function LoadsListPage() {
           </div>
         )}
       </div>
+
+      {!loading && !error && cancelledLoads.length > 0 ? (
+        <div className="mt-6">
+          <h2 className="mb-2 text-[12px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]">
+            Cancelled loads — audit only
+          </h2>
+          <p className="mb-2 text-[11px] text-[var(--trk-text-muted)]">
+            These stay on record. They cannot be dispatched, saved, or parsed again.
+          </p>
+          <div className="overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Load #</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Cancelled by</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Reason</th>
+                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cancelledLoads.map((load) => (
+                    <tr
+                      key={load.id}
+                      className="cursor-pointer border-b border-[var(--trk-border)] hover:bg-[var(--trk-surface)]"
+                      onClick={() => navigate(OPS.LOAD_DETAIL(load.id))}
+                    >
+                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text)]">{load.load_number || load.id}</td>
+                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text)]">{load.cancelled_by || "Unknown"}</td>
+                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{load.cancel_reason || "No reason recorded"}</td>
+                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
+                        {load.cancelled_at ? new Date(load.cancelled_at).toLocaleString() : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -4415,6 +4415,10 @@ export type Load = {
   customer_rate?: number | null;
   /** GET enrichment: rate-con parse raw text from commercial evidence. */
   verification_extracted_text?: string | null;
+  /** GET enrichment from the cancel audit event. Not a Load column. */
+  cancel_reason?: string | null;
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
   /** GET enrichment from promotion-origin workspace draft_json. */
   parse_manual_override_keys?: string[];
   miles?: number | null;

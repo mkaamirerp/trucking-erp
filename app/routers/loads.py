@@ -110,6 +110,7 @@ async def list_loads(
         )
     items = [LoadResponse.model_validate(item) for item in paged["items"]]
     items = await loads_service.enrich_load_responses(db, tenant_id, items)
+    items = await loads_service.attach_cancel_audit(db, tenant_id, items)
     return {**paged, "items": items}
 
 
@@ -179,6 +180,8 @@ async def get_load_detail(
     verification_text = await loads_service.get_load_verification_extracted_text(db, tenant_id, load_id)
     if verification_text:
         resp = resp.model_copy(update={"verification_extracted_text": verification_text})
+    enriched_cancel = await loads_service.attach_cancel_audit(db, tenant_id, [resp])
+    resp = enriched_cancel[0]
     override_keys = await loads_service.get_load_parse_manual_override_keys(db, tenant_id, load)
     if override_keys:
         resp = resp.model_copy(update={"parse_manual_override_keys": override_keys})
@@ -271,7 +274,13 @@ async def cancel_load(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Commercial cancel — preserves load row and history; closes OPEN TripLoads (Issue I5)."""
-    actor_user_id, _ = _load_audit_actor(user)
+    actor_user_id, platform_label = _load_audit_actor(user)
+    tu = user.tenant_user
+    if tu is not None:
+        person = " ".join(part for part in ((tu.first_name or "").strip(), (tu.last_name or "").strip()) if part)
+        actor_label = person or (tu.email_norm or "").strip() or None
+    else:
+        actor_label = platform_label
     load = await loads_service.cancel_load(
         db,
         tenant_id,
@@ -279,6 +288,7 @@ async def cancel_load(
         expected_concurrency_version=body.expected_concurrency_version,
         reason=body.reason,
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )

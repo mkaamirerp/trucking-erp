@@ -107,6 +107,8 @@ async def _write_load_audit(
     changed_fields: dict | None = None,
     context_json: dict | None = None,
     best_effort: bool = True,
+    actor_label: str | None = None,
+    reason_note: str | None = None,
 ) -> None:
     """Write tenant audit_events for Loads.
 
@@ -131,10 +133,12 @@ async def _write_load_audit(
             action=action,
             source=source,
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=correlation_id,
             changed_fields=changed_fields,
             context_json=ctx,
+            reason_note=reason_note,
             best_effort=best_effort,
         )
     except Exception:
@@ -1245,6 +1249,7 @@ async def cancel_load(
     expected_concurrency_version: int,
     reason: str,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
     request_id: str | None = None,
     source: str = "api",
 ) -> Load:
@@ -1353,6 +1358,8 @@ async def cancel_load(
             "cancel_reason": reason.strip(),
             "open_trip_load_memberships_closed": memberships_closed,
         },
+        actor_label=actor_label,
+        reason_note=reason.strip(),
         best_effort=False,
     )
     await db.commit()
@@ -1714,6 +1721,85 @@ async def get_load_verification_extracted_text(
     if row is None:
         return None
     return verification_extracted_text_from_accepted_parse(row.accepted_parse_json)
+
+
+def _cancel_actor_display(user) -> str | None:
+    if user is None:
+        return None
+    name = " ".join(
+        part for part in ((getattr(user, "first_name", None) or "").strip(), (getattr(user, "last_name", None) or "").strip()) if part
+    )
+    email = (getattr(user, "email_norm", None) or "").strip()
+    return name or email or None
+
+
+async def attach_cancel_audit(
+    db: AsyncSession,
+    tenant_id: int,
+    items: list[LoadResponse],
+) -> list[LoadResponse]:
+    """Read-only: who cancelled a load, why, and when. Does not change the load row."""
+    cancelled_ids = [str(item.id) for item in items if (item.status or "").strip().lower() == "cancelled"]
+    if not cancelled_ids:
+        return items
+    from app.models.tenant import AuditEvent
+    from app.models.tenant_auth import TenantUser
+
+    rows = list(
+        (
+            await db.scalars(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.tenant_id == tenant_id,
+                    AuditEvent.entity_type == "load",
+                    AuditEvent.action == "load_cancelled",
+                    AuditEvent.entity_id.in_(cancelled_ids),
+                )
+                .order_by(AuditEvent.event_at.desc(), AuditEvent.id.desc())
+            )
+        ).all()
+    )
+    latest: dict[str, AuditEvent] = {}
+    for row in rows:
+        latest.setdefault(str(row.entity_id), row)
+    actor_ids = {int(row.actor_user_id) for row in latest.values() if row.actor_user_id is not None and not (row.actor_label or "").strip()}
+    actors: dict[int, str] = {}
+    if actor_ids:
+        users = list(
+            (
+                await db.scalars(
+                    select(TenantUser).where(
+                        TenantUser.tenant_id == tenant_id,
+                        TenantUser.id.in_(actor_ids),
+                    )
+                )
+            ).all()
+        )
+        for user in users:
+            label = _cancel_actor_display(user)
+            if label:
+                actors[int(user.id)] = label
+    out: list[LoadResponse] = []
+    for item in items:
+        event = latest.get(str(item.id))
+        if event is None:
+            out.append(item)
+            continue
+        ctx = event.context_json if isinstance(event.context_json, dict) else {}
+        reason = (event.reason_note or "").strip() or str(ctx.get("cancel_reason") or "").strip() or None
+        who = (event.actor_label or "").strip() or None
+        if who is None and event.actor_user_id is not None:
+            who = actors.get(int(event.actor_user_id)) or f"User {int(event.actor_user_id)}"
+        out.append(
+            item.model_copy(
+                update={
+                    "cancel_reason": reason,
+                    "cancelled_by": who,
+                    "cancelled_at": event.event_at,
+                }
+            )
+        )
+    return out
 
 
 async def get_load_rate_confirmation_pdf_evidence(

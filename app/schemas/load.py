@@ -295,6 +295,10 @@ class LoadResponse(LoadBase):
     open_future_movement_plan_id: Optional[int] = None
     #: Rate-con parse raw text from commercial evidence (GET enrichment only).
     verification_extracted_text: Optional[str] = None
+    #: GET enrichment from the load_cancelled audit event. Not a Load column.
+    cancel_reason: Optional[str] = None
+    cancelled_by: Optional[str] = None
+    cancelled_at: Optional[datetime] = None
     #: From promotion-origin workspace draft_json (GET enrichment only).
     parse_manual_override_keys: list[str] = Field(default_factory=list)
     #: Operational custody read-model (e.g. final delivery without changing loads.status).
