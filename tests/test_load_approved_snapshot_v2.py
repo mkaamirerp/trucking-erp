@@ -1,8 +1,11 @@
-"""S1 creation snapshot projector. No database and no email-intake path."""
+"""S1 creation snapshot projector and S2 creation-snapshot lookup. No database and no email-intake path."""
 
+import inspect
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+
+import pytest
 
 from app.services.load_approved_commercial_snapshot import (
     build_approved_db_fields,
@@ -316,3 +319,147 @@ def test_storage_policy_excludes_internal_notes_from_future_ai():
     ]
     assert payload["metadata"]["dispatcher_review_claim"] == "none"
     assert payload["metadata"]["creation_source"] == "direct_create"
+
+
+def _stored_payload(**overrides):
+    payload = {
+        "schema_version": "load_approved_snapshot_v2",
+        "approved_db_fields": {"rate": "1.00", "broker_load_reference": "STORED-REF"},
+        "original_rc_reference": {"association_status": "pdf_missing", "source": "none"},
+        "metadata": {
+            "tenant_id": 7,
+            "load_id": 9,
+            "milestone": "creation",
+            "revision": 1,
+            "schema_version": "load_approved_snapshot_v2",
+        },
+        "storage_policy": {"future_ai_comparable_excludes": ["approved_db_fields.internal_notes"]},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _snapshot_row(**overrides):
+    base = dict(
+        id=4,
+        tenant_id=7,
+        load_id=9,
+        milestone="creation",
+        revision=1,
+        schema_version="load_approved_snapshot_v2",
+        payload_json=_stored_payload(),
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+class _Scalars:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def all(self):
+        return list(self._rows)
+
+
+class _ReadDb:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.statements = []
+        self.writes = 0
+
+    async def scalars(self, statement):
+        self.statements.append(statement)
+        return _Scalars(self.rows)
+
+    def add(self, *_args, **_kwargs):
+        self.writes += 1
+
+    async def execute(self, *_args, **_kwargs):
+        self.writes += 1
+
+    async def commit(self):
+        self.writes += 1
+
+    async def flush(self):
+        self.writes += 1
+
+
+@pytest.mark.asyncio
+async def test_creation_snapshot_lookup_returns_stored_payload_only():
+    from app.services.load_approved_commercial_snapshot import get_creation_snapshot
+
+    db = _ReadDb([_snapshot_row()])
+    found = await get_creation_snapshot(db, 7, 9)
+    assert found.outcome == "creation_snapshot"
+    assert found.payload["approved_db_fields"]["rate"] == "1.00"
+    assert found.payload["approved_db_fields"]["broker_load_reference"] == "STORED-REF"
+    assert db.writes == 0
+    found.payload["approved_db_fields"]["rate"] = "999.00"
+    assert db.rows[0].payload_json["approved_db_fields"]["rate"] == "1.00"
+
+
+@pytest.mark.asyncio
+async def test_missing_creation_snapshot_is_explicit_and_not_filled():
+    from app.services.load_approved_commercial_snapshot import get_creation_snapshot
+
+    db = _ReadDb([])
+    found = await get_creation_snapshot(db, 7, 9)
+    assert found.outcome == "no_creation_snapshot"
+    assert found.payload is None
+    assert found.reason is None
+    assert db.writes == 0
+
+
+@pytest.mark.asyncio
+async def test_creation_snapshot_lookup_is_tenant_scoped():
+    from app.services.load_approved_commercial_snapshot import get_creation_snapshot
+
+    db = _ReadDb([_snapshot_row(tenant_id=8, payload_json=_stored_payload())])
+    found = await get_creation_snapshot(db, 7, 9)
+    params = db.statements[0].compile().params
+    assert 7 in params.values()
+    assert 9 in params.values()
+    assert found.outcome == "no_creation_snapshot"
+    assert found.payload is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_creation_snapshot_is_not_replaced_with_other_values():
+    from app.services.load_approved_commercial_snapshot import get_creation_snapshot
+
+    db = _ReadDb([_snapshot_row(payload_json={"approved_db_fields": {"rate": "999.00"}})])
+    found = await get_creation_snapshot(db, 7, 9)
+    assert found.outcome == "invalid_creation_snapshot"
+    assert found.reason == "payload_incomplete"
+    assert found.payload is None
+    assert found.snapshot_id == 4
+    assert db.writes == 0
+
+
+@pytest.mark.asyncio
+async def test_unsupported_creation_snapshot_schema_is_reported():
+    from app.services.load_approved_commercial_snapshot import get_creation_snapshot
+
+    db = _ReadDb(
+        [
+            _snapshot_row(
+                schema_version="load_approved_snapshot_v1",
+                payload_json=_stored_payload(schema_version="load_approved_snapshot_v1"),
+            )
+        ]
+    )
+    found = await get_creation_snapshot(db, 7, 9)
+    assert found.outcome == "unsupported_creation_snapshot"
+    assert found.reason == "unsupported_schema_version"
+    assert found.payload is None
+    assert found.schema_version == "load_approved_snapshot_v1"
+
+
+def test_load_edit_cancel_and_view_do_not_write_the_creation_snapshot():
+    from app.services.loads import cancel_load, enrich_load_responses, get_load, update_load
+
+    for fn in (update_load, cancel_load, get_load, enrich_load_responses):
+        source = inspect.getsource(fn)
+        assert "insert_creation_snapshot_uncommitted" not in source
+        assert "LoadApprovedCommercialSnapshot" not in source
+        assert "load_approved_commercial_snapshots" not in source

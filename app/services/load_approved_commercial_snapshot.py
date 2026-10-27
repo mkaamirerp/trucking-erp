@@ -5,7 +5,9 @@ Reads the flushed Load. Does not change parser output, money defaults, or eviden
 
 from __future__ import annotations
 
+import copy
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -28,6 +30,12 @@ CLAIM_NONE = "none"
 CLAIM_WORKSPACE_REVIEWED = "workspace_promotion_reviewed"
 EVIDENCE_CLASS = "unverified_parser_extraction"
 COMPARE_BASELINE_NOTE = "creation_only_until_dispatcher_commercial_approved_milestone"
+OUTCOME_PRESENT = "creation_snapshot"
+OUTCOME_MISSING = "no_creation_snapshot"
+OUTCOME_INVALID = "invalid_creation_snapshot"
+OUTCOME_UNSUPPORTED = "unsupported_creation_snapshot"
+
+_PAYLOAD_KEYS = ("schema_version", "approved_db_fields", "original_rc_reference", "metadata", "storage_policy")
 
 _CONTEXT_ALLOW = frozenset(
     {
@@ -429,3 +437,102 @@ async def insert_creation_snapshot_uncommitted(
         )
     )
     await db.flush()
+
+
+@dataclass(frozen=True)
+class CreationSnapshotLookup:
+    """Read-only creation snapshot. A missing row is not an age judgment and is not filled in."""
+
+    outcome: str
+    reason: str | None = None
+    payload: dict[str, Any] | None = None
+    snapshot_id: int | None = None
+    schema_version: str | None = None
+
+
+def _payload_problem(row: LoadApprovedCommercialSnapshot, tenant_id: int, load_id: int) -> tuple[str, str] | None:
+    if str(row.schema_version) != SCHEMA_VERSION:
+        return OUTCOME_UNSUPPORTED, "unsupported_schema_version"
+    if int(row.revision) != CREATION_REVISION or str(row.milestone) != MILESTONE_CREATION:
+        return OUTCOME_UNSUPPORTED, "unexpected_creation_revision"
+    payload = row.payload_json
+    if not isinstance(payload, dict):
+        return OUTCOME_INVALID, "payload_not_object"
+    if any(key not in payload for key in _PAYLOAD_KEYS):
+        return OUTCOME_INVALID, "payload_incomplete"
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        return OUTCOME_INVALID, "schema_version_mismatch"
+    if not isinstance(payload.get("approved_db_fields"), dict):
+        return OUTCOME_INVALID, "approved_db_fields_not_object"
+    if not isinstance(payload.get("original_rc_reference"), dict):
+        return OUTCOME_INVALID, "original_rc_reference_not_object"
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return OUTCOME_INVALID, "metadata_not_object"
+    if not isinstance(payload.get("storage_policy"), dict):
+        return OUTCOME_INVALID, "storage_policy_not_object"
+    try:
+        meta_tenant = int(metadata.get("tenant_id"))
+        meta_load = int(metadata.get("load_id"))
+        meta_revision = int(metadata.get("revision"))
+    except (TypeError, ValueError):
+        return OUTCOME_INVALID, "metadata_identity_invalid"
+    if (
+        meta_tenant != tenant_id
+        or meta_load != load_id
+        or metadata.get("schema_version") != SCHEMA_VERSION
+        or metadata.get("milestone") != MILESTONE_CREATION
+        or meta_revision != CREATION_REVISION
+    ):
+        return OUTCOME_INVALID, "metadata_identity_mismatch"
+    return None
+
+
+async def get_creation_snapshot(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+) -> CreationSnapshotLookup:
+    """Return the stored creation snapshot for this tenant and load.
+
+    Does not read the current Load, the PDF, or parser output, and does not insert a row.
+    """
+    rows = list(
+        (
+            await db.scalars(
+                select(LoadApprovedCommercialSnapshot)
+                .where(
+                    LoadApprovedCommercialSnapshot.tenant_id == int(tenant_id),
+                    LoadApprovedCommercialSnapshot.load_id == int(load_id),
+                    LoadApprovedCommercialSnapshot.milestone == MILESTONE_CREATION,
+                )
+                .order_by(LoadApprovedCommercialSnapshot.revision.asc())
+            )
+        ).all()
+    )
+    rows = [row for row in rows if int(row.tenant_id) == int(tenant_id) and int(row.load_id) == int(load_id)]
+    original = next((row for row in rows if int(row.revision) == CREATION_REVISION), None)
+    if original is None:
+        if rows:
+            return CreationSnapshotLookup(
+                outcome=OUTCOME_UNSUPPORTED,
+                reason="unexpected_creation_revision",
+                snapshot_id=int(rows[0].id) if rows[0].id is not None else None,
+                schema_version=str(rows[0].schema_version),
+            )
+        return CreationSnapshotLookup(outcome=OUTCOME_MISSING)
+    problem = _payload_problem(original, int(tenant_id), int(load_id))
+    if problem is not None:
+        outcome, reason = problem
+        return CreationSnapshotLookup(
+            outcome=outcome,
+            reason=reason,
+            snapshot_id=int(original.id) if original.id is not None else None,
+            schema_version=str(original.schema_version),
+        )
+    return CreationSnapshotLookup(
+        outcome=OUTCOME_PRESENT,
+        payload=copy.deepcopy(original.payload_json),
+        snapshot_id=int(original.id) if original.id is not None else None,
+        schema_version=SCHEMA_VERSION,
+    )
