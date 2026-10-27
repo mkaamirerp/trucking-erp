@@ -134,8 +134,10 @@ describe("Issue 0A — legacy assignment UI unreachable", () => {
     const page = source("../pages/LoadWorkspacePage.tsx");
     expect(page).not.toMatch(/DispatchAssignmentStrip|dispatchAssign|onDispatchAssign/);
     expect(page).not.toMatch(/status:\s*"assigned"/);
-    expect(page).toContain("createTripForLoadAssignment");
-    expect(page).not.toMatch(/buildLoadPersistPayload[\s\S]{0,400}driver_id/);
+    expect(page).toContain("promoteLoadWorkspaceDraft");
+    expect(page).not.toContain("createTripForLoadAssignment");
+    expect(page).not.toMatch(/buildLoadPersistPayload[\s\S]{0,800}driver_id/);
+    expect(page).not.toMatch(/updateLoad\([\s\S]{0,500}driver_id/);
 
     const board = source("../pages/DeprecatedDispatchPage.tsx");
     expect(board).not.toMatch(/dispatchAssign|LOAD_DISPATCH_ASSIGN_QUERY/);
