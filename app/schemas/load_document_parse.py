@@ -163,3 +163,23 @@ def postgres_safe_load_document_parse_response(
 ) -> LoadDocumentParseResponse:
     payload = strip_nul_bytes_from_json_tree(response.model_dump(mode="json"))
     return LoadDocumentParseResponse.model_validate(payload)
+
+
+class RateConfirmationRevisionChange(BaseModel):
+    """One verified field from a revised rate confirmation. Not a load update."""
+
+    field: str
+    current_value: Any = None
+    original_extracted: Any = None
+    new_value: Any = None
+    kind: str = Field(..., description="changed | info_only")
+    ai_note: Optional[str] = None
+    requires_explicit_accept: bool = False
+
+
+class RateConfirmationRevisionCompareResponse(BaseModel):
+    """Read-only comparison. Nothing in this payload is written to the load."""
+
+    same_load: bool
+    warning: Optional[str] = None
+    changes: list[RateConfirmationRevisionChange] = Field(default_factory=list)

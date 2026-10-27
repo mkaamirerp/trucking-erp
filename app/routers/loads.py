@@ -20,14 +20,21 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
-from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.schemas.load_document_parse import (
+    LoadDocumentParseResponse,
+    RateConfirmationRevisionCompareResponse,
+)
 from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
 from app.services import future_movement_plans as fmp_service
 from app.services import loads as loads_service
 from app.services import trips as trips_service
 from app.services import load_custody as custody_service
 from app.schemas.load_pod_evidence import LoadPodEvidenceListResponse, LoadPodEvidenceOut
-from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
+from app.services.load_document_parse_orchestrator import (
+    RateConfirmationRevisionCompareError,
+    compare_revised_rate_confirmation,
+    parse_load_workspace_document_orchestrated,
+)
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
 from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
 from app.services.load_pod_evidence import (
@@ -168,6 +175,44 @@ async def parse_load_workspace_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    except DuplicatePrecheckUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Duplicate check unavailable; AI parsing was not started.",
+        ) from exc
+
+
+@router.post(
+    "/{load_id}/rate-confirmation-revision/compare",
+    response_model=RateConfirmationRevisionCompareResponse,
+)
+async def compare_load_rate_confirmation_revision(
+    load_id: int,
+    file: UploadFile = File(...),
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Return verified field changes for a revised rate confirmation. Does not write."""
+    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+    if len(data) > _MAX_PARSE_PDF_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
+    try:
+        return await compare_revised_rate_confirmation(
+            db,
+            tenant_id=tenant_id,
+            load_id=load_id,
+            pdf_bytes=data,
+            filename=file.filename or "upload.pdf",
+        )
+    except RateConfirmationRevisionCompareError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except UnsafeLoadPdfError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except DuplicatePrecheckUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
