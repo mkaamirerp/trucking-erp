@@ -1024,8 +1024,12 @@ function LoadWorkspacePage() {
     }
   }, [workspaceMode, loadIdFromRoute, applyLoadDetailToWorkspace]);
 
+  const loadIsCancelled =
+    (load?.status || "").toLowerCase() === "cancelled" || status.toLowerCase() === "cancelled";
+
   const canWorkspaceParsePdf =
-    workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail";
+    !loadIsCancelled &&
+    (workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail");
 
   const trackParseManualScalar = useCallback((key: ParseScalarFieldKey, value: string) => {
     const before = parseHydrationRef.current.manualOverrideKeys.size;
@@ -1219,7 +1223,7 @@ function LoadWorkspacePage() {
 
   const onParseWorkspacePdf = useCallback(
     async (file: File, continueAnyway = false) => {
-      if (!canWorkspaceParsePdf) return;
+      if (!canWorkspaceParsePdf || loadIsCancelled) return;
       if (workspaceMode !== "manual" && isDraftWorkspace && (!draftIdFromRoute || !workspaceDraft)) return;
       // Local PDF duplicate review must complete BEFORE semantic AI and form hydration.
       if (!continueAnyway) setDuplicateReview(null);
@@ -1364,6 +1368,7 @@ function LoadWorkspacePage() {
     },
     [
       canWorkspaceParsePdf,
+      loadIsCancelled,
       hasIntakeThread,
       intakeThreadId,
       internalNotes,
@@ -1805,10 +1810,8 @@ function LoadWorkspacePage() {
     setToolbarMessage(null);
     setError(null);
     try {
-      const updated = await cancelLoad(load.id, expectedVersion, trimmed);
-      setLoad(updated);
-      await applyLoadDetailToWorkspace(updated);
-      setToolbarMessage({ text: "Load cancelled.", tone: "success" });
+      await cancelLoad(load.id, expectedVersion, trimmed);
+      navigate(OPS.LOADS, { replace: true });
     } catch (e: unknown) {
       const mc = parseLoadVersionConflict(e);
       if (mc) {
@@ -2015,7 +2018,7 @@ function LoadWorkspacePage() {
   }
 
   async function onSave() {
-    if (!load) return;
+    if (!load || loadIsCancelled) return;
     const stopErr = validateDraftStopsClassifiedForSave(draftStops);
     if (stopErr) {
       setToolbarMessage({ text: stopErr, tone: "warning" });
@@ -2054,7 +2057,7 @@ function LoadWorkspacePage() {
   }
 
   async function onMarkReady() {
-    if (!load) return;
+    if (!load || loadIsCancelled) return;
     const expectedVersion = load.concurrency_version ?? 1;
     setMarkReadyBusy(true);
     setToolbarMessage(null);
@@ -2532,7 +2535,7 @@ function LoadWorkspacePage() {
                 <p className="w-full text-[11px] text-amber-400/90 sm:w-auto">{createUnderButtonLine}</p>
               ) : null}
             </>
-          ) : workspaceMode === "manual" ? null : (
+          ) : workspaceMode === "manual" || loadIsCancelled ? null : (
             <>
               <Button
                 variant="primary"
@@ -2996,8 +2999,14 @@ function LoadWorkspacePage() {
             </details>
           ) : null}
 
+          {loadIsCancelled ? (
+            <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">
+              This load is cancelled. The parser fields are locked so they cannot be saved or parsed again.
+            </div>
+          ) : null}
           <LoadWorkspaceForm
             mode={workspaceMode}
+            readOnly={loadIsCancelled}
             visibleSections={sectionConfig.visible}
             editableSections={sectionConfig.editable}
             intakeProposed={intakeProposed}
