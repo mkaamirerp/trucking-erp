@@ -164,6 +164,24 @@ _BROKER_IDENTITY = frozenset(
     }
 )
 _STOP_WHEN = frozenset({"appointment_date", "appointment_time_text"})
+_BROKER_NOTICE_FIELDS = _BROKER_IDENTITY - {"broker_load_reference"}
+_INFO_ONLY_FIELDS = frozenset({"mode", "equipment_type", "trailer_type", "trailer_size"})
+_UNREADABLE_PARSE = frozenset({"blocked_ocr_required", "skipped_missing_client", "ocr_failed"})
+_UNREADABLE_PDF = "This PDF could not be read"
+_BROKER_NOTICES = {
+    "broker_name_snapshot": "Broker name reads differently on the revised PDF",
+    "broker_phone_snapshot": "Broker phone reads differently on the revised PDF",
+    "broker_contact_name_snapshot": "Broker contact reads differently on the revised PDF",
+    "broker_contact_phone_snapshot": "Broker contact phone reads differently on the revised PDF",
+    "broker_contact_extension_snapshot": "Broker contact extension reads differently on the revised PDF",
+    "broker_contact_email_snapshot": "Broker contact email reads differently on the revised PDF",
+    "broker_mc_number_snapshot": "Broker MC number reads differently on the revised PDF",
+    "broker_dot_number_snapshot": "Broker DOT number reads differently on the revised PDF",
+    "broker_id": "Broker identity reads differently on the revised PDF",
+    "broker_contact_id": "Broker contact reads differently on the revised PDF",
+    "customs_broker_id": "Customs broker reads differently on the revised PDF",
+    "customs_broker_name": "Customs broker reads differently on the revised PDF",
+}
 
 _COMPARE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -333,6 +351,81 @@ def _broker_ref(value: Any) -> str:
     return str(value).strip()
 
 
+def _mode_label(value: Any) -> str | None:
+    """Fold a longer name for the same mode. A different mode stays different."""
+    text = _canon(value)
+    if not isinstance(text, str):
+        return None
+    compact = text.replace(" ", "")
+    if compact in {"ftl", "fulltruckload", "truckload"}:
+        return "truckload"
+    if compact in {"ltl", "lessthantruckload"}:
+        return "ltl"
+    return None
+
+
+def _same_place_name(left: Any, right: Any) -> bool:
+    """A shorter or longer label for the same facility is not a new stop."""
+    first = _canon(left)
+    second = _canon(right)
+    if not isinstance(first, str) or not isinstance(second, str):
+        return False
+    if len(first) < 4 or len(second) < 4:
+        return False
+    return first in second or second in first
+
+
+def _same_reading(leaf: str, left: Any, right: Any) -> bool:
+    if _canon(left) == _canon(right):
+        return True
+    if leaf == "mode":
+        label = _mode_label(left)
+        return label is not None and label == _mode_label(right)
+    if leaf == "facility_name":
+        return _same_place_name(left, right)
+    return False
+
+
+def _has_usable_extraction(extracted: dict[str, Any]) -> bool:
+    for key, value in extracted.items():
+        if key in {"stops", "references"}:
+            if isinstance(value, list) and any(
+                any(_canon(item) is not None for item in row.values()) if isinstance(row, dict) else _canon(row) is not None
+                for row in value
+            ):
+                return True
+            continue
+        if _canon(value) is not None:
+            return True
+    return False
+
+
+def _revised_pdf_unreadable(parsed: LoadDocumentParseResponse) -> bool:
+    outcome = str((parsed.context or {}).get("semantic_outcome") or "")
+    if outcome in _UNREADABLE_PARSE:
+        return True
+    return not _has_usable_extraction(parsed.extracted.model_dump(mode="json"))
+
+
+def _broker_notices(
+    *,
+    current: dict[str, Any],
+    original_extracted: dict[str, Any],
+    new_extracted: dict[str, Any],
+) -> list[str]:
+    notices: list[str] = []
+    for field, sentence in _BROKER_NOTICES.items():
+        found, new_value = _lookup(new_extracted, [field])
+        if not found or _canon(new_value) is None:
+            continue
+        _original_found, original_value = _lookup(original_extracted, [field])
+        _current_found, current_value = _lookup(current, [field])
+        if _same_reading(field, new_value, original_value) or _same_reading(field, new_value, current_value):
+            continue
+        notices.append(sentence)
+    return notices
+
+
 def verify_revision_changes(
     proposals: list[dict[str, Any]],
     *,
@@ -361,25 +454,30 @@ def verify_revision_changes(
         path = field.strip().removeprefix("extracted.")
         if path in seen:
             continue
+        names = _names(tokens)
+        leaf = names[-1]
+        if leaf in _BROKER_NOTICE_FIELDS:
+            continue
         found, extracted_value = _lookup(new_extracted, tokens)
         if not found or _canon(proposal.get("new_value")) != _canon(extracted_value):
             continue
         _original_found, original_value = _lookup(original_extracted, tokens)
         _current_found, current_value = _lookup(current, tokens)
-        if _canon(extracted_value) == _canon(original_value) or _canon(extracted_value) == _canon(current_value):
+        if _same_reading(leaf, extracted_value, original_value) or _same_reading(leaf, extracted_value, current_value):
             continue
         note = proposal.get("ai_note")
         note_text = note.strip()[:400] if isinstance(note, str) and note.strip() else None
         seen.add(path)
+        info_only = leaf in _INFO_ONLY_FIELDS or not _is_stored(tokens)
         kept.append(
             RateConfirmationRevisionChange(
                 field=path,
                 current_value=current_value,
                 original_extracted=original_value,
                 new_value=extracted_value,
-                kind="changed" if _is_stored(tokens) else "info_only",
+                kind="info_only" if info_only else "changed",
                 ai_note=note_text,
-                requires_explicit_accept=_requires_explicit_accept(tokens),
+                requires_explicit_accept=False if leaf in _INFO_ONLY_FIELDS else _requires_explicit_accept(tokens),
             )
         )
     return kept
@@ -444,14 +542,17 @@ async def compare_revised_rate_confirmation(
         tenant_id=tenant_id,
         db=db,
     )
+    if _revised_pdf_unreadable(parsed):
+        raise RateConfirmationRevisionCompareError(422, _UNREADABLE_PDF)
     new_extracted = parsed.extracted.model_dump(mode="json")
     current = build_approved_db_fields(load)
     saved_ref = _broker_ref(load.broker_load_reference)
     new_ref = _broker_ref(new_extracted.get("broker_load_reference"))
-    if saved_ref != new_ref:
+    if new_ref and saved_ref != new_ref:
         return RateConfirmationRevisionCompareResponse(
             same_load=False,
             warning=_DIFFERENT_LOAD,
+            notices=[],
             changes=[],
         )
 
@@ -484,4 +585,14 @@ async def compare_revised_rate_confirmation(
         original_extracted=original,
         new_extracted=new_extracted,
     )
-    return RateConfirmationRevisionCompareResponse(same_load=True, warning=None, changes=changes)
+    notices = _broker_notices(
+        current=current,
+        original_extracted=original,
+        new_extracted=new_extracted,
+    )
+    return RateConfirmationRevisionCompareResponse(
+        same_load=True,
+        warning=None,
+        notices=notices,
+        changes=changes,
+    )

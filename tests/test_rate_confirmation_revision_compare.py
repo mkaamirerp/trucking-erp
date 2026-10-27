@@ -266,6 +266,99 @@ async def test_unchanged_pdf_returns_an_empty_list(baselines):
 
 
 @pytest.mark.asyncio
+async def test_broker_name_reworded_is_a_notice_not_a_change(baselines):
+    baselines["load"].broker_name_snapshot = "TQL"
+    baselines["evidence"].accepted_parse_json["extracted"]["broker_name_snapshot"] = "TQL"
+    result, _seen = await _run(
+        baselines,
+        _parsed(broker_name_snapshot="Total Quality Logistics", broker_mc_number_snapshot=None),
+        [{"field": "broker_name_snapshot", "new_value": "Total Quality Logistics", "ai_note": "Name expanded."}],
+    )
+    assert result.same_load is True
+    assert result.changes == []
+    assert result.notices == ["Broker name reads differently on the revised PDF"]
+
+
+@pytest.mark.asyncio
+async def test_mode_reworded_is_info_only(baselines):
+    baselines["load"].mode = "Van"
+    baselines["evidence"].accepted_parse_json["extracted"]["mode"] = "Van"
+    result, _seen = await _run(
+        baselines,
+        _parsed(mode="Reefer", broker_mc_number_snapshot=None),
+        [{"field": "mode", "new_value": "Reefer", "ai_note": "Mode reads differently."}],
+    )
+    assert result.notices == []
+    assert len(result.changes) == 1
+    change = result.changes[0]
+    assert change.field == "mode"
+    assert change.kind == "info_only"
+    assert change.requires_explicit_accept is False
+    assert change.current_value == "Van"
+    assert change.new_value == "Reefer"
+
+
+@pytest.mark.asyncio
+async def test_shorter_facility_name_for_the_same_stop_is_not_a_change(baselines):
+    baselines["evidence"].accepted_parse_json["extracted"]["stops"] = [
+        {"city": "Boston", "sequence": 1, "stop_type": "pickup", "facility_name": "NCG-MW RAY DORNHECKER"}
+    ]
+    result, _seen = await _run(
+        baselines,
+        _parsed(
+            broker_mc_number_snapshot=None,
+            stops=[
+                LoadParseStopItem(
+                    stop_type="pickup",
+                    sequence=1,
+                    city="Boston",
+                    facility_name="RAY DORNHECKER",
+                )
+            ],
+        ),
+        [{"field": "stops[0].facility_name", "new_value": "RAY DORNHECKER", "ai_note": "Facility shortened."}],
+    )
+    assert result.changes == []
+
+
+@pytest.mark.asyncio
+async def test_unreadable_pdf_is_422_not_a_different_load(baselines):
+    parsed = LoadDocumentParseResponse(
+        document=LoadParseDocumentMeta(filename="revised.pdf"),
+        extracted=LoadParseExtractedFields(),
+        raw_text="",
+        context={"semantic_outcome": "blocked_ocr_required"},
+    )
+    db = _Db(baselines["evidence"])
+    before = _freeze(baselines["load"], baselines["snapshot"], baselines["evidence"])
+    chat_called = False
+
+    async def parse_document(*_args, **_kwargs):
+        return parsed
+
+    async def compare_chat(**_kwargs):
+        nonlocal chat_called
+        chat_called = True
+        return {"changes": []}
+
+    with pytest.raises(RateConfirmationRevisionCompareError) as caught:
+        await compare_revised_rate_confirmation(
+            db,
+            tenant_id=4,
+            load_id=11,
+            pdf_bytes=PDF,
+            filename="revised.pdf",
+            parse_document=parse_document,
+            compare_chat=compare_chat,
+        )
+    assert caught.value.status_code == 422
+    assert caught.value.detail == "This PDF could not be read"
+    assert chat_called is False
+    assert db.writes == []
+    assert _freeze(baselines["load"], baselines["snapshot"], baselines["evidence"]) == before
+
+
+@pytest.mark.asyncio
 async def test_different_broker_reference_proposes_nothing(baselines):
     result, seen = await _run(
         baselines,

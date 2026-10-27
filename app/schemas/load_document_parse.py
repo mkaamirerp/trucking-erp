@@ -182,4 +182,5 @@ class RateConfirmationRevisionCompareResponse(BaseModel):
 
     same_load: bool
     warning: Optional[str] = None
+    notices: list[str] = Field(default_factory=list)
     changes: list[RateConfirmationRevisionChange] = Field(default_factory=list)
