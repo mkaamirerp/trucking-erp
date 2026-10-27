@@ -2277,10 +2277,12 @@ function LoadWorkspacePage() {
   const confirmed = Boolean(load?.document_snapshot_confirmed_at);
   const hasActiveDispatchTrip = load?.active_dispatch_trip_id != null;
 
-  const lidLabel = workspaceMode === "manual" ? "#NEW" : load ? `#${load.id}` : "#—";
+  const lidLabel = load ? `#${load.id}` : "#—";
   const intakeQueueUrl = hasIntakeThread ? `${OPS.INTAKE}?thread=${intakeThreadId}` : OPS.INTAKE;
   const toolBtnSecondary =
-    "rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-[11px] font-semibold text-[var(--trk-text-muted)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)]";
+    "inline-flex items-center justify-center rounded-md border border-[var(--trk-border)] bg-[var(--trk-surface)] px-3 py-1.5 text-sm font-semibold text-[var(--trk-text)] shadow-sm hover:border-[var(--trk-border-strong)] hover:bg-[var(--trk-border)] disabled:cursor-not-allowed disabled:opacity-50";
+  const toolBtnPrimary =
+    "inline-flex items-center justify-center rounded-md bg-[var(--trk-btn-primary)] px-3 py-1.5 text-sm font-semibold text-[var(--trk-btn-text)] shadow-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50";
 
   /** Compare the server snapshot against the current form state; return human-readable diffs. */
   function getConflictDiffs(snap: Load): Array<{ label: string; server: string; yours: string }> {
@@ -2411,42 +2413,25 @@ function LoadWorkspacePage() {
             <button type="button" onClick={() => navigate(OPS.LOADS)} className={toolBtnSecondary}>
               ← Loads
             </button>
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="font-mono text-[11px] text-[var(--trk-text-muted)]">{lidLabel}</span>
-              <h1 className="truncate text-[14px] font-semibold tracking-tight text-[var(--trk-heading)]">
-                {workspaceMode === "manual" ? "New load" : loadNumber || load?.load_number || "Load"}
-              </h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {workspaceMode !== "manual" && load ? (
-                <OperatorLoadStatusChip
-                  load={{
-                    status: load.status,
-                    active_trip_id: load.active_trip_id,
-                    open_planned_trip_id: load.open_planned_trip_id,
-                    open_future_movement_plan_id: load.open_future_movement_plan_id,
-                    custody_owner: load.custody_owner,
-                  }}
-                />
-              ) : (
-                <OperatorLoadStatusChip load={{ status: "draft" }} />
-              )}
-              {workspaceMode === "detail" ? (
-                <span className="rounded border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-400">
-                  DETAIL
-                </span>
-              ) : null}
-              {workspaceMode === "manual" ? (
-                <span className="rounded bg-[var(--trk-btn-primary)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--trk-btn-text)]">
-                  Manual
-                </span>
-              ) : null}
-              {workspaceMode === "intake" ? (
-                <span className="rounded border border-sky-800 bg-sky-950/40 px-2 py-0.5 text-[10.5px] font-semibold text-sky-300">
-                  Intake
-                </span>
-              ) : null}
-            </div>
+            {workspaceMode !== "manual" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="font-mono text-sm text-[var(--trk-text-muted)]">{lidLabel}</span>
+                <h1 className="truncate text-sm font-semibold tracking-tight text-[var(--trk-heading)]">
+                  {loadNumber || load?.load_number || "Load"}
+                </h1>
+                {load ? (
+                  <OperatorLoadStatusChip
+                    load={{
+                      status: load.status,
+                      active_trip_id: load.active_trip_id,
+                      open_planned_trip_id: load.open_planned_trip_id,
+                      open_future_movement_plan_id: load.open_future_movement_plan_id,
+                      custody_owner: load.custody_owner,
+                    }}
+                  />
+                ) : null}
+              </div>
+            ) : null}
             <div className="ml-auto flex flex-wrap items-center gap-2">
           <button type="button" className={toolBtnSecondary} onClick={() => navigate(OPS.LOADS)}>
             Load directory
@@ -2477,9 +2462,9 @@ function LoadWorkspacePage() {
             }}
           />
           {canWorkspaceParsePdf ? (
-            <Button
-              variant="secondary"
+            <button
               type="button"
+              className={toolBtnSecondary}
               disabled={
                 saving ||
                 markReadyBusy ||
@@ -2495,29 +2480,29 @@ function LoadWorkspacePage() {
                   ? `Parsing… ${parseElapsedSec}s`
                   : "Parsing…"
                 : "Upload & parse PDF"}
-            </Button>
+            </button>
           ) : null}
           {showManualDraftActions ? (
             <>
-              <Button
-                variant="secondary"
+              <button
                 type="button"
+                className={toolBtnSecondary}
                 disabled={saving || markReadyBusy || !isDraftEditable}
                 onClick={() => void onDiscardDraft()}
               >
                 Discard
-              </Button>
-              <Button
-                variant="secondary"
+              </button>
+              <button
                 type="button"
+                className={toolBtnSecondary}
                 disabled={saving || markReadyBusy || parseBusy || !isDraftEditable}
                 onClick={() => void onSaveDraft()}
               >
                 {saving ? "Saving…" : "Save for later"}
-              </Button>
-              <Button
-                variant="primary"
+              </button>
+              <button
                 type="button"
+                className={toolBtnPrimary}
                 disabled={
                   saving ||
                   markReadyBusy ||
@@ -2530,43 +2515,42 @@ function LoadWorkspacePage() {
                 onClick={() => void onPromoteDraft()}
               >
                 {saving ? "Creating…" : "Create load"}
-              </Button>
+              </button>
               {createUnderButtonLine ? (
                 <p className="w-full text-[11px] text-amber-400/90 sm:w-auto">{createUnderButtonLine}</p>
               ) : null}
             </>
           ) : workspaceMode === "manual" || loadIsCancelled ? null : (
             <>
-              <Button
-                variant="primary"
+              <button
                 type="button"
+                className={toolBtnPrimary}
                 disabled={saving || markReadyBusy || cancelLoadBusy}
                 onClick={() => void onSave()}
               >
                 {saving ? "Saving…" : "Save load"}
-              </Button>
+              </button>
               {showMarkReadyAction ? (
-                <Button
-                  variant="secondary"
+                <button
                   type="button"
-                  className="!border-[var(--trk-btn-primary)] !bg-[var(--trk-btn-primary)] !text-[var(--trk-btn-text)] hover:!bg-amber-400"
+                  className={toolBtnPrimary}
                   disabled={saving || markReadyBusy || cancelLoadBusy || loading || parseBusy}
                   title="Saves your edits, then marks this load ready when broker, load reference, and pickup + delivery stops are set."
                   onClick={() => void onMarkReady()}
                 >
                   {markReadyBusy ? "Marking ready…" : "Mark ready"}
-                </Button>
+                </button>
               ) : null}
               {showCancelLoadAction ? (
-                <Button
-                  variant="secondary"
+                <button
                   type="button"
+                  className={toolBtnSecondary}
                   data-testid="load-workspace-cancel-load"
                   disabled={saving || markReadyBusy || cancelLoadBusy || loading}
                   onClick={() => void onCancelLoad()}
                 >
                   {cancelLoadBusy ? "Cancelling…" : "Cancel load"}
-                </Button>
+                </button>
               ) : null}
             </>
           )}
