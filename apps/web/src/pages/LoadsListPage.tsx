@@ -42,6 +42,7 @@ export default function LoadsListPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
+  const [listTab, setListTab] = useState<"loads" | "drafts" | "cancelled">("loads");
   const [workspaceDrafts, setWorkspaceDrafts] = useState<LoadWorkspaceDraft[]>([]);
   const [cancelledLoads, setCancelledLoads] = useState<Load[]>([]);
   const [draftLoads, setDraftLoads] = useState<Load[]>([]);
@@ -88,10 +89,13 @@ export default function LoadsListPage() {
     onRefresh: () => runQuery(searchApplied, { silent: true }),
   });
 
-  const directoryRows = useMemo(
-    () =>
-      buildLoadsDirectoryRows(loads, draftLoads, workspaceDrafts, searchApplied),
-    [loads, draftLoads, workspaceDrafts, searchApplied],
+  const loadRows = useMemo(
+    () => buildLoadsDirectoryRows(loads, [], [], searchApplied),
+    [loads, searchApplied],
+  );
+  const draftRows = useMemo(
+    () => buildLoadsDirectoryRows([], draftLoads, workspaceDrafts, searchApplied),
+    [draftLoads, workspaceDrafts, searchApplied],
   );
 
   const applySearch = () => {
@@ -162,7 +166,7 @@ export default function LoadsListPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-lg font-semibold text-[var(--trk-text)]">Loads</h1>
-          <p className="text-[11px] text-[var(--trk-text-muted)]">Manage loads and dispatch.</p>
+          <p className="text-[11px] text-[var(--trk-text-muted)]">Active loads, drafts, and cancelled loads are separate.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -216,15 +220,44 @@ export default function LoadsListPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ["loads", "Loads", loadRows.length],
+            ["drafts", "Drafts", draftRows.length],
+            ["cancelled", "Cancelled", cancelledLoads.length],
+          ] as const
+        ).map(([id, label, count]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setListTab(id)}
+            className={`rounded-md px-3 py-1.5 text-[12px] font-semibold ${
+              listTab === id
+                ? "bg-amber-500 text-slate-900"
+                : "border border-[var(--trk-border)] bg-[var(--trk-surface)] text-[var(--trk-text-muted)]"
+            }`}
+          >
+            {label} ({count})
+          </button>
+        ))}
+      </div>
+
       <div className="rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm overflow-hidden">
         {loading && (
           <p className="px-4 py-6 text-center text-sm text-[var(--trk-text-muted)]">Loading…</p>
         )}
         {error && <p className="px-4 py-6 text-center text-sm text-red-400">{error}</p>}
-        {!loading && !error && directoryRows.length === 0 && (
+        {!loading && !error && listTab === "loads" && loadRows.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-[var(--trk-text-muted)]">No loads yet.</p>
         )}
-        {!loading && !error && directoryRows.length > 0 && (
+        {!loading && !error && listTab === "drafts" && draftRows.length === 0 && (
+          <p className="px-4 py-10 text-center text-sm text-[var(--trk-text-muted)]">No drafts.</p>
+        )}
+        {!loading && !error && listTab === "cancelled" && cancelledLoads.length === 0 && (
+          <p className="px-4 py-10 text-center text-sm text-[var(--trk-text-muted)]">No cancelled loads.</p>
+        )}
+        {!loading && !error && listTab !== "cancelled" && (listTab === "loads" ? loadRows : draftRows).length > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
@@ -253,7 +286,7 @@ export default function LoadsListPage() {
                 </tr>
               </thead>
               <tbody>
-                {directoryRows.map((row) => (
+                {(listTab === "loads" ? loadRows : draftRows).map((row) => (
                   <tr
                     key={row.key}
                     className="border-b border-[var(--trk-border)] hover:bg-[var(--trk-surface)] cursor-pointer"
@@ -280,19 +313,12 @@ export default function LoadsListPage() {
             </table>
           </div>
         )}
-      </div>
-
-      {!loading && !error && cancelledLoads.length > 0 ? (
-        <div className="mt-6">
-          <h2 className="mb-2 text-[12px] font-bold uppercase tracking-wide text-[var(--trk-text-muted)]">
-            Cancelled loads — audit only
-          </h2>
-          <p className="mb-2 text-[11px] text-[var(--trk-text-muted)]">
-            These stay on record. They cannot be dispatched, saved, or parsed again.
-          </p>
-          <div className="overflow-hidden rounded-lg border border-[var(--trk-border)] bg-[#1a1e2a] shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
+        {!loading && !error && listTab === "cancelled" && cancelledLoads.length > 0 ? (
+          <div className="overflow-x-auto">
+            <p className="border-b border-[var(--trk-border)] px-4 py-2 text-[11px] text-[var(--trk-text-muted)]">
+              Audit only. These cannot be dispatched, saved, or parsed again.
+            </p>
+            <table className="min-w-full">
                 <thead>
                   <tr className="border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
                     <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Load #</th>
@@ -318,10 +344,9 @@ export default function LoadsListPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

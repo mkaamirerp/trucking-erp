@@ -45,8 +45,24 @@ router = APIRouter(prefix="/loads", tags=["loads"])
 def _load_audit_actor(user: CurrentUser) -> tuple[int | None, str | None]:
     """Tenant audit_events.actor_user_id is tenant-scoped int — not platform UUID."""
     actor_user_id = int(user.tenant_user.id) if user.tenant_user else None
-    actor_label = None if user.tenant_user else f"platform:{user.user.id}"
-    return actor_user_id, actor_label
+    return actor_user_id, _signed_in_actor_label(user)
+
+
+def _signed_in_actor_label(user: CurrentUser) -> str | None:
+    """Name and email of the logged-in account, for audit display."""
+    tu = user.tenant_user
+    platform = user.user
+    first = ((tu.first_name if tu is not None else None) or platform.first_name or "").strip()
+    last = ((tu.last_name if tu is not None else None) or platform.last_name or "").strip()
+    email = ((tu.email_norm if tu is not None else None) or platform.email or "").strip()
+    name = " ".join(part for part in (first, last) if part)
+    if name and email:
+        label = f"{name} · {email}"
+    else:
+        label = name or email
+    if not label:
+        return None
+    return label[:128]
 
 
 def _pod_actor(user: CurrentUser) -> tuple[int | None, str | None]:
@@ -274,13 +290,7 @@ async def cancel_load(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Commercial cancel — preserves load row and history; closes OPEN TripLoads (Issue I5)."""
-    actor_user_id, platform_label = _load_audit_actor(user)
-    tu = user.tenant_user
-    if tu is not None:
-        person = " ".join(part for part in ((tu.first_name or "").strip(), (tu.last_name or "").strip()) if part)
-        actor_label = person or (tu.email_norm or "").strip() or None
-    else:
-        actor_label = platform_label
+    actor_user_id, actor_label = _load_audit_actor(user)
     load = await loads_service.cancel_load(
         db,
         tenant_id,
