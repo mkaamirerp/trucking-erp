@@ -68,7 +68,7 @@ import {
   draftRateConfirmationPdfDownloadPath,
   loadRateConfirmationPdfDownloadPath,
 } from "@/loadWorkspace/RateConfirmationPdfPanel";
-import { associatedTripNumber } from "@/loadWorkspace/draftListPresentation";
+import { associatedTripNumber, cancelActorDisplayName } from "@/loadWorkspace/draftListPresentation";
 import {
   baselineSignatureFromLoad,
   buildLoadPersistPayload,
@@ -2987,7 +2987,7 @@ function LoadWorkspacePage() {
             <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-100">
               <p className="font-semibold text-red-200">Cancelled — audit only. This cannot be dispatched or saved again.</p>
               <p className="mt-1">
-                Cancelled by <span className="font-semibold text-[var(--trk-text)]">{load?.cancelled_by || "Unknown"}</span>
+                Cancelled by <span className="font-semibold text-[var(--trk-text)]">{cancelActorDisplayName(load?.cancelled_by)}</span>
                 {load?.cancelled_at ? ` on ${new Date(load.cancelled_at).toLocaleString()}` : ""}.
               </p>
               <p className="mt-1">

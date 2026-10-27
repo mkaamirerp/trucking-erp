@@ -49,20 +49,15 @@ def _load_audit_actor(user: CurrentUser) -> tuple[int | None, str | None]:
 
 
 def _signed_in_actor_label(user: CurrentUser) -> str | None:
-    """Name and email of the logged-in account, for audit display."""
+    """Name of the logged-in account, for audit display. Email is not stored."""
     tu = user.tenant_user
     platform = user.user
     first = ((tu.first_name if tu is not None else None) or platform.first_name or "").strip()
     last = ((tu.last_name if tu is not None else None) or platform.last_name or "").strip()
-    email = ((tu.email_norm if tu is not None else None) or platform.email or "").strip()
     name = " ".join(part for part in (first, last) if part)
-    if name and email:
-        label = f"{name} · {email}"
-    else:
-        label = name or email
-    if not label:
+    if not name:
         return None
-    return label[:128]
+    return name[:128]
 
 
 def _pod_actor(user: CurrentUser) -> tuple[int | None, str | None]:

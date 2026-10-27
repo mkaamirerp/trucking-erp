@@ -11,7 +11,13 @@ import {
 import { isTenantAdmin } from "@/auth/roles";
 import { useMe } from "@/hooks/useMe";
 import { getTenantSlugFromHost } from "@/tenant";
-import { associatedTripDriverLabel, associatedTripNumber, buildLoadsDirectoryRows } from "@/loadWorkspace/draftListPresentation";
+import {
+  associatedTripDriverLabel,
+  associatedTripNumber,
+  buildLoadsDirectoryRows,
+  cancelActorDisplayName,
+  loadToDirectoryRow,
+} from "@/loadWorkspace/draftListPresentation";
 import { formatRouteFromStops, firstPickupAppointmentDate } from "@/utils/loadStops";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
@@ -96,6 +102,23 @@ export default function LoadsListPage() {
   const draftRows = useMemo(
     () => buildLoadsDirectoryRows([], draftLoads, workspaceDrafts, searchApplied),
     [draftLoads, workspaceDrafts, searchApplied],
+  );
+  const cancelledRows = useMemo(
+    () =>
+      cancelledLoads.map((load) => ({
+        row: loadToDirectoryRow(load),
+        by: cancelActorDisplayName(load.cancelled_by),
+        reason: (load.cancel_reason || "").trim() || "—",
+        when: load.cancelled_at
+          ? new Date(load.cancelled_at).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            })
+          : "—",
+      })),
+    [cancelledLoads],
   );
 
   const applySearch = () => {
@@ -313,33 +336,57 @@ export default function LoadsListPage() {
             </table>
           </div>
         )}
-        {!loading && !error && listTab === "cancelled" && cancelledLoads.length > 0 ? (
+        {!loading && !error && listTab === "cancelled" && cancelledRows.length > 0 ? (
           <div className="overflow-x-auto">
-            <p className="border-b border-[var(--trk-border)] px-4 py-2 text-[11px] text-[var(--trk-text-muted)]">
-              Audit only. These cannot be dispatched, saved, or parsed again.
-            </p>
             <table className="min-w-full">
                 <thead>
                   <tr className="border-b border-[var(--trk-border)] bg-[var(--trk-surface)]">
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Load #</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Cancelled by</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">Reason</th>
-                    <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">When</th>
+                    {(
+                      [
+                        "Load #",
+                        "Trip #",
+                        "Route",
+                        "Pickup",
+                        "Status",
+                        "Driver",
+                        "Rate",
+                        "By",
+                        "Reason",
+                        "When",
+                      ] as const
+                    ).map((label) => (
+                      <th
+                        key={label}
+                        className={`whitespace-nowrap px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)] ${
+                          label === "Rate" ? "text-right" : "text-left"
+                        }`}
+                      >
+                        {label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {cancelledLoads.map((load) => (
+                  {cancelledRows.map(({ row, by, reason, when }) => (
                     <tr
-                      key={load.id}
+                      key={row.key}
                       className="cursor-pointer border-b border-[var(--trk-border)] hover:bg-[var(--trk-surface)]"
-                      onClick={() => navigate(OPS.LOAD_DETAIL(load.id))}
+                      onClick={() => (row.loadId != null ? navigate(OPS.LOAD_DETAIL(row.loadId)) : undefined)}
                     >
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text)]">{load.load_number || load.id}</td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text)]">{load.cancelled_by || "Unknown"}</td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">{load.cancel_reason || "No reason recorded"}</td>
-                      <td className="px-4 py-2.5 text-sm text-[var(--trk-text-muted)]">
-                        {load.cancelled_at ? new Date(load.cancelled_at).toLocaleString() : "—"}
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text)]">{row.loadNumber}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text-muted)]">{row.tripNumber}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text-muted)]">{row.route}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text-muted)]">{row.pickup}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5">
+                        <OperatorLoadStatusChip load={row.operatorStatus} />
                       </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text-muted)]">{row.driver}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right text-xs text-[var(--trk-text)]">{row.rateDisplay}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text)]">{by}</td>
+                      <td className="max-w-[10rem] truncate px-2 py-1.5 text-xs text-[var(--trk-text-muted)]" title={reason}>
+                        {reason}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text-muted)]">{when}</td>
                     </tr>
                   ))}
                 </tbody>

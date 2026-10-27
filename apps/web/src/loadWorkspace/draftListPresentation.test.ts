@@ -3,6 +3,7 @@ import {
   associatedTripDriverLabel,
   associatedTripNumber,
   buildLoadsDirectoryRows,
+  cancelActorDisplayName,
   draftTitleFromFields,
   loadToDirectoryRow,
   missingLineForFields,
@@ -17,6 +18,14 @@ function loadRow(partial: Record<string, unknown>) {
     ...partial,
   } as never;
 }
+
+describe("cancel actor display", () => {
+  it("shows the name and drops a stored email", () => {
+    expect(cancelActorDisplayName("Mohammad Aamir · mkaamir@gmail.com")).toBe("Mohammad Aamir");
+    expect(cancelActorDisplayName("mkaamir@gmail.com")).toBe("Unknown");
+    expect(cancelActorDisplayName("")).toBe("Unknown");
+  });
+});
 
 describe("associated trip display", () => {
   it("shows the planned trip number and that trip's driver", () => {

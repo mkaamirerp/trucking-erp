@@ -102,6 +102,15 @@ export function associatedTripNumber(load: Load): string {
   return storedActive;
 }
 
+/** Cancel audit shows the person's name. Stored labels may still include an email. */
+export function cancelActorDisplayName(label: string | null | undefined): string {
+  const raw = (label ?? "").trim();
+  if (!raw) return "Unknown";
+  const name = raw.split("·")[0]?.trim() ?? "";
+  if (!name || name.includes("@")) return "Unknown";
+  return name;
+}
+
 /** Driver on the Trip shown by associatedTripNumber. Blank when the load has no trip. */
 export function associatedTripDriverLabel(load: Load): string {
   if (!associatedTripNumber(load)) return "";

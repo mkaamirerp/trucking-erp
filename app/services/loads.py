@@ -835,6 +835,50 @@ async def _open_membership_trip_map(
     return out
 
 
+async def _latest_closed_membership_trip_map(
+    db: AsyncSession, tenant_id: int, load_ids: list[int]
+) -> dict[int, tuple[int, str, str | None]]:
+    """Latest closed TripLoad for a cancelled load. Read-only. Does not reopen the trip."""
+    if not load_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                TripLoad.load_id,
+                Trip.id,
+                Trip.trip_number,
+                Driver.first_name,
+                Driver.last_name,
+            )
+            .select_from(TripLoad)
+            .join(
+                Trip,
+                and_(Trip.tenant_id == TripLoad.tenant_id, Trip.id == TripLoad.trip_id),
+            )
+            .outerjoin(
+                Driver,
+                and_(Driver.tenant_id == Trip.tenant_id, Driver.id == Trip.driver_id),
+            )
+            .where(
+                TripLoad.tenant_id == tenant_id,
+                TripLoad.load_id.in_(load_ids),
+                or_(TripLoad.completed_at.is_not(None), TripLoad.removed_at.is_not(None)),
+            )
+            .order_by(TripLoad.load_id.asc(), TripLoad.id.desc())
+        )
+    ).all()
+    out: dict[int, tuple[int, str, str | None]] = {}
+    for load_id, trip_id, trip_number, first_name, last_name in rows:
+        lid = int(load_id)
+        if lid not in out:
+            out[lid] = (
+                int(trip_id),
+                str(trip_number or ""),
+                trip_driver_display_name(first_name, last_name),
+            )
+    return out
+
+
 async def _open_planned_trip_map(
     db: AsyncSession, tenant_id: int, load_ids: list[int]
 ) -> dict[int, tuple[int, str, str | None]]:
@@ -870,6 +914,14 @@ async def enrich_load_responses(
         db, tenant_id, load_ids, _trip_load_is_open_active_clause()
     )
     fmp = await _open_fmp_map(db, tenant_id, load_ids)
+    cancelled_ids = [
+        int(item.id)
+        for item in items
+        if (item.status or "").strip().lower() == "cancelled"
+        and int(item.id) not in active
+        and int(item.id) not in planned
+    ]
+    closed = await _latest_closed_membership_trip_map(db, tenant_id, cancelled_ids)
     enriched: list[LoadResponse] = []
     for resp in items:
         lid = int(resp.id)
@@ -877,6 +929,9 @@ async def enrich_load_responses(
         if lid in active:
             updates["active_membership_trip_number"] = active[lid][1]
             updates["active_membership_driver_name"] = active[lid][2]
+        elif lid in closed:
+            updates["active_membership_trip_number"] = closed[lid][1]
+            updates["active_membership_driver_name"] = closed[lid][2]
         if lid in planned:
             updates["open_planned_trip_id"] = planned[lid][0]
             updates["open_planned_trip_number"] = planned[lid][1]
