@@ -437,17 +437,11 @@ function EquipmentTempChip({
   const equip = trailerType.trim() || equipmentType.trim() || "Equipment";
   const temp = temperatureRequirement.trim();
   return (
-    <span className="inline-flex max-w-full items-center gap-2 rounded-md border border-[var(--trk-accent)]/40 bg-[var(--trk-bg)] px-2.5 py-1.5">
+    <span className="inline-flex max-w-full items-center gap-2 rounded-md border border-[var(--trk-accent)]/40 bg-[var(--trk-surface)] px-3 py-1.5">
       <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
         {equip}
       </span>
-      <span
-        className={
-          temp
-            ? "text-lg font-bold leading-none tracking-tight text-[var(--trk-text)]"
-            : "text-xs font-semibold text-[var(--trk-text-muted)]"
-        }
-      >
+      <span className="font-mono text-xl font-bold leading-none tracking-tight text-[var(--trk-text)]">
         {temp || "No temp set"}
       </span>
     </span>
