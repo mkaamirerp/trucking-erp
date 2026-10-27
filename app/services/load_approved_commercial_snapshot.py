@@ -68,7 +68,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _wrap(value: Any) -> dict[str, Any]:
-    return {"value": _jsonable(value), "evidence_class": EVIDENCE_CLASS}
+    return {"value": _jsonable(_scrub(value)), "evidence_class": EVIDENCE_CLASS}
 
 
 def _present(value: Any) -> bool:
@@ -136,6 +136,32 @@ def build_approved_db_fields(load: Load) -> dict[str, Any]:
             for stop in stops
         ],
     }
+
+
+def _key_is_nested_leak(key: str) -> bool:
+    """Drop nested parser secrets. Match whole snake segments so raw_text is removed."""
+    name = str(key)
+    folded = name.casefold()
+    if name in _CONTEXT_LEAK_KEYS or folded.startswith("diagnostic"):
+        return True
+    padded = f"_{folded}_"
+    for token in ("raw_text", "prompt", "handoff"):
+        if f"_{token}_" in padded:
+            return True
+    return any(segment.startswith("diagnostic") for segment in folded.split("_"))
+
+
+def _scrub(value: Any) -> Any:
+    if isinstance(value, dict):
+        kept: dict[str, Any] = {}
+        for key, item in value.items():
+            if _key_is_nested_leak(str(key)):
+                continue
+            kept[str(key)] = _scrub(item)
+        return kept
+    if isinstance(value, list):
+        return [_scrub(item) for item in value]
+    return value
 
 
 def _context_allowlist(context: Any) -> dict[str, Any]:
@@ -269,16 +295,20 @@ def project_original_rc_reference(
             commercial[dest] = _wrap(take(key))
     if commercial:
         body["commercial"] = commercial
-    if _present(take("references")):
-        body["document_references"] = _wrap(take("references"))
-    if _present(take("stops")):
-        body["document_stops"] = _wrap(take("stops"))
+    references = _scrub(take("references"))
+    stops = _scrub(take("stops"))
+    if _present(references):
+        body["document_references"] = _wrap(references)
+    if _present(stops):
+        body["document_stops"] = _wrap(stops)
 
     if isinstance(accepted, dict):
-        if _present(accepted.get("field_confidence")):
-            body["parser_field_confidence"] = _wrap(accepted.get("field_confidence"))
-        if _present(accepted.get("warnings")):
-            body["parser_warnings"] = _wrap(accepted.get("warnings"))
+        confidence = _scrub(accepted.get("field_confidence"))
+        warnings = _scrub(accepted.get("warnings"))
+        if _present(confidence):
+            body["parser_field_confidence"] = _wrap(confidence)
+        if _present(warnings):
+            body["parser_warnings"] = _wrap(warnings)
         context = _context_allowlist(accepted.get("context"))
         if context:
             body["parse_context"] = _wrap(context)

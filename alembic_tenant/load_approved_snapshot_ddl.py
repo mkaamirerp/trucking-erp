@@ -11,11 +11,29 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
 def upgrade_load_approved_commercial_snapshots() -> None:
-    op.create_unique_constraint(
-        "uq_load_commercial_evidence_tenant_id",
-        "load_commercial_evidence",
-        ["tenant_id", "id"],
+    # Commercial evidence exists on the DW-1/FMP line only. The x5 line has no
+    # load_commercial_evidence table, so that sibling cannot take this FK.
+    evidence_present = _has_table("load_commercial_evidence")
+    if evidence_present:
+        op.create_unique_constraint(
+            "uq_load_commercial_evidence_tenant_id",
+            "load_commercial_evidence",
+            ["tenant_id", "id"],
+        )
+    evidence_fk = (
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "commercial_evidence_id"],
+            ["load_commercial_evidence.tenant_id", "load_commercial_evidence.id"],
+            name="fk_load_approved_snapshots_evidence_tenant",
+            ondelete="RESTRICT",
+        )
+        if evidence_present
+        else None
     )
     op.create_table(
         "load_approved_commercial_snapshots",
@@ -47,12 +65,7 @@ def upgrade_load_approved_commercial_snapshots() -> None:
             name="fk_load_approved_snapshots_load_tenant",
             ondelete="RESTRICT",
         ),
-        sa.ForeignKeyConstraint(
-            ["tenant_id", "commercial_evidence_id"],
-            ["load_commercial_evidence.tenant_id", "load_commercial_evidence.id"],
-            name="fk_load_approved_snapshots_evidence_tenant",
-            ondelete="RESTRICT",
-        ),
+        *([evidence_fk] if evidence_fk is not None else []),
         sa.CheckConstraint(
             "milestone IN ('creation')",
             name="ck_load_approved_snapshots_milestone_creation",
@@ -118,8 +131,14 @@ def downgrade_load_approved_commercial_snapshots() -> None:
         table_name="load_approved_commercial_snapshots",
     )
     op.drop_table("load_approved_commercial_snapshots")
-    op.drop_constraint(
-        "uq_load_commercial_evidence_tenant_id",
-        "load_commercial_evidence",
-        type_="unique",
-    )
+    if _has_table("load_commercial_evidence"):
+        names = {
+            item["name"]
+            for item in sa.inspect(op.get_bind()).get_unique_constraints("load_commercial_evidence")
+        }
+        if "uq_load_commercial_evidence_tenant_id" in names:
+            op.drop_constraint(
+                "uq_load_commercial_evidence_tenant_id",
+                "load_commercial_evidence",
+                type_="unique",
+            )

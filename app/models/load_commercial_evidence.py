@@ -27,6 +27,7 @@ from app.models.base import Base
 class LoadCommercialEvidence(Base):
     __tablename__ = "load_commercial_evidence"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_load_commercial_evidence_tenant_id"),
         UniqueConstraint("tenant_id", "workspace_draft_id", name="uq_load_commercial_evidence_tenant_draft"),
         UniqueConstraint(
             "tenant_id",

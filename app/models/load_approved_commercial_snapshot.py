@@ -6,7 +6,16 @@ from datetime import datetime
 from typing import Any
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, ForeignKeyConstraint, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,10 +44,37 @@ class LoadApprovedCommercialSnapshot(Base):
             name="fk_load_approved_snapshots_evidence_tenant",
             ondelete="RESTRICT",
         ),
+        CheckConstraint(
+            "milestone IN ('creation')",
+            name="ck_load_approved_snapshots_milestone_creation",
+        ),
+        CheckConstraint(
+            "creation_source IN ('workspace_promotion', 'direct_create')",
+            name="ck_load_approved_snapshots_creation_source",
+        ),
+        CheckConstraint(
+            "dispatcher_review_claim IN ('none', 'workspace_promotion_reviewed')",
+            name="ck_load_approved_snapshots_review_claim",
+        ),
+        CheckConstraint(
+            "("
+            "creation_source = 'direct_create' AND dispatcher_review_claim = 'none'"
+            ") OR ("
+            "creation_source = 'workspace_promotion' "
+            "AND dispatcher_review_claim = 'workspace_promotion_reviewed'"
+            ")",
+            name="ck_load_approved_snapshots_claim_matches_source",
+        ),
+        CheckConstraint(
+            "(commercial_evidence_id IS NULL AND workspace_draft_id IS NULL) "
+            "OR (creation_source = 'workspace_promotion')",
+            name="ck_load_approved_snapshots_evidence_on_promotion",
+        ),
+        Index("ix_load_approved_snapshots_tenant_load", "tenant_id", "load_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
     load_id: Mapped[int] = mapped_column(Integer, nullable=False)
     milestone: Mapped[str] = mapped_column(String(32), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)

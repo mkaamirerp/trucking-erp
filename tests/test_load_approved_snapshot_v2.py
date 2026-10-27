@@ -171,6 +171,131 @@ def test_matching_hashes_with_extracted_are_usable():
     assert ref["parse_context"]["value"] == {"pdf_type": "digital"}
 
 
+def test_nested_references_stops_and_confidence_drop_leak_keys():
+    secret = "NESTED-SECRET-RC"
+    ref = project_original_rc_reference(
+        {
+            "document": {"filename": "rc.pdf"},
+            "extracted": {
+                "commodity": "steel",
+                "temperature_requirement": "appointment window",
+                "references": [
+                    {
+                        "kind": "po",
+                        "value": "PO-9",
+                        "raw_text": secret,
+                        "llm_prompt": secret,
+                        "handoff": {"raw_text": secret},
+                        "parse_diagnostics": {"secret": secret},
+                    }
+                ],
+                "stops": [
+                    {
+                        "city": "Chicago",
+                        "state_or_province": "IL",
+                        "appointment_type": "FCFS",
+                        "raw_text": secret,
+                        "prompt": secret,
+                        "handoff_payload": secret,
+                        "diagnostic_blob": secret,
+                    }
+                ],
+            },
+            "field_confidence": {
+                "rate": {"score": "high", "raw_text": secret, "prompt": secret},
+                "stops": [
+                    {
+                        "city": {
+                            "value": "Chicago",
+                            "handoff": secret,
+                            "diagnostics": secret,
+                        }
+                    }
+                ],
+            },
+            "warnings": [{"code": "soft", "raw_text": secret, "diagnostic_note": secret}],
+        },
+        evidence_id=5,
+        evidence_sha256="abc",
+        accepted_parse_pdf_sha256="abc",
+        workspace_draft_id=None,
+        parse_schema_version="v1",
+    )
+    blob = str(ref)
+    assert secret not in blob
+    assert "raw_text" not in blob
+    assert "llm_prompt" not in blob
+    assert "handoff" not in blob
+    assert "diagnostic" not in blob
+    assert ref["document_references"]["value"] == [{"kind": "po", "value": "PO-9"}]
+    stop = ref["document_stops"]["value"][0]
+    assert stop["city"] == "Chicago"
+    assert stop["appointment_type"] == "FCFS"
+    assert ref["parser_field_confidence"]["value"]["rate"] == {"score": "high"}
+    assert ref["parser_field_confidence"]["value"]["stops"][0]["city"] == {"value": "Chicago"}
+    assert ref["parser_warnings"]["value"] == [{"code": "soft"}]
+    assert ref["commercial"]["commodity"]["value"] == "steel"
+    assert ref["commercial"]["temperature_requirement"]["value"] == "appointment window"
+
+
+def test_orm_metadata_matches_s1_migration_constraints():
+    from app.models.load_approved_commercial_snapshot import LoadApprovedCommercialSnapshot
+    from app.models.load_commercial_evidence import LoadCommercialEvidence
+
+    snapshot = LoadApprovedCommercialSnapshot.__table__
+    constraint_names = {constraint.name for constraint in snapshot.constraints}
+    assert "uq_load_approved_snapshots_tenant_load_milestone_rev" in constraint_names
+    assert "fk_load_approved_snapshots_load_tenant" in constraint_names
+    assert "fk_load_approved_snapshots_evidence_tenant" in constraint_names
+    assert "ck_load_approved_snapshots_milestone_creation" in constraint_names
+    assert "ck_load_approved_snapshots_creation_source" in constraint_names
+    assert "ck_load_approved_snapshots_review_claim" in constraint_names
+    assert "ck_load_approved_snapshots_claim_matches_source" in constraint_names
+    assert "ck_load_approved_snapshots_evidence_on_promotion" in constraint_names
+    assert "ix_load_approved_snapshots_tenant_load" in {index.name for index in snapshot.indexes}
+
+    evidence_names = {constraint.name for constraint in LoadCommercialEvidence.__table__.constraints}
+    assert "uq_load_commercial_evidence_tenant_id" in evidence_names
+
+
+def test_provisioning_target_stops_before_s1_snapshot_table():
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from pathlib import Path
+
+    from app.core.config import Settings
+    from scripts.tenant_revision_plan import POD_X5, S1_FMP, S1_X5
+
+    assert Settings.model_fields["tenant_alembic_target_rev"].default == POD_X5
+    root = Path(__file__).resolve().parents[1]
+    script = ScriptDirectory.from_config(Config(str(root / "alembic_tenant.ini")))
+
+    def ancestors(revision: str) -> set[str]:
+        found: set[str] = set()
+        pending = [revision]
+        while pending:
+            current_id = pending.pop()
+            if current_id in found:
+                continue
+            found.add(current_id)
+            current = script.get_revision(current_id)
+            down = current.down_revision
+            if down is None:
+                continue
+            if isinstance(down, (tuple, list)):
+                pending.extend(str(item) for item in down)
+            else:
+                pending.append(str(down))
+        return found
+
+    provisioning = ancestors(POD_X5)
+    assert S1_X5 not in provisioning
+    assert S1_FMP not in provisioning
+    assert POD_X5 in ancestors(S1_X5)
+    assert S1_FMP not in ancestors(S1_X5)
+    assert S1_X5 not in ancestors(S1_FMP)
+
+
 def test_storage_policy_excludes_internal_notes_from_future_ai():
     from datetime import datetime, timezone
 
