@@ -70,7 +70,7 @@ const I = wsInputClass;
 const stopLb = `${L} !mb-0.5`;
 const stopIc = `${I} !py-1 !px-2 !text-[13px]`;
 const linehaulInputClass =
-  "w-[8.5rem] shrink-0 rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2.5 py-0.5 text-right font-mono text-sm font-semibold text-[var(--trk-text)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/25";
+  "w-[11rem] shrink-0 rounded-md border border-[var(--trk-heading)]/55 bg-[var(--trk-surface)] px-3 py-1.5 text-right font-mono text-xl font-bold tracking-tight text-[var(--trk-heading)] placeholder:text-[var(--trk-text-muted)] focus:border-[var(--trk-heading)] focus:outline-none focus:ring-1 focus:ring-[var(--trk-heading)]/40";
 const stopGridCol =
   "grid grid-cols-6 gap-x-1.5 gap-y-1 sm:grid-cols-12 sm:gap-x-2 sm:gap-y-1";
 const stopIconBtn =
@@ -682,7 +682,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               />
             </ParseConfidenceField>
           ) : (
-            <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2.5 py-0.5 font-mono text-sm font-semibold text-[var(--trk-text)]">
+            <span className="rounded-md border border-[var(--trk-heading)]/55 bg-[var(--trk-surface)] px-3 py-1.5 font-mono text-xl font-bold tracking-tight text-[var(--trk-heading)]">
               {formatLinehaulDisplay(p.rate) ?? "—"}
             </span>
           )}
