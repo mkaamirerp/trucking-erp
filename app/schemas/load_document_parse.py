@@ -181,6 +181,7 @@ class RateConfirmationRevisionCompareResponse(BaseModel):
     """Read-only comparison. Nothing in this payload is written to the load."""
 
     same_load: bool
+    same_load_confirmed: bool = False
     warning: Optional[str] = None
     notices: list[str] = Field(default_factory=list)
     changes: list[RateConfirmationRevisionChange] = Field(default_factory=list)

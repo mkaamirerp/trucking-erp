@@ -88,6 +88,10 @@ _DIFFERENT_LOAD = (
     "The revised rate confirmation has a different broker load number than this load. "
     "No changes are proposed."
 )
+_NO_REVISED_REF = (
+    "Could not read a broker load number on this PDF, so it cannot be confirmed as the same load."
+)
+_NO_SAVED_REF = "This load has no broker load number saved, so the revised PDF cannot be matched."
 _COMPARE_FAILED = "Revised rate confirmation comparison could not be read."
 
 _STORED_TOP = frozenset(
@@ -364,25 +368,12 @@ def _mode_label(value: Any) -> str | None:
     return None
 
 
-def _same_place_name(left: Any, right: Any) -> bool:
-    """A shorter or longer label for the same facility is not a new stop."""
-    first = _canon(left)
-    second = _canon(right)
-    if not isinstance(first, str) or not isinstance(second, str):
-        return False
-    if len(first) < 4 or len(second) < 4:
-        return False
-    return first in second or second in first
-
-
 def _same_reading(leaf: str, left: Any, right: Any) -> bool:
     if _canon(left) == _canon(right):
         return True
     if leaf == "mode":
         label = _mode_label(left)
         return label is not None and label == _mode_label(right)
-    if leaf == "facility_name":
-        return _same_place_name(left, right)
     return False
 
 
@@ -426,6 +417,37 @@ def _broker_notices(
     return notices
 
 
+def _facility_notices(
+    *,
+    current: dict[str, Any],
+    original_extracted: dict[str, Any],
+    new_extracted: dict[str, Any],
+) -> list[str]:
+    """A different facility name is visible and is not a proposed load change."""
+    notices: list[str] = []
+    new_stops = new_extracted.get("stops") if isinstance(new_extracted.get("stops"), list) else []
+    original_stops = original_extracted.get("stops") if isinstance(original_extracted.get("stops"), list) else []
+    current_stops = current.get("stops") if isinstance(current.get("stops"), list) else []
+    for index, stop in enumerate(new_stops):
+        if not isinstance(stop, dict):
+            continue
+        new_name = stop.get("facility_name")
+        if _canon(new_name) is None:
+            continue
+        original_name = None
+        if index < len(original_stops) and isinstance(original_stops[index], dict):
+            original_name = original_stops[index].get("facility_name")
+        current_name = None
+        if index < len(current_stops) and isinstance(current_stops[index], dict):
+            current_name = current_stops[index].get("facility_name")
+        if _same_reading("facility_name", new_name, original_name) or _same_reading(
+            "facility_name", new_name, current_name
+        ):
+            continue
+        notices.append(f"Facility name reads differently at stop {index + 1}")
+    return notices
+
+
 def verify_revision_changes(
     proposals: list[dict[str, Any]],
     *,
@@ -456,7 +478,7 @@ def verify_revision_changes(
             continue
         names = _names(tokens)
         leaf = names[-1]
-        if leaf in _BROKER_NOTICE_FIELDS:
+        if leaf in _BROKER_NOTICE_FIELDS or leaf == "facility_name":
             continue
         found, extracted_value = _lookup(new_extracted, tokens)
         if not found or _canon(proposal.get("new_value")) != _canon(extracted_value):
@@ -548,9 +570,26 @@ async def compare_revised_rate_confirmation(
     current = build_approved_db_fields(load)
     saved_ref = _broker_ref(load.broker_load_reference)
     new_ref = _broker_ref(new_extracted.get("broker_load_reference"))
-    if new_ref and saved_ref != new_ref:
+    if not saved_ref:
         return RateConfirmationRevisionCompareResponse(
             same_load=False,
+            same_load_confirmed=False,
+            warning=_NO_SAVED_REF,
+            notices=[],
+            changes=[],
+        )
+    if not new_ref:
+        return RateConfirmationRevisionCompareResponse(
+            same_load=False,
+            same_load_confirmed=False,
+            warning=_NO_REVISED_REF,
+            notices=[],
+            changes=[],
+        )
+    if saved_ref != new_ref:
+        return RateConfirmationRevisionCompareResponse(
+            same_load=False,
+            same_load_confirmed=True,
             warning=_DIFFERENT_LOAD,
             notices=[],
             changes=[],
@@ -590,8 +629,16 @@ async def compare_revised_rate_confirmation(
         original_extracted=original,
         new_extracted=new_extracted,
     )
+    notices.extend(
+        _facility_notices(
+            current=current,
+            original_extracted=original,
+            new_extracted=new_extracted,
+        )
+    )
     return RateConfirmationRevisionCompareResponse(
         same_load=True,
+        same_load_confirmed=True,
         warning=None,
         notices=notices,
         changes=changes,

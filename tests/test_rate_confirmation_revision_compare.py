@@ -299,9 +299,41 @@ async def test_mode_reworded_is_info_only(baselines):
 
 
 @pytest.mark.asyncio
-async def test_shorter_facility_name_for_the_same_stop_is_not_a_change(baselines):
+async def test_revised_pdf_without_broker_number_is_not_confirmed(baselines):
+    result, seen = await _run(
+        baselines,
+        _parsed(broker_load_reference=None, broker_mc_number_snapshot=None),
+        [{"field": "rate", "new_value": "2100.00", "ai_note": "Should not be asked."}],
+    )
+    assert "chat" not in seen
+    assert result.same_load is False
+    assert result.same_load_confirmed is False
+    assert result.changes == []
+    assert result.warning == (
+        "Could not read a broker load number on this PDF, so it cannot be confirmed as the same load."
+    )
+
+
+@pytest.mark.asyncio
+async def test_saved_load_without_broker_number_cannot_be_matched(baselines):
+    baselines["load"].broker_load_reference = None
+    result, seen = await _run(
+        baselines,
+        _parsed(broker_mc_number_snapshot=None),
+        [{"field": "rate", "new_value": "2100.00", "ai_note": "Should not be asked."}],
+    )
+    assert "chat" not in seen
+    assert result.same_load is False
+    assert result.same_load_confirmed is False
+    assert result.changes == []
+    assert result.warning == "This load has no broker load number saved, so the revised PDF cannot be matched."
+
+
+@pytest.mark.asyncio
+async def test_nearby_facility_name_is_a_notice_not_a_hidden_change(baselines):
+    baselines["load"].stops[0].facility_name = "Acme Warehouse"
     baselines["evidence"].accepted_parse_json["extracted"]["stops"] = [
-        {"city": "Boston", "sequence": 1, "stop_type": "pickup", "facility_name": "NCG-MW RAY DORNHECKER"}
+        {"city": "Boston", "sequence": 1, "stop_type": "pickup", "facility_name": "Acme Warehouse"}
     ]
     result, _seen = await _run(
         baselines,
@@ -312,13 +344,15 @@ async def test_shorter_facility_name_for_the_same_stop_is_not_a_change(baselines
                     stop_type="pickup",
                     sequence=1,
                     city="Boston",
-                    facility_name="RAY DORNHECKER",
+                    facility_name="Acme Warehouse East",
                 )
             ],
         ),
-        [{"field": "stops[0].facility_name", "new_value": "RAY DORNHECKER", "ai_note": "Facility shortened."}],
+        [{"field": "stops[0].facility_name", "new_value": "Acme Warehouse East", "ai_note": "Facility grew."}],
     )
+    assert result.same_load_confirmed is True
     assert result.changes == []
+    assert result.notices == ["Facility name reads differently at stop 1"]
 
 
 @pytest.mark.asyncio
@@ -367,6 +401,7 @@ async def test_different_broker_reference_proposes_nothing(baselines):
     )
     assert "chat" not in seen
     assert result.same_load is False
+    assert result.same_load_confirmed is True
     assert result.changes == []
     assert "different broker load number" in (result.warning or "")
 
