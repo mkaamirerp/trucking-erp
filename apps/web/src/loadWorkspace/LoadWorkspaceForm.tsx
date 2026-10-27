@@ -34,7 +34,6 @@ import {
   docFocusForStopState,
   docFocusForStopStreet,
   type DocFocusOpts,
-  formatEquipmentTempChip,
   formatLinehaulDisplay,
   wsGrid2,
   wsInputClass,
@@ -426,6 +425,35 @@ export type LoadWorkspaceFormProps = {
   suppressStopsRouteConfidence?: boolean;
 };
 
+function EquipmentTempChip({
+  trailerType,
+  equipmentType,
+  temperatureRequirement,
+}: {
+  trailerType: string;
+  equipmentType: string;
+  temperatureRequirement: string;
+}) {
+  const equip = trailerType.trim() || equipmentType.trim() || "Equipment";
+  const temp = temperatureRequirement.trim();
+  return (
+    <span className="inline-flex max-w-full items-center gap-2 rounded-md border border-[var(--trk-accent)]/40 bg-[var(--trk-bg)] px-2.5 py-1.5">
+      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-[var(--trk-text-muted)]">
+        {equip}
+      </span>
+      <span
+        className={
+          temp
+            ? "text-lg font-bold leading-none tracking-tight text-[var(--trk-text)]"
+            : "text-xs font-semibold text-[var(--trk-text-muted)]"
+        }
+      >
+        {temp || "No temp set"}
+      </span>
+    </span>
+  );
+}
+
 export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
   const modeCreate = p.mode === "manual";
   const isIntake = p.mode === "intake";
@@ -472,9 +500,11 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
       {vis("Parties") && <section className={wsSectionCard} data-editable={editable("Parties")}>
         <div className={`${wsSectionHeader} py-3`}>
           <span className={wsSectionTitle}>Broker/Carrier</span>
-          <span className="rounded border border-[var(--trk-border)] bg-[var(--trk-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--trk-text-muted)]">
-            {formatEquipmentTempChip(p.trailerType, p.equipmentType, p.temperatureRequirement)}
-          </span>
+          <EquipmentTempChip
+            trailerType={p.trailerType}
+            equipmentType={p.equipmentType}
+            temperatureRequirement={p.temperatureRequirement}
+          />
         </div>
         <div className={wsSectionBody}>
         <div className={wsGrid2}>
