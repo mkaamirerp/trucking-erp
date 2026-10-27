@@ -11,7 +11,7 @@ import {
 import { isTenantAdmin } from "@/auth/roles";
 import { useMe } from "@/hooks/useMe";
 import { getTenantSlugFromHost } from "@/tenant";
-import { buildLoadsDirectoryRows } from "@/loadWorkspace/draftListPresentation";
+import { associatedTripDriverLabel, associatedTripNumber, buildLoadsDirectoryRows } from "@/loadWorkspace/draftListPresentation";
 import { formatRouteFromStops, firstPickupAppointmentDate } from "@/utils/loadStops";
 import { useOperationalRefresh } from "@/core/concurrency/useOperationalRefresh";
 import { OPS } from "@/routes";
@@ -103,14 +103,13 @@ export default function LoadsListPage() {
     const lines = [
       headers.join(","),
       ...loads.map((load) => {
-        const driver = load.driver ? `${load.driver.first_name} ${load.driver.last_name}`.trim() : "";
         return [
           esc(load.load_number ?? ""),
-          esc(load.trip_number?.trim() || ""),
+          esc(associatedTripNumber(load)),
           esc(formatRouteFromStops(load.stops)),
           esc(firstPickupAppointmentDate(load.stops) || ""),
           esc(load.status),
-          esc(driver),
+          esc(associatedTripDriverLabel(load)),
           load.rate != null ? String(load.rate) : "",
         ].join(",");
       }),

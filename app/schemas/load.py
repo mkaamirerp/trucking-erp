@@ -287,6 +287,11 @@ class LoadResponse(LoadBase):
     #: Open PLANNED TripLoad mirror (Issue I13); not the ACTIVE-only active_trip_id pointer.
     open_planned_trip_id: Optional[int] = None
     open_planned_trip_number: Optional[str] = None
+    #: GET enrichment from Trip.driver. Not a Load column.
+    open_planned_trip_driver_name: Optional[str] = None
+    #: GET enrichment from an open ACTIVE TripLoad. Not copied onto loads.
+    active_membership_trip_number: Optional[str] = None
+    active_membership_driver_name: Optional[str] = None
     open_future_movement_plan_id: Optional[int] = None
     #: Rate-con parse raw text from commercial evidence (GET enrichment only).
     verification_extracted_text: Optional[str] = None

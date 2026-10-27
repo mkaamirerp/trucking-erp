@@ -89,6 +89,28 @@ function loadDriverLabel(load: Load): string {
   return load.driver ? `${load.driver.first_name} ${load.driver.last_name}`.trim() : "";
 }
 
+/** Trip number from Trip/TripLoad read model. Does not use Load assignment columns as a source of truth. */
+export function associatedTripNumber(load: Load): string {
+  const activeMembership = (load.active_membership_trip_number ?? "").trim();
+  const storedActive = (load.trip_number ?? "").trim();
+  const planned = (load.open_planned_trip_number ?? "").trim();
+  if (load.active_trip_id != null) {
+    return activeMembership || storedActive;
+  }
+  if (activeMembership) return activeMembership;
+  if (planned) return planned;
+  return storedActive;
+}
+
+/** Driver on the Trip shown by associatedTripNumber. Blank when the load has no trip. */
+export function associatedTripDriverLabel(load: Load): string {
+  if (!associatedTripNumber(load)) return "";
+  if (load.active_trip_id != null || (load.active_membership_trip_number ?? "").trim()) {
+    return (load.active_membership_driver_name ?? "").trim() || loadDriverLabel(load);
+  }
+  return (load.open_planned_trip_driver_name ?? "").trim();
+}
+
 export function loadToDirectoryRow(load: Load): LoadsDirectoryRow {
   const loadNumber = (load.load_number ?? "").trim() || "—";
   const brokerRef = (load.broker_load_reference ?? "").trim();
@@ -97,7 +119,7 @@ export function loadToDirectoryRow(load: Load): LoadsDirectoryRow {
     kind: "load",
     loadId: load.id,
     loadNumber: load.status === "draft" && loadNumber === "—" && brokerRef ? brokerRef : loadNumber,
-    tripNumber: load.trip_number?.trim() || "—",
+    tripNumber: associatedTripNumber(load) || "—",
     route: formatRouteFromStops(load.stops ?? []),
     pickup: firstPickupAppointmentDate(load.stops) || "—",
     status: load.status,
@@ -108,10 +130,17 @@ export function loadToDirectoryRow(load: Load): LoadsDirectoryRow {
       open_future_movement_plan_id: load.open_future_movement_plan_id,
       custody_owner: load.custody_owner,
     },
-    driver: loadDriverLabel(load) || "—",
+    driver: associatedTripDriverLabel(load) || "—",
     rateDisplay: load.rate != null ? String(load.rate) : "—",
     updatedAt: load.updated_at ?? load.created_at ?? new Date(0).toISOString(),
-    searchBlob: [loadNumber, brokerRef, load.trip_number, load.broker_load_reference, load.commodity]
+    searchBlob: [
+      loadNumber,
+      brokerRef,
+      associatedTripNumber(load),
+      associatedTripDriverLabel(load),
+      load.broker_load_reference,
+      load.commodity,
+    ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase(),

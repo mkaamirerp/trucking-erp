@@ -68,6 +68,7 @@ import {
   draftRateConfirmationPdfDownloadPath,
   loadRateConfirmationPdfDownloadPath,
 } from "@/loadWorkspace/RateConfirmationPdfPanel";
+import { associatedTripNumber } from "@/loadWorkspace/draftListPresentation";
 import {
   baselineSignatureFromLoad,
   buildLoadPersistPayload,
@@ -2566,8 +2567,8 @@ function LoadWorkspacePage() {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-[var(--trk-border)] bg-[var(--trk-bg)] px-4 py-1.5 text-[11.5px] text-[var(--trk-text-muted)]">
             <span>
               <span className="font-medium text-[var(--trk-text)]">Trip</span>{" "}
-              {load.trip_number?.trim() ? (
-                <span className="font-mono">{load.trip_number.trim()}</span>
+              {associatedTripNumber(load) ? (
+                <span className="font-mono">{associatedTripNumber(load)}</span>
               ) : (
                 "No trip number"
               )}
@@ -2889,7 +2890,7 @@ function LoadWorkspacePage() {
               </summary>
               <div className="border-t border-[var(--trk-border)] px-3 py-3 text-xs">
                 <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ContextRow label="Trip number" value={load.trip_number?.trim() || "—"} mono />
+                  <ContextRow label="Trip number" value={associatedTripNumber(load) || "—"} mono />
                   <ContextRow label="Dispatch trip" value={hasActiveDispatchTrip ? "Linked" : "—"} />
                   <ContextRow label="Match method" value={load.broker_match_method?.replace(/_/g, " ") || "—"} />
                   <ContextRow label="Confidence tier" value={load.broker_match_confidence_tier || "—"} />

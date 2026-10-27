@@ -37,6 +37,7 @@ from app.constants.trip_dispatch import (
     TRIP_LOAD_STATUS_WITHIN_ACTIVE,
 )
 from app.models.broker import Broker, BrokerContact
+from app.models.driver import Driver
 from app.models.customs_broker import CustomsBroker, LoadCustomsSnapshot
 from app.models.load import Load, LoadNote, LoadStop, LoadStopAction
 from app.models.load_commercial_evidence import LoadCommercialEvidence
@@ -56,6 +57,7 @@ from app.services.future_movement_plans import tenant_has_fmp_schema
 from app.services.trips import (
     _fmpl_is_open_clause,
     _lock_load_for_membership,
+    _trip_load_is_open_active_clause,
     _trip_load_is_open_planned_clause,
     close_open_trip_load_memberships_for_commercial_cancel,
 )
@@ -776,33 +778,65 @@ def _dispatch_unassigned_pickup_order_clauses(pickup_subq):
     )
 
 
-async def _open_planned_trip_map(
-    db: AsyncSession, tenant_id: int, load_ids: list[int]
-) -> dict[int, tuple[int, str]]:
+def trip_driver_display_name(first_name: str | None, last_name: str | None) -> str | None:
+    """Read-model label for a Trip's driver. Does not write Load assignment columns."""
+    name = " ".join(part for part in ((first_name or "").strip(), (last_name or "").strip()) if part)
+    return name or None
+
+
+async def _open_membership_trip_map(
+    db: AsyncSession,
+    tenant_id: int,
+    load_ids: list[int],
+    membership_clause,
+) -> dict[int, tuple[int, str, str | None]]:
+    """Open TripLoad → (trip id, trip number, trip driver name). Read-only."""
     if not load_ids:
         return {}
     rows = (
         await db.execute(
-            select(TripLoad.load_id, Trip.id, Trip.trip_number)
+            select(
+                TripLoad.load_id,
+                Trip.id,
+                Trip.trip_number,
+                Driver.first_name,
+                Driver.last_name,
+            )
             .select_from(TripLoad)
             .join(
                 Trip,
                 and_(Trip.tenant_id == TripLoad.tenant_id, Trip.id == TripLoad.trip_id),
             )
+            .outerjoin(
+                Driver,
+                and_(Driver.tenant_id == Trip.tenant_id, Driver.id == Trip.driver_id),
+            )
             .where(
                 TripLoad.tenant_id == tenant_id,
                 TripLoad.load_id.in_(load_ids),
-                _trip_load_is_open_planned_clause(),
+                membership_clause,
             )
             .order_by(TripLoad.load_id.asc(), TripLoad.id.desc())
         )
     ).all()
-    out: dict[int, tuple[int, str]] = {}
-    for load_id, trip_id, trip_number in rows:
+    out: dict[int, tuple[int, str, str | None]] = {}
+    for load_id, trip_id, trip_number, first_name, last_name in rows:
         lid = int(load_id)
         if lid not in out:
-            out[lid] = (int(trip_id), str(trip_number or ""))
+            out[lid] = (
+                int(trip_id),
+                str(trip_number or ""),
+                trip_driver_display_name(first_name, last_name),
+            )
     return out
+
+
+async def _open_planned_trip_map(
+    db: AsyncSession, tenant_id: int, load_ids: list[int]
+) -> dict[int, tuple[int, str, str | None]]:
+    return await _open_membership_trip_map(
+        db, tenant_id, load_ids, _trip_load_is_open_planned_clause()
+    )
 
 
 async def _open_fmp_map(db: AsyncSession, tenant_id: int, load_ids: list[int]) -> dict[int, int]:
@@ -828,14 +862,21 @@ async def enrich_load_responses(
         return items
     load_ids = [int(r.id) for r in items]
     planned = await _open_planned_trip_map(db, tenant_id, load_ids)
+    active = await _open_membership_trip_map(
+        db, tenant_id, load_ids, _trip_load_is_open_active_clause()
+    )
     fmp = await _open_fmp_map(db, tenant_id, load_ids)
     enriched: list[LoadResponse] = []
     for resp in items:
         lid = int(resp.id)
         updates: dict[str, object] = {}
+        if lid in active:
+            updates["active_membership_trip_number"] = active[lid][1]
+            updates["active_membership_driver_name"] = active[lid][2]
         if lid in planned:
             updates["open_planned_trip_id"] = planned[lid][0]
             updates["open_planned_trip_number"] = planned[lid][1]
+            updates["open_planned_trip_driver_name"] = planned[lid][2]
         if lid in fmp:
             updates["open_future_movement_plan_id"] = fmp[lid]
         enriched.append(resp.model_copy(update=updates) if updates else resp)

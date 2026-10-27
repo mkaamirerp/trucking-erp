@@ -4424,6 +4424,11 @@ export type Load = {
   /** Open PLANNED TripLoad (Issue I13); not the ACTIVE-only active_trip_id mirror. */
   open_planned_trip_id?: number | null;
   open_planned_trip_number?: string | null;
+  /** GET enrichment from the planned Trip's driver. Not a Load column. */
+  open_planned_trip_driver_name?: string | null;
+  /** GET enrichment from an open active TripLoad. Not copied onto the Load. */
+  active_membership_trip_number?: string | null;
+  active_membership_driver_name?: string | null;
   /** Open §9A Future Movement Plan (pre-Trip); not a trip number. */
   open_future_movement_plan_id?: number | null;
   custody_owner?: string | null;
