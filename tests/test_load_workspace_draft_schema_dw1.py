@@ -553,7 +553,10 @@ def test_dw1c_is_dw1_pod_parent_and_tenant_heads_are_split() -> None:
     pod = script.get_revision(POD_DW1_REVISION)
     assert pod is not None
     assert pod.down_revision == DW1D_REVISION
-    assert set(script.get_heads()) == {POD_DW1_REVISION, "i14_load_pod_evidence_x5"}
+    assert set(script.get_heads()) == {
+        "s1_load_approved_snapshot_fmp",
+        "s1_load_approved_snapshot_x5",
+    }
 
 
 def test_integration_db_guard_rejects_demo() -> None:

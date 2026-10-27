@@ -10,9 +10,9 @@ from alembic.script import ScriptDirectory
 
 from scripts.tenant_revision_plan import (
     APPROVED_EQ01_HEADS,
+    APPROVED_S1_HEADS,
     DW1D, EQ01_FMP, EQ01_X5, FMP02, LN01_FMP, LN01_X5,
-    POD_DW1, POD_X5, RevisionPlanError, X5,
-    approved_eq01_heads_are_split,
+    POD_DW1, POD_X5, RevisionPlanError, S1_FMP, S1_X5, X5,
     assert_target_matches_history,
     fuel_test_migrate_target,
     migration_target_for_request,
@@ -28,8 +28,9 @@ def script() -> ScriptDirectory:
 
 
 def test_eq01_revisions_are_exactly_the_latest_pair(script: ScriptDirectory) -> None:
-    assert set(script.get_heads()) == APPROVED_EQ01_HEADS
-    assert approved_eq01_heads_are_split(script)
+    assert set(script.get_heads()) == APPROVED_S1_HEADS
+    assert script.get_revision(S1_FMP).down_revision == EQ01_FMP
+    assert script.get_revision(S1_X5).down_revision == EQ01_X5
     assert script.get_revision(EQ01_FMP).down_revision == LN01_FMP
     assert script.get_revision(EQ01_X5).down_revision == LN01_X5
 

@@ -15,6 +15,10 @@ EQ01_FMP = "eq01_equipment_attachments_fmp"
 EQ01_X5 = "eq01_equipment_attachments_x5"
 APPROVED_EQ01_HEADS = frozenset({EQ01_FMP, EQ01_X5})
 
+S1_FMP = "s1_load_approved_snapshot_fmp"
+S1_X5 = "s1_load_approved_snapshot_x5"
+APPROVED_S1_HEADS = frozenset({S1_FMP, S1_X5})
+
 POD_X5 = "i14_load_pod_evidence_x5"
 POD_DW1 = "i14_load_pod_evidence"
 APPROVED_POD_TARGETS = frozenset({POD_X5, POD_DW1})
@@ -151,9 +155,9 @@ def pod_dw1_direct_parent(script: ScriptDirectory) -> str:
 
 
 def approved_heads_are_split(script: ScriptDirectory) -> bool:
-    """Recognize only the two explicitly reviewed two-head migration layouts."""
+    """Recognize the reviewed two-head migration layouts. upgrade head stays refused."""
     heads = set(script.get_heads())
-    return heads in (APPROVED_SPLIT_HEADS, APPROVED_EQ01_HEADS)
+    return heads in (APPROVED_SPLIT_HEADS, APPROVED_EQ01_HEADS, APPROVED_S1_HEADS)
 
 
 def approved_eq01_heads_are_split(script: ScriptDirectory) -> bool:
@@ -174,7 +178,9 @@ def migration_target_for_request(
             raise RevisionPlanError(f"unexpected tenant heads: {sorted(heads)}")
         return "head"
 
-    if heads == APPROVED_EQ01_HEADS:
+    if heads == APPROVED_S1_HEADS:
+        allowed = APPROVED_S1_HEADS | APPROVED_EQ01_HEADS
+    elif heads == APPROVED_EQ01_HEADS:
         allowed = APPROVED_EQ01_HEADS
     elif heads == APPROVED_SPLIT_HEADS:
         allowed = APPROVED_SPLIT_HEADS
@@ -197,6 +203,11 @@ def migration_target_for_request(
 def fuel_test_migrate_target(script: ScriptDirectory, current: str | None) -> str:
     """Pinned Fuel integration DB target: keep branch isolation, never use head."""
     heads = set(script.get_heads())
+    if current in APPROVED_S1_HEADS:
+        return current
+    if heads == APPROVED_S1_HEADS:
+        # Fuel fixtures do not need the commercial snapshot table.
+        heads = APPROVED_EQ01_HEADS
     if heads == APPROVED_EQ01_HEADS:
         if current in APPROVED_EQ01_HEADS:
             return current
@@ -230,6 +241,23 @@ def fuel_test_migrate_target(script: ScriptDirectory, current: str | None) -> st
 
 def assert_target_matches_history(script: ScriptDirectory, current: str | None, target: str) -> list[str]:
     """Return the upgrade plan or raise RevisionPlanError."""
+    if current in APPROVED_S1_HEADS and target in APPROVED_S1_HEADS and current != target:
+        raise RevisionPlanError(
+            f"database is already at {current}; refusing a second S1 revision"
+        )
+    if target in APPROVED_S1_HEADS and current == target:
+        return []
+    if target == S1_FMP:
+        if current is None or not on_fmp_line(script, current):
+            raise RevisionPlanError(
+                f"{S1_FMP} requires established FMP lineage; current is {current}"
+            )
+    if target == S1_X5:
+        if current is not None and current != X5 and POD_X5 not in ancestor_revisions(script, current):
+            raise RevisionPlanError(
+                f"{S1_X5} requires x5/POD-x5 lineage; current is {current}"
+            )
+
     if current in APPROVED_EQ01_HEADS and target in APPROVED_EQ01_HEADS and current != target:
         raise RevisionPlanError(
             f"database is already at {current}; refusing a second EQ01 revision"
@@ -311,6 +339,23 @@ def assert_target_matches_history(script: ScriptDirectory, current: str | None, 
 
     if target in APPROVED_POD_TARGETS:
         assert_pod_plan_safe(plan, current=current, target=target)
+    if target in APPROVED_S1_HEADS:
+        if target == S1_FMP and any(rev in {POD_X5, LN01_X5, EQ01_X5, S1_X5} for rev in plan):
+            raise RevisionPlanError("FMP S1 plan crosses into the x5 branch")
+        if target == S1_X5 and any(
+            rev == POD_DW1
+            or rev == LN01_FMP
+            or rev == EQ01_FMP
+            or rev == S1_FMP
+            or rev == FMP02
+            or rev.startswith("dw0")
+            or rev.startswith("dw1")
+            for rev in plan
+        ):
+            raise RevisionPlanError("x5 S1 plan crosses into the FMP/DW-1 branch")
+        s1_steps = [rev for rev in plan if rev in APPROVED_S1_HEADS]
+        if len(s1_steps) != 1 or s1_steps[0] != target or plan[-1] != target:
+            raise RevisionPlanError("S1 plan must install exactly its own branch-specific revision")
     if target in APPROVED_EQ01_HEADS:
         # Also forbid replaying either POD/ln01 branch's duplicate DDL.
         if target == EQ01_FMP and any(rev in {POD_X5, LN01_X5, EQ01_X5} for rev in plan):

@@ -41,7 +41,7 @@ def _heads(script: ScriptDirectory) -> set[str]:
 
 
 def test_approved_heads_are_exactly_the_eq01_pair_on_top_of_ln01(script: ScriptDirectory) -> None:
-    assert _heads(script) == {EQ01_FMP, EQ01_X5}
+    assert _heads(script) == {"s1_load_approved_snapshot_fmp", "s1_load_approved_snapshot_x5"}
     assert script.get_revision(EQ01_FMP).down_revision == LN01_FMP
     assert script.get_revision(EQ01_X5).down_revision == LN01_X5
 

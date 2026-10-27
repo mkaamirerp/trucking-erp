@@ -46,6 +46,11 @@ from app.models.trip import Trip, TripLoad
 from app.core.concurrency.conflicts import load_version_conflict_exception
 from app.schemas.load import LoadCreate, LoadResponse, LoadUpdate, LoadStopCreate, ALLOWED_STATUSES
 from app.services.future_movement_plans import load_has_open_future_movement_plan
+from app.services.load_approved_commercial_snapshot import (
+    CLAIM_NONE,
+    SOURCE_DIRECT,
+    insert_creation_snapshot_uncommitted,
+)
 from app.services.load_numbering import mint_next_load_number
 from app.services.load_workspace_draft_storage import (
     LoadWorkspaceDraftStorageError,
@@ -614,6 +619,17 @@ async def create_load(
     out = await get_load(db, tenant_id, int(load.id))
     if out is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after create")
+
+    await insert_creation_snapshot_uncommitted(
+        db,
+        out,
+        creation_source=SOURCE_DIRECT,
+        dispatcher_review_claim=CLAIM_NONE,
+        created_by_platform_user_id=None,
+        evidence=None,
+        workspace_draft_id=None,
+        accepted_parse_pdf_sha256=None,
+    )
 
     corr = request_id
     await _write_load_audit(
