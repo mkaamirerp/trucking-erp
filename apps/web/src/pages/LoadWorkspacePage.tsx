@@ -78,6 +78,7 @@ import {
   workspaceFieldsFromLoadPersistParams,
   type WorkspaceDraftFields,
   buildVerificationTabIndexMap,
+  docFocusForMoneyField,
   findBestDocLineIndex,
   type DocFocusOpts,
   type LoadPersistParams,
@@ -269,7 +270,7 @@ function ReferenceTextRail({
   activeDocLine: number | null;
 }) {
   return (
-    <div className="flex min-h-0 max-h-[200px] flex-col bg-[var(--trk-surface)]">
+    <div data-doc-rail className="flex min-h-[180px] max-h-[min(36vh,320px)] flex-col bg-[var(--trk-surface)]">
       <div className="shrink-0 border-b border-[var(--trk-border)] px-3 py-2">
         <span className={wsSectionTitle}>{title}</span>
         <p className="mt-1 text-[11px] leading-snug text-[var(--trk-text-muted)]">{hint}</p>
@@ -285,8 +286,11 @@ function ReferenceTextRail({
                 ref={(el) => {
                   docLineRefs.current.set(i, el);
                 }}
-                className="whitespace-pre-wrap break-words rounded px-1 py-0.5"
-                style={activeDocLine === i ? { background: "rgba(245,166,35,0.2)" } : undefined}
+                className={`whitespace-pre-wrap break-words rounded px-1 py-0.5 ${
+                  activeDocLine === i
+                    ? "bg-[rgba(245,158,11,0.35)] font-semibold text-[var(--trk-heading)] ring-1 ring-[var(--trk-heading)]/70"
+                    : ""
+                }`}
               >
                 {line || " "}
               </div>
@@ -691,6 +695,7 @@ function LoadWorkspacePage() {
       requestAnimationFrame(() => {
         const lineEl = docLineRefs.current.get(bestIdx);
         const scrollEl = docScrollRef.current;
+        scrollEl?.closest("[data-doc-rail]")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
         if (!lineEl) return;
         if (scrollEl) {
           const lineRect = lineEl.getBoundingClientRect();
@@ -709,6 +714,15 @@ function LoadWorkspacePage() {
     },
     [docLines],
   );
+
+  const rateDocFocusKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const textKey = `${load?.id ?? "new"}:${workspaceReferenceText.length}`;
+    if (!rate.trim() || docLines.length === 0) return;
+    if (rateDocFocusKeyRef.current === textKey) return;
+    rateDocFocusKeyRef.current = textKey;
+    focusDoc(docFocusForMoneyField(rate, "linehaul"));
+  }, [load?.id, workspaceReferenceText, docLines, rate, focusDoc]);
 
   const hydrateFromWorkspaceFields = useCallback((fields: WorkspaceDraftFields) => {
     setStatus(fields.status);
@@ -849,6 +863,8 @@ function LoadWorkspacePage() {
     setPalletCaseCount(l.pallet_case_count ?? "");
     setRate(l.rate != null ? String(l.rate) : "");
     setCustomerRate(l.customer_rate != null ? String(l.customer_rate) : "");
+    const extracted = (l.verification_extracted_text ?? "").trim();
+    if (extracted) setWorkspaceReferenceText(extracted);
     setMiles(l.miles != null ? String(l.miles) : "");
     setDriverId(l.driver_id ?? null);
     setTruckId(l.truck_id ?? null);

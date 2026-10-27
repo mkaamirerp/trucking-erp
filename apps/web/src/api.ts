@@ -4413,6 +4413,8 @@ export type Load = {
   internal_notes?: string | null;
   rate?: number | null;
   customer_rate?: number | null;
+  /** GET enrichment: rate-con parse raw text from commercial evidence. */
+  verification_extracted_text?: string | null;
   /** GET enrichment from promotion-origin workspace draft_json. */
   parse_manual_override_keys?: string[];
   miles?: number | null;
