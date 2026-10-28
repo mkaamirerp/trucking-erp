@@ -560,12 +560,12 @@ def _stops_conflict(saved: Any, revised: Any) -> bool:
     """
     if _stop_type(saved) != _stop_type(revised):
         return True
+    if _stops_share_specific_id(saved, revised):
+        return False
     for key in ("street", "facility_name", "reference_number"):
         left, right = _stop_token(saved, key), _stop_token(revised, key)
         if left and right and left != right:
             return True
-    if _stops_share_specific_id(saved, revised):
-        return False
     for key in ("city", "state_or_province"):
         left, right = _stop_token(saved, key), _stop_token(revised, key)
         if left and right and left != right:
@@ -660,6 +660,8 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
         "commodity": "Commodity",
     }
     for field in _SCALAR_FIELDS:
+        if field == "customer_rate":
+            continue
         current = saved_extracted.get(field)
         updated = revised_extracted.get(field)
         if field not in saved_extracted and field not in revised_extracted:
@@ -1050,33 +1052,161 @@ def _money_review(field: str, current: Any, updated: Any) -> dict:
     }
 
 
-def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
-    """Keep comparison rows the model proposed when both JSON documents support them.
+_INCOMPLETE_EXTRACTION = "The revised extraction did not include this value. It was not treated as a deletion."
 
-    Invented values, unsupported paths, and ambiguous stops are not accepted changes.
-    A valid money difference the model missed or misstated remains an actionable proposal; never an automatic write.
-    """
-    saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
-    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
-    saved_stops = _stop_dicts(saved_extracted)
-    revised_stops = _stop_dicts(revised_extracted)
-    stop_pair = dict(_pair_stops(saved_stops, revised_stops)[0])
-    saved_refs = [item for item in (saved_extracted.get("references") or []) if isinstance(item, dict)]
-    revised_refs = [item for item in (revised_extracted.get("references") or []) if isinstance(item, dict)]
-    ref_pair = dict(_pair_references(saved_refs, revised_refs)[0])
+
+def _reparse_field_label(field: str) -> str:
     labels = {
         "rate": "Rate",
-        "customer_rate": "Customer rate",
         "broker_load_reference": "Broker load number",
         "broker_name_snapshot": "Broker",
         "temperature_requirement": "Temperature",
         "equipment_type": "Equipment",
         "commodity": "Commodity",
     }
+    if field in labels:
+        return labels[field]
+    indexed = _INDEXED_FIELD.match(field)
+    if indexed and indexed.group(1) == "stops" and indexed.group(3):
+        return f"Stop {int(indexed.group(2)) + 1} {indexed.group(3).replace('_', ' ')}"
+    if indexed and indexed.group(1) == "references":
+        return "Reference"
+    return field.replace("_", " ")
+
+
+def _supported_difference_row(field: str, current: Any, updated: Any, *, revised_present: bool) -> dict | None:
+    """One verified difference. A blank revised value is review-only, never a cleared field."""
+    if field == "customer_rate" or _blank(current):
+        return None
+    if not revised_present or _blank(updated):
+        if _blank(current):
+            return None
+        return {
+            "field": field,
+            "label": _reparse_field_label(field),
+            "current_value": current,
+            "revised_value": None,
+            "editable": False,
+            "explanation": _INCOMPLETE_EXTRACTION,
+        }
+    if reparse_values_equivalent(field, current, updated):
+        return None
+    if field == "rate":
+        return _money_review(field, current, updated)
+    return {
+        "field": field,
+        "label": _reparse_field_label(field),
+        "current_value": current,
+        "revised_value": updated,
+        "editable": field_is_editable(field),
+    }
+
+
+def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> list[dict]:
+    """Every supported difference between the two verified JSON documents."""
+    saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
     rows: list[dict] = []
-    seen: set[str] = set()
-    reviewed_stops: set[int] = set()
-    reviewed_refs: set[int] = set()
+    for field in _SCALAR_FIELDS:
+        if field == "customer_rate" or field not in saved_extracted:
+            continue
+        row = _supported_difference_row(
+            field,
+            saved_extracted.get(field),
+            revised_extracted.get(field),
+            revised_present=field in revised_extracted,
+        )
+        if row is not None:
+            rows.append(row)
+    saved_stops = _stop_dicts(saved_extracted)
+    revised_stops = _stop_dicts(revised_extracted)
+    pairs, unmatched_saved, unmatched_revised = _pair_stops(saved_stops, revised_stops)
+    for saved_index, revised_index in pairs:
+        saved_stop = saved_stops[saved_index]
+        revised_stop = revised_stops[revised_index]
+        for leaf in _STOP_FIELDS:
+            if leaf not in saved_stop:
+                continue
+            row = _supported_difference_row(
+                f"stops[{saved_index}].{leaf}",
+                saved_stop.get(leaf),
+                revised_stop.get(leaf),
+                revised_present=leaf in revised_stop,
+            )
+            if row is not None:
+                rows.append(row)
+    for index in unmatched_saved:
+        rows.append(
+            {
+                "field": f"stops.review.saved.{index}",
+                "label": "Stop",
+                "current_value": _stop_label(saved_stops[index]),
+                "revised_value": None,
+                "editable": False,
+                "explanation": "This stop could not be matched safely. No stop was changed.",
+            }
+        )
+    for index in unmatched_revised:
+        rows.append(
+            {
+                "field": f"stops.review.revised.{index}",
+                "label": "Stop",
+                "current_value": None,
+                "revised_value": _stop_label(revised_stops[index]),
+                "editable": False,
+                "explanation": "This stop could not be matched safely. No stop was changed.",
+            }
+        )
+    saved_refs = [item for item in (saved_extracted.get("references") or []) if isinstance(item, dict)]
+    revised_refs = [item for item in (revised_extracted.get("references") or []) if isinstance(item, dict)]
+    ref_pairs, open_saved, open_revised = _pair_references(saved_refs, revised_refs)
+    for saved_index, revised_index in ref_pairs:
+        row = _supported_difference_row(
+            f"references[{saved_index}].value",
+            saved_refs[saved_index].get("value"),
+            revised_refs[revised_index].get("value"),
+            revised_present="value" in revised_refs[revised_index],
+        )
+        if row is not None:
+            rows.append(row)
+    for index in open_saved:
+        rows.append(
+            {
+                "field": f"references.review.saved.{index}",
+                "label": "Reference",
+                "current_value": saved_refs[index].get("value"),
+                "revised_value": None,
+                "editable": False,
+                "explanation": "This reference could not be matched safely. No reference was changed.",
+            }
+        )
+    for index in open_revised:
+        rows.append(
+            {
+                "field": f"references.review.revised.{index}",
+                "label": "Reference",
+                "current_value": None,
+                "revised_value": revised_refs[index].get("value"),
+                "editable": False,
+                "explanation": "This reference could not be matched safely. No reference was changed.",
+            }
+        )
+    return rows
+
+
+def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
+    """Show every supported JSON difference. AI wording is kept only when the documents agree.
+
+    An omitted or invented proposal does not hide a real difference and does not write the load.
+    Customer rate is never proposed. Ambiguous stops stay review-only.
+    """
+    rows = _supported_reparse_differences(saved, revised)
+    by_field = {str(row["field"]): row for row in rows}
+    saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
+    saved_stops = _stop_dicts(saved_extracted)
+    revised_stops = _stop_dicts(revised_extracted)
+    stop_pair = dict(_pair_stops(saved_stops, revised_stops)[0])
 
     def document_values(field: str) -> tuple[str, Any, Any]:
         indexed = _INDEXED_FIELD.match(field)
@@ -1086,98 +1216,34 @@ def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, propos
             return "ok", saved_extracted.get(field), revised_extracted.get(field)
         name, index, child = indexed.group(1), int(indexed.group(2)), indexed.group(3)
         if name == "stops":
-            if index >= len(saved_stops) or child is None:
-                return "missing", None, None
-            if index not in stop_pair:
+            if index >= len(saved_stops) or index not in stop_pair or child is None:
                 return "ambiguous_stop", index, None
             revised_stop = revised_stops[stop_pair[index]]
             if child not in saved_stops[index] or child not in revised_stop:
                 return "missing", None, None
             return "ok", saved_stops[index].get(child), revised_stop.get(child)
-        if index >= len(saved_refs) or child is None:
-            return "missing", None, None
-        if index not in ref_pair:
-            return "ambiguous_ref", index, None
-        revised_ref = revised_refs[ref_pair[index]]
-        if child not in saved_refs[index] or child not in revised_ref:
-            return "missing", None, None
-        return "ok", saved_refs[index].get(child), revised_ref.get(child)
+        return "missing", None, None
 
     for item in proposed or []:
         if not isinstance(item, dict):
             continue
         field = _normalize_field_path(str(item.get("field") or ""))
-        if not field or field in seen or field == "customer_rate" or not _comparable_reparse_field(field):
+        if not field or field == "customer_rate" or not _comparable_reparse_field(field):
             continue
         kind, current, updated = document_values(field)
+        target = by_field.get(field)
         if kind == "ambiguous_stop":
-            index = int(current)
-            if index in reviewed_stops:
-                continue
-            reviewed_stops.add(index)
-            row = {
-                "field": f"stops.review.saved.{index}",
-                "label": "Stop",
-                "current_value": _stop_label(saved_stops[index]),
-                "revised_value": None,
-                "editable": False,
-            }
-            note = _comparison_label(item, "Stop")
-            if note:
-                row["explanation"] = note
-            rows.append(row)
+            target = by_field.get(f"stops.review.saved.{int(current)}")
+        if target is None or target.get("editable") is not True:
             continue
-        if kind == "ambiguous_ref":
-            index = int(current)
-            if index in reviewed_refs:
-                continue
-            reviewed_refs.add(index)
-            rows.append(
-                {
-                    "field": f"references.review.saved.{index}",
-                    "label": "Reference",
-                    "current_value": saved_refs[index].get("value"),
-                    "revised_value": None,
-                    "editable": False,
-                }
-            )
+        if _blank(updated) or not (
+            reparse_values_equivalent(field, item.get("current_value"), current)
+            and reparse_values_equivalent(field, item.get("revised_value"), updated)
+        ):
             continue
-        if kind != "ok" or _blank(current) or _blank(updated) or reparse_values_equivalent(field, current, updated):
-            continue
-        if field in {"rate", "customer_rate"} and not _valid_money_change(current, updated):
-            rows.append(_money_review(field, current, updated))
-            seen.add(field)
-            continue
-        supported = reparse_values_equivalent(field, item.get("current_value"), current) and reparse_values_equivalent(
-            field, item.get("revised_value"), updated
-        )
-        if not supported:
-            if field in {"rate", "customer_rate"}:
-                rows.append(_money_review(field, current, updated))
-                seen.add(field)
-            continue
-        seen.add(field)
-        fallback = labels.get(field, field.replace("_", " "))
-        row = {
-            "field": field,
-            "label": fallback,
-            "current_value": current,
-            "revised_value": updated,
-            "editable": field_is_editable(field),
-        }
-        note = _comparison_label(item, fallback)
+        note = _comparison_label(item, str(target.get("label") or ""))
         if note:
-            row["explanation"] = note
-        rows.append(row)
-
-    for field in ("rate",):
-        if field in seen or field not in saved_extracted or field not in revised_extracted:
-            continue
-        current, updated = saved_extracted.get(field), revised_extracted.get(field)
-        if _blank(current) or _blank(updated) or reparse_values_equivalent(field, current, updated):
-            continue
-        rows.append(_money_review(field, current, updated))
-        seen.add(field)
+            target["explanation"] = note
     return rows
 
 
