@@ -1873,6 +1873,11 @@ export type LoadReparseProposal = {
   changes: LoadReparseChange[];
   revised_parse: LoadDocumentParseResponse;
   integrity: string;
+  verdict: "strong" | "needs_confirmation" | "blocked" | string;
+  summary: string;
+  reasons?: string[];
+  acknowledgement_required?: boolean;
+  expires_at: number;
 };
 
 /** Suggest differences for a revised PDF. Does not change the load. */
@@ -1893,12 +1898,18 @@ export async function saveLoadReparse(
   revisedParse: LoadDocumentParseResponse,
   payload: LoadUpdatePayload,
   integrity: string,
+  expiresAt: number,
+  acknowledgementRequired: boolean,
+  acknowledgementReason: string,
 ) {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("payload", JSON.stringify(payload));
   fd.append("revised_parse", JSON.stringify(revisedParse));
   fd.append("integrity", integrity);
+  fd.append("expires_at", String(expiresAt));
+  fd.append("acknowledgement_required", acknowledgementRequired ? "true" : "false");
+  fd.append("acknowledgement_reason", acknowledgementReason);
   const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/rate-confirmation-reparse/save`, {
     method: "POST",
     body: fd,

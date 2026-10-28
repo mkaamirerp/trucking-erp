@@ -345,6 +345,500 @@ def field_is_editable(field: str) -> bool:
     return False
 
 
+def reparse_document_block_reason(revised: dict | None) -> str | None:
+    """Block a re-parse when the existing parser did not accept a usable rate confirmation.
+
+    ``document_type`` and ``classification_reasoning`` come from that parser. This does
+    not start another classifier.
+    """
+    document = revised if isinstance(revised, dict) else {}
+    context = document.get("context") if isinstance(document.get("context"), dict) else {}
+    doc_type = str(context.get("document_type") or "").strip().casefold()
+    reasoning = str(context.get("classification_reasoning") or "")
+    if doc_type == "rate_confirmation":
+        if _has_commercial_shipment_evidence(document.get("extracted")):
+            return None
+        return "This PDF does not contain enough shipment information to re-parse. No Load information has changed."
+    if doc_type == "invoice":
+        kind = "a fuel invoice" if any(word in reasoning.casefold() for word in ("fuel", "bvd")) else "an invoice"
+        return f"This appears to be {kind}, not a carrier rate confirmation. No Load information has changed."
+    if doc_type == "bol":
+        return "This appears to be a bill of lading, not a carrier rate confirmation. No Load information has changed."
+    if doc_type == "driver_information_sheet":
+        return "This appears to be a driver information sheet, not a carrier rate confirmation. No Load information has changed."
+    if not doc_type:
+        return "This PDF could not be classified as a carrier rate confirmation. No Load information has changed."
+    return "This PDF is not a carrier rate confirmation. No Load information has changed."
+
+
+def known_pdf_reuse_message(evidence: Any, pdf_bytes: bytes) -> str | None:
+    """Tell the dispatcher when this exact file was already accepted. Does not call a model."""
+    import hashlib
+
+    digest = hashlib.sha256(pdf_bytes).hexdigest()
+    original = str(getattr(evidence, "file_sha256", "") or "").strip().lower()
+    records = revised_pdf_records(getattr(evidence, "accepted_parse_json", None))
+    revised_digests = [str(item.get("sha256") or "").strip().lower() for item in records]
+    revised_digests = [item for item in revised_digests if item]
+    if digest == original or (revised_digests and digest == revised_digests[-1]):
+        return "This PDF is already on the Load."
+    if digest in revised_digests:
+        return "This is a previously accepted version, not a new revision."
+    return None
+
+
+def _has_commercial_shipment_evidence(extracted: Any) -> bool:
+    if not isinstance(extracted, dict):
+        return False
+    if str(extracted.get("broker_name_snapshot") or "").strip():
+        return True
+    if str(extracted.get("broker_load_reference") or "").strip():
+        return True
+    pickups = [stop for stop in _stop_dicts(extracted) if _stop_type(stop) == "pickup" and _norm_place(_read(stop, "city"))]
+    deliveries = [stop for stop in _stop_dicts(extracted) if _stop_type(stop) == "delivery" and _norm_place(_read(stop, "city"))]
+    return bool(pickups and deliveries)
+
+
+def _stop_dicts(extracted: Any) -> list[dict]:
+    if not isinstance(extracted, dict):
+        return []
+    stops = extracted.get("stops")
+    if not isinstance(stops, list):
+        return []
+    return [stop for stop in stops if isinstance(stop, dict)]
+
+
+def _stop_type(stop: Any) -> str:
+    return str(_read(stop, "stop_type") or "").strip().casefold()
+
+
+def _norm_place(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+
+def _norm_ref(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip()).casefold()
+
+
+def _norm_date(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return text.casefold()
+
+
+def _norm_time(value: Any) -> str:
+    text = re.sub(r"\s+", "", str(value or "").strip().casefold()).replace(".", "")
+    matched = re.match(r"^0*(\d{1,2}):(\d{2})(?::\d{2})?(am|pm)?$", text)
+    if not matched:
+        return text
+    return f"{int(matched.group(1))}:{matched.group(2)}{matched.group(3) or ''}"
+
+
+def _blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def reparse_values_equivalent(field: str, left: Any, right: Any) -> bool:
+    """Field-aware equality for re-parse differences. Leading zeros in references stay significant."""
+    if _blank(left) and _blank(right):
+        return True
+    if _blank(left) or _blank(right):
+        return False
+    leaf = field.rsplit(".", 1)[-1]
+    if field == "broker_load_reference" or leaf in {"value", "broker_load_reference", "reference_number"}:
+        return _norm_ref(left) == _norm_ref(right)
+    if leaf == "appointment_date":
+        return _norm_date(left) == _norm_date(right)
+    if leaf == "appointment_time_text":
+        return _norm_time(left) == _norm_time(right)
+    if leaf in {"street", "city", "state_or_province", "facility_name", "country"}:
+        return _norm_place(left) == _norm_place(right)
+    if field in {"rate", "customer_rate"} or leaf in {"rate", "customer_rate", "estimated_weight", "miles", "pallet_case_count"}:
+        left_num = _decimal_or_none(left)
+        right_num = _decimal_or_none(right)
+        if left_num is not None and right_num is not None:
+            return left_num == right_num
+    return str(left).strip() == str(right).strip()
+
+
+def _money_text(value: Any) -> str:
+    number = _decimal_or_none(value)
+    if number is None:
+        return str(value)
+    if number == number.to_integral():
+        return f"${int(number):,}"
+    return f"${number:,.2f}"
+
+
+def _party_name(value: Any) -> str:
+    parts = [part for part in _norm_place(value).split() if part not in {"inc", "llc", "ltd", "co", "company", "corp", "corporation"}]
+    return " ".join(parts)
+
+
+def _names_match(left: Any, right: Any) -> bool:
+    a, b = _party_name(left), _party_name(right)
+    if not a or not b:
+        return False
+    return a == b or a.startswith(b + " ") or b.startswith(a + " ")
+
+
+def _first_stop(extracted: Any, stop_type: str) -> dict | None:
+    for stop in _stop_dicts(extracted):
+        if _stop_type(stop) == stop_type:
+            return stop
+    return None
+
+
+def _document_dates(document: dict) -> str:
+    extracted = document.get("extracted") if isinstance(document.get("extracted"), dict) else {}
+    context = document.get("context") if isinstance(document.get("context"), dict) else {}
+    for source in (extracted, context):
+        for key in ("issue_date", "document_date", "revised_date", "confirmation_date", "rate_confirmation_date"):
+            found = _norm_date(source.get(key))
+            if found:
+                return found
+    return ""
+
+
+def _pair_stops(saved_stops: list[dict], revised_stops: list[dict]) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    """Pair stops without treating array position as identity. Ambiguous stops stay unpaired."""
+    pairs: list[tuple[int, int]] = []
+    used_saved: set[int] = set()
+    used_revised: set[int] = set()
+
+    def claim(saved_index: int, revised_index: int) -> None:
+        used_saved.add(saved_index)
+        used_revised.add(revised_index)
+        pairs.append((saved_index, revised_index))
+
+    for saved_index, saved in enumerate(saved_stops):
+        hits = [
+            index
+            for index, revised in enumerate(revised_stops)
+            if index not in used_revised
+            and _stop_type(saved) == _stop_type(revised)
+            and _norm_place(_read(saved, "city"))
+            and _norm_place(_read(saved, "city")) == _norm_place(_read(revised, "city"))
+            and _norm_place(_read(saved, "state_or_province")) == _norm_place(_read(revised, "state_or_province"))
+        ]
+        if len(hits) == 1:
+            claim(saved_index, hits[0])
+    for stop_type in ("pickup", "delivery", "drop", "other"):
+        saved_left = [index for index, stop in enumerate(saved_stops) if index not in used_saved and _stop_type(stop) == stop_type]
+        revised_left = [index for index, stop in enumerate(revised_stops) if index not in used_revised and _stop_type(stop) == stop_type]
+        if len(saved_left) == 1 and len(revised_left) == 1:
+            claim(saved_left[0], revised_left[0])
+    return pairs, [index for index in range(len(saved_stops)) if index not in used_saved], [index for index in range(len(revised_stops)) if index not in used_revised]
+
+
+def _stop_label(stop: dict) -> str:
+    city = str(_read(stop, "city") or "").strip()
+    state = str(_read(stop, "state_or_province") or "").strip()
+    place = ", ".join(part for part in (city, state) if part)
+    kind = str(_read(stop, "stop_type") or "stop").strip()
+    return f"{kind} {place}".strip()
+
+
+def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> list[dict]:
+    """Differences between the two extracted JSON documents, independent of the comparison model."""
+    saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
+    changes: list[dict] = []
+    labels = {
+        "rate": "Rate",
+        "customer_rate": "Customer rate",
+        "broker_load_reference": "Broker load number",
+        "broker_name_snapshot": "Broker",
+        "temperature_requirement": "Temperature",
+        "equipment_type": "Equipment",
+        "commodity": "Commodity",
+    }
+    for field in _SCALAR_FIELDS:
+        current = saved_extracted.get(field)
+        updated = revised_extracted.get(field)
+        if field not in saved_extracted and field not in revised_extracted:
+            continue
+        if reparse_values_equivalent(field, current, updated):
+            continue
+        changes.append(
+            {
+                "field": field,
+                "label": labels.get(field, field.replace("_", " ")),
+                "current_value": None if field not in saved_extracted else current,
+                "revised_value": None if field not in revised_extracted else updated,
+                "editable": True,
+            }
+        )
+    saved_stops = _stop_dicts(saved_extracted)
+    revised_stops = _stop_dicts(revised_extracted)
+    pairs, unmatched_saved, unmatched_revised = _pair_stops(saved_stops, revised_stops)
+    for saved_index, revised_index in pairs:
+        for leaf in _STOP_FIELDS:
+            field = f"stops[{saved_index}].{leaf}"
+            current = saved_stops[saved_index].get(leaf)
+            updated = revised_stops[revised_index].get(leaf)
+            if leaf not in saved_stops[saved_index] and leaf not in revised_stops[revised_index]:
+                continue
+            if reparse_values_equivalent(field, current, updated):
+                continue
+            changes.append(
+                {
+                    "field": field,
+                    "label": f"Stop {saved_index + 1} {leaf.replace('_', ' ')}",
+                    "current_value": current,
+                    "revised_value": updated,
+                    "editable": True,
+                }
+            )
+    for index in unmatched_saved:
+        changes.append(
+            {
+                "field": f"stops.review.saved.{index}",
+                "label": "Stop",
+                "current_value": _stop_label(saved_stops[index]),
+                "revised_value": None,
+                "editable": False,
+            }
+        )
+    for index in unmatched_revised:
+        changes.append(
+            {
+                "field": f"stops.review.revised.{index}",
+                "label": "Stop",
+                "current_value": None,
+                "revised_value": _stop_label(revised_stops[index]),
+                "editable": False,
+            }
+        )
+    saved_refs = [item for item in (saved_extracted.get("references") or []) if isinstance(item, dict)]
+    revised_refs = [item for item in (revised_extracted.get("references") or []) if isinstance(item, dict)]
+    pairs_refs, open_saved, open_revised = _pair_references(saved_refs, revised_refs)
+    for saved_index, revised_index in pairs_refs:
+        if reparse_values_equivalent("references.value", saved_refs[saved_index].get("value"), revised_refs[revised_index].get("value")):
+            continue
+        changes.append(
+            {
+                "field": f"references[{saved_index}].value",
+                "label": "Reference",
+                "current_value": saved_refs[saved_index].get("value"),
+                "revised_value": revised_refs[revised_index].get("value"),
+                "editable": True,
+            }
+        )
+    for index in open_saved:
+        changes.append(
+            {
+                "field": f"references.review.saved.{index}",
+                "label": "Reference",
+                "current_value": saved_refs[index].get("value"),
+                "revised_value": None,
+                "editable": False,
+            }
+        )
+    for index in open_revised:
+        changes.append(
+            {
+                "field": f"references.review.revised.{index}",
+                "label": "Reference",
+                "current_value": None,
+                "revised_value": revised_refs[index].get("value"),
+                "editable": False,
+            }
+        )
+    return changes
+
+
+def _pair_references(saved_refs: list[dict], revised_refs: list[dict]) -> tuple[list[tuple[int, int]], list[int], list[int]]:
+    pairs: list[tuple[int, int]] = []
+    used_saved: set[int] = set()
+    used_revised: set[int] = set()
+    for saved_index, saved in enumerate(saved_refs):
+        hits = [
+            index
+            for index, revised in enumerate(revised_refs)
+            if index not in used_revised and _norm_ref(saved.get("kind")) == _norm_ref(revised.get("kind")) and _norm_ref(saved.get("value")) == _norm_ref(revised.get("value"))
+        ]
+        if len(hits) == 1:
+            used_saved.add(saved_index)
+            used_revised.add(hits[0])
+            pairs.append((saved_index, hits[0]))
+    saved_left = [index for index in range(len(saved_refs)) if index not in used_saved]
+    revised_left = [index for index in range(len(revised_refs)) if index not in used_revised]
+    for kind in {str(saved_refs[index].get("kind") or "") for index in saved_left}:
+        saved_kind = [index for index in saved_left if str(saved_refs[index].get("kind") or "") == kind]
+        revised_kind = [index for index in revised_left if str(revised_refs[index].get("kind") or "") == kind]
+        if len(saved_kind) == 1 and len(revised_kind) == 1:
+            pairs.append((saved_kind[0], revised_kind[0]))
+            used_saved.add(saved_kind[0])
+            used_revised.add(revised_kind[0])
+    return (
+        pairs,
+        [index for index in range(len(saved_refs)) if index not in used_saved],
+        [index for index in range(len(revised_refs)) if index not in used_revised],
+    )
+
+
+def align_replacement_to_form(replacement: dict, form: Any) -> dict:
+    """Line revised stops up with the form before reconcile, so hidden stop data stays with that stop."""
+    out = copy.deepcopy(replacement) if isinstance(replacement, dict) else {}
+    extracted = out.get("extracted")
+    if not isinstance(extracted, dict):
+        return out
+    form_stops = list(_read(form, "stops") or [])
+    revised_stops = _stop_dicts(extracted)
+    pairs, _unmatched_saved, _unmatched_revised = _pair_stops(
+        [
+            {
+                "stop_type": _read(stop, "stop_type"),
+                "city": _read(stop, "city"),
+                "state_or_province": _read(stop, "state_or_province"),
+            }
+            for stop in form_stops
+        ],
+        revised_stops,
+    )
+    by_form = {saved_index: revised_stops[revised_index] for saved_index, revised_index in pairs}
+    extracted["stops"] = [copy.deepcopy(by_form.get(index, {})) for index in range(len(form_stops))]
+    return out
+
+
+def preserve_matched_reference_extras(verified: dict, revised: dict) -> None:
+    """Keep unmapped reference keys when a revised reference safely matches one on the form."""
+    verified_extracted = verified.get("extracted") if isinstance(verified.get("extracted"), dict) else None
+    revised_extracted = revised.get("extracted") if isinstance(revised.get("extracted"), dict) else None
+    if verified_extracted is None or revised_extracted is None:
+        return
+    current = [item for item in (verified_extracted.get("references") or []) if isinstance(item, dict)]
+    previous = [item for item in (revised_extracted.get("references") or []) if isinstance(item, dict)]
+    pairs, _open_saved, _open_revised = _pair_references(current, previous)
+    for current_index, previous_index in pairs:
+        for key, value in previous[previous_index].items():
+            if key in {"kind", "value"} or key in current[current_index]:
+                continue
+            current[current_index][key] = value
+    if current:
+        verified_extracted["references"] = current
+
+
+def assess_same_load(saved: dict | None, revised: dict | None) -> dict:
+    """Explain whether the revised extraction is the same shipment. No numeric score."""
+    saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
+    saved_broker = saved_extracted.get("broker_name_snapshot")
+    revised_broker = revised_extracted.get("broker_name_snapshot")
+    broker_match = _names_match(saved_broker, revised_broker)
+    broker_conflict = bool(_party_name(saved_broker) and _party_name(revised_broker) and not broker_match)
+    saved_ref = saved_extracted.get("broker_load_reference")
+    revised_ref = revised_extracted.get("broker_load_reference")
+    reference_match = not _blank(saved_ref) and reparse_values_equivalent("broker_load_reference", saved_ref, revised_ref)
+    reference_conflict = not _blank(saved_ref) and not _blank(revised_ref) and not reference_match
+    pickup_match, pickup_conflict = _place_relation(saved_extracted, revised_extracted, "pickup")
+    delivery_match, delivery_conflict = _place_relation(saved_extracted, revised_extracted, "delivery")
+    date_conflict = _date_conflict(saved_extracted, revised_extracted)
+    match_count = sum((broker_match, reference_match, pickup_match, delivery_match))
+    blocked = "Wrong document — broker and shipment details do not match this Load."
+    if broker_conflict and not (pickup_match and delivery_match):
+        return _identity_result("blocked", blocked, [blocked], False)
+    if broker_match and pickup_conflict and delivery_conflict:
+        return _identity_result("blocked", blocked, [blocked], False)
+    if match_count < 2:
+        insufficient = "Cannot confirm this PDF belongs to this Load. No Load information has changed."
+        return _identity_result("blocked", insufficient, [insufficient], False)
+    reasons: list[str] = []
+    summary = ""
+    if reference_conflict and broker_match and pickup_match and delivery_match:
+        summary = "Needs confirmation — PO changed, but broker, addresses and pickup dates match."
+        reasons.append(summary)
+    elif reference_conflict:
+        summary = "Needs confirmation — the broker load number changed and other shipment evidence is limited."
+        reasons.append(summary)
+    if date_conflict and not pickup_conflict and not delivery_conflict:
+        text = "Needs confirmation — the pickup appointment changed, but the broker and stops match."
+        summary = summary or text
+        reasons.append(text)
+    if (pickup_conflict or delivery_conflict) and not (pickup_conflict and delivery_conflict):
+        text = "Needs confirmation — a stop address changed, but other shipment details match."
+        summary = summary or text
+        reasons.append(text)
+    order = _revision_order(saved or {}, revised or {})
+    if order != "newer":
+        text = "Cannot confirm revision order — this may be an older rate confirmation."
+        summary = summary or text
+        reasons.append(text)
+    rate_note = _rate_change_note(saved_extracted, revised_extracted)
+    accounting = ""
+    if rate_note or reference_conflict:
+        accounting = "If this rate or broker load number was already invoiced or paid, accounting may need a separate review."
+        reasons.append(accounting)
+    if summary:
+        return _identity_result("needs_confirmation", summary, [item for item in reasons if item != summary], True)
+    broker_text = str(saved_broker or revised_broker or "The broker").strip()
+    ref_text = str(revised_ref or saved_ref or "").strip()
+    ref_bit = f", Load #{ref_text}" if ref_text else ""
+    strong = f"Strong match — {broker_text}{ref_bit}, pickup and delivery match."
+    if rate_note:
+        strong = f"{strong} {rate_note}"
+    extra = [accounting] if accounting else []
+    return _identity_result("strong", strong, extra, False)
+
+
+def _identity_result(verdict: str, summary: str, reasons: list[str], acknowledgement: bool) -> dict:
+    return {
+        "verdict": verdict,
+        "summary": summary,
+        "reasons": reasons,
+        "acknowledgement_required": acknowledgement,
+    }
+
+
+def _place_relation(saved: dict, revised: dict, stop_type: str) -> tuple[bool, bool]:
+    left = _first_stop(saved, stop_type)
+    right = _first_stop(revised, stop_type)
+    if left is None or right is None:
+        return False, False
+    same = _norm_place(_read(left, "city")) == _norm_place(_read(right, "city")) and _norm_place(
+        _read(left, "state_or_province")
+    ) == _norm_place(_read(right, "state_or_province"))
+    both_present = bool(_norm_place(_read(left, "city")) and _norm_place(_read(right, "city")))
+    return (same and both_present, both_present and not same)
+
+
+def _date_conflict(saved: dict, revised: dict) -> bool:
+    left = _first_stop(saved, "pickup")
+    right = _first_stop(revised, "pickup")
+    if left is None or right is None:
+        return False
+    saved_date = _norm_date(left.get("appointment_date"))
+    revised_date = _norm_date(right.get("appointment_date"))
+    if not saved_date or not revised_date:
+        return False
+    return saved_date != revised_date
+
+
+def _revision_order(saved: dict, revised: dict) -> str:
+    saved_date = _document_dates(saved)
+    revised_date = _document_dates(revised)
+    if not saved_date or not revised_date:
+        return "unknown"
+    if revised_date < saved_date:
+        return "older"
+    return "newer"
+
+
+def _rate_change_note(saved: dict, revised: dict) -> str:
+    if "rate" not in saved and "rate" not in revised:
+        return ""
+    if reparse_values_equivalent("rate", saved.get("rate"), revised.get("rate")):
+        return ""
+    return f"Rate changed from {_money_text(saved.get('rate'))} to {_money_text(revised.get('rate'))}."
+
+
 def ground_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
     """Keep a proposal only when the path exists on the revised extraction.
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import subprocess
+import time
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +28,7 @@ from app.services.load_document_parse_orchestrator import (
 from app.services.load_workspace_draft_document import (
     extracted_fields_in_draft,
     ground_reparse_changes,
+    parse_json_for_compare,
     reconcile_accepted_parse_json,
 )
 from app.services.load_workspace_draft_mapper import draft_json_to_load_create
@@ -247,15 +250,21 @@ def _revised_response() -> LoadDocumentParseResponse:
         {
             "document": {"filename": "revised.pdf"},
             "raw_text": "normalized revised text",
+            "context": {
+                "document_type": "rate_confirmation",
+                "classification_reasoning": "Broker rate confirmation with pickup and delivery.",
+                "document_date": "2026-02-02",
+            },
             "extracted": {
                 "rate": "2550",
+                "broker_name_snapshot": "Armstrong",
                 "broker_load_reference": "PO-200",
                 "temperature_requirement": "0",
                 "unmapped_note": "changed",
                 "references": [{"kind": "po", "value": "NEW"}],
                 "stops": [
-                    {"stop_type": "pickup", "sequence": 0, "city": "Boston"},
-                    {"stop_type": "delivery", "sequence": 1, "city": "Dallas"},
+                    {"stop_type": "pickup", "sequence": 0, "city": "Boston", "state_or_province": "MA"},
+                    {"stop_type": "delivery", "sequence": 1, "city": "Dallas", "state_or_province": "TX"},
                 ],
             },
         }
@@ -269,11 +278,15 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
         "_revised_pdf": {"storage_key": "old-revised"},
         "extracted": {
             "rate": "2500",
+            "broker_name_snapshot": "Armstrong",
             "broker_load_reference": "PO-100",
             "temperature_requirement": "34",
             "unmapped_note": "keep",
             "references": [{"kind": "po", "value": "OLD"}],
-            "stops": [{"city": "Chicago"}, {"city": "Dallas"}],
+            "stops": [
+                {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL"},
+                {"stop_type": "delivery", "city": "Dallas", "state_or_province": "TX"},
+            ],
         },
     }
     evidence = SimpleNamespace(accepted_parse_json=copy.deepcopy(saved))
@@ -302,6 +315,14 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
         }
 
     monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+
+    async def no_other_load(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.services.load_parser_duplicate_precheck.find_exact_pdf_duplicate_candidates",
+        no_other_load,
+    )
     monkeypatch.setattr(
         "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
         fake_parser,
@@ -327,6 +348,7 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
         "rate",
         "broker_load_reference",
         "stops[0].city",
+        "stops[0].state_or_province",
         "temperature_requirement",
         "references[0].value",
     }
@@ -355,21 +377,19 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
             "editable": False,
         }
     ]
-    verify_reparse_integrity(
-        tenant_id=1,
-        load_id=9,
-        pdf_bytes=b"%PDF-revised",
-        revised_parse=proposal["revised_parse"].model_dump(mode="json"),
-        token=proposal["integrity"],
-    )
+    verify_kwargs = {
+        "tenant_id": 1,
+        "load_id": 9,
+        "revised_parse": proposal["revised_parse"].model_dump(mode="json"),
+        "token": proposal["integrity"],
+        "baseline": parse_json_for_compare(saved),
+        "concurrency_version": 1,
+        "acknowledgement_required": proposal["acknowledgement_required"],
+        "expires_at": proposal["expires_at"],
+    }
+    verify_reparse_integrity(pdf_bytes=b"%PDF-revised", **verify_kwargs)
     with pytest.raises(LoadReparseError) as mismatched:
-        verify_reparse_integrity(
-            tenant_id=1,
-            load_id=9,
-            pdf_bytes=b"%PDF-other",
-            revised_parse=proposal["revised_parse"].model_dump(mode="json"),
-            token=proposal["integrity"],
-        )
+        verify_reparse_integrity(pdf_bytes=b"%PDF-other", **verify_kwargs)
     assert mismatched.value.status_code == 422
     assert db.writes == []
     assert evidence.accepted_parse_json == before
@@ -532,7 +552,20 @@ def test_reparse_routes_keep_existing_load_authorization() -> None:
 
 @pytest.mark.asyncio
 async def test_production_compare_call_passes_configured_key_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    evidence = SimpleNamespace(accepted_parse_json={"extracted": {"rate": "10"}})
+    evidence = SimpleNamespace(
+        accepted_parse_json={
+            "context": {"document_date": "2026-01-01"},
+            "extracted": {
+                "rate": "10",
+                "broker_name_snapshot": "Armstrong",
+                "broker_load_reference": "PO-200",
+                "stops": [
+                    {"stop_type": "pickup", "sequence": 0, "city": "Boston", "state_or_province": "MA"},
+                    {"stop_type": "delivery", "sequence": 1, "city": "Dallas", "state_or_province": "TX"},
+                ],
+            },
+        }
+    )
     seen: dict = {}
 
     async def fake_parser(*_args, **_kwargs):
@@ -543,6 +576,14 @@ async def test_production_compare_call_passes_configured_key_and_model(monkeypat
         return {"changes": []}
 
     monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+
+    async def no_other_load(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.services.load_parser_duplicate_precheck.find_exact_pdf_duplicate_candidates",
+        no_other_load,
+    )
     monkeypatch.setattr(
         "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
         fake_parser,
@@ -564,11 +605,29 @@ async def test_production_compare_call_passes_configured_key_and_model(monkeypat
     assert proposal["integrity"]
 
 
-def _signed_update(monkeypatch: pytest.MonkeyPatch, document: dict, pdf: bytes) -> tuple[LoadUpdate, str]:
+def _signed_update(
+    monkeypatch: pytest.MonkeyPatch,
+    document: dict,
+    pdf: bytes,
+    baseline: dict,
+    *,
+    acknowledgement_required: bool = False,
+    expires_at: int | None = None,
+) -> tuple[LoadUpdate, str, int]:
     monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
-    token = reparse_integrity_token(tenant_id=1, load_id=9, pdf_bytes=pdf, revised_parse=document)
+    expires = int(time.time()) + 600 if expires_at is None else expires_at
+    token = reparse_integrity_token(
+        tenant_id=1,
+        load_id=9,
+        pdf_bytes=pdf,
+        revised_parse=document,
+        baseline=baseline,
+        concurrency_version=3,
+        acknowledgement_required=acknowledgement_required,
+        expires_at=expires,
+    )
     payload = LoadUpdate(expected_concurrency_version=3, rate=Decimal("100.00"))
-    return payload, token
+    return payload, token, expires
 
 
 def _plain_load() -> SimpleNamespace:
@@ -592,8 +651,9 @@ async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pdf = b"%PDF-revised"
+    baseline = {"extracted": {"rate": "100.00", "broker_name_snapshot": "Armstrong"}}
     document = {"extracted": {"rate": "100.00"}, "raw_text": "revised"}
-    payload, token = _signed_update(monkeypatch, document, pdf)
+    payload, token, expires = _signed_update(monkeypatch, document, pdf, baseline)
     storage = _Storage()
     load = _plain_load()
 
@@ -604,6 +664,9 @@ async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
     monkeypatch.setattr("app.core.storage.get_storage", lambda: storage)
 
     class _RejectDb:
+        async def scalar(self, *_args, **_kwargs):
+            return SimpleNamespace(accepted_parse_json=baseline)
+
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("rejected save must not write")
 
@@ -618,6 +681,7 @@ async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
             revised_pdf_filename="bad.pdf",
             tenant_slug="demo",
             reparse_integrity=token,
+            reparse_expires_at=expires,
         )
     assert rejected.value.status_code == 422
     assert storage.saved == 0
@@ -637,7 +701,7 @@ async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
             self.calls.append("rollback")
 
         async def scalar(self, *_args, **_kwargs):
-            raise AssertionError("a version conflict must not replace the JSON")
+            return SimpleNamespace(accepted_parse_json=copy.deepcopy(baseline))
 
         async def commit(self):
             raise AssertionError("a version conflict must not commit")
@@ -659,6 +723,7 @@ async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
             revised_pdf_filename="revised.pdf",
             tenant_slug="demo",
             reparse_integrity=token,
+            reparse_expires_at=expires,
         )
     assert conflict.value.status_code == 409
     assert conflict_db.calls == ["execute", "rollback"]
@@ -698,23 +763,268 @@ async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
             self.rolled_back = True
 
     commit_db = _CommitDb()
+    _commit_payload, commit_token, commit_expires = _signed_update(monkeypatch, document, pdf, prior)
+
+    async def allow_audit(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(loads_service, "_write_load_audit", allow_audit)
     with pytest.raises(RuntimeError, match="commit failed"):
         await loads_service.update_load(
             commit_db,
             1,
             9,
-            payload,
+            _commit_payload,
             verified_parse=document,
             revised_pdf_bytes=pdf,
             revised_pdf_filename="revised.pdf",
             tenant_slug="demo",
-            reparse_integrity=token,
+            reparse_integrity=commit_token,
+            reparse_expires_at=commit_expires,
         )
     assert commit_db.rolled_back is True
     assert evidence.accepted_parse_json == prior
     assert evidence.storage_key == "original-key"
     assert storage.deleted == []
     assert load.rate == Decimal("100.00")
+
+
+def _shipment(broker: str, reference: str, pickup: tuple[str, str], delivery: tuple[str, str], **extra) -> dict:
+    extracted = {
+        "broker_name_snapshot": broker,
+        "broker_load_reference": reference,
+        "rate": extra.pop("rate", "1800"),
+        "customer_rate": extra.pop("customer_rate", "1800"),
+        "commodity": extra.pop("commodity", "Food"),
+        "equipment_type": extra.pop("equipment", "Reefer"),
+        "stops": [
+            {
+                "stop_type": "pickup",
+                "city": pickup[0],
+                "state_or_province": pickup[1],
+                "appointment_date": extra.pop("pickup_date", "2026-03-01"),
+                "appointment_time_text": extra.pop("pickup_time", "08:00"),
+                "facility_code": extra.pop("pickup_code", "PU-1"),
+            },
+            {
+                "stop_type": "delivery",
+                "city": delivery[0],
+                "state_or_province": delivery[1],
+                "facility_code": extra.pop("delivery_code", "DEL-1"),
+            },
+        ],
+        "references": extra.pop("references", [{"kind": "po", "value": reference, "source_label": "kept"}]),
+    }
+    extracted.update(extra)
+    return {
+        "context": {
+            "document_type": "rate_confirmation",
+            "classification_reasoning": "Carrier rate confirmation.",
+            "document_date": extra.pop("document_date", "2026-03-02") if False else "2026-03-02",
+        },
+        "extracted": extracted,
+    }
+
+
+def test_reparse_gates_cover_identity_classification_and_field_differences() -> None:
+    from app.services.load_workspace_draft_document import (
+        align_replacement_to_form,
+        assess_same_load,
+        deterministic_reparse_changes,
+        known_pdf_reuse_message,
+        preserve_matched_reference_extras,
+        reparse_document_block_reason,
+    )
+
+    armstrong = _shipment("Armstrong", "3872125-1", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800", customer_rate="1800")
+    armstrong["context"]["document_date"] = "2026-03-01"
+    revised = _shipment("Armstrong Transport", "3872125-1", ("Greensboro", "NC"), ("Dallas", "TX"), rate="2000", customer_rate="2000")
+    revised["context"]["document_date"] = "2026-03-05"
+    identity = assess_same_load(armstrong, revised)
+    assert identity["verdict"] == "strong"
+    assert identity["summary"] == "Strong match — Armstrong, Load #3872125-1, pickup and delivery match. Rate changed from $1,800 to $2,000."
+    omitted = deterministic_reparse_changes(armstrong, revised)
+    assert any(item["field"] == "rate" and Decimal(item["revised_value"]) == Decimal("2000") for item in omitted)
+    assert any(item["field"] == "customer_rate" for item in omitted)
+
+    original_again = SimpleNamespace(file_sha256=hashlib.sha256(b"%PDF-original").hexdigest(), accepted_parse_json={})
+    assert known_pdf_reuse_message(original_again, b"%PDF-original") == "This PDF is already on the Load."
+    older = SimpleNamespace(
+        file_sha256="original",
+        accepted_parse_json={
+            "_revised_pdfs": [
+                {"storage_key": "r1", "sha256": hashlib.sha256(b"%PDF-old").hexdigest(), "filename": "old.pdf"},
+                {"storage_key": "r2", "sha256": hashlib.sha256(b"%PDF-new").hexdigest(), "filename": "new.pdf"},
+            ]
+        },
+    )
+    assert known_pdf_reuse_message(older, b"%PDF-old") == "This is a previously accepted version, not a new revision."
+
+    tql = _shipment("TQL", "999", ("Chicago", "IL"), ("Miami", "FL"), rate="900")
+    wrong = assess_same_load(armstrong, tql)
+    assert wrong["verdict"] == "blocked"
+    assert wrong["summary"] == "Wrong document — broker and shipment details do not match this Load."
+
+    fuel = {"context": {"document_type": "invoice", "classification_reasoning": "BVD fuel invoice"}, "extracted": {}}
+    assert reparse_document_block_reason(fuel) == (
+        "This appears to be a fuel invoice, not a carrier rate confirmation. No Load information has changed."
+    )
+    assert reparse_document_block_reason({"context": {}, "extracted": {}}) == (
+        "This PDF could not be classified as a carrier rate confirmation. No Load information has changed."
+    )
+
+    po_change = _shipment("Armstrong", "PO-200", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800")
+    po_change["context"]["document_date"] = "2026-03-05"
+    po_saved = _shipment("Armstrong", "PO-100", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800")
+    po_saved["context"]["document_date"] = "2026-03-01"
+    po_identity = assess_same_load(po_saved, po_change)
+    assert po_identity["verdict"] == "needs_confirmation"
+    assert po_identity["summary"] == "Needs confirmation — PO changed, but broker, addresses and pickup dates match."
+    assert po_identity["acknowledgement_required"] is True
+
+    other_route = _shipment("Armstrong", "PO-100", ("Seattle", "WA"), ("Miami", "FL"), rate="1800")
+    blocked_route = assess_same_load(po_saved, other_route)
+    assert blocked_route["verdict"] == "blocked"
+
+    later_pickup = _shipment(
+        "Armstrong",
+        "3872125-1",
+        ("Greensboro", "NC"),
+        ("Dallas", "TX"),
+        rate="1800",
+        pickup_date="2026-03-04",
+        pickup_time="8:00 AM",
+    )
+    later_pickup["context"]["document_date"] = "2026-03-05"
+    date_identity = assess_same_load(armstrong, later_pickup)
+    assert date_identity["verdict"] == "needs_confirmation"
+    date_change = deterministic_reparse_changes(armstrong, later_pickup)
+    assert any(item["field"] == "stops[0].appointment_date" and item["editable"] is True for item in date_change)
+
+    zeros = _shipment("Armstrong", "00123", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800")
+    zeros["extracted"]["references"] = [{"kind": "po", "value": "00123"}]
+    plain = _shipment("Armstrong", "00123", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800")
+    plain["extracted"]["references"] = [{"kind": "po", "value": "123"}]
+    assert any(item["field"] == "references[0].value" and item["revised_value"] == "123" for item in deterministic_reparse_changes(zeros, plain))
+
+    reordered = _shipment("Armstrong", "3872125-1", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800")
+    reordered["extracted"]["stops"] = list(reversed(reordered["extracted"]["stops"]))
+    form = SimpleNamespace(
+        stops=[
+            SimpleNamespace(stop_type="pickup", city="Greensboro", state_or_province="NC"),
+            SimpleNamespace(stop_type="delivery", city="Dallas", state_or_province="TX"),
+        ]
+    )
+    aligned = align_replacement_to_form(reordered, form)
+    assert aligned["extracted"]["stops"][0]["facility_code"] == "PU-1"
+    assert aligned["extracted"]["stops"][1]["facility_code"] == "DEL-1"
+    inserted = copy.deepcopy(armstrong)
+    inserted["extracted"]["stops"].insert(1, {"stop_type": "pickup", "city": "Atlanta", "state_or_province": "GA", "facility_code": "EXTRA"})
+    review = deterministic_reparse_changes(armstrong, inserted)
+    assert any(item["editable"] is False and item["label"] == "Stop" for item in review)
+    kept = {"extracted": {"references": [{"kind": "po", "value": "00123"}]}}
+    preserve_matched_reference_extras(kept, {"extracted": {"references": [{"kind": "po", "value": "00123", "source_label": "kept"}]}})
+    assert kept["extracted"]["references"][0]["source_label"] == "kept"
+
+
+@pytest.mark.asyncio
+async def test_expired_token_and_unchanged_form_still_records_pdf_acceptance(monkeypatch: pytest.MonkeyPatch) -> None:
+    pdf = b"%PDF-same"
+    baseline = {"extracted": {"rate": "100.00"}}
+    document = {"extracted": {"rate": "100.00"}, "raw_text": "same"}
+    payload, token, _expires = _signed_update(monkeypatch, document, pdf, baseline, expires_at=int(time.time()) - 5)
+    evidence = SimpleNamespace(accepted_parse_json=copy.deepcopy(baseline), storage_key="original-key", file_sha256="sha", filename="a.pdf")
+
+    class _Db:
+        async def scalar(self, *_args, **_kwargs):
+            return evidence
+
+        async def execute(self, *_args, **_kwargs):
+            raise AssertionError("expired save must not write")
+
+    async def fake_get(*_args, **_kwargs):
+        return _plain_load()
+
+    monkeypatch.setattr(loads_service, "get_load", fake_get)
+    with pytest.raises(HTTPException) as expired:
+        await loads_service.update_load(
+            _Db(),
+            1,
+            9,
+            payload,
+            verified_parse=document,
+            revised_pdf_bytes=pdf,
+            reparse_integrity=token,
+            reparse_expires_at=int(time.time()) - 5,
+            tenant_slug="demo",
+        )
+    assert expired.value.status_code == 422
+    assert "expired" in str(expired.value.detail).casefold()
+
+    fresh_payload, fresh_token, fresh_expires = _signed_update(monkeypatch, document, pdf, baseline)
+    seen: dict = {}
+
+    async def record_audit(*_args, **kwargs):
+        seen["action"] = kwargs.get("action")
+        seen["context"] = kwargs.get("context_json")
+
+    class _Ok:
+        async def scalar(self, *_args, **_kwargs):
+            return evidence
+
+        async def execute(self, *_args, **_kwargs):
+            return SimpleNamespace(rowcount=1)
+
+        async def flush(self):
+            return None
+
+        async def refresh(self, *_args, **_kwargs):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            raise AssertionError("successful acceptance should commit")
+
+    monkeypatch.setattr(loads_service, "_write_load_audit", record_audit)
+    monkeypatch.setattr("app.core.storage.get_storage", lambda: _Storage())
+    load = _plain_load()
+    load.concurrency_version = 3
+    load.stops = []
+
+    async def get_ready(*_args, **_kwargs):
+        return load
+
+    monkeypatch.setattr(loads_service, "get_load", get_ready)
+    await loads_service.update_load(
+        _Ok(),
+        1,
+        9,
+        fresh_payload,
+        verified_parse=document,
+        revised_pdf_bytes=pdf,
+        revised_pdf_filename="same.pdf",
+        tenant_slug="demo",
+        reparse_integrity=fresh_token,
+        reparse_expires_at=fresh_expires,
+        actor_user_id=7,
+    )
+    assert seen["action"] == "load_reparse_pdf_accepted"
+    assert seen["context"]["revision_position"] == 1
+    assert seen["context"]["pdf_sha256"] == hashlib.sha256(pdf).hexdigest()
+    assert "app.services.payroll" not in (ROOT / "app/services/load_document_parse_orchestrator.py").read_text()
+    assert "app.routers.trips" not in (ROOT / "app/routers/loads.py").read_text()
+
+
+def test_local_rate_confirmation_fixtures_stay_out_of_a_second_classifier() -> None:
+    bvd = ROOT / "docs/fixtures/fuel/BVD_invoice_972201.pdf"
+    armstrong = ROOT / "docs/_review/fixtures/pdf/Armstrong.pdf"
+    assert bvd.is_file() and bvd.read_bytes().startswith(b"%PDF")
+    assert armstrong.is_file() and armstrong.read_bytes().startswith(b"%PDF")
+    page = (ROOT / "app/services/load_document_parse_orchestrator.py").read_text()
+    assert "openai_chat_json_schema" in page
+    assert "document_type" not in page or "reparse_document_block_reason" in page
 
 
 def test_diff_does_not_touch_email_intake_or_the_original_parser() -> None:

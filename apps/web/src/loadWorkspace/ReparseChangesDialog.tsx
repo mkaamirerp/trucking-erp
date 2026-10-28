@@ -8,12 +8,27 @@ function showValue(value: unknown): string {
 
 type Props = {
   changes: LoadReparseChange[];
+  summary?: string;
+  reasons?: string[];
+  acknowledgementRequired?: boolean;
+  acknowledgementReason?: string;
+  onAcknowledgementReason?: (value: string) => void;
   busy: boolean;
   onChangeField: (change: LoadReparseChange) => void;
   onClose: () => void;
 };
 
-export function ReparseChangesDialog({ changes, busy, onChangeField, onClose }: Props) {
+export function ReparseChangesDialog({
+  changes,
+  summary = "",
+  reasons = [],
+  acknowledgementRequired = false,
+  acknowledgementReason = "",
+  onAcknowledgementReason,
+  busy,
+  onChangeField,
+  onClose,
+}: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
       <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-4 shadow-lg">
@@ -27,9 +42,29 @@ export function ReparseChangesDialog({ changes, busy, onChangeField, onClose }: 
             Close
           </button>
         </div>
+        {summary ? <p className="mb-2 text-sm font-medium text-gray-900">{summary}</p> : null}
+        {reasons.length > 0 ? (
+          <ul className="mb-3 list-disc pl-5 text-sm text-gray-700">
+            {reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        ) : null}
         <p className="mb-3 text-sm text-gray-600">
           The load form is unchanged until you click Change. You can still edit any field. Nothing is stored until Save.
         </p>
+        {acknowledgementRequired ? (
+          <label className="mb-3 block text-sm text-gray-800">
+            Reason for saving this PDF
+            <textarea
+              className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+              rows={2}
+              value={acknowledgementReason}
+              disabled={busy}
+              onChange={(event) => onAcknowledgementReason?.(event.target.value)}
+            />
+          </label>
+        ) : null}
         {changes.length > 0 ? (
           <table className="w-full text-left text-sm">
             <thead>

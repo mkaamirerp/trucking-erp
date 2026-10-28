@@ -563,6 +563,7 @@ function LoadWorkspacePage() {
   const [internalNotes, setInternalNotes] = useState("");
   const [parseBusy, setParseBusy] = useState(false);
   const [reparseProposal, setReparseProposal] = useState<LoadReparseProposal | null>(null);
+  const [reparseReason, setReparseReason] = useState("");
   const [reparseDialogOpen, setReparseDialogOpen] = useState(false);
   const [revisedPdfPaths, setRevisedPdfPaths] = useState<{ href: string; label: string }[]>([]);
   const [reparseFile, setReparseFile] = useState<File | null>(null);
@@ -2115,6 +2116,7 @@ function LoadWorkspacePage() {
       const proposal = await reparseLoadRateConfirmation(load.id, file);
       setReparseFile(file);
       setReparseProposal(proposal);
+      setReparseReason("");
       setReparseDialogOpen(true);
     } catch (e: unknown) {
       setToolbarMessage({ text: formatApiErrorMessage(e, "Could not re-parse that PDF"), tone: "error" });
@@ -2131,6 +2133,11 @@ function LoadWorkspacePage() {
       return;
     }
     const expectedVersion = load.concurrency_version ?? 1;
+    if (reparseProposal?.acknowledgement_required && reparseReason.trim().length < 3) {
+      setToolbarMessage({ text: "Enter a short reason before saving this revised PDF.", tone: "warning" });
+      setReparseDialogOpen(true);
+      return;
+    }
     setSaving(true);
     setToolbarMessage(null);
     setError(null);
@@ -2147,11 +2154,15 @@ function LoadWorkspacePage() {
               reparseProposal.revised_parse,
               payload,
               reparseProposal.integrity,
+              reparseProposal.expires_at,
+              Boolean(reparseProposal.acknowledgement_required),
+              reparseReason.trim(),
             )
           : await updateLoad(load.id, payload);
       if (reparseProposal && reparseFile) {
         setReparseProposal(null);
         setReparseFile(null);
+        setReparseReason("");
         setReparseDialogOpen(false);
         setRevisedPdfPaths((prev) => [
           ...prev,
@@ -2966,6 +2977,11 @@ function LoadWorkspacePage() {
       {reparseDialogOpen && reparseProposal ? (
         <ReparseChangesDialog
           changes={reparseProposal.changes}
+          summary={reparseProposal.summary}
+          reasons={reparseProposal.reasons}
+          acknowledgementRequired={Boolean(reparseProposal.acknowledgement_required)}
+          acknowledgementReason={reparseReason}
+          onAcknowledgementReason={setReparseReason}
           busy={saving || parseBusy}
           onChangeField={applyReparseChange}
           onClose={() => {

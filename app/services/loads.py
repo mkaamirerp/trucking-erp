@@ -1037,7 +1037,9 @@ async def _sync_verified_parse_json(
 
     from app.core.storage import get_storage
     from app.services.load_workspace_draft_document import (
+        align_replacement_to_form,
         append_revised_pdf,
+        preserve_matched_reference_extras,
         reconcile_accepted_parse_json,
         without_client_pdf_pointers,
     )
@@ -1062,8 +1064,13 @@ async def _sync_verified_parse_json(
     await db.refresh(load, attribute_names=["stops"])
     prior = copy.deepcopy(row.accepted_parse_json) if isinstance(row.accepted_parse_json, dict) else {}
     base = without_client_pdf_pointers(replacement) if replacement is not None else prior
+    revised_before_align = copy.deepcopy(base)
+    if replacement is not None:
+        base = align_replacement_to_form(base, load)
     fields = None if replacement is not None else only_fields
     verified = reconcile_accepted_parse_json(base, load, only_fields=fields)
+    if replacement is not None:
+        preserve_matched_reference_extras(verified, revised_before_align)
     if revised_pdf_bytes is not None:
         if not tenant_slug:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant is required to store the PDF")
@@ -1104,6 +1111,9 @@ async def update_load(
     revised_pdf_filename: str | None = None,
     tenant_slug: str | None = None,
     reparse_integrity: str | None = None,
+    reparse_expires_at: int | None = None,
+    reparse_acknowledgement_required: bool = False,
+    acknowledgement_reason: str | None = None,
 ) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -1111,7 +1121,22 @@ async def update_load(
 
     if verified_parse is not None:
         from app.services.load_document_parse_orchestrator import LoadReparseError, verify_reparse_integrity
+        from app.services.load_workspace_draft_document import parse_json_for_compare
 
+        evidence = await db.scalar(
+            select(LoadCommercialEvidence).where(
+                LoadCommercialEvidence.tenant_id == tenant_id,
+                LoadCommercialEvidence.load_id == load_id,
+                LoadCommercialEvidence.evidence_kind == "rate_confirmation_pdf",
+            )
+        )
+        baseline = evidence.accepted_parse_json if evidence is not None and isinstance(evidence.accepted_parse_json, dict) else {}
+        reason = (acknowledgement_reason or "").strip()
+        if reparse_acknowledgement_required and len(reason) < 3:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Enter a short reason before saving this revised PDF. Nothing was changed.",
+            )
         try:
             verify_reparse_integrity(
                 tenant_id=tenant_id,
@@ -1119,6 +1144,10 @@ async def update_load(
                 pdf_bytes=revised_pdf_bytes or b"",
                 revised_parse=verified_parse,
                 token=reparse_integrity or "",
+                baseline=parse_json_for_compare(baseline),
+                concurrency_version=int(payload.expected_concurrency_version),
+                acknowledgement_required=reparse_acknowledgement_required,
+                expires_at=int(reparse_expires_at or 0),
             )
         except LoadReparseError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -1379,6 +1408,29 @@ async def update_load(
         revised_pdf_filename=revised_pdf_filename,
         tenant_slug=tenant_slug,
     )
+    if revised_pdf_bytes is not None and evidence_row is not None:
+        import hashlib
+
+        from app.services.load_workspace_draft_document import revised_pdf_records
+
+        await _write_load_audit(
+            db,
+            tenant_id=tenant_id,
+            load=out,
+            action="load_reparse_pdf_accepted",
+            actor_user_id=actor_user_id,
+            request_id=request_id,
+            correlation_id=corr,
+            source=source,
+            changed_fields=None,
+            context_json={
+                "pdf_sha256": hashlib.sha256(revised_pdf_bytes).hexdigest(),
+                "revision_position": len(revised_pdf_records(evidence_row.accepted_parse_json)),
+                "acknowledgement_reason": (acknowledgement_reason or "").strip() or None,
+            },
+            reason_note=(acknowledgement_reason or "").strip() or None,
+            best_effort=False,
+        )
 
     try:
         await db.commit()

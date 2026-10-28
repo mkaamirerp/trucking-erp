@@ -161,6 +161,11 @@ class LoadReparseProposal(BaseModel):
     changes: list[LoadReparseChange] = Field(default_factory=list)
     revised_parse: LoadDocumentParseResponse
     integrity: str
+    verdict: str
+    summary: str
+    reasons: list[str] = Field(default_factory=list)
+    acknowledgement_required: bool = False
+    expires_at: int
 
 
 def strip_nul_bytes_from_json_tree(value: Any) -> Any:

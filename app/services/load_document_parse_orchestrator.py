@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -114,11 +115,27 @@ def _reparse_signing_key() -> bytes:
     return secret.encode()
 
 
-def reparse_integrity_token(*, tenant_id: int, load_id: int, pdf_bytes: bytes, revised_parse: dict) -> str:
-    """Bind a revised extraction to this tenant, load, and PDF. An empty secret fails closed."""
+def reparse_integrity_token(
+    *,
+    tenant_id: int,
+    load_id: int,
+    pdf_bytes: bytes,
+    revised_parse: dict,
+    baseline: dict,
+    concurrency_version: int,
+    acknowledgement_required: bool,
+    expires_at: int,
+) -> str:
+    """Bind the proposal to this PDF, the verified baseline, and the load version."""
+    from app.services.load_workspace_draft_document import parse_json_for_compare
+
     pdf_digest = hashlib.sha256(pdf_bytes).hexdigest()
     body_digest = hashlib.sha256(canonical_reparse_document(revised_parse).encode()).hexdigest()
-    message = f"{int(tenant_id)}|{int(load_id)}|{pdf_digest}|{body_digest}".encode()
+    baseline_digest = hashlib.sha256(canonical_reparse_document(parse_json_for_compare(baseline)).encode()).hexdigest()
+    message = (
+        f"{int(tenant_id)}|{int(load_id)}|{pdf_digest}|{body_digest}|{baseline_digest}|"
+        f"{int(concurrency_version)}|{int(bool(acknowledgement_required))}|{int(expires_at)}"
+    ).encode()
     return hmac.new(_reparse_signing_key(), message, hashlib.sha256).hexdigest()
 
 
@@ -129,17 +146,29 @@ def verify_reparse_integrity(
     pdf_bytes: bytes,
     revised_parse: dict,
     token: str,
+    baseline: dict,
+    concurrency_version: int,
+    acknowledgement_required: bool,
+    expires_at: int,
 ) -> None:
     if not isinstance(revised_parse, dict) or not pdf_bytes or not isinstance(token, str) or not token.strip():
+        raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
+    if not isinstance(expires_at, int):
         raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
     expected = reparse_integrity_token(
         tenant_id=tenant_id,
         load_id=load_id,
         pdf_bytes=pdf_bytes,
         revised_parse=revised_parse,
+        baseline=baseline,
+        concurrency_version=concurrency_version,
+        acknowledgement_required=acknowledgement_required,
+        expires_at=expires_at,
     )
     if not hmac.compare_digest(expected, token.strip()):
         raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
+    if expires_at < int(time.time()):
+        raise LoadReparseError(422, "This re-parse expired. Upload the PDF again. Nothing was changed.")
 
 
 async def propose_load_reparse(
@@ -156,8 +185,19 @@ async def propose_load_reparse(
 
     from sqlalchemy import select
 
+    from app.models.load import Load
     from app.models.load_commercial_evidence import LoadCommercialEvidence
-    from app.services.load_workspace_draft_document import ground_reparse_changes, parse_json_for_compare
+    from app.services.load_parser_duplicate_precheck import (
+        DuplicatePrecheckUnavailable,
+        find_exact_pdf_duplicate_candidates,
+    )
+    from app.services.load_workspace_draft_document import (
+        assess_same_load,
+        deterministic_reparse_changes,
+        known_pdf_reuse_message,
+        parse_json_for_compare,
+        reparse_document_block_reason,
+    )
 
     evidence = await db.scalar(
         select(LoadCommercialEvidence).where(
@@ -168,6 +208,17 @@ async def propose_load_reparse(
     )
     if evidence is None or not isinstance(evidence.accepted_parse_json, dict):
         raise LoadReparseError(422, "This load has no saved parser JSON to compare against.")
+    reuse = known_pdf_reuse_message(evidence, pdf_bytes)
+    if reuse:
+        raise LoadReparseError(422, reuse)
+    try:
+        other_loads = await find_exact_pdf_duplicate_candidates(
+            db, tenant_id=tenant_id, pdf_bytes=pdf_bytes, exclude_load_id=load_id
+        )
+    except DuplicatePrecheckUnavailable as exc:
+        raise LoadReparseError(503, "Duplicate check unavailable; AI parsing was not started.") from exc
+    if other_loads:
+        raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
 
     revised = await parse_load_workspace_document_orchestrated(
         pdf_bytes,
@@ -183,6 +234,12 @@ async def propose_load_reparse(
     saved = parse_json_for_compare(evidence.accepted_parse_json)
     revised_document = revised.model_dump(mode="json")
     revised_doc = parse_json_for_compare(revised_document)
+    block_reason = reparse_document_block_reason(revised_doc)
+    if block_reason:
+        raise LoadReparseError(422, block_reason)
+    identity = assess_same_load(saved, revised_doc)
+    if identity["verdict"] == "blocked":
+        raise LoadReparseError(422, identity["summary"])
     compare_kwargs = {
         "system": _COMPARE_INSTRUCTIONS,
         "user_text": (
@@ -213,7 +270,10 @@ async def propose_load_reparse(
     raw_changes = compared.get("changes") if isinstance(compared, dict) else None
     if not isinstance(raw_changes, list):
         raise LoadReparseError(422, "The revised PDF could not be compared.")
-    changes = ground_reparse_changes(saved, revised_doc, raw_changes)
+    changes = deterministic_reparse_changes(saved, revised_doc)
+    version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
+    concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
+    expires_at = int(time.time()) + 30 * 60
     return {
         "changes": changes,
         "revised_parse": revised,
@@ -222,5 +282,14 @@ async def propose_load_reparse(
             load_id=load_id,
             pdf_bytes=pdf_bytes,
             revised_parse=revised_document,
+            baseline=saved,
+            concurrency_version=concurrency_version,
+            acknowledgement_required=bool(identity["acknowledgement_required"]),
+            expires_at=expires_at,
         ),
+        "verdict": identity["verdict"],
+        "summary": identity["summary"],
+        "reasons": identity["reasons"],
+        "acknowledgement_required": bool(identity["acknowledgement_required"]),
+        "expires_at": expires_at,
     }

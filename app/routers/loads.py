@@ -226,6 +226,9 @@ async def save_load_reparse(
     payload: str = Form(...),
     revised_parse: str = Form(...),
     integrity: str = Form(...),
+    expires_at: int = Form(...),
+    acknowledgement_required: bool = Form(False),
+    acknowledgement_reason: str = Form(""),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     user=Depends(require_pilot_capability("loads.records", "update")),
@@ -243,18 +246,6 @@ async def save_load_reparse(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid") from exc
     if not isinstance(revised, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid")
-    from app.services.load_document_parse_orchestrator import verify_reparse_integrity
-
-    try:
-        verify_reparse_integrity(
-            tenant_id=tenant_id,
-            load_id=load_id,
-            pdf_bytes=data,
-            revised_parse=revised,
-            token=integrity,
-        )
-    except LoadReparseError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     actor_user_id, _ = _load_audit_actor(user)
     load = await loads_service.update_load(
         db,
@@ -269,6 +260,9 @@ async def save_load_reparse(
         revised_pdf_filename=file.filename or "revised-rate-confirmation.pdf",
         tenant_slug=tenant_slug,
         reparse_integrity=integrity,
+        reparse_expires_at=expires_at,
+        reparse_acknowledgement_required=acknowledgement_required,
+        acknowledgement_reason=acknowledgement_reason,
     )
     return LoadResponse.model_validate(load)
 
