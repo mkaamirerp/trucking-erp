@@ -6,6 +6,9 @@ single product entrypoint ``parse_pdf_bytes_to_load_document_response``.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -96,12 +99,47 @@ _COMPARE_INSTRUCTIONS = (
 )
 
 
-def _display_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
+def canonical_reparse_document(document: dict) -> str:
+    """Stable JSON for the Save token. Key order and client reserialization do not matter."""
+    round_tripped = json.loads(json.dumps(document, default=str, ensure_ascii=False))
+    return json.dumps(round_tripped, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _reparse_signing_key() -> bytes:
+    from app.core.config import settings
+
+    secret = (settings.jwt_secret or "").strip()
+    if not secret:
+        raise LoadReparseError(503, "Re-parse signing is not configured.")
+    return secret.encode()
+
+
+def reparse_integrity_token(*, tenant_id: int, load_id: int, pdf_bytes: bytes, revised_parse: dict) -> str:
+    """Bind a revised extraction to this tenant, load, and PDF. An empty secret fails closed."""
+    pdf_digest = hashlib.sha256(pdf_bytes).hexdigest()
+    body_digest = hashlib.sha256(canonical_reparse_document(revised_parse).encode()).hexdigest()
+    message = f"{int(tenant_id)}|{int(load_id)}|{pdf_digest}|{body_digest}".encode()
+    return hmac.new(_reparse_signing_key(), message, hashlib.sha256).hexdigest()
+
+
+def verify_reparse_integrity(
+    *,
+    tenant_id: int,
+    load_id: int,
+    pdf_bytes: bytes,
+    revised_parse: dict,
+    token: str,
+) -> None:
+    if not isinstance(revised_parse, dict) or not pdf_bytes or not isinstance(token, str) or not token.strip():
+        raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
+    expected = reparse_integrity_token(
+        tenant_id=tenant_id,
+        load_id=load_id,
+        pdf_bytes=pdf_bytes,
+        revised_parse=revised_parse,
+    )
+    if not hmac.compare_digest(expected, token.strip()):
+        raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
 
 
 async def propose_load_reparse(
@@ -119,11 +157,7 @@ async def propose_load_reparse(
     from sqlalchemy import select
 
     from app.models.load_commercial_evidence import LoadCommercialEvidence
-    from app.services.load_document_parse_semantic_llm import (
-        default_load_parser_semantic_client,
-        load_parser_semantic_configured,
-    )
-    from app.services.load_workspace_draft_document import parse_json_for_compare, values_equivalent
+    from app.services.load_workspace_draft_document import ground_reparse_changes, parse_json_for_compare
 
     evidence = await db.scalar(
         select(LoadCommercialEvidence).where(
@@ -147,42 +181,46 @@ async def propose_load_reparse(
         raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
 
     saved = parse_json_for_compare(evidence.accepted_parse_json)
-    revised_doc = parse_json_for_compare(revised.model_dump(mode="json"))
-    client = openai_chat_json_schema or (
-        default_load_parser_semantic_client() if load_parser_semantic_configured() else None
-    )
-    if client is None:
-        raise LoadReparseError(503, "The parser model is not configured.")
+    revised_document = revised.model_dump(mode="json")
+    revised_doc = parse_json_for_compare(revised_document)
+    compare_kwargs = {
+        "system": _COMPARE_INSTRUCTIONS,
+        "user_text": (
+            "saved_verified_json:\n"
+            + json.dumps(saved, default=str)
+            + "\n\nrevised_extraction:\n"
+            + json.dumps(revised_doc, default=str)
+        ),
+        "schema": _COMPARE_SCHEMA,
+        "schema_name": "load_reparse_changes",
+    }
     try:
-        compared = await client(
-            system=_COMPARE_INSTRUCTIONS,
-            user_text=(
-                "saved_verified_json:\n"
-                + json.dumps(saved, default=str)
-                + "\n\nrevised_extraction:\n"
-                + json.dumps(revised_doc, default=str)
-            ),
-            schema=_COMPARE_SCHEMA,
-            schema_name="load_reparse_changes",
-        )
+        if openai_chat_json_schema is not None:
+            compared = await openai_chat_json_schema(**compare_kwargs)
+        else:
+            from app.services.load_document_parse_semantic_llm import (
+                load_parser_semantic_configured,
+                parse_document_semantic_chat_json_schema,
+            )
+
+            if not load_parser_semantic_configured():
+                raise LoadReparseError(503, "The parser model is not configured.")
+            compared = await parse_document_semantic_chat_json_schema(**compare_kwargs)
+    except LoadReparseError:
+        raise
     except Exception as exc:
         raise LoadReparseError(422, "The revised PDF could not be compared.") from exc
     raw_changes = compared.get("changes") if isinstance(compared, dict) else None
     if not isinstance(raw_changes, list):
         raise LoadReparseError(422, "The revised PDF could not be compared.")
-    changes: list[dict[str, Any]] = []
-    for item in raw_changes:
-        if not isinstance(item, dict):
-            continue
-        field = _display_text(item.get("field"))
-        if not field or values_equivalent(item.get("current_value"), item.get("revised_value")):
-            continue
-        changes.append(
-            {
-                "field": field,
-                "label": _display_text(item.get("label")) or field,
-                "current_value": item.get("current_value"),
-                "revised_value": item.get("revised_value"),
-            }
-        )
-    return {"changes": changes, "revised_parse": revised}
+    changes = ground_reparse_changes(saved, revised_doc, raw_changes)
+    return {
+        "changes": changes,
+        "revised_parse": revised,
+        "integrity": reparse_integrity_token(
+            tenant_id=tenant_id,
+            load_id=load_id,
+            pdf_bytes=pdf_bytes,
+            revised_parse=revised_document,
+        ),
+    }

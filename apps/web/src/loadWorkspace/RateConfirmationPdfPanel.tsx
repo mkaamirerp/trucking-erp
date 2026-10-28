@@ -10,7 +10,7 @@ type Props = {
   objectUrl: string;
   /** When set, show “Open in new tab” for the same PDF bytes (cookie auth on same origin). */
   openInNewTabPath?: string | null;
-  revisedPdfPath?: string | null;
+  revisedPdfPaths?: { href: string; label: string }[];
   /** Overall parse confidence — drives RC panel accent for dispatch review. */
   parseConfidenceTier?: DocumentReviewTier | null;
 };
@@ -19,8 +19,8 @@ export function loadRateConfirmationPdfDownloadPath(loadId: number): string {
   return `${API_BASE}/loads/${encodeURIComponent(String(loadId))}/rate-confirmation-pdf`;
 }
 
-export function loadRevisedRateConfirmationPdfDownloadPath(loadId: number): string {
-  return `${loadRateConfirmationPdfDownloadPath(loadId)}?revised=1`;
+export function loadRevisedRateConfirmationPdfDownloadPath(loadId: number, revision: number): string {
+  return `${loadRateConfirmationPdfDownloadPath(loadId)}?revision=${revision}`;
 }
 
 export function draftRateConfirmationPdfDownloadPath(draftId: string): string {
@@ -30,7 +30,7 @@ export function draftRateConfirmationPdfDownloadPath(draftId: string): string {
 export function RateConfirmationPdfPanel({
   objectUrl,
   openInNewTabPath,
-  revisedPdfPath = null,
+  revisedPdfPaths = [],
   parseConfidenceTier = null,
 }: Props) {
   const tier: DocumentReviewTier = parseConfidenceTier ?? "neutral";
@@ -67,16 +67,17 @@ export function RateConfirmationPdfPanel({
               Open in new tab
             </a>
           ) : null}
-          {revisedPdfPath ? (
+          {revisedPdfPaths.map((item) => (
             <a
-              href={revisedPdfPath}
+              key={item.href}
+              href={item.href}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[10px] font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
             >
-              Revised PDF
+              {item.label}
             </a>
-          ) : null}
+          ))}
         </span>
       </div>
       <iframe

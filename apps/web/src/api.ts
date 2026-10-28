@@ -1717,26 +1717,24 @@ export async function fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(
   return URL.createObjectURL(blob);
 }
 
-/** True when a revised rate confirmation PDF is stored beside the original. */
-export async function loadHasRevisedRateConfirmationPdf(loadId: number): Promise<boolean> {
-  const res = await fetchWithTenant(
-    `${API_BASE}/loads/${encodeURIComponent(String(loadId))}/rate-confirmation-pdf?revised=1`,
-  );
-  return res.ok;
-}
-
 /** Object URL for the promoted load's stored rate confirmation PDF (caller must revoke when done). */
-export async function fetchLoadRateConfirmationPdfObjectUrl(loadId: number): Promise<string | null> {
+export async function fetchLoadRateConfirmationPdfObjectUrl(
+  loadId: number,
+): Promise<{ url: string | null; revisedCount: number }> {
   const res = await fetchWithTenant(
     `${API_BASE}/loads/${encodeURIComponent(String(loadId))}/rate-confirmation-pdf`,
   );
-  if (res.status === 404) return null;
+  if (res.status === 404) return { url: null, revisedCount: 0 };
   if (!res.ok) {
     await handle(res);
-    return null;
+    return { url: null, revisedCount: 0 };
   }
+  const revisedCount = Number(res.headers.get("X-Revised-Rate-Confirmations") || "0");
   const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  return {
+    url: URL.createObjectURL(blob),
+    revisedCount: Number.isFinite(revisedCount) && revisedCount > 0 ? revisedCount : 0,
+  };
 }
 
 /** Load Lab — persisted extraction run (tenant DB). */
@@ -1868,11 +1866,13 @@ export type LoadReparseChange = {
   label: string;
   current_value?: unknown;
   revised_value?: unknown;
+  editable?: boolean;
 };
 
 export type LoadReparseProposal = {
   changes: LoadReparseChange[];
   revised_parse: LoadDocumentParseResponse;
+  integrity: string;
 };
 
 /** Suggest differences for a revised PDF. Does not change the load. */
@@ -1892,11 +1892,13 @@ export async function saveLoadReparse(
   file: File,
   revisedParse: LoadDocumentParseResponse,
   payload: LoadUpdatePayload,
+  integrity: string,
 ) {
   const fd = new FormData();
   fd.append("file", file);
   fd.append("payload", JSON.stringify(payload));
   fd.append("revised_parse", JSON.stringify(revisedParse));
+  fd.append("integrity", integrity);
   const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/rate-confirmation-reparse/save`, {
     method: "POST",
     body: fd,

@@ -152,6 +152,7 @@ class LoadReparseChange(BaseModel):
     label: str
     current_value: Any = None
     revised_value: Any = None
+    editable: bool = False
 
 
 class LoadReparseProposal(BaseModel):
@@ -159,6 +160,7 @@ class LoadReparseProposal(BaseModel):
 
     changes: list[LoadReparseChange] = Field(default_factory=list)
     revised_parse: LoadDocumentParseResponse
+    integrity: str
 
 
 def strip_nul_bytes_from_json_tree(value: Any) -> Any:

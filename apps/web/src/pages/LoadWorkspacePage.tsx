@@ -18,7 +18,6 @@ import {
   getTruckAssignmentHints,
   discardLoadWorkspaceDraft,
   fetchLoadRateConfirmationPdfObjectUrl,
-  loadHasRevisedRateConfirmationPdf,
   fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
   getLoadWorkspaceDraft,
   parseLoadWorkspaceDraftDocument,
@@ -565,7 +564,7 @@ function LoadWorkspacePage() {
   const [parseBusy, setParseBusy] = useState(false);
   const [reparseProposal, setReparseProposal] = useState<LoadReparseProposal | null>(null);
   const [reparseDialogOpen, setReparseDialogOpen] = useState(false);
-  const [revisedPdfPath, setRevisedPdfPath] = useState<string | null>(null);
+  const [revisedPdfPaths, setRevisedPdfPaths] = useState<{ href: string; label: string }[]>([]);
   const [reparseFile, setReparseFile] = useState<File | null>(null);
   const reparseInputRef = useRef<HTMLInputElement | null>(null);
   const [parseElapsedSec, setParseElapsedSec] = useState(0);
@@ -660,18 +659,16 @@ function LoadWorkspacePage() {
       return;
     }
     let cancelled = false;
-    void fetchLoadRateConfirmationPdfObjectUrl(loadIdFromRoute).then((url) => {
-      if (!cancelled) replaceWorkspacePdfPreviewUrl(url);
+    void fetchLoadRateConfirmationPdfObjectUrl(loadIdFromRoute).then((result) => {
+      if (cancelled) return;
+      replaceWorkspacePdfPreviewUrl(result.url);
+      setRevisedPdfPaths(
+        Array.from({ length: result.revisedCount }, (_, index) => ({
+          href: loadRevisedRateConfirmationPdfDownloadPath(loadIdFromRoute, index + 1),
+          label: `Revised PDF ${index + 1}`,
+        })),
+      );
     });
-    void loadHasRevisedRateConfirmationPdf(loadIdFromRoute)
-      .then((present) => {
-        if (!cancelled) {
-          setRevisedPdfPath(present ? loadRevisedRateConfirmationPdfDownloadPath(loadIdFromRoute) : null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setRevisedPdfPath(null);
-      });
     return () => {
       cancelled = true;
     };
@@ -2039,6 +2036,7 @@ function LoadWorkspacePage() {
   }
 
   function applyReparseChange(change: LoadReparseChange) {
+    if (change.editable !== true) return;
     const field = change.field.replace(/^extracted\./, "");
     const text =
       change.revised_value == null
@@ -2047,12 +2045,33 @@ function LoadWorkspacePage() {
           ? JSON.stringify(change.revised_value)
           : String(change.revised_value);
     const stop = field.match(/^stops\[(\d+)\]\.([a-z0-9_]+)$/);
+    const reference = field.match(/^references\[(\d+)\]\.(kind|value)$/);
+    const stopKeys = new Set([
+      "stop_type",
+      "facility_name",
+      "street",
+      "city",
+      "state_or_province",
+      "postal_code",
+      "country",
+      "reference_number",
+      "appointment_type",
+      "appointment_date",
+      "appointment_time_text",
+      "notes",
+    ]);
     if (stop) {
       const index = Number(stop[1]);
       const key = stop[2];
+      if (!stopKeys.has(key) || !draftStops[index]) return;
       setDraftStops((prev) =>
         prev.map((row, i) => (i === index ? ({ ...row, [key]: text || null } as typeof row) : row)),
       );
+    } else if (reference) {
+      const index = Number(reference[1]);
+      const key = reference[2] as "kind" | "value";
+      if (!loadReferences[index]) return;
+      setLoadReferences((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: text } : row)));
     } else if (field === "rate") setRate(text);
     else if (field === "customer_rate") setCustomerRate(text);
     else if (field === "broker_load_reference") setBrokerLoadReference(text);
@@ -2070,6 +2089,12 @@ function LoadWorkspacePage() {
     else if (field === "broker_contact_extension_snapshot") setBrokerContactExtensionSnapshot(text);
     else if (field === "broker_contact_email_snapshot") setBrokerContactEmailSnapshot(text);
     else if (field === "pallet_case_count") setPalletCaseCount(text);
+    else if (field === "hazmat_flag") {
+      const normalized = text.trim().toLowerCase();
+      if (normalized === "true" || normalized === "yes") setHazmat("yes");
+      else if (normalized === "false" || normalized === "no") setHazmat("no");
+      else return;
+    } else return;
     setReparseProposal((prev) =>
       prev
         ? {
@@ -2116,13 +2141,25 @@ function LoadWorkspacePage() {
       };
       const updated =
         reparseProposal && reparseFile
-          ? await saveLoadReparse(load.id, reparseFile, reparseProposal.revised_parse, payload)
+          ? await saveLoadReparse(
+              load.id,
+              reparseFile,
+              reparseProposal.revised_parse,
+              payload,
+              reparseProposal.integrity,
+            )
           : await updateLoad(load.id, payload);
       if (reparseProposal && reparseFile) {
         setReparseProposal(null);
         setReparseFile(null);
         setReparseDialogOpen(false);
-        setRevisedPdfPath(loadRevisedRateConfirmationPdfDownloadPath(load.id));
+        setRevisedPdfPaths((prev) => [
+          ...prev,
+          {
+            href: loadRevisedRateConfirmationPdfDownloadPath(load.id, prev.length + 1),
+            label: `Revised PDF ${prev.length + 1}`,
+          },
+        ]);
       }
       setLoad(updated);
       await applyLoadDetailToWorkspace(updated);
@@ -2957,7 +2994,7 @@ function LoadWorkspacePage() {
               <RateConfirmationPdfPanel
                 objectUrl={workspacePdfPreviewUrl}
                 openInNewTabPath={rateConPdfOpenInNewTabPath}
-                revisedPdfPath={revisedPdfPath}
+                revisedPdfPaths={revisedPdfPaths}
                 parseConfidenceTier={lastParseConfidenceTier}
               />
             ) : null}

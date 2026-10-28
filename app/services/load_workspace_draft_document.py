@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -54,6 +55,9 @@ def accepted_parse_from_response(parse: LoadDocumentParseResponse) -> dict:
 
 
 _REVISED_PDF_KEY = "_revised_pdf"
+_REVISED_PDFS_KEY = "_revised_pdfs"
+_MISSING = object()
+_INDEXED_FIELD = re.compile(r"^([A-Za-z0-9_]+)\[(\d+)\](?:\.([A-Za-z0-9_]+))?$")
 
 _SCALAR_FIELDS = (
     "broker_name_snapshot",
@@ -262,8 +266,123 @@ def parse_json_for_compare(accepted: dict | None) -> dict:
     """Verified JSON sent to the comparison call, without stored file pointers."""
     out = copy.deepcopy(accepted) if isinstance(accepted, dict) else {}
     out.pop(_REVISED_PDF_KEY, None)
+    out.pop(_REVISED_PDFS_KEY, None)
     out.pop("raw_text", None)
     return out
+
+
+def revised_pdf_records(accepted: dict | None) -> list[dict]:
+    """Accepted revised PDFs, oldest first. The original file is not in this list."""
+    if not isinstance(accepted, dict):
+        return []
+    records = accepted.get(_REVISED_PDFS_KEY)
+    if isinstance(records, list):
+        return [dict(item) for item in records if isinstance(item, dict) and str(item.get("storage_key") or "").strip()]
+    single = accepted.get(_REVISED_PDF_KEY)
+    if isinstance(single, dict) and str(single.get("storage_key") or "").strip():
+        return [dict(single)]
+    return []
+
+
+def without_client_pdf_pointers(accepted: dict | None) -> dict:
+    """Drop file pointers a client might submit inside a parse JSON."""
+    out = copy.deepcopy(accepted) if isinstance(accepted, dict) else {}
+    out.pop(_REVISED_PDF_KEY, None)
+    out.pop(_REVISED_PDFS_KEY, None)
+    return out
+
+
+def append_revised_pdf(verified: dict, prior: dict | None, pointer: dict) -> dict:
+    """Keep every previously accepted revised PDF and add the new one."""
+    records = revised_pdf_records(prior)
+    records.append(dict(pointer))
+    verified[_REVISED_PDFS_KEY] = records
+    verified.pop(_REVISED_PDF_KEY, None)
+    return verified
+
+
+def _normalize_field_path(field: str) -> str:
+    text = field.strip()
+    if text.startswith("extracted."):
+        text = text[len("extracted.") :]
+    return text
+
+
+def _resolve_extracted(extracted: Any, field: str) -> Any:
+    if not isinstance(extracted, dict):
+        return _MISSING
+    indexed = _INDEXED_FIELD.match(field)
+    if indexed:
+        name, index_text, child = indexed.group(1), indexed.group(2), indexed.group(3)
+        sequence = extracted.get(name, _MISSING)
+        if sequence is _MISSING or not isinstance(sequence, list):
+            return _MISSING
+        index = int(index_text)
+        if index >= len(sequence) or not isinstance(sequence[index], dict):
+            return _MISSING
+        if child is None:
+            return sequence[index]
+        if child not in sequence[index]:
+            return _MISSING
+        return sequence[index][child]
+    if field not in extracted:
+        return _MISSING
+    return extracted[field]
+
+
+def field_is_editable(field: str) -> bool:
+    """True when Change can write this path onto the load form."""
+    if field in _SCALAR_FIELDS:
+        return True
+    indexed = _INDEXED_FIELD.match(field)
+    if not indexed:
+        return False
+    name, child = indexed.group(1), indexed.group(3)
+    if name == "stops" and child in _STOP_FIELDS:
+        return True
+    if name == "references" and child in {"kind", "value"}:
+        return True
+    return False
+
+
+def ground_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
+    """Keep a proposal only when the path exists on the revised extraction.
+
+    Displayed values come from the saved JSON and the revised extraction.
+    A path the form cannot edit stays visible and is not marked editable.
+    """
+    saved_extracted = saved.get("extracted") if isinstance(saved, dict) else None
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) else None
+    grounded: list[dict] = []
+    seen: set[str] = set()
+    for item in proposed or []:
+        if not isinstance(item, dict):
+            continue
+        field = _normalize_field_path(str(item.get("field") or ""))
+        if not field or field in seen:
+            continue
+        revised_value = _resolve_extracted(revised_extracted, field)
+        if revised_value is _MISSING:
+            continue
+        current_value = _resolve_extracted(saved_extracted, field)
+        if current_value is _MISSING:
+            current_value = None
+        if values_equivalent(current_value, revised_value):
+            continue
+        seen.add(field)
+        label = str(item.get("label") or "").strip()
+        if not label or len(label) > 80 or "\n" in label:
+            label = field
+        grounded.append(
+            {
+                "field": field,
+                "label": label,
+                "current_value": current_value,
+                "revised_value": revised_value,
+                "editable": field_is_editable(field),
+            }
+        )
+    return grounded
 
 
 async def parse_and_attach_workspace_draft_pdf(

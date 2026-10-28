@@ -47,14 +47,18 @@ export function ReparseChangesDialog({ changes, busy, onChangeField, onClose }: 
                   <td className="py-2 pr-2">{showValue(change.current_value)}</td>
                   <td className="py-2 pr-2">{showValue(change.revised_value)}</td>
                   <td className="py-2 text-right">
-                    <button
-                      type="button"
-                      className="rounded border border-gray-300 px-2 py-1 text-xs font-medium"
-                      disabled={busy}
-                      onClick={() => onChangeField(change)}
-                    >
-                      Change
-                    </button>
+                    {change.editable === true ? (
+                      <button
+                        type="button"
+                        className="rounded border border-gray-300 px-2 py-1 text-xs font-medium"
+                        disabled={busy}
+                        onClick={() => onChangeField(change)}
+                      >
+                        Change
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-500">For review</span>
+                    )}
                   </td>
                 </tr>
               ))}

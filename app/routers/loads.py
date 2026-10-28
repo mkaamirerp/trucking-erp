@@ -225,6 +225,7 @@ async def save_load_reparse(
     file: UploadFile = File(...),
     payload: str = Form(...),
     revised_parse: str = Form(...),
+    integrity: str = Form(...),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     user=Depends(require_pilot_capability("loads.records", "update")),
@@ -242,6 +243,18 @@ async def save_load_reparse(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid") from exc
     if not isinstance(revised, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid")
+    from app.services.load_document_parse_orchestrator import verify_reparse_integrity
+
+    try:
+        verify_reparse_integrity(
+            tenant_id=tenant_id,
+            load_id=load_id,
+            pdf_bytes=data,
+            revised_parse=revised,
+            token=integrity,
+        )
+    except LoadReparseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     actor_user_id, _ = _load_audit_actor(user)
     load = await loads_service.update_load(
         db,
@@ -255,6 +268,7 @@ async def save_load_reparse(
         revised_pdf_bytes=data,
         revised_pdf_filename=file.filename or "revised-rate-confirmation.pdf",
         tenant_slug=tenant_slug,
+        reparse_integrity=integrity,
     )
     return LoadResponse.model_validate(load)
 
@@ -475,25 +489,32 @@ async def download_load_pod_file(
 @router.get("/{load_id}/rate-confirmation-pdf")
 async def download_load_rate_confirmation_pdf(
     load_id: int,
-    revised: bool = Query(False),
+    revision: int | None = Query(None),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> Response:
-    if revised:
+    if revision is not None:
         fname, body = await loads_service.read_revised_rate_confirmation_pdf_bytes(
-            db, tenant_id, load_id, tenant_slug=tenant_slug
+            db, tenant_id, load_id, tenant_slug=tenant_slug, revision=revision
         )
+        headers = {"Content-Disposition": f'inline; filename="{fname}"'}
     else:
+        from app.services.load_workspace_draft_document import revised_pdf_records
+
         row, body = await loads_service.read_load_rate_confirmation_pdf_bytes(
             db, tenant_id, load_id, tenant_slug=tenant_slug
         )
         fname = row.filename or "rate-confirmation.pdf"
+        headers = {
+            "Content-Disposition": f'inline; filename="{fname}"',
+            "X-Revised-Rate-Confirmations": str(len(revised_pdf_records(row.accepted_parse_json))),
+        }
     return Response(
         content=body,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+        headers=headers,
     )
 
 

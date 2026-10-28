@@ -15,9 +15,17 @@ from app.authz.routes import binding_for
 from app.schemas.load import LoadStopCreate
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.services import loads as loads_service
-from app.services.load_document_parse_orchestrator import propose_load_reparse
+from app.core.config import settings
+from app.schemas.load import LoadUpdate
+from app.services.load_document_parse_orchestrator import (
+    LoadReparseError,
+    propose_load_reparse,
+    reparse_integrity_token,
+    verify_reparse_integrity,
+)
 from app.services.load_workspace_draft_document import (
     extracted_fields_in_draft,
+    ground_reparse_changes,
     reconcile_accepted_parse_json,
 )
 from app.services.load_workspace_draft_mapper import draft_json_to_load_create
@@ -243,6 +251,8 @@ def _revised_response() -> LoadDocumentParseResponse:
                 "rate": "2550",
                 "broker_load_reference": "PO-200",
                 "temperature_requirement": "0",
+                "unmapped_note": "changed",
+                "references": [{"kind": "po", "value": "NEW"}],
                 "stops": [
                     {"stop_type": "pickup", "sequence": 0, "city": "Boston"},
                     {"stop_type": "delivery", "sequence": 1, "city": "Dallas"},
@@ -261,6 +271,8 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
             "rate": "2500",
             "broker_load_reference": "PO-100",
             "temperature_requirement": "34",
+            "unmapped_note": "keep",
+            "references": [{"kind": "po", "value": "OLD"}],
             "stops": [{"city": "Chicago"}, {"city": "Dallas"}],
         },
     }
@@ -278,14 +290,18 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
         seen["compare"] = kwargs
         return {
             "changes": [
-                {"field": "rate", "label": "Rate", "current_value": "2500", "revised_value": "2550"},
-                {"field": "broker_load_reference", "label": "PO number", "current_value": "PO-100", "revised_value": "PO-200"},
+                {"field": "rate", "label": "Rate", "current_value": "1", "revised_value": "9999"},
+                {"field": "broker_load_reference", "label": "PO number", "current_value": "nope", "revised_value": "also-nope"},
                 {"field": "stops[0].city", "label": "Pickup city", "current_value": "Chicago", "revised_value": "Boston"},
                 {"field": "temperature_requirement", "label": "Temperature", "current_value": "34", "revised_value": "0"},
+                {"field": "references[0].value", "label": "Reference", "current_value": "FAKE", "revised_value": "FAKE-2"},
+                {"field": "unmapped_note", "label": "Note", "current_value": "ai", "revised_value": "ai-2"},
+                {"field": "not_a_field", "label": "Nope", "current_value": "a", "revised_value": "b"},
                 {"field": "miles", "label": "Miles", "current_value": "100", "revised_value": "100"},
             ]
         }
 
+    monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
     monkeypatch.setattr(
         "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
         fake_parser,
@@ -306,8 +322,55 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     assert "PO-200" in seen["compare"]["user_text"]
     assert "old-revised" not in seen["compare"]["user_text"]
     assert seen["compare"]["schema_name"] == "load_reparse_changes"
-    fields = {item["field"] for item in proposal["changes"]}
-    assert fields == {"rate", "broker_load_reference", "stops[0].city", "temperature_requirement"}
+    by_field = {item["field"]: item for item in proposal["changes"]}
+    assert set(by_field) == {
+        "rate",
+        "broker_load_reference",
+        "stops[0].city",
+        "temperature_requirement",
+        "references[0].value",
+    }
+    assert Decimal(by_field["rate"]["revised_value"]) == Decimal("2550")
+    assert by_field["rate"]["current_value"] == "2500"
+    assert by_field["broker_load_reference"]["revised_value"] == "PO-200"
+    assert by_field["references[0].value"]["revised_value"] == "NEW"
+    assert by_field["references[0].value"]["editable"] is True
+    assert by_field["stops[0].city"]["editable"] is True
+    assert "not_a_field" not in by_field
+    assert "unmapped_note" not in by_field
+    informational = ground_reparse_changes(
+        {"extracted": {"unmapped_note": "keep", "rate": "10"}},
+        {"extracted": {"unmapped_note": "changed", "rate": "10"}},
+        [
+            {"field": "unmapped_note", "label": "Note", "current_value": "ai", "revised_value": "ai-2"},
+            {"field": "missing_path", "label": "Missing", "current_value": "a", "revised_value": "b"},
+        ],
+    )
+    assert informational == [
+        {
+            "field": "unmapped_note",
+            "label": "Note",
+            "current_value": "keep",
+            "revised_value": "changed",
+            "editable": False,
+        }
+    ]
+    verify_reparse_integrity(
+        tenant_id=1,
+        load_id=9,
+        pdf_bytes=b"%PDF-revised",
+        revised_parse=proposal["revised_parse"].model_dump(mode="json"),
+        token=proposal["integrity"],
+    )
+    with pytest.raises(LoadReparseError) as mismatched:
+        verify_reparse_integrity(
+            tenant_id=1,
+            load_id=9,
+            pdf_bytes=b"%PDF-other",
+            revised_parse=proposal["revised_parse"].model_dump(mode="json"),
+            token=proposal["integrity"],
+        )
+    assert mismatched.value.status_code == 422
     assert db.writes == []
     assert evidence.accepted_parse_json == before
 
@@ -323,6 +386,11 @@ def test_popup_change_and_reparse_do_not_hydrate_or_call_save() -> None:
     assert "fetch(" not in change
     assert "updateLoad" not in change
     assert "saveLoadReparse" not in change
+    assert "change.editable !== true" in change
+    assert "references\\\\[" in change or 'references\\[' in change
+    assert "hazmat_flag" in change
+    assert "editable === true" in dialog
+    assert "For review" in dialog
     assert "hydrate" not in dialog
     assert "fetch(" not in dialog
     assert "updateLoad" not in dialog
@@ -339,22 +407,21 @@ class _SaveDb:
         return None
 
 
-class _Stored:
-    storage_key = "tenants/demo/revised-key"
-    sha256 = "abc123"
-    original_filename = "revised.pdf"
-
-
 class _Storage:
     def __init__(self) -> None:
-        self.saved: tuple | None = None
+        self.saved = 0
+        self.deleted: list[str] = []
 
     async def save_bytes(self, *args, **kwargs):
-        self.saved = (args, kwargs)
-        return _Stored()
+        self.saved += 1
+        return SimpleNamespace(
+            storage_key=f"revised-{self.saved}",
+            sha256=f"sha-{self.saved}",
+            original_filename=f"revised-{self.saved}.pdf",
+        )
 
-    def delete(self, *_args, **_kwargs):
-        raise AssertionError("original or previous file must not be deleted on the first revised save")
+    def delete(self, key, **_kwargs):
+        self.deleted.append(str(key))
 
 
 @pytest.mark.asyncio
@@ -380,17 +447,32 @@ async def test_save_replaces_json_and_keeps_original_and_revised_pdfs_distinct(
         return b"%PDF-bytes"
 
     monkeypatch.setattr(loads_service, "read_object_bytes", fake_read)
-    replaced = await loads_service._sync_verified_parse_json(
-        _SaveDb(evidence),
+    db = _SaveDb(evidence)
+    prior, _row = await loads_service._sync_verified_parse_json(
+        db,
         1,
         load,
         only_fields=set(),
         replacement=_parser_json(),
-        revised_pdf_bytes=b"%PDF-revised",
-        revised_pdf_filename="revised.pdf",
+        revised_pdf_bytes=b"%PDF-revised-1",
+        revised_pdf_filename="revised-1.pdf",
         tenant_slug="demo",
     )
-    assert replaced is None
+    assert prior is not None
+    assert "_revised_pdfs" not in prior
+    second = _parser_json()
+    second["_revised_pdfs"] = [{"storage_key": "client-injected", "sha256": "nope", "filename": "nope.pdf"}]
+    await loads_service._sync_verified_parse_json(
+        db,
+        1,
+        load,
+        only_fields=set(),
+        replacement=second,
+        revised_pdf_bytes=b"%PDF-revised-2",
+        revised_pdf_filename="revised-2.pdf",
+        tenant_slug="demo",
+    )
+    assert storage.deleted == []
     assert evidence.storage_key == "original-key"
     assert evidence.file_sha256 == "original-sha"
     verified = evidence.accepted_parse_json
@@ -400,7 +482,8 @@ async def test_save_replaces_json_and_keeps_original_and_revised_pdfs_distinct(
     assert verified["extracted"]["stops"][0]["city"] == "Boston"
     assert verified["extracted"]["stops"][1]["city"] == "Dallas"
     assert verified["extracted"]["unmapped_note"] == "parser-only"
-    assert verified["_revised_pdf"]["storage_key"] == "tenants/demo/revised-key"
+    assert [item["storage_key"] for item in verified["_revised_pdfs"]] == ["revised-1", "revised-2"]
+    assert "_revised_pdf" not in verified
     assert verified["raw_text"] == "original pdf text"
 
     async def evidence_row(*_args, **_kwargs):
@@ -410,13 +493,21 @@ async def test_save_replaces_json_and_keeps_original_and_revised_pdfs_distinct(
     original_row, original_body = await loads_service.read_load_rate_confirmation_pdf_bytes(
         None, 1, 9, tenant_slug="demo"
     )
-    revised_name, revised_body = await loads_service.read_revised_rate_confirmation_pdf_bytes(
-        None, 1, 9, tenant_slug="demo"
+    first_name, first_body = await loads_service.read_revised_rate_confirmation_pdf_bytes(
+        None, 1, 9, tenant_slug="demo", revision=1
+    )
+    second_name, second_body = await loads_service.read_revised_rate_confirmation_pdf_bytes(
+        None, 1, 9, tenant_slug="demo", revision=2
     )
     assert original_row.storage_key == "original-key"
-    assert revised_name == "revised.pdf"
-    assert reads == ["original-key", "tenants/demo/revised-key"]
-    assert original_body == revised_body == b"%PDF-bytes"
+    assert first_name == "revised-1.pdf"
+    assert second_name == "revised-2.pdf"
+    assert reads == ["original-key", "revised-1", "revised-2"]
+    assert original_body == first_body == second_body == b"%PDF-bytes"
+    with pytest.raises(HTTPException):
+        await loads_service.read_revised_rate_confirmation_pdf_bytes(
+            None, 1, 9, tenant_slug="demo", revision=3
+        )
 
 
 def test_reparse_routes_keep_existing_load_authorization() -> None:
@@ -437,6 +528,193 @@ def test_reparse_routes_keep_existing_load_authorization() -> None:
             ),
         )
     assert raised.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_production_compare_call_passes_configured_key_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    evidence = SimpleNamespace(accepted_parse_json={"extracted": {"rate": "10"}})
+    seen: dict = {}
+
+    async def fake_parser(*_args, **_kwargs):
+        return _revised_response()
+
+    async def inner(**kwargs):
+        seen["inner"] = kwargs
+        return {"changes": []}
+
+    monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+    monkeypatch.setattr(
+        "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
+        fake_parser,
+    )
+    monkeypatch.setattr("app.services.load_document_parse_semantic_llm.load_parser_semantic_provider", lambda: "openai")
+    monkeypatch.setattr("app.services.load_document_parse_semantic_llm.load_parser_semantic_api_key", lambda: "test-key")
+    monkeypatch.setattr("app.services.load_document_parse_semantic_llm.load_parser_semantic_model", lambda: "test-model")
+    monkeypatch.setattr("app.services.load_document_parse_semantic_llm.openai_chat_json_schema_content", inner)
+    proposal = await propose_load_reparse(
+        _ReadDb(evidence),
+        tenant_id=1,
+        load_id=9,
+        pdf_bytes=b"%PDF-revised",
+        filename="revised.pdf",
+    )
+    assert seen["inner"]["api_key"] == "test-key"
+    assert seen["inner"]["model"] == "test-model"
+    assert seen["inner"]["schema_name"] == "load_reparse_changes"
+    assert proposal["integrity"]
+
+
+def _signed_update(monkeypatch: pytest.MonkeyPatch, document: dict, pdf: bytes) -> tuple[LoadUpdate, str]:
+    monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+    token = reparse_integrity_token(tenant_id=1, load_id=9, pdf_bytes=pdf, revised_parse=document)
+    payload = LoadUpdate(expected_concurrency_version=3, rate=Decimal("100.00"))
+    return payload, token
+
+
+def _plain_load() -> SimpleNamespace:
+    return SimpleNamespace(
+        id=9,
+        tenant_id=1,
+        status="draft",
+        concurrency_version=4,
+        rate=Decimal("100.00"),
+        customer_rate=Decimal("100.00"),
+        driver_id=None,
+        customs_broker_id=None,
+        broker_id=None,
+        promotion_origin_workspace_draft_id=None,
+        stops=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_rejected_save_conflict_and_failed_commit_keep_json_and_pdfs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf = b"%PDF-revised"
+    document = {"extracted": {"rate": "100.00"}, "raw_text": "revised"}
+    payload, token = _signed_update(monkeypatch, document, pdf)
+    storage = _Storage()
+    load = _plain_load()
+
+    async def fake_get(*_args, **_kwargs):
+        return load
+
+    monkeypatch.setattr(loads_service, "get_load", fake_get)
+    monkeypatch.setattr("app.core.storage.get_storage", lambda: storage)
+
+    class _RejectDb:
+        async def execute(self, *_args, **_kwargs):
+            raise AssertionError("rejected save must not write")
+
+    with pytest.raises(HTTPException) as rejected:
+        await loads_service.update_load(
+            _RejectDb(),
+            1,
+            9,
+            payload,
+            verified_parse={"extracted": {"rate": "9999"}},
+            revised_pdf_bytes=pdf,
+            revised_pdf_filename="bad.pdf",
+            tenant_slug="demo",
+            reparse_integrity=token,
+        )
+    assert rejected.value.status_code == 422
+    assert storage.saved == 0
+
+    class _ConflictResult:
+        rowcount = 0
+
+    class _ConflictDb:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def execute(self, *_args, **_kwargs):
+            self.calls.append("execute")
+            return _ConflictResult()
+
+        async def rollback(self):
+            self.calls.append("rollback")
+
+        async def scalar(self, *_args, **_kwargs):
+            raise AssertionError("a version conflict must not replace the JSON")
+
+        async def commit(self):
+            raise AssertionError("a version conflict must not commit")
+
+    conflict_db = _ConflictDb()
+    monkeypatch.setattr(
+        loads_service.LoadResponse,
+        "model_validate",
+        lambda _obj: SimpleNamespace(model_dump=lambda mode="json": {"id": 9}),
+    )
+    with pytest.raises(HTTPException) as conflict:
+        await loads_service.update_load(
+            conflict_db,
+            1,
+            9,
+            payload,
+            verified_parse=document,
+            revised_pdf_bytes=pdf,
+            revised_pdf_filename="revised.pdf",
+            tenant_slug="demo",
+            reparse_integrity=token,
+        )
+    assert conflict.value.status_code == 409
+    assert conflict_db.calls == ["execute", "rollback"]
+    assert storage.saved == 0
+
+    prior = {"extracted": {"rate": "100.00", "unmapped_note": "stay"}, "raw_text": "active"}
+    evidence = SimpleNamespace(
+        storage_key="original-key",
+        file_sha256="original-sha",
+        filename="original.pdf",
+        accepted_parse_json=copy.deepcopy(prior),
+    )
+
+    class _CommitResult:
+        rowcount = 1
+
+    class _CommitDb:
+        def __init__(self) -> None:
+            self.rolled_back = False
+
+        async def execute(self, *_args, **_kwargs):
+            return _CommitResult()
+
+        async def flush(self):
+            return None
+
+        async def refresh(self, *_args, **_kwargs):
+            return None
+
+        async def scalar(self, *_args, **_kwargs):
+            return evidence
+
+        async def commit(self):
+            raise RuntimeError("commit failed")
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    commit_db = _CommitDb()
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await loads_service.update_load(
+            commit_db,
+            1,
+            9,
+            payload,
+            verified_parse=document,
+            revised_pdf_bytes=pdf,
+            revised_pdf_filename="revised.pdf",
+            tenant_slug="demo",
+            reparse_integrity=token,
+        )
+    assert commit_db.rolled_back is True
+    assert evidence.accepted_parse_json == prior
+    assert evidence.storage_key == "original-key"
+    assert storage.deleted == []
+    assert load.rate == Decimal("100.00")
 
 
 def test_diff_does_not_touch_email_intake_or_the_original_parser() -> None:
