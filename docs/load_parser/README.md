@@ -43,6 +43,14 @@ Current semantic architecture lives in:
 
 A job/queue/background-worker design may change **when and where** the shared parser runs. It must not create a second parser implementation or redefine profile semantics.
 
+## Dispatcher verification and approval — OWNER-LOCKED TODO (2026-10-28)
+
+The PDF parser and comparison model **assist** in interpreting RC documents; they do not approve or silently modify dispatcher-verified commercial values. The logged-in, authorized dispatcher reviews the RC and expressly approves the final form before Create Load or intentional revised-RC acceptance. The system must save precisely those values and retain a trustworthy user-attributed approval/change audit. This requirement is **not yet implemented**.
+
+**Canonical work item (including exact mandatory acknowledgement text and acceptance checklist):** [TruckERP TODO — Load / Rate Confirmation dispatcher verification acknowledgement](../../TODO.md#load--rate-confirmation--dispatcher-verification-acknowledgement-owner-locked-todo-2026-10-28).
+
+This is a responsibility and audit requirement, not a change to the existing PDF extraction handoff, original Parse gates, or the Re-parse semantic-comparison contract.
+
 ## Current design note
 
 - `ASYNC_LOAD_PAGE_PARSE_JOB_DESIGN.md` — **design only / not implemented**. Proposes moving the Load Page Rate Confirmation parse request from synchronous HTTP execution to a durable async job while preserving the same parser/profile result and workspace hydration contract.
