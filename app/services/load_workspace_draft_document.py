@@ -1020,15 +1020,33 @@ def _comparison_label(item: dict, fallback: str) -> str | None:
     return label
 
 
+def _valid_money_change(current: Any, updated: Any) -> bool:
+    """Both document amounts must be finite numbers before Change is offered."""
+    old_amount, new_amount = _decimal_or_none(current), _decimal_or_none(updated)
+    return (
+        old_amount is not None
+        and new_amount is not None
+        and old_amount.is_finite()
+        and new_amount.is_finite()
+        and old_amount != new_amount
+    )
+
+
 def _money_review(field: str, current: Any, updated: Any) -> dict:
+    """A verified numeric discrepancy remains actionable even if AI omitted or misstated it."""
     label = "Rate" if field == "rate" else "Customer rate"
+    actionable = _valid_money_change(current, updated)
     return {
         "field": field,
         "label": label,
-        "explanation": "The comparison did not confirm this amount. Review it before changing the load.",
+        "explanation": (
+            "Both JSON documents contain different valid amounts. Verify the revised PDF before applying."
+            if actionable
+            else "The amounts could not be validated. Review the PDF; no automatic change is available."
+        ),
         "current_value": current,
         "revised_value": updated,
-        "editable": False,
+        "editable": actionable,
     }
 
 
@@ -1036,7 +1054,7 @@ def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, propos
     """Keep comparison rows the model proposed when both JSON documents support them.
 
     Invented values, unsupported paths, and ambiguous stops are not accepted changes.
-    A money difference the model missed or misstated stays visible for review.
+    A valid money difference the model missed or misstated remains an actionable proposal; never an automatic write.
     """
     saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
     revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
@@ -1124,7 +1142,11 @@ def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, propos
                 }
             )
             continue
-        if kind != "ok" or reparse_values_equivalent(field, current, updated):
+        if kind != "ok" or _blank(current) or _blank(updated) or reparse_values_equivalent(field, current, updated):
+            continue
+        if field in {"rate", "customer_rate"} and not _valid_money_change(current, updated):
+            rows.append(_money_review(field, current, updated))
+            seen.add(field)
             continue
         supported = reparse_values_equivalent(field, item.get("current_value"), current) and reparse_values_equivalent(
             field, item.get("revised_value"), updated
@@ -1152,7 +1174,7 @@ def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, propos
         if field in seen or field not in saved_extracted or field not in revised_extracted:
             continue
         current, updated = saved_extracted.get(field), revised_extracted.get(field)
-        if reparse_values_equivalent(field, current, updated):
+        if _blank(current) or _blank(updated) or reparse_values_equivalent(field, current, updated):
             continue
         rows.append(_money_review(field, current, updated))
         seen.add(field)
