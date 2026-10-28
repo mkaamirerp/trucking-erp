@@ -193,7 +193,7 @@ async def reparse_load_rate_confirmation(
     load_id: int,
     file: UploadFile = File(...),
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Suggest field changes for a revised PDF. Does not change the load or the form."""
