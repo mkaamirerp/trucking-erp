@@ -98,11 +98,15 @@ def upgrade_load_rate_confirmation_revisions() -> None:
     op.execute(
         """
         DROP TRIGGER IF EXISTS load_rate_confirmation_revisions_append_only
-            ON load_rate_confirmation_revisions;
+            ON load_rate_confirmation_revisions
+        """
+    )
+    op.execute(
+        """
         CREATE TRIGGER load_rate_confirmation_revisions_append_only
             BEFORE UPDATE OR DELETE ON load_rate_confirmation_revisions
             FOR EACH ROW
-            EXECUTE PROCEDURE reject_load_rate_confirmation_revision_mutation();
+            EXECUTE PROCEDURE reject_load_rate_confirmation_revision_mutation()
         """
     )
 
