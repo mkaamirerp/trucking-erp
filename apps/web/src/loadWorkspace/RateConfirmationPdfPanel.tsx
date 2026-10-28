@@ -10,12 +10,17 @@ type Props = {
   objectUrl: string;
   /** When set, show “Open in new tab” for the same PDF bytes (cookie auth on same origin). */
   openInNewTabPath?: string | null;
+  revisedPdfPath?: string | null;
   /** Overall parse confidence — drives RC panel accent for dispatch review. */
   parseConfidenceTier?: DocumentReviewTier | null;
 };
 
 export function loadRateConfirmationPdfDownloadPath(loadId: number): string {
   return `${API_BASE}/loads/${encodeURIComponent(String(loadId))}/rate-confirmation-pdf`;
+}
+
+export function loadRevisedRateConfirmationPdfDownloadPath(loadId: number): string {
+  return `${loadRateConfirmationPdfDownloadPath(loadId)}?revised=1`;
 }
 
 export function draftRateConfirmationPdfDownloadPath(draftId: string): string {
@@ -25,6 +30,7 @@ export function draftRateConfirmationPdfDownloadPath(draftId: string): string {
 export function RateConfirmationPdfPanel({
   objectUrl,
   openInNewTabPath,
+  revisedPdfPath = null,
   parseConfidenceTier = null,
 }: Props) {
   const tier: DocumentReviewTier = parseConfidenceTier ?? "neutral";
@@ -50,16 +56,28 @@ export function RateConfirmationPdfPanel({
             {documentReviewTierLabel(tier)}
           </span>
         </div>
-        {openInNewTabPath ? (
-          <a
-            href={openInNewTabPath}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 text-[10px] font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
-          >
-            Open in new tab
-          </a>
-        ) : null}
+        <span className="flex shrink-0 gap-3">
+          {openInNewTabPath ? (
+            <a
+              href={openInNewTabPath}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
+            >
+              Open in new tab
+            </a>
+          ) : null}
+          {revisedPdfPath ? (
+            <a
+              href={revisedPdfPath}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
+            >
+              Revised PDF
+            </a>
+          ) : null}
+        </span>
       </div>
       <iframe
         data-testid="rate-confirmation-pdf-viewer"

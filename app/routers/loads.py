@@ -20,14 +20,18 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
-from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.schemas.load_document_parse import LoadDocumentParseResponse, LoadReparseProposal
 from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
 from app.services import future_movement_plans as fmp_service
 from app.services import loads as loads_service
 from app.services import trips as trips_service
 from app.services import load_custody as custody_service
 from app.schemas.load_pod_evidence import LoadPodEvidenceListResponse, LoadPodEvidenceOut
-from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
+from app.services.load_document_parse_orchestrator import (
+    LoadReparseError,
+    parse_load_workspace_document_orchestrated,
+    propose_load_reparse,
+)
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
 from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
 from app.services.load_pod_evidence import (
@@ -173,6 +177,86 @@ async def parse_load_workspace_document(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Duplicate check unavailable; AI parsing was not started.",
         ) from exc
+
+
+def _read_reparse_pdf(data: bytes) -> None:
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+    if len(data) > _MAX_PARSE_PDF_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
+
+
+@router.post("/{load_id}/rate-confirmation-reparse", response_model=LoadReparseProposal)
+async def reparse_load_rate_confirmation(
+    load_id: int,
+    file: UploadFile = File(...),
+    tenant_id: int = Depends(require_tenant),
+    _user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Suggest field changes for a revised PDF. Does not change the load or the form."""
+    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
+    _read_reparse_pdf(data)
+    try:
+        return await propose_load_reparse(
+            db,
+            tenant_id=tenant_id,
+            load_id=load_id,
+            pdf_bytes=data,
+            filename=file.filename or "upload.pdf",
+        )
+    except LoadReparseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    except UnsafeLoadPdfError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DuplicatePrecheckUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Duplicate check unavailable; AI parsing was not started.",
+        ) from exc
+
+
+@router.post("/{load_id}/rate-confirmation-reparse/save", response_model=LoadResponse)
+async def save_load_reparse(
+    load_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    payload: str = Form(...),
+    revised_parse: str = Form(...),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    user=Depends(require_pilot_capability("loads.records", "update")),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Save the form, replace the one verified JSON, and keep the original and revised PDFs."""
+    import json
+
+    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
+    _read_reparse_pdf(data)
+    try:
+        update_body = LoadUpdate.model_validate(json.loads(payload))
+        revised = json.loads(revised_parse)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid") from exc
+    if not isinstance(revised, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid")
+    actor_user_id, _ = _load_audit_actor(user)
+    load = await loads_service.update_load(
+        db,
+        tenant_id,
+        load_id,
+        update_body,
+        actor_user_id=actor_user_id,
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+        verified_parse=revised,
+        revised_pdf_bytes=data,
+        revised_pdf_filename=file.filename or "revised-rate-confirmation.pdf",
+        tenant_slug=tenant_slug,
+    )
+    return LoadResponse.model_validate(load)
 
 
 @router.get("/{load_id}", response_model=LoadResponse)
@@ -391,15 +475,21 @@ async def download_load_pod_file(
 @router.get("/{load_id}/rate-confirmation-pdf")
 async def download_load_rate_confirmation_pdf(
     load_id: int,
+    revised: bool = Query(False),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> Response:
-    row, body = await loads_service.read_load_rate_confirmation_pdf_bytes(
-        db, tenant_id, load_id, tenant_slug=tenant_slug
-    )
-    fname = row.filename or "rate-confirmation.pdf"
+    if revised:
+        fname, body = await loads_service.read_revised_rate_confirmation_pdf_bytes(
+            db, tenant_id, load_id, tenant_slug=tenant_slug
+        )
+    else:
+        row, body = await loads_service.read_load_rate_confirmation_pdf_bytes(
+            db, tenant_id, load_id, tenant_slug=tenant_slug
+        )
+        fname = row.filename or "rate-confirmation.pdf"
     return Response(
         content=body,
         media_type="application/pdf",

@@ -1717,6 +1717,14 @@ export async function fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl(
   return URL.createObjectURL(blob);
 }
 
+/** True when a revised rate confirmation PDF is stored beside the original. */
+export async function loadHasRevisedRateConfirmationPdf(loadId: number): Promise<boolean> {
+  const res = await fetchWithTenant(
+    `${API_BASE}/loads/${encodeURIComponent(String(loadId))}/rate-confirmation-pdf?revised=1`,
+  );
+  return res.ok;
+}
+
 /** Object URL for the promoted load's stored rate confirmation PDF (caller must revoke when done). */
 export async function fetchLoadRateConfirmationPdfObjectUrl(loadId: number): Promise<string | null> {
   const res = await fetchWithTenant(
@@ -1851,6 +1859,47 @@ export async function updateLoad(id: number, payload: LoadUpdatePayload) {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  return handle<Load>(res);
+}
+
+export type LoadReparseChange = {
+  field: string;
+  label: string;
+  current_value?: unknown;
+  revised_value?: unknown;
+};
+
+export type LoadReparseProposal = {
+  changes: LoadReparseChange[];
+  revised_parse: LoadDocumentParseResponse;
+};
+
+/** Suggest differences for a revised PDF. Does not change the load. */
+export async function reparseLoadRateConfirmation(loadId: number, file: File) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/rate-confirmation-reparse`, {
+    method: "POST",
+    body: fd,
+  });
+  return handle<LoadReparseProposal>(res);
+}
+
+/** Save the form, replace the verified JSON, and store the revised PDF beside the original. */
+export async function saveLoadReparse(
+  loadId: number,
+  file: File,
+  revisedParse: LoadDocumentParseResponse,
+  payload: LoadUpdatePayload,
+) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("payload", JSON.stringify(payload));
+  fd.append("revised_parse", JSON.stringify(revisedParse));
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/rate-confirmation-reparse/save`, {
+    method: "POST",
+    body: fd,
   });
   return handle<Load>(res);
 }

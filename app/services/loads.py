@@ -993,6 +993,97 @@ async def list_dispatch_unassigned_loads(
     return await paginate(db, stmt, page=page, size=size)
 
 
+_PAYLOAD_TO_VERIFIED_FIELD = {
+    "broker_name_snapshot": "broker_name_snapshot",
+    "broker_contact_name_snapshot": "broker_contact_name_snapshot",
+    "broker_contact_phone_snapshot": "broker_contact_phone_snapshot",
+    "broker_contact_extension_snapshot": "broker_contact_extension_snapshot",
+    "broker_contact_email_snapshot": "broker_contact_email_snapshot",
+    "broker_load_reference": "broker_load_reference",
+    "mode": "mode",
+    "equipment_type": "equipment_type",
+    "trailer_type": "trailer_type",
+    "trailer_size": "trailer_size",
+    "commodity": "commodity",
+    "estimated_weight": "estimated_weight",
+    "hazmat_flag": "hazmat_flag",
+    "temperature_requirement": "temperature_requirement",
+    "pallet_case_count": "pallet_case_count",
+    "rate": "rate",
+    "customer_rate": "customer_rate",
+    "miles": "miles",
+    "stops": "stops",
+    "references": "references",
+}
+
+
+async def _sync_verified_parse_json(
+    db: AsyncSession,
+    tenant_id: int,
+    load: Load,
+    *,
+    only_fields: set[str],
+    replacement: dict | None = None,
+    revised_pdf_bytes: bytes | None = None,
+    revised_pdf_filename: str | None = None,
+    tenant_slug: str | None = None,
+) -> str | None:
+    """Keep the one verified JSON aligned with the saved form. Does not touch the parser."""
+    from app.core.storage import get_storage
+    from app.services.load_workspace_draft_document import (
+        _REVISED_PDF_KEY,
+        reconcile_accepted_parse_json,
+    )
+    from app.services.load_workspace_draft_storage import STORAGE_MODULE
+
+    row = await db.scalar(
+        select(LoadCommercialEvidence).where(
+            LoadCommercialEvidence.tenant_id == tenant_id,
+            LoadCommercialEvidence.load_id == load.id,
+            LoadCommercialEvidence.evidence_kind == "rate_confirmation_pdf",
+        )
+    )
+    if row is None:
+        if replacement is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="This load has no saved parser JSON to replace.",
+            )
+        return None
+    if replacement is None and not only_fields:
+        return None
+    await db.refresh(load, attribute_names=["stops"])
+    base = replacement if replacement is not None else (row.accepted_parse_json or {})
+    fields = None if replacement is not None else only_fields
+    verified = reconcile_accepted_parse_json(base, load, only_fields=fields)
+    if revised_pdf_bytes is not None:
+        if not tenant_slug:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant is required to store the PDF")
+        stored_pointer = (row.accepted_parse_json or {}).get(_REVISED_PDF_KEY)
+        previous = stored_pointer if isinstance(stored_pointer, dict) else None
+        stored = await get_storage().save_bytes(
+            tenant_slug,
+            STORAGE_MODULE,
+            "load_revised_rc",
+            str(load.id),
+            revised_pdf_bytes,
+            filename_hint=revised_pdf_filename or "revised-rate-confirmation.pdf",
+            content_type="application/pdf",
+        )
+        verified[_REVISED_PDF_KEY] = {
+            "storage_key": stored.storage_key,
+            "sha256": stored.sha256,
+            "filename": stored.original_filename or revised_pdf_filename,
+        }
+        old_key = (previous or {}).get("storage_key")
+        row.accepted_parse_json = verified
+        if old_key and old_key != stored.storage_key and old_key != row.storage_key:
+            return str(old_key)
+        return None
+    row.accepted_parse_json = verified
+    return None
+
+
 async def update_load(
     db: AsyncSession,
     tenant_id: int,
@@ -1003,6 +1094,10 @@ async def update_load(
     request_id: str | None = None,
     correlation_id: str | None = None,
     source: str = "ui",
+    verified_parse: dict | None = None,
+    revised_pdf_bytes: bytes | None = None,
+    revised_pdf_filename: str | None = None,
+    tenant_slug: str | None = None,
 ) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -1247,7 +1342,30 @@ async def update_load(
             parse_override_keys,
         )
 
+    verified_fields = {
+        _PAYLOAD_TO_VERIFIED_FIELD[name]
+        for name in payload.model_fields_set
+        if name in _PAYLOAD_TO_VERIFIED_FIELD
+    }
+    if "rate" in verified_fields:
+        verified_fields.add("customer_rate")
+    replaced_pdf_key = await _sync_verified_parse_json(
+        db,
+        tenant_id,
+        out,
+        only_fields=verified_fields,
+        replacement=verified_parse,
+        revised_pdf_bytes=revised_pdf_bytes,
+        revised_pdf_filename=revised_pdf_filename,
+        tenant_slug=tenant_slug,
+    )
+
     await db.commit()
+    if replaced_pdf_key and tenant_slug:
+        from app.core.storage import get_storage
+        from app.services.load_workspace_draft_storage import STORAGE_MODULE
+
+        get_storage().delete(replaced_pdf_key, module=STORAGE_MODULE, tenant_slug=tenant_slug)
     await db.refresh(load)
     return load
 
@@ -1918,3 +2036,30 @@ async def read_load_rate_confirmation_pdf_bytes(
             detail="Rate confirmation PDF file not found",
         ) from exc
     return row, body
+
+
+async def read_revised_rate_confirmation_pdf_bytes(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    tenant_slug: str,
+) -> tuple[str, bytes]:
+    """The latest revised rate confirmation. The original evidence file stays in place."""
+    from app.services.load_workspace_draft_document import _REVISED_PDF_KEY
+
+    row = await get_load_rate_confirmation_pdf_evidence(db, tenant_id, load_id)
+    pointer = (row.accepted_parse_json or {}).get(_REVISED_PDF_KEY)
+    if not isinstance(pointer, dict) or not (pointer.get("storage_key") or "").strip():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No revised rate confirmation PDF on this load")
+    expected = str(pointer.get("sha256") or "").strip().lower()
+    try:
+        body = read_object_bytes(
+            str(pointer["storage_key"]),
+            tenant_slug=tenant_slug,
+            expected_sha256=expected or None,
+        )
+    except LoadWorkspaceDraftStorageError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revised rate confirmation PDF file not found") from exc
+    filename = str(pointer.get("filename") or "revised-rate-confirmation.pdf")
+    return filename, body

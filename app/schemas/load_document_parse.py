@@ -147,6 +147,20 @@ class LoadDocumentParseResponse(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class LoadReparseChange(BaseModel):
+    field: str
+    label: str
+    current_value: Any = None
+    revised_value: Any = None
+
+
+class LoadReparseProposal(BaseModel):
+    """Suggested differences only. Nothing here is written until Save."""
+
+    changes: list[LoadReparseChange] = Field(default_factory=list)
+    revised_parse: LoadDocumentParseResponse
+
+
 def strip_nul_bytes_from_json_tree(value: Any) -> Any:
     """PostgreSQL jsonb/text rejects U+0000; PDF text and model output may include NUL."""
     if isinstance(value, str):

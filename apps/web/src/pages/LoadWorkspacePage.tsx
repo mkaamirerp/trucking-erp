@@ -18,6 +18,7 @@ import {
   getTruckAssignmentHints,
   discardLoadWorkspaceDraft,
   fetchLoadRateConfirmationPdfObjectUrl,
+  loadHasRevisedRateConfirmationPdf,
   fetchLoadWorkspaceDraftRateConfirmationPdfObjectUrl,
   getLoadWorkspaceDraft,
   parseLoadWorkspaceDraftDocument,
@@ -44,7 +45,11 @@ import {
   markLoadReady,
   parseLoadVersionConflict,
   parseLoadWorkspaceDocument,
+  reparseLoadRateConfirmation,
+  saveLoadReparse,
   updateLoad,
+  type LoadReparseChange,
+  type LoadReparseProposal,
   type Broker,
   type BrokerContact,
   type CustomsBroker,
@@ -67,6 +72,7 @@ import {
   RateConfirmationPdfPanel,
   draftRateConfirmationPdfDownloadPath,
   loadRateConfirmationPdfDownloadPath,
+  loadRevisedRateConfirmationPdfDownloadPath,
 } from "@/loadWorkspace/RateConfirmationPdfPanel";
 import { associatedTripNumber, cancelActorDisplayName } from "@/loadWorkspace/draftListPresentation";
 import {
@@ -95,6 +101,7 @@ import {
 } from "@/loadWorkspace/loadWorkspaceShared";
 import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttribution";
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
+import { ReparseChangesDialog } from "@/loadWorkspace/ReparseChangesDialog";
 import {
   confidenceTierForAppliedLabel,
   parseConfidenceAppliedChipClasses,
@@ -556,6 +563,11 @@ function LoadWorkspacePage() {
   const [customsBrokerId, setCustomsBrokerId] = useState<number | null>(null);
   const [internalNotes, setInternalNotes] = useState("");
   const [parseBusy, setParseBusy] = useState(false);
+  const [reparseProposal, setReparseProposal] = useState<LoadReparseProposal | null>(null);
+  const [reparseDialogOpen, setReparseDialogOpen] = useState(false);
+  const [revisedPdfPath, setRevisedPdfPath] = useState<string | null>(null);
+  const [reparseFile, setReparseFile] = useState<File | null>(null);
+  const reparseInputRef = useRef<HTMLInputElement | null>(null);
   const [parseElapsedSec, setParseElapsedSec] = useState(0);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [duplicateReview, setDuplicateReview] = useState<{
@@ -651,6 +663,15 @@ function LoadWorkspacePage() {
     void fetchLoadRateConfirmationPdfObjectUrl(loadIdFromRoute).then((url) => {
       if (!cancelled) replaceWorkspacePdfPreviewUrl(url);
     });
+    void loadHasRevisedRateConfirmationPdf(loadIdFromRoute)
+      .then((present) => {
+        if (!cancelled) {
+          setRevisedPdfPath(present ? loadRevisedRateConfirmationPdfDownloadPath(loadIdFromRoute) : null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRevisedPdfPath(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -2017,6 +2038,66 @@ function LoadWorkspacePage() {
     }
   }
 
+  function applyReparseChange(change: LoadReparseChange) {
+    const field = change.field.replace(/^extracted\./, "");
+    const text =
+      change.revised_value == null
+        ? ""
+        : typeof change.revised_value === "object"
+          ? JSON.stringify(change.revised_value)
+          : String(change.revised_value);
+    const stop = field.match(/^stops\[(\d+)\]\.([a-z0-9_]+)$/);
+    if (stop) {
+      const index = Number(stop[1]);
+      const key = stop[2];
+      setDraftStops((prev) =>
+        prev.map((row, i) => (i === index ? ({ ...row, [key]: text || null } as typeof row) : row)),
+      );
+    } else if (field === "rate") setRate(text);
+    else if (field === "customer_rate") setCustomerRate(text);
+    else if (field === "broker_load_reference") setBrokerLoadReference(text);
+    else if (field === "temperature_requirement") setTemperatureRequirement(text);
+    else if (field === "mode") setFreightMode(text);
+    else if (field === "equipment_type") setEquipmentType(text);
+    else if (field === "trailer_type") setTrailerType(text);
+    else if (field === "trailer_size") setTrailerSize(text);
+    else if (field === "commodity") setCommodity(text);
+    else if (field === "estimated_weight") setEstimatedWeight(text);
+    else if (field === "miles") setMiles(text);
+    else if (field === "broker_name_snapshot") setBrokerNameSnapshot(text);
+    else if (field === "broker_contact_name_snapshot") setBrokerContactNameSnapshot(text);
+    else if (field === "broker_contact_phone_snapshot") setBrokerContactPhoneSnapshot(text);
+    else if (field === "broker_contact_extension_snapshot") setBrokerContactExtensionSnapshot(text);
+    else if (field === "broker_contact_email_snapshot") setBrokerContactEmailSnapshot(text);
+    else if (field === "pallet_case_count") setPalletCaseCount(text);
+    setReparseProposal((prev) =>
+      prev
+        ? {
+            ...prev,
+            changes: prev.changes.map((row) =>
+              row.field === change.field ? { ...row, current_value: change.revised_value } : row,
+            ),
+          }
+        : prev,
+    );
+  }
+
+  async function onReparsePdf(file: File) {
+    if (!load || loadIsCancelled) return;
+    setParseBusy(true);
+    setToolbarMessage(null);
+    try {
+      const proposal = await reparseLoadRateConfirmation(load.id, file);
+      setReparseFile(file);
+      setReparseProposal(proposal);
+      setReparseDialogOpen(true);
+    } catch (e: unknown) {
+      setToolbarMessage({ text: formatApiErrorMessage(e, "Could not re-parse that PDF"), tone: "error" });
+    } finally {
+      setParseBusy(false);
+    }
+  }
+
   async function onSave() {
     if (!load || loadIsCancelled) return;
     const stopErr = validateDraftStopsClassifiedForSave(draftStops);
@@ -2029,10 +2110,20 @@ function LoadWorkspacePage() {
     setToolbarMessage(null);
     setError(null);
     try {
-      const updated = await updateLoad(load.id, {
+      const payload = {
         ...buildWorkspacePersistPayload(),
         expected_concurrency_version: expectedVersion,
-      });
+      };
+      const updated =
+        reparseProposal && reparseFile
+          ? await saveLoadReparse(load.id, reparseFile, reparseProposal.revised_parse, payload)
+          : await updateLoad(load.id, payload);
+      if (reparseProposal && reparseFile) {
+        setReparseProposal(null);
+        setReparseFile(null);
+        setReparseDialogOpen(false);
+        setRevisedPdfPath(loadRevisedRateConfirmationPdfDownloadPath(load.id));
+      }
       setLoad(updated);
       await applyLoadDetailToWorkspace(updated);
       setToolbarMessage({ text: "Saved.", tone: "success" });
@@ -2522,6 +2613,26 @@ function LoadWorkspacePage() {
             </>
           ) : workspaceMode === "manual" || loadIsCancelled ? null : (
             <>
+              <input
+                ref={reparseInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                aria-hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void onReparsePdf(f);
+                }}
+              />
+              <button
+                type="button"
+                className={toolBtnSecondary}
+                disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy}
+                onClick={() => reparseInputRef.current?.click()}
+              >
+                {parseBusy ? "Re-parsing…" : "Re-parse PDF"}
+              </button>
               <button
                 type="button"
                 className={toolBtnPrimary}
@@ -2815,6 +2926,20 @@ function LoadWorkspacePage() {
       </div>
       ) : null}
 
+      {reparseDialogOpen && reparseProposal ? (
+        <ReparseChangesDialog
+          changes={reparseProposal.changes}
+          busy={saving || parseBusy}
+          onChangeField={applyReparseChange}
+          onClose={() => {
+            setReparseDialogOpen(false);
+            setToolbarMessage({
+              text: "Form stays as you left it. Save to store it and the revised PDF.",
+              tone: "neutral",
+            });
+          }}
+        />
+      ) : null}
       <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">
         <aside className="flex max-h-[42vh] min-h-0 flex-col gap-3 overflow-y-auto border-b border-[var(--trk-border)] bg-[var(--trk-bg)] p-3 lg:sticky lg:top-0 lg:max-h-[calc(100vh-7rem)] lg:border-b-0 lg:border-r lg:border-[var(--trk-border)]">
           {workspaceMode === "intake" && hasIntakeThread ? (
@@ -2832,6 +2957,7 @@ function LoadWorkspacePage() {
               <RateConfirmationPdfPanel
                 objectUrl={workspacePdfPreviewUrl}
                 openInNewTabPath={rateConPdfOpenInNewTabPath}
+                revisedPdfPath={revisedPdfPath}
                 parseConfidenceTier={lastParseConfidenceTier}
               />
             ) : null}

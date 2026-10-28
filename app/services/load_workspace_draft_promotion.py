@@ -17,6 +17,10 @@ from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
 from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
 from app.services.load_rate_confirmation_duplicate import assert_promote_rate_confirmation_not_duplicate
+from app.services.load_workspace_draft_document import (
+    extracted_fields_in_draft,
+    reconcile_accepted_parse_json,
+)
 from app.schemas.trip_read import TripAssignmentBody
 from app.services.loads import (
     _insert_commercial_load_uncommitted,
@@ -219,6 +223,7 @@ def _maybe_commercial_evidence_row(
     load_id: int,
     promoted_by_platform_user_id: str | None,
     promoted_at: datetime,
+    accepted_parse_json: dict | None = None,
 ) -> LoadCommercialEvidence | None:
     if draft.pdf_upload_state != "ready":
         return None
@@ -231,7 +236,11 @@ def _maybe_commercial_evidence_row(
         file_sha256=draft.pdf_sha256,
         storage_key=draft.pdf_storage_key,
         filename=draft.pdf_filename,
-        accepted_parse_json=draft.accepted_parse_json or {},
+        accepted_parse_json=(
+            draft.accepted_parse_json or {}
+            if accepted_parse_json is None
+            else accepted_parse_json
+        ),
         parse_schema_version=draft.accepted_parse_schema_version,
         promoted_by_platform_user_id=promoted_by_platform_user_id,
         promoted_at=promoted_at,
@@ -301,12 +310,18 @@ async def promote_workspace_draft(
         insert_as_ready=True,
     )
 
+    verified_parse = reconcile_accepted_parse_json(
+        draft.accepted_parse_json or {},
+        load_create,
+        only_fields=extracted_fields_in_draft(draft.draft_json or {}),
+    )
     evidence = _maybe_commercial_evidence_row(
         draft,
         tenant_id=tenant_id,
         load_id=int(load.id),
         promoted_by_platform_user_id=promoted_by_platform_user_id,
         promoted_at=now,
+        accepted_parse_json=verified_parse,
     )
     if evidence is not None:
         db.add(evidence)
