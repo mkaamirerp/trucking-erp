@@ -2604,7 +2604,7 @@ function LoadWorkspacePage() {
               if (f) void onParseWorkspacePdf(f);
             }}
           />
-          {canWorkspaceParsePdf ? (
+          {workspaceMode === "manual" && canWorkspaceParsePdf ? (
             <button
               type="button"
               className={toolBtnSecondary}
@@ -2677,6 +2677,14 @@ function LoadWorkspacePage() {
                   if (f) void onReparsePdf(f);
                 }}
               />
+              <button
+                type="button"
+                className={toolBtnSecondary}
+                disabled
+                title="Use Re-parse PDF for a revised rate confirmation."
+              >
+                Upload & parse PDF
+              </button>
               {reparseDialogOpen ? null : (
                 <button
                   type="button"
