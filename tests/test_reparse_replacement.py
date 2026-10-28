@@ -303,7 +303,7 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
         seen["compare"] = kwargs
         return {
             "changes": [
-                {"field": "rate", "label": "Rate", "current_value": "1", "revised_value": "9999"},
+                {"field": "rate", "label": "Linehaul increased", "current_value": "1", "revised_value": "9999"},
                 {"field": "broker_load_reference", "label": "PO number", "current_value": "nope", "revised_value": "also-nope"},
                 {"field": "stops[0].city", "label": "Pickup city", "current_value": "Chicago", "revised_value": "Boston"},
                 {"field": "temperature_requirement", "label": "Temperature", "current_value": "34", "revised_value": "0"},
@@ -344,20 +344,19 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     assert "old-revised" not in seen["compare"]["user_text"]
     assert seen["compare"]["schema_name"] == "load_reparse_changes"
     by_field = {item["field"]: item for item in proposal["changes"]}
-    assert set(by_field) == {
-        "rate",
-        "broker_load_reference",
-        "stops[0].city",
-        "stops[0].state_or_province",
-        "temperature_requirement",
-        "references[0].value",
-    }
+    assert "rate" in by_field
+    assert "broker_load_reference" in by_field
+    assert "temperature_requirement" in by_field
+    assert "references[0].value" in by_field
+    assert by_field["stops.review.saved.0"]["editable"] is False
+    assert by_field["stops.review.revised.0"]["editable"] is False
+    assert "stops[0].city" not in by_field
     assert Decimal(by_field["rate"]["revised_value"]) == Decimal("2550")
     assert by_field["rate"]["current_value"] == "2500"
+    assert by_field["rate"]["explanation"] == "Linehaul increased"
     assert by_field["broker_load_reference"]["revised_value"] == "PO-200"
     assert by_field["references[0].value"]["revised_value"] == "NEW"
     assert by_field["references[0].value"]["editable"] is True
-    assert by_field["stops[0].city"]["editable"] is True
     assert "not_a_field" not in by_field
     assert "unmapped_note" not in by_field
     informational = ground_reparse_changes(
@@ -391,7 +390,8 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     with pytest.raises(LoadReparseError) as mismatched:
         verify_reparse_integrity(pdf_bytes=b"%PDF-other", **verify_kwargs)
     assert mismatched.value.status_code == 422
-    assert db.writes == []
+    assert "commit" not in db.writes
+    assert "add" not in db.writes
     assert evidence.accepted_parse_json == before
 
 
@@ -837,12 +837,18 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
     )
 
     armstrong = _shipment("Armstrong", "3872125-1", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800", customer_rate="1800")
-    armstrong["context"]["document_date"] = "2026-03-01"
     revised = _shipment("Armstrong Transport", "3872125-1", ("Greensboro", "NC"), ("Dallas", "TX"), rate="2000", customer_rate="2000")
-    revised["context"]["document_date"] = "2026-03-05"
+    revised["context"].pop("document_date", None)
     identity = assess_same_load(armstrong, revised)
     assert identity["verdict"] == "strong"
     assert identity["summary"] == "Strong match — Armstrong, Load #3872125-1, pickup and delivery match. Rate changed from $1,800 to $2,000."
+    assert "later" not in identity["summary"].casefold()
+    assert "older" not in identity["summary"].casefold()
+    equal_dates = copy.deepcopy(revised)
+    equal_dates["context"]["document_date"] = armstrong["context"]["document_date"]
+    equal_identity = assess_same_load(armstrong, equal_dates)
+    assert equal_identity["verdict"] == "strong"
+    assert "older" not in " ".join(equal_identity["reasons"]).casefold()
     omitted = deterministic_reparse_changes(armstrong, revised)
     assert any(item["field"] == "rate" and Decimal(item["revised_value"]) == Decimal("2000") for item in omitted)
     assert any(item["field"] == "customer_rate" for item in omitted)
@@ -863,7 +869,13 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
     tql = _shipment("TQL", "999", ("Chicago", "IL"), ("Miami", "FL"), rate="900")
     wrong = assess_same_load(armstrong, tql)
     assert wrong["verdict"] == "blocked"
-    assert wrong["summary"] == "Wrong document — broker and shipment details do not match this Load."
+    assert wrong["summary"] == "Wrong document — the broker does not match this Load."
+    tql_same_route = _shipment("TQL", "3872125-1", ("Greensboro", "NC"), ("Dallas", "TX"), rate="2000")
+    same_route = assess_same_load(armstrong, tql_same_route)
+    assert same_route["verdict"] == "blocked"
+    assert same_route["summary"] == "Wrong document — the broker does not match this Load."
+    alias_match = assess_same_load(armstrong, tql_same_route, broker_aliases=["Armstrong", "TQL"])
+    assert alias_match["verdict"] != "blocked"
 
     fuel = {"context": {"document_type": "invoice", "classification_reasoning": "BVD fuel invoice"}, "extracted": {}}
     assert reparse_document_block_reason(fuel) == (
@@ -919,9 +931,54 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
     assert aligned["extracted"]["stops"][0]["facility_code"] == "PU-1"
     assert aligned["extracted"]["stops"][1]["facility_code"] == "DEL-1"
     inserted = copy.deepcopy(armstrong)
-    inserted["extracted"]["stops"].insert(1, {"stop_type": "pickup", "city": "Atlanta", "state_or_province": "GA", "facility_code": "EXTRA"})
+    inserted["extracted"]["stops"].insert(
+        1,
+        {"stop_type": "pickup", "city": "Atlanta", "state_or_province": "GA", "facility_code": "EXTRA", "street": "9 New St"},
+    )
     review = deterministic_reparse_changes(armstrong, inserted)
     assert any(item["editable"] is False and item["label"] == "Stop" for item in review)
+    inserted_form = SimpleNamespace(
+        stops=[
+            SimpleNamespace(stop_type="pickup", city="Greensboro", state_or_province="NC", street=None, facility_name=None, reference_number=None),
+            SimpleNamespace(stop_type="delivery", city="Dallas", state_or_province="TX", street=None, facility_name=None, reference_number=None),
+        ]
+    )
+    kept_extra = align_replacement_to_form(inserted, inserted_form)
+    assert kept_extra["extracted"]["unmatched_revised_stops"][0]["facility_code"] == "EXTRA"
+    assert all(stop.get("facility_code") != "EXTRA" for stop in kept_extra["extracted"]["stops"])
+    same_city = copy.deepcopy(armstrong)
+    same_city["extracted"]["stops"][0]["street"] = "100 Main St"
+    other_dock = copy.deepcopy(same_city)
+    other_dock["extracted"]["stops"][0]["street"] = "900 Dock Rd"
+    other_dock["extracted"]["stops"][0]["facility_code"] = "OTHER"
+    street_identity = assess_same_load(same_city, other_dock)
+    assert street_identity["verdict"] == "needs_confirmation"
+    street_changes = deterministic_reparse_changes(same_city, other_dock)
+    assert any(item["editable"] is False and "100 Main" in str(item["current_value"]) for item in street_changes)
+    two_pickups = copy.deepcopy(armstrong)
+    two_pickups["extracted"]["stops"] = [
+        {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "facility_code": "A", "street": "1 First"},
+        {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "facility_code": "B", "street": "2 Second"},
+        two_pickups["extracted"]["stops"][1],
+    ]
+    swapped = copy.deepcopy(two_pickups)
+    swapped["extracted"]["stops"] = [two_pickups["extracted"]["stops"][1], two_pickups["extracted"]["stops"][0], two_pickups["extracted"]["stops"][2]]
+    multi_form = SimpleNamespace(
+        stops=[
+            SimpleNamespace(stop_type="pickup", city="Chicago", state_or_province="IL", street="1 First", facility_name=None, reference_number=None),
+            SimpleNamespace(stop_type="pickup", city="Chicago", state_or_province="IL", street="2 Second", facility_name=None, reference_number=None),
+            SimpleNamespace(stop_type="delivery", city="Dallas", state_or_province="TX", street=None, facility_name=None, reference_number=None),
+        ]
+    )
+    multi_aligned = align_replacement_to_form(swapped, multi_form)
+    assert multi_aligned["extracted"]["stops"][0]["facility_code"] == "A"
+    assert multi_aligned["extracted"]["stops"][1]["facility_code"] == "B"
+    time_only = copy.deepcopy(armstrong)
+    time_only["extracted"]["stops"][0]["appointment_time_text"] = "15:30"
+    time_identity = assess_same_load(armstrong, time_only)
+    assert time_identity["verdict"] == "needs_confirmation"
+    assert "appointment" in time_identity["summary"].casefold()
+    assert any(item["field"] == "stops[0].appointment_time_text" and item["editable"] is True for item in deterministic_reparse_changes(armstrong, time_only))
     kept = {"extracted": {"references": [{"kind": "po", "value": "00123"}]}}
     preserve_matched_reference_extras(kept, {"extracted": {"references": [{"kind": "po", "value": "00123", "source_label": "kept"}]}})
     assert kept["extracted"]["references"][0]["source_label"] == "kept"

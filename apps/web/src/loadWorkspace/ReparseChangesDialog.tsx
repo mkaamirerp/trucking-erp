@@ -78,7 +78,10 @@ export function ReparseChangesDialog({
             <tbody>
               {changes.map((change) => (
                 <tr key={change.field} className="border-b border-gray-100">
-                  <td className="py-2 pr-2 font-medium">{change.label}</td>
+                  <td className="py-2 pr-2 font-medium">
+                    {change.label}
+                    {change.explanation ? <div className="font-normal text-xs text-gray-500">{change.explanation}</div> : null}
+                  </td>
                   <td className="py-2 pr-2">{showValue(change.current_value)}</td>
                   <td className="py-2 pr-2">{showValue(change.revised_value)}</td>
                   <td className="py-2 text-right">

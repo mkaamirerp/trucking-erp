@@ -96,7 +96,9 @@ _COMPARE_INSTRUCTIONS = (
     "A different PO or load number is a normal proposed change. Do not reject the PDF for that. "
     "Do not return unchanged fields. "
     "field is a path such as rate, temperature_requirement, broker_load_reference, or stops[0].city. "
-    "current_value is the saved JSON value. revised_value is the new PDF value."
+    "label is a short explanation of that difference. "
+    "current_value is the saved JSON value. revised_value is the new PDF value. "
+    "Do not decide whether the PDF belongs to this load."
 )
 
 
@@ -171,6 +173,44 @@ def verify_reparse_integrity(
         raise LoadReparseError(422, "This re-parse expired. Upload the PDF again. Nothing was changed.")
 
 
+async def _broker_aliases(db: AsyncSession, tenant_id: int, saved: dict, revised: dict) -> list[str]:
+    """Names and aliases already stored for one broker. A lookup failure does not invent a match."""
+    try:
+        from sqlalchemy import select
+
+        from app.models.broker import BrokerAlias
+        from app.services.load_document_parse_rate_con import _find_broker_by_name_or_alias
+
+        saved_name = ((saved.get("extracted") or {}) if isinstance(saved.get("extracted"), dict) else {}).get("broker_name_snapshot")
+        revised_name = ((revised.get("extracted") or {}) if isinstance(revised.get("extracted"), dict) else {}).get(
+            "broker_name_snapshot"
+        )
+        found = []
+        for name in (saved_name, revised_name):
+            if not str(name or "").strip():
+                continue
+            broker = await _find_broker_by_name_or_alias(db, tenant_id=tenant_id, name=str(name))
+            if broker is not None:
+                found.append(broker)
+        if len({int(broker.id) for broker in found}) != 1:
+            return []
+        broker = found[0]
+        labels = [broker.name, getattr(broker, "legal_name", None), getattr(broker, "display_name", None)]
+        alias_rows = (
+            await db.execute(
+                select(BrokerAlias).where(
+                    BrokerAlias.tenant_id == tenant_id,
+                    BrokerAlias.broker_id == broker.id,
+                    BrokerAlias.is_active.is_(True),
+                )
+            )
+        ).scalars().all()
+        labels.extend(row.alias for row in alias_rows)
+        return [str(label) for label in labels if str(label or "").strip()]
+    except Exception:
+        return []
+
+
 async def propose_load_reparse(
     db: AsyncSession,
     *,
@@ -193,6 +233,7 @@ async def propose_load_reparse(
     )
     from app.services.load_workspace_draft_document import (
         assess_same_load,
+        attach_model_explanations,
         deterministic_reparse_changes,
         known_pdf_reuse_message,
         parse_json_for_compare,
@@ -237,7 +278,11 @@ async def propose_load_reparse(
     block_reason = reparse_document_block_reason(revised_doc)
     if block_reason:
         raise LoadReparseError(422, block_reason)
-    identity = assess_same_load(saved, revised_doc)
+    identity = assess_same_load(
+        saved,
+        revised_doc,
+        broker_aliases=await _broker_aliases(db, tenant_id, saved, revised_doc),
+    )
     if identity["verdict"] == "blocked":
         raise LoadReparseError(422, identity["summary"])
     compare_kwargs = {
@@ -270,7 +315,7 @@ async def propose_load_reparse(
     raw_changes = compared.get("changes") if isinstance(compared, dict) else None
     if not isinstance(raw_changes, list):
         raise LoadReparseError(422, "The revised PDF could not be compared.")
-    changes = deterministic_reparse_changes(saved, revised_doc)
+    changes = attach_model_explanations(deterministic_reparse_changes(saved, revised_doc), raw_changes)
     version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
     concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
     expires_at = int(time.time()) + 30 * 60

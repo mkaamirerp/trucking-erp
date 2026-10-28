@@ -1867,6 +1867,7 @@ export type LoadReparseChange = {
   current_value?: unknown;
   revised_value?: unknown;
   editable?: boolean;
+  explanation?: string;
 };
 
 export type LoadReparseProposal = {

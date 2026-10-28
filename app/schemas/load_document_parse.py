@@ -153,6 +153,7 @@ class LoadReparseChange(BaseModel):
     current_value: Any = None
     revised_value: Any = None
     editable: bool = False
+    explanation: Optional[str] = None
 
 
 class LoadReparseProposal(BaseModel):
