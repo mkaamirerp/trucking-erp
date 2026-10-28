@@ -2102,9 +2102,7 @@ function LoadWorkspacePage() {
       rememberReparseUndo(change.field, () => setRate(previous));
       setRate(text);
     } else if (field === "customer_rate") {
-      const previous = customerRate;
-      rememberReparseUndo(change.field, () => setCustomerRate(previous));
-      setCustomerRate(text);
+      return;
     } else if (field === "broker_load_reference") {
       const previous = brokerLoadReference;
       rememberReparseUndo(change.field, () => setBrokerLoadReference(previous));

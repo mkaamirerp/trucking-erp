@@ -152,26 +152,17 @@ export function effectiveParseCustomerRateString(
   return null;
 }
 
-function customerRateStorageFromParse(
-  ex: LoadDocumentParseResponse["extracted"],
-): { display: string; effective: string } | null {
-  const effective = effectiveParseCustomerRateString(ex);
-  if (effective == null) return null;
-  if (ex.customer_rate != null) return { display: effective, effective };
-  return { display: "", effective };
-}
-
 function applyCustomerRateFromParse(
   ex: LoadDocumentParseResponse["extracted"],
   cbs: ApplyLoadDocumentParseCallbacks,
   state: ParseHydrationState,
 ): string | null {
-  const parsed = customerRateStorageFromParse(ex);
-  if (parsed == null) return null;
-  cbs.setCustomerRate(parsed.display);
+  if (ex.rate == null) return null;
+  const fromRc = String(ex.rate);
+  cbs.setCustomerRate(fromRc);
   state.lastAppliedKeys.add("customerRate");
-  state.lastAppliedValues.set("customerRate", parsed.effective);
-  return parsed.effective;
+  state.lastAppliedValues.set("customerRate", fromRc);
+  return fromRc;
 }
 
 export function extractPresentParseScalarKeys(
@@ -336,7 +327,8 @@ export function applyParseScalarHydration(
 
   const skipScalarHydration = (key: ParseScalarFieldKey): boolean =>
     next.manualOverrideKeys.has(key) ||
-    (key === "brokerNameSnapshot" && next.brokerIdentityLocked);
+    (key === "brokerNameSnapshot" && next.brokerIdentityLocked) ||
+    (key === "customerRate" && next.lastAppliedKeys.has("customerRate"));
 
   for (const key of next.lastAppliedKeys) {
     if (present.has(key) || skipScalarHydration(key)) continue;

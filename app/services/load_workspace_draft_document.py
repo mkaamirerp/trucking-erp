@@ -984,7 +984,7 @@ def comparison_baseline(saved: dict | None) -> dict:
     extracted = document.get("extracted") if isinstance(document.get("extracted"), dict) else {}
     fields: list[dict] = []
     for name in _SCALAR_FIELDS:
-        if name not in extracted or _blank(extracted.get(name)):
+        if name == "customer_rate" or name not in extracted or _blank(extracted.get(name)):
             continue
         fields.append({"path": name, "value": extracted.get(name)})
     for index, stop in enumerate(_stop_dicts(extracted)):
@@ -1107,7 +1107,7 @@ def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, propos
         if not isinstance(item, dict):
             continue
         field = _normalize_field_path(str(item.get("field") or ""))
-        if not field or field in seen or not _comparable_reparse_field(field):
+        if not field or field in seen or field == "customer_rate" or not _comparable_reparse_field(field):
             continue
         kind, current, updated = document_values(field)
         if kind == "ambiguous_stop":
@@ -1170,7 +1170,7 @@ def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, propos
             row["explanation"] = note
         rows.append(row)
 
-    for field in ("rate", "customer_rate"):
+    for field in ("rate",):
         if field in seen or field not in saved_extracted or field not in revised_extracted:
             continue
         current, updated = saved_extracted.get(field), revised_extracted.get(field)

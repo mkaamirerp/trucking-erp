@@ -104,18 +104,18 @@ describe("loadParseHydrationState", () => {
     const cbs = mkCbs();
     let state = createEmptyParseHydrationState();
     state = applyParseScalarHydration({ rate: 2500 } as never, cbs, state);
-    expect(cbs.setCustomerRate).toHaveBeenCalledWith("");
+    expect(cbs.setCustomerRate).toHaveBeenCalledWith("2500");
     expect(state.lastAppliedValues.get("customerRate")).toBe("2500");
   });
 
-  it("follows RC rate on re-parse when customer mirrors rate", () => {
+  it("does not change customer rate on a later parse", () => {
     const cbs = mkCbs();
     let state = createEmptyParseHydrationState();
     state = applyParseScalarHydration({ rate: 1000 } as never, cbs, state);
     vi.mocked(cbs.setCustomerRate).mockClear();
     state = applyParseScalarHydration({ rate: 900 } as never, cbs, state);
-    expect(cbs.setCustomerRate).toHaveBeenCalledWith("");
-    expect(state.lastAppliedValues.get("customerRate")).toBe("900");
+    expect(cbs.setCustomerRate).not.toHaveBeenCalled();
+    expect(state.lastAppliedValues.get("customerRate")).toBe("1000");
   });
 
   it("does not overwrite manually edited customer rate on re-parse", () => {
@@ -129,15 +129,15 @@ describe("loadParseHydrationState", () => {
     expect(state.manualOverrideKeys.has("customerRate")).toBe(true);
   });
 
-  it("parsed customer stays parser-owned until operator edits", () => {
+  it("first parse copies RC rate into customer rate and ignores a separate parser customer rate", () => {
     const cbs = mkCbs();
     let state = createEmptyParseHydrationState();
     state = applyParseScalarHydration({ rate: 2000, customer_rate: 1500 } as never, cbs, state);
-    expect(cbs.setCustomerRate).toHaveBeenCalledWith("1500");
+    expect(cbs.setCustomerRate).toHaveBeenCalledWith("2000");
     vi.mocked(cbs.setCustomerRate).mockClear();
-    state = applyParseScalarHydration({ rate: 2000, customer_rate: 1400 } as never, cbs, state);
-    expect(cbs.setCustomerRate).toHaveBeenCalledWith("1400");
-    expect(state.manualOverrideKeys.has("customerRate")).toBe(false);
+    state = applyParseScalarHydration({ rate: 1800, customer_rate: 1400 } as never, cbs, state);
+    expect(cbs.setCustomerRate).not.toHaveBeenCalled();
+    expect(state.lastAppliedValues.get("customerRate")).toBe("2000");
   });
 
   it("operator-entered customer matching RC is protected when persisted on reopen", () => {

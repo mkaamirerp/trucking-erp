@@ -187,11 +187,12 @@ describe("parse → manual edit → re-parse → persist", () => {
 
     hydration = applyParseScalarHydration({ rate: 1000 } as never, cbs, hydration);
     expect(live.rate).toBe("1000");
-    expect(live.customerRate).toBe("");
+    expect(live.customerRate).toBe("1000");
 
     hydration = applyParseScalarHydration({ rate: 1100 } as never, cbs, hydration);
     expect(live.rate).toBe("1100");
-    expect(hydration.lastAppliedValues.get("customerRate")).toBe("1100");
+    expect(live.customerRate).toBe("1000");
+    expect(hydration.lastAppliedValues.get("customerRate")).toBe("1000");
 
     markOperatorEditedParseScalar(hydration, "customerRate");
     live.customerRate = "1350";

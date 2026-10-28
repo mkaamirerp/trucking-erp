@@ -225,7 +225,7 @@ export function applyEmptyWorkspaceFieldsFromParseResponse(
     workspaceFieldEmpty(fields.customerRate) &&
     effectiveParseCustomerRateString(ex) != null
   ) {
-    cbs.setCustomerRate(ex.customer_rate != null ? String(ex.customer_rate) : "");
+    cbs.setCustomerRate(ex.rate != null ? String(ex.rate) : "");
   }
   if (
     !draftJsonDefinesField(draftJson, ["miles"]) &&

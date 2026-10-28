@@ -881,6 +881,15 @@ def test_ai_comparison_is_authoritative_and_validated() -> None:
     assert only_rate[0]["current_value"] == "1800"
     assert only_rate[0]["revised_value"] == "2000"
     assert only_rate[0]["explanation"] == "Linehaul increased"
+    customer_only = copy.deepcopy(revised)
+    customer_only["extracted"]["rate"] = "1800"
+    customer_only["extracted"]["customer_rate"] = "900"
+    untouched = validate_ai_reparse_changes(
+        saved,
+        customer_only,
+        [{"field": "customer_rate", "label": "Customer rate", "current_value": "1800", "revised_value": "900"}],
+    )
+    assert untouched == []
 
     same_money = copy.deepcopy(revised)
     same_money["extracted"]["rate"] = "1800"

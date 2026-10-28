@@ -704,13 +704,7 @@ export function LoadWorkspaceForm(p: LoadWorkspaceFormProps) {
               inputMode="decimal"
               value={p.customerRate.trim() === "" ? p.rate : p.customerRate}
               onChange={(e) => p.setCustomerRate(e.target.value)}
-              title="Defaults to the RC rate if not set separately"
-              {...bindFieldDoc(
-                docFocusForMoneyField(
-                  p.customerRate.trim() === "" ? p.rate : p.customerRate,
-                  "customer",
-                ),
-              )}
+              title="Customer rate. The first parse copies the RC rate. Later parses do not change it."
             />
           </ParseConfidenceField>
           <ParseConfidenceField
