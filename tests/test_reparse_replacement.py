@@ -1178,6 +1178,134 @@ def test_reparse_stop_identity_limits_editable_changes() -> None:
     assert any(row["field"] == "stops.review.revised.0" for row in similar)
 
 
+def test_reparse_duplicate_street_follows_the_unique_reference() -> None:
+    saved_stops = [
+        {
+            "stop_type": "pickup",
+            "street": "100 Main St",
+            "reference_number": "PU-101",
+            "postal_code": "60601",
+            "appointment_time_text": "08:00",
+        },
+        {
+            "stop_type": "pickup",
+            "street": "100 Main St",
+            "reference_number": "PU-202",
+            "city": "Chicago",
+            "state_or_province": "IL",
+            "facility_name": "Main Dock",
+            "postal_code": "60601",
+            "appointment_time_text": "08:00",
+        },
+    ]
+    revised = {
+        "extracted": {
+            "stops": [
+                {
+                    "stop_type": "pickup",
+                    "street": "100 Main St",
+                    "reference_number": "PU-202",
+                    "city": "Boston",
+                    "state_or_province": "MA",
+                    "facility_name": "North Dock",
+                    "postal_code": "02101",
+                    "appointment_time_text": "15:30",
+                }
+            ]
+        }
+    }
+    rows = {row["field"]: row for row in validate_ai_reparse_changes({"extracted": {"stops": saved_stops}}, revised, [])}
+    assert rows["stops[1].postal_code"]["editable"] is True
+    assert rows["stops[1].postal_code"]["revised_value"] == "02101"
+    assert rows["stops[1].appointment_time_text"]["editable"] is True
+    assert rows["stops[1].appointment_time_text"]["revised_value"] == "15:30"
+    assert rows["stops[1].city"]["editable"] is True
+    assert rows["stops[1].facility_name"]["editable"] is True
+    assert "stops[0].postal_code" not in rows
+    assert "stops[0].reference_number" not in rows
+    assert rows["stops.review.saved.0"]["editable"] is False
+
+    reversed_stops = list(reversed(saved_stops))
+    reversed_rows = {
+        row["field"]: row
+        for row in validate_ai_reparse_changes({"extracted": {"stops": reversed_stops}}, revised, [])
+    }
+    assert reversed_rows["stops[0].postal_code"]["editable"] is True
+    assert reversed_rows["stops[0].postal_code"]["revised_value"] == "02101"
+    assert "stops[1].postal_code" not in reversed_rows
+    assert reversed_rows["stops.review.saved.1"]["editable"] is False
+
+    duplicate = validate_ai_reparse_changes(
+        {
+            "extracted": {
+                "stops": [
+                    {"stop_type": "pickup", "street": "100 Main St", "postal_code": "60601"},
+                    {"stop_type": "pickup", "street": "100 Main St", "postal_code": "60602"},
+                ]
+            }
+        },
+        {"extracted": {"stops": [{"stop_type": "pickup", "street": "100 Main St", "postal_code": "60609"}]}},
+        [],
+    )
+    assert all(row["editable"] is False for row in duplicate)
+    assert all(not str(row["field"]).endswith("postal_code") for row in duplicate)
+    assert {row["field"] for row in duplicate} >= {
+        "stops.review.saved.0",
+        "stops.review.saved.1",
+        "stops.review.revised.0",
+    }
+
+    confirmed = {
+        row["field"]: row
+        for row in validate_ai_reparse_changes(
+            {
+                "extracted": {
+                    "stops": [
+                        {
+                            "stop_type": "pickup",
+                            "street": "100 Main St",
+                            "reference_number": "PU-202",
+                            "facility_name": "Main Dock",
+                            "city": "Chicago",
+                            "state_or_province": "IL",
+                            "postal_code": "60601",
+                            "appointment_time_text": "08:00",
+                        }
+                    ]
+                }
+            },
+            revised,
+            [],
+        )
+    }
+    assert confirmed["stops[0].postal_code"]["editable"] is True
+    assert confirmed["stops[0].appointment_time_text"]["editable"] is True
+    assert confirmed["stops[0].facility_name"]["editable"] is True
+    assert confirmed["stops[0].city"]["editable"] is True
+    assert all(not str(field).startswith("stops.review.") for field in confirmed)
+
+    contradicted = validate_ai_reparse_changes(
+        {
+            "extracted": {
+                "stops": [
+                    {
+                        "stop_type": "pickup",
+                        "street": "100 Main St",
+                        "reference_number": "PU-101",
+                        "postal_code": "60601",
+                    }
+                ]
+            }
+        },
+        {"extracted": {"stops": [{"stop_type": "pickup", "street": "100 Main St", "reference_number": "PU-202", "postal_code": "02101"}]}},
+        [],
+    )
+    contradicted_fields = {row["field"]: row for row in contradicted}
+    assert contradicted_fields["stops[0].reference_number"]["editable"] is False
+    assert contradicted_fields["stops[0].postal_code"]["editable"] is False
+    assert contradicted_fields["stops[0].reference_number"]["revised_value"] == "PU-202"
+
+
 def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
     saved = {"extracted": {"rate": "1800", "customer_rate": "1800", "temperature_requirement": "34"}}
     revised = {"extracted": {"rate": "2000", "customer_rate": None, "temperature_requirement": None}}

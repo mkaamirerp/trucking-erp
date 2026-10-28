@@ -589,15 +589,19 @@ def _generic_facility(value: Any) -> bool:
 
 
 def _stops_conflict(saved: Any, revised: Any) -> bool:
-    """Conflicting street or location evidence blocks a confident match.
+    """Conflicting street, reference, or location evidence blocks a confident match.
 
-    A matching street still allows a city or facility amendment. A generic facility
-    name does not override a different street. City alone is not an identity.
+    A matching street still allows a city, facility, ZIP, or appointment amendment.
+    It does not override a different stop reference. A generic facility name does
+    not override a different street. City alone is not an identity.
     """
     if _stop_type(saved) != _stop_type(revised):
         return True
     street_left, street_right = _stop_token(saved, "street"), _stop_token(revised, "street")
     if street_left and street_right and street_left != street_right:
+        return True
+    reference_left, reference_right = _stop_token(saved, "reference_number"), _stop_token(revised, "reference_number")
+    if reference_left and reference_right and reference_left != reference_right:
         return True
     if street_left and street_right and street_left == street_right:
         return False
@@ -647,10 +651,11 @@ def _stops_share_city(saved: Any, revised: Any) -> bool:
 
 
 def _pair_stops(saved_stops: list[dict], revised_stops: list[dict]) -> tuple[list[tuple[int, int]], list[int], list[int]]:
-    """Pair a stop by a reliable identifier, or by one unique city when nothing stronger exists.
+    """Pair stops only when the same candidate is unique from both sides.
 
-    A city pair is only a candidate. Field changes require `_stop_pair_is_confident`.
-    Stop type alone is not enough. Ambiguous stops stay unpaired.
+    A unique matching reference wins when the street and other evidence agree.
+    A shared street without a distinguishing reference stays unpaired. A city
+    pair is only a candidate. Field changes require `_stop_pair_is_confident`.
     """
     pairs: list[tuple[int, int]] = []
     used_saved: set[int] = set()
@@ -661,40 +666,42 @@ def _pair_stops(saved_stops: list[dict], revised_stops: list[dict]) -> tuple[lis
         used_revised.add(revised_index)
         pairs.append((saved_index, revised_index))
 
-    for saved_index, saved in enumerate(saved_stops):
-        hits = [
-            index
-            for index, revised in enumerate(revised_stops)
-            if index not in used_revised and _stops_share_specific_id(saved, revised) and not _stops_conflict(saved, revised)
-        ]
-        if len(hits) == 1:
-            claim(saved_index, hits[0])
-    for saved_index, saved in enumerate(saved_stops):
-        if saved_index in used_saved:
-            continue
-        hits = [
-            index
-            for index, revised in enumerate(revised_stops)
-            if index not in used_revised and _stops_share_city(saved, revised) and not _stops_conflict(saved, revised)
-        ]
-        if len(hits) != 1:
-            continue
-        revised_index = hits[0]
-        others = [
-            index
-            for index, stop in enumerate(saved_stops)
-            if index not in used_saved and index != saved_index and _stops_share_city(stop, revised_stops[revised_index])
-        ]
-        if others:
-            continue
-        claim(saved_index, revised_index)
+    def claim_unique(predicate) -> None:
+        candidates: list[tuple[int, int]] = []
+        for saved_index, saved in enumerate(saved_stops):
+            if saved_index in used_saved:
+                continue
+            for revised_index, revised in enumerate(revised_stops):
+                if revised_index in used_revised:
+                    continue
+                if predicate(saved, revised):
+                    candidates.append((saved_index, revised_index))
+        saved_hits: dict[int, list[int]] = {}
+        revised_hits: dict[int, list[int]] = {}
+        for saved_index, revised_index in candidates:
+            saved_hits.setdefault(saved_index, []).append(revised_index)
+            revised_hits.setdefault(revised_index, []).append(saved_index)
+        for saved_index, revised_indexes in saved_hits.items():
+            if len(revised_indexes) != 1:
+                continue
+            revised_index = revised_indexes[0]
+            if len(revised_hits[revised_index]) == 1:
+                claim(saved_index, revised_index)
+
+    def reference_compatible(saved: Any, revised: Any) -> bool:
+        left, right = _stop_token(saved, "reference_number"), _stop_token(revised, "reference_number")
+        return bool(left and right and left == right and not _stops_conflict(saved, revised))
+
+    claim_unique(reference_compatible)
+    claim_unique(lambda saved, revised: _stops_share_specific_id(saved, revised) and not _stops_conflict(saved, revised))
+    claim_unique(lambda saved, revised: _stops_share_city(saved, revised) and not _stops_conflict(saved, revised))
     return pairs, [index for index in range(len(saved_stops)) if index not in used_saved], [
         index for index in range(len(revised_stops)) if index not in used_revised
     ]
 
 
 def _stop_pair_is_confident(saved: Any, revised: Any) -> bool:
-    """A field Change needs one unique reliable identifier and no conflicting street."""
+    """A field Change needs a unique reliable identifier and no contradictory reference."""
     return _stops_share_specific_id(saved, revised) and not _stops_conflict(saved, revised)
 
 
