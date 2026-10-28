@@ -371,18 +371,34 @@ def reparse_document_block_reason(revised: dict | None) -> str | None:
     return "This PDF is not a carrier rate confirmation. No Load information has changed."
 
 
-def known_pdf_reuse_message(evidence: Any, pdf_bytes: bytes) -> str | None:
-    """Tell the dispatcher when this exact file was already accepted. Does not call a model."""
+def classify_load_pdf_reuse(evidence: Any, pdf_bytes: bytes) -> str:
+    """Determine provenance only; re-reading the same PDF is not a duplicate write.
+
+    Save must independently recompute this from trusted evidence. Reusing a PDF
+    never authorizes appending the same bytes to the evidence history.
+    """
     import hashlib
 
     digest = hashlib.sha256(pdf_bytes).hexdigest()
     original = str(getattr(evidence, "file_sha256", "") or "").strip().lower()
     records = revised_pdf_records(getattr(evidence, "accepted_parse_json", None))
-    revised_digests = [str(item.get("sha256") or "").strip().lower() for item in records]
-    revised_digests = [item for item in revised_digests if item]
-    if digest == original or (revised_digests and digest == revised_digests[-1]):
+    history = [str(item.get("sha256") or "").strip().lower() for item in records]
+    history = [value for value in history if value]
+    if original and digest == original:
+        return "existing_prior_original" if history else "existing_original"
+    if history and digest == history[-1]:
+        return "existing_latest_revision"
+    if digest in history:
+        return "existing_prior_revision"
+    return "new_revision"
+
+
+def known_pdf_reuse_message(evidence: Any, pdf_bytes: bytes) -> str | None:
+    """Compatibility with the existing duplicate-attachment detection API."""
+    status = classify_load_pdf_reuse(evidence, pdf_bytes)
+    if status in {"existing_original", "existing_latest_revision", "existing_prior_original"}:
         return "This PDF is already on the Load."
-    if digest in revised_digests:
+    if status == "existing_prior_revision":
         return "This is a previously accepted version, not a new revision."
     return None
 
@@ -994,6 +1010,11 @@ def assess_same_load(saved: dict | None, revised: dict | None, broker_aliases: l
     if broker_conflict:
         return _identity_result("blocked", wrong_broker, [wrong_broker], False)
     if broker_match and pickup_conflict and delivery_conflict:
+        if reference_match:
+            # Broker and *same shipment reference* identify a plausible amendment,
+            # but both locations changed; never silently accept it.
+            caution = "Needs confirmation — broker and load number match, but both pickup and delivery locations changed."
+            return _identity_result("needs_confirmation", caution, [caution], True)
         blocked = "Wrong document — broker and shipment details do not match this Load."
         return _identity_result("blocked", blocked, [blocked], False)
     if not broker_match and not (pickup_match and delivery_match) and match_count < 2:

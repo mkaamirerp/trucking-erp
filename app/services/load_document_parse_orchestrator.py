@@ -234,7 +234,7 @@ async def propose_load_reparse(
     from app.services.load_workspace_draft_document import (
         assess_same_load,
         comparison_baseline,
-        known_pdf_reuse_message,
+        classify_load_pdf_reuse,
         parse_json_for_compare,
         reparse_document_block_reason,
         validate_ai_reparse_changes,
@@ -249,9 +249,10 @@ async def propose_load_reparse(
     )
     if evidence is None or not isinstance(evidence.accepted_parse_json, dict):
         raise LoadReparseError(422, "This load has no saved parser JSON to compare against.")
-    reuse = known_pdf_reuse_message(evidence, pdf_bytes)
-    if reuse:
-        raise LoadReparseError(422, reuse)
+    reuse_status = classify_load_pdf_reuse(evidence, pdf_bytes)
+    # Re-parse means READ and compare. Identical attachments must not be added
+    # again on Save, but their hashes do not forbid checking saved Load fields.
+    historical_pdf = reuse_status in {"existing_prior_revision", "existing_prior_original"}
     try:
         other_loads = await find_exact_pdf_duplicate_candidates(
             db, tenant_id=tenant_id, pdf_bytes=pdf_bytes, exclude_load_id=load_id
@@ -284,7 +285,24 @@ async def propose_load_reparse(
         broker_aliases=await _broker_aliases(db, tenant_id, saved, revised_doc),
     )
     if identity["verdict"] == "blocked":
-        raise LoadReparseError(422, identity["summary"])
+        if reuse_status == "new_revision":
+            raise LoadReparseError(422, identity["summary"])
+        # The SHA-256 is already trusted evidence for THIS Load. The Load may
+        # have manually edited fields; expose disagreements for dispatcher review.
+        identity = {
+            "verdict": "needs_confirmation",
+            "summary": "This PDF is already accepted on this Load, but its shipment fields disagree with saved values. Review manually.",
+            "reasons": [identity["summary"]],
+            "acknowledgement_required": True,
+        }
+    if historical_pdf:
+        identity = {
+            **identity,
+            "verdict": "needs_confirmation",
+            "summary": "Historical PDF version — review differences, but do not apply an older version as an amendment.",
+            "reasons": [*identity["reasons"], identity["summary"]],
+            "acknowledgement_required": True,
+        }
     compare_kwargs = {
         "system": _COMPARE_INSTRUCTIONS,
         "user_text": (
@@ -316,11 +334,21 @@ async def propose_load_reparse(
     if not isinstance(raw_changes, list):
         raise LoadReparseError(422, "The revised PDF could not be compared.")
     changes = validate_ai_reparse_changes(saved, revised_doc, raw_changes)
+    if historical_pdf:
+        # A historical copy can inform an operator, not overwrite latest values.
+        changes = [
+            {**item, "editable": False, "explanation": (
+                "Historical PDF: review-only. " + str(item.get("explanation") or "")
+            ).strip()}
+            for item in changes
+        ]
     version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
     concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
     expires_at = int(time.time()) + 30 * 60
     return {
         "changes": changes,
+        "pdf_reuse_status": reuse_status,
+        "store_new_pdf": reuse_status == "new_revision",
         "revised_parse": revised,
         "integrity": reparse_integrity_token(
             tenant_id=tenant_id,
