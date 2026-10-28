@@ -36,6 +36,7 @@ from app.models.load import Load, LoadStop, LoadStopAction, LoadNote
 from app.models.load_workspace_draft import LoadWorkspaceDraft
 from app.models.load_commercial_evidence import LoadCommercialEvidence
 from app.models.load_approved_commercial_snapshot import LoadApprovedCommercialSnapshot
+from app.models.load_rate_confirmation_revision import LoadRateConfirmationRevision
 from app.models.load_pod_evidence import LoadPodEvidence
 from app.models.load_custody_event import LoadCustodyEvent
 from app.models.terminal import Terminal

@@ -554,8 +554,8 @@ def test_dw1c_is_dw1_pod_parent_and_tenant_heads_are_split() -> None:
     assert pod is not None
     assert pod.down_revision == DW1D_REVISION
     assert set(script.get_heads()) == {
-        "s1_load_approved_snapshot_fmp",
-        "s1_load_approved_snapshot_x5",
+        "rc01_rate_con_revision_fmp",
+        "rc01_rate_con_revision_x5",
     }
 
 

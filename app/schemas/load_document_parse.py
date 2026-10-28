@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -185,3 +186,26 @@ class RateConfirmationRevisionCompareResponse(BaseModel):
     warning: Optional[str] = None
     notices: list[str] = Field(default_factory=list)
     changes: list[RateConfirmationRevisionChange] = Field(default_factory=list)
+
+
+class RateConfirmationRevisionAcceptResponse(BaseModel):
+    """One kept revised rate confirmation. Only the accepted rate is written on the load."""
+
+    revision_number: int
+    applied_fields: list[str]
+    new_rate: str
+    customer_rate_moved: bool
+
+
+class RateConfirmationRevisionListItem(BaseModel):
+    revision_number: int
+    filename: Optional[str] = None
+    accepted_at: datetime
+    accepted_by: Optional[str] = None
+    is_current: bool
+    old_rate: Optional[str] = None
+    new_rate: Optional[str] = None
+
+
+class RateConfirmationRevisionListResponse(BaseModel):
+    items: list[RateConfirmationRevisionListItem] = Field(default_factory=list)
