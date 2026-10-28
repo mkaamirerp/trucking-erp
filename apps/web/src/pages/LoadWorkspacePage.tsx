@@ -2110,6 +2110,11 @@ function LoadWorkspacePage() {
 
   async function onReparsePdf(file: File) {
     if (!load || loadIsCancelled) return;
+    // A new attempt invalidates the previous PDF proposal, even if parsing fails.
+    setReparseProposal(null);
+    setReparseFile(null);
+    setReparseReason("");
+    setReparseDialogOpen(false);
     setParseBusy(true);
     setToolbarMessage(null);
     try {
@@ -2985,9 +2990,14 @@ function LoadWorkspacePage() {
           busy={saving || parseBusy}
           onChangeField={applyReparseChange}
           onClose={() => {
+            // Dismissing the comparison must never attach an unaccepted revised PDF.
+            // Any already-applied form edits remain visible and can be saved normally.
             setReparseDialogOpen(false);
+            setReparseProposal(null);
+            setReparseFile(null);
+            setReparseReason("");
             setToolbarMessage({
-              text: "Form stays as you left it. Save to store it and the revised PDF.",
+              text: "Re-parse dismissed. Any form edits remain unsaved; Save will not attach the revised PDF.",
               tone: "neutral",
             });
           }}
