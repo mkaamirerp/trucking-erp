@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import get_storage
@@ -87,7 +88,8 @@ async def _lock_load(db: AsyncSession, tenant_id: int, load_id: int) -> Load | N
     return await db.scalar(
         select(Load)
         .where(Load.tenant_id == int(tenant_id), Load.id == int(load_id))
-        .with_for_update()
+        .options(selectinload(Load.stops))
+        .with_for_update(of=Load)
     )
 
 
@@ -156,6 +158,7 @@ async def accept_revised_rate_confirmation(
     if requested.get("field") != "rate" or "new_value" not in requested or "expected_current_value" not in requested:
         raise RateConfirmationRevisionAcceptError(422, _RATE_ONLY)
 
+    await db.refresh(load, attribute_names=["stops"])
     current = build_approved_db_fields(load)
     verified = verify_revision_changes(
         [{"field": "rate", "new_value": requested.get("new_value")}],

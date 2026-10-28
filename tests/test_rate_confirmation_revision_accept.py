@@ -208,6 +208,9 @@ class _Db:
         self.added.append(row)
         self.revisions.append(row)
 
+    async def refresh(self, _obj, attribute_names=None):
+        return None
+
     async def flush(self):
         return None
 
