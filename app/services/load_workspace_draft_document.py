@@ -474,6 +474,19 @@ def _blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+def _omitted_default(value: Any) -> bool:
+    """False, blank, or unset was not a value the PDF stated."""
+    return value is False or _blank(value)
+
+
+def _revised_reference_repeats_changed_broker_load(_saved_extracted: dict, revised_extracted: dict, value: Any) -> bool:
+    """The broker load number already has its own row. Do not list that same value again."""
+    revised_ref = revised_extracted.get("broker_load_reference")
+    if _blank(revised_ref):
+        return False
+    return reparse_values_equivalent("broker_load_reference", value, revised_ref)
+
+
 def reparse_values_equivalent(field: str, left: Any, right: Any) -> bool:
     """Field-aware equality for re-parse differences. Leading zeros in references stay significant."""
     if _blank(left) and _blank(right):
@@ -786,6 +799,8 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
         updated = revised_extracted.get(field)
         if field not in saved_extracted and field not in revised_extracted:
             continue
+        if (field not in revised_extracted or _blank(updated)) and _omitted_default(current):
+            continue
         if reparse_values_equivalent(field, current, updated):
             continue
         changes.append(
@@ -864,6 +879,8 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
             }
         )
     for index in open_revised:
+        if _revised_reference_repeats_changed_broker_load(saved_extracted, revised_extracted, revised_refs[index].get("value")):
+            continue
         changes.append(
             {
                 "field": f"references.review.revised.{index}",
@@ -1199,7 +1216,7 @@ def _supported_difference_row(field: str, current: Any, updated: Any, *, revised
     if field == "customer_rate" or _blank(current):
         return None
     if not revised_present or _blank(updated):
-        if _blank(current):
+        if _omitted_default(current):
             return None
         return {
             "field": field,
@@ -1306,6 +1323,8 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
             }
         )
     for index in open_revised:
+        if _revised_reference_repeats_changed_broker_load(saved_extracted, revised_extracted, revised_refs[index].get("value")):
+            continue
         rows.append(
             {
                 "field": f"references.review.revised.{index}",

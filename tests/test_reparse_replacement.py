@@ -1306,6 +1306,78 @@ def test_reparse_duplicate_street_follows_the_unique_reference() -> None:
     assert contradicted_fields["stops[0].reference_number"]["revised_value"] == "PU-202"
 
 
+def test_reparse_popup_hides_default_omissions_and_duplicate_broker_reference() -> None:
+    saved = {
+        "extracted": {
+            "broker_load_reference": "3872125-1",
+            "hazmat_flag": False,
+            "temperature_requirement": "34F",
+        }
+    }
+    po_only = {
+        "extracted": {
+            "broker_load_reference": "3872199-1",
+            "temperature_requirement": "34F",
+            "references": [{"kind": "other", "value": "3872199-1"}],
+        }
+    }
+    po_rows = validate_ai_reparse_changes(saved, po_only, [])
+    assert [row["field"] for row in po_rows] == ["broker_load_reference"]
+    assert po_rows[0]["editable"] is True
+    assert po_rows[0]["current_value"] == "3872125-1"
+    assert po_rows[0]["revised_value"] == "3872199-1"
+    assert all(row["field"] != "hazmat_flag" for row in po_rows)
+    assert all(not str(row["field"]).startswith("references.review.revised.") for row in po_rows)
+
+    omitted_temperature = validate_ai_reparse_changes(
+        saved,
+        {"extracted": {"broker_load_reference": "3872125-1", "hazmat_flag": False}},
+        [],
+    )
+    assert len(omitted_temperature) == 1
+    assert omitted_temperature[0]["field"] == "temperature_requirement"
+    assert omitted_temperature[0]["editable"] is False
+    assert omitted_temperature[0]["current_value"] == "34F"
+    assert omitted_temperature[0]["revised_value"] is None
+    assert "not treated as a deletion" in omitted_temperature[0]["explanation"]
+
+    extra_saved = copy.deepcopy(saved)
+    extra_saved["extracted"]["references"] = [{"kind": "po", "value": "3872125-1"}]
+    extra_reference = validate_ai_reparse_changes(
+        extra_saved,
+        {
+            "extracted": {
+                "broker_load_reference": "3872125-1",
+                "temperature_requirement": "34 °F",
+                "hazmat_flag": None,
+                "references": [
+                    {"kind": "po", "value": "3872125-1"},
+                    {"kind": "bol", "value": "BOL-555"},
+                ],
+            }
+        },
+        [],
+    )
+    assert [row["field"] for row in extra_reference] == ["references.review.revised.1"]
+    assert extra_reference[0]["editable"] is False
+    assert extra_reference[0]["revised_value"] == "BOL-555"
+
+    same_po = validate_ai_reparse_changes(
+        {"extracted": {"broker_load_reference": "3872125-1", "rate": "1800", "hazmat_flag": False}},
+        {
+            "extracted": {
+                "broker_load_reference": "3872125-1",
+                "rate": "2000",
+                "references": [{"kind": "po", "value": "3872125-1"}],
+            }
+        },
+        [],
+    )
+    assert [row["field"] for row in same_po] == ["rate"]
+    assert same_po[0]["editable"] is True
+    assert same_po[0]["revised_value"] == "2000"
+
+
 def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
     saved = {"extracted": {"rate": "1800", "customer_rate": "1800", "temperature_requirement": "34"}}
     revised = {"extracted": {"rate": "2000", "customer_rate": None, "temperature_requirement": None}}
