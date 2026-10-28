@@ -420,6 +420,36 @@ def _norm_ref(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "").strip()).casefold()
 
 
+def _norm_labeled_ref(value: Any) -> str:
+    """Drop a leading PO/REF/BOL label. The remaining digits, including leading zeros, stay."""
+    text = str(value or "").strip()
+    text = re.sub(
+        r"^(?:p\.?\s*o\.?|purchase\s+order|ref(?:erence)?|bol|order)\s*[#:]\s*",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return _norm_ref(text)
+
+
+def _norm_temperature(value: Any) -> str:
+    text = str(value or "").strip().casefold().replace("º", "°")
+    text = text.replace("degrees", "").replace("degree", "")
+    text = re.sub(r"\s+", "", text).replace("°", "")
+    return text.replace("fahrenheit", "f").replace("celsius", "c")
+
+
+def _norm_equipment(value: Any) -> str:
+    text = _norm_place(value)
+    return {
+        "ftl": "full truckload",
+        "full truck load": "full truckload",
+        "ltl": "less than truckload",
+        "less than truck load": "less than truckload",
+    }.get(text, text)
+
+
 def _norm_date(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -452,11 +482,15 @@ def reparse_values_equivalent(field: str, left: Any, right: Any) -> bool:
         return False
     leaf = field.rsplit(".", 1)[-1]
     if field == "broker_load_reference" or leaf in {"value", "broker_load_reference", "reference_number"}:
-        return _norm_ref(left) == _norm_ref(right)
+        return _norm_labeled_ref(left) == _norm_labeled_ref(right)
     if leaf == "appointment_date":
         return _norm_date(left) == _norm_date(right)
     if leaf == "appointment_time_text":
         return _norm_time(left) == _norm_time(right)
+    if field == "temperature_requirement" or leaf == "temperature_requirement":
+        return _norm_temperature(left) == _norm_temperature(right)
+    if leaf in {"stop_type", "appointment_type"} or field in {"mode", "equipment_type", "trailer_type"}:
+        return _norm_equipment(left) == _norm_equipment(right)
     if leaf in {"street", "city", "state_or_province", "facility_name", "country"}:
         return _norm_place(left) == _norm_place(right)
     if field in {"rate", "customer_rate"} or leaf in {"rate", "customer_rate", "estimated_weight", "miles", "pallet_case_count"}:
@@ -520,9 +554,19 @@ def _stop_token(stop: Any, key: str) -> str:
 
 
 def _stops_conflict(saved: Any, revised: Any) -> bool:
+    """Disagreeing street, facility, or reference means these are not the same stop.
+
+    A city change does not block a stop already identified by street, facility, or reference.
+    """
     if _stop_type(saved) != _stop_type(revised):
         return True
-    for key in ("street", "facility_name", "reference_number", "city", "state_or_province"):
+    for key in ("street", "facility_name", "reference_number"):
+        left, right = _stop_token(saved, key), _stop_token(revised, key)
+        if left and right and left != right:
+            return True
+    if _stops_share_specific_id(saved, revised):
+        return False
+    for key in ("city", "state_or_province"):
         left, right = _stop_token(saved, key), _stop_token(revised, key)
         if left and right and left != right:
             return True
@@ -932,6 +976,187 @@ def _revision_order(saved: dict, revised: dict) -> str:
     if revised_date < saved_date:
         return "older"
     return "newer"
+
+
+def comparison_baseline(saved: dict | None) -> dict:
+    """Compact field paths and values from the latest saved verified JSON."""
+    document = saved if isinstance(saved, dict) else {}
+    extracted = document.get("extracted") if isinstance(document.get("extracted"), dict) else {}
+    fields: list[dict] = []
+    for name in _SCALAR_FIELDS:
+        if name not in extracted or _blank(extracted.get(name)):
+            continue
+        fields.append({"path": name, "value": extracted.get(name)})
+    for index, stop in enumerate(_stop_dicts(extracted)):
+        for leaf in _STOP_FIELDS:
+            if leaf not in stop or _blank(stop.get(leaf)):
+                continue
+            fields.append({"path": f"stops[{index}].{leaf}", "value": stop.get(leaf)})
+    references = [item for item in (extracted.get("references") or []) if isinstance(item, dict)]
+    for index, reference in enumerate(references):
+        for leaf in ("kind", "value"):
+            if leaf not in reference or _blank(reference.get(leaf)):
+                continue
+            fields.append({"path": f"references[{index}].{leaf}", "value": reference.get(leaf)})
+    return {"fields": fields}
+
+
+def _comparable_reparse_field(field: str) -> bool:
+    if field in _SCALAR_FIELDS:
+        return True
+    indexed = _INDEXED_FIELD.match(field)
+    if not indexed or indexed.group(3) is None:
+        return False
+    name, child = indexed.group(1), indexed.group(3)
+    if name == "stops" and child in _STOP_FIELDS:
+        return True
+    return name == "references" and child in {"kind", "value"}
+
+
+def _comparison_label(item: dict, fallback: str) -> str | None:
+    label = str(item.get("label") or "").strip()
+    if not label or label == fallback or len(label) > 160 or "\n" in label:
+        return None
+    return label
+
+
+def _money_review(field: str, current: Any, updated: Any) -> dict:
+    label = "Rate" if field == "rate" else "Customer rate"
+    return {
+        "field": field,
+        "label": label,
+        "explanation": "The comparison did not confirm this amount. Review it before changing the load.",
+        "current_value": current,
+        "revised_value": updated,
+        "editable": False,
+    }
+
+
+def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
+    """Keep comparison rows the model proposed when both JSON documents support them.
+
+    Invented values, unsupported paths, and ambiguous stops are not accepted changes.
+    A money difference the model missed or misstated stays visible for review.
+    """
+    saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
+    saved_stops = _stop_dicts(saved_extracted)
+    revised_stops = _stop_dicts(revised_extracted)
+    stop_pair = dict(_pair_stops(saved_stops, revised_stops)[0])
+    saved_refs = [item for item in (saved_extracted.get("references") or []) if isinstance(item, dict)]
+    revised_refs = [item for item in (revised_extracted.get("references") or []) if isinstance(item, dict)]
+    ref_pair = dict(_pair_references(saved_refs, revised_refs)[0])
+    labels = {
+        "rate": "Rate",
+        "customer_rate": "Customer rate",
+        "broker_load_reference": "Broker load number",
+        "broker_name_snapshot": "Broker",
+        "temperature_requirement": "Temperature",
+        "equipment_type": "Equipment",
+        "commodity": "Commodity",
+    }
+    rows: list[dict] = []
+    seen: set[str] = set()
+    reviewed_stops: set[int] = set()
+    reviewed_refs: set[int] = set()
+
+    def document_values(field: str) -> tuple[str, Any, Any]:
+        indexed = _INDEXED_FIELD.match(field)
+        if not indexed:
+            if field not in saved_extracted or field not in revised_extracted:
+                return "missing", None, None
+            return "ok", saved_extracted.get(field), revised_extracted.get(field)
+        name, index, child = indexed.group(1), int(indexed.group(2)), indexed.group(3)
+        if name == "stops":
+            if index >= len(saved_stops) or child is None:
+                return "missing", None, None
+            if index not in stop_pair:
+                return "ambiguous_stop", index, None
+            revised_stop = revised_stops[stop_pair[index]]
+            if child not in saved_stops[index] or child not in revised_stop:
+                return "missing", None, None
+            return "ok", saved_stops[index].get(child), revised_stop.get(child)
+        if index >= len(saved_refs) or child is None:
+            return "missing", None, None
+        if index not in ref_pair:
+            return "ambiguous_ref", index, None
+        revised_ref = revised_refs[ref_pair[index]]
+        if child not in saved_refs[index] or child not in revised_ref:
+            return "missing", None, None
+        return "ok", saved_refs[index].get(child), revised_ref.get(child)
+
+    for item in proposed or []:
+        if not isinstance(item, dict):
+            continue
+        field = _normalize_field_path(str(item.get("field") or ""))
+        if not field or field in seen or not _comparable_reparse_field(field):
+            continue
+        kind, current, updated = document_values(field)
+        if kind == "ambiguous_stop":
+            index = int(current)
+            if index in reviewed_stops:
+                continue
+            reviewed_stops.add(index)
+            row = {
+                "field": f"stops.review.saved.{index}",
+                "label": "Stop",
+                "current_value": _stop_label(saved_stops[index]),
+                "revised_value": None,
+                "editable": False,
+            }
+            note = _comparison_label(item, "Stop")
+            if note:
+                row["explanation"] = note
+            rows.append(row)
+            continue
+        if kind == "ambiguous_ref":
+            index = int(current)
+            if index in reviewed_refs:
+                continue
+            reviewed_refs.add(index)
+            rows.append(
+                {
+                    "field": f"references.review.saved.{index}",
+                    "label": "Reference",
+                    "current_value": saved_refs[index].get("value"),
+                    "revised_value": None,
+                    "editable": False,
+                }
+            )
+            continue
+        if kind != "ok" or reparse_values_equivalent(field, current, updated):
+            continue
+        supported = reparse_values_equivalent(field, item.get("current_value"), current) and reparse_values_equivalent(
+            field, item.get("revised_value"), updated
+        )
+        if not supported:
+            if field in {"rate", "customer_rate"}:
+                rows.append(_money_review(field, current, updated))
+                seen.add(field)
+            continue
+        seen.add(field)
+        fallback = labels.get(field, field.replace("_", " "))
+        row = {
+            "field": field,
+            "label": fallback,
+            "current_value": current,
+            "revised_value": updated,
+            "editable": field_is_editable(field),
+        }
+        note = _comparison_label(item, fallback)
+        if note:
+            row["explanation"] = note
+        rows.append(row)
+
+    for field in ("rate", "customer_rate"):
+        if field in seen or field not in saved_extracted or field not in revised_extracted:
+            continue
+        current, updated = saved_extracted.get(field), revised_extracted.get(field)
+        if reparse_values_equivalent(field, current, updated):
+            continue
+        rows.append(_money_review(field, current, updated))
+        seen.add(field)
+    return rows
 
 
 def attach_model_explanations(changes: list[dict], proposed: list) -> list[dict]:

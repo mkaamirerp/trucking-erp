@@ -70,7 +70,7 @@ export function ReparseChangesDialog({
             <thead>
               <tr className="border-b text-xs uppercase text-gray-500">
                 <th className="py-2 pr-2">Field</th>
-                <th className="py-2 pr-2">On the load</th>
+                <th className="py-2 pr-2">On the Load</th>
                 <th className="py-2 pr-2">Revised PDF</th>
                 <th className="py-2" />
               </tr>

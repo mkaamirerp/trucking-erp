@@ -88,16 +88,16 @@ _COMPARE_SCHEMA = {
 }
 
 _COMPARE_INSTRUCTIONS = (
-    "You are comparing one revised rate confirmation against the load's one saved verified JSON. "
-    "saved_verified_json is the baseline currently on the load. "
-    "revised_extraction is the new PDF after the existing parser normalized it. "
-    "Return only fields whose value changed. Any field may change, including city, address, "
-    "temperature, rate, stops, equipment, and the broker load number, PO number, or order number. "
-    "A different PO or load number is a normal proposed change. Do not reject the PDF for that. "
-    "Do not return unchanged fields. "
-    "field is a path such as rate, temperature_requirement, broker_load_reference, or stops[0].city. "
-    "label is a short explanation of that difference. "
-    "current_value is the saved JSON value. revised_value is the new PDF value. "
+    "Compare only the fields present in JSON 1 against the corresponding values in JSON 2. "
+    "Ignore fields that exist only in JSON 2. Return only meaningful changes. "
+    "Equivalent representations, formatting, and capitalization are not changes. "
+    "A missing value in the revised extraction is not automatically a deletion. Do not invent values. "
+    "Unchanged examples: FTL versus Full Truckload; PICKUP versus pickup; DELIVERY versus delivery; "
+    "34F versus 34 °F; PO# 48211903 versus 48211903 when the prefix is only a label. "
+    "Changed examples: $1,800 versus $2,000; Chicago versus Boston when they are the same identifiable stop. "
+    "Preserve significant reference digits, leading zeros, units, stop identities, and genuine business differences. "
+    "field is the JSON 1 path. label is a short explanation. "
+    "current_value is the JSON 1 value. revised_value is the JSON 2 value. "
     "Do not decide whether the PDF belongs to this load."
 )
 
@@ -233,11 +233,11 @@ async def propose_load_reparse(
     )
     from app.services.load_workspace_draft_document import (
         assess_same_load,
-        attach_model_explanations,
-        deterministic_reparse_changes,
+        comparison_baseline,
         known_pdf_reuse_message,
         parse_json_for_compare,
         reparse_document_block_reason,
+        validate_ai_reparse_changes,
     )
 
     evidence = await db.scalar(
@@ -288,9 +288,9 @@ async def propose_load_reparse(
     compare_kwargs = {
         "system": _COMPARE_INSTRUCTIONS,
         "user_text": (
-            "saved_verified_json:\n"
-            + json.dumps(saved, default=str)
-            + "\n\nrevised_extraction:\n"
+            "JSON 1:\n"
+            + json.dumps(comparison_baseline(saved), default=str)
+            + "\n\nJSON 2:\n"
             + json.dumps(revised_doc, default=str)
         ),
         "schema": _COMPARE_SCHEMA,
@@ -315,7 +315,7 @@ async def propose_load_reparse(
     raw_changes = compared.get("changes") if isinstance(compared, dict) else None
     if not isinstance(raw_changes, list):
         raise LoadReparseError(422, "The revised PDF could not be compared.")
-    changes = attach_model_explanations(deterministic_reparse_changes(saved, revised_doc), raw_changes)
+    changes = validate_ai_reparse_changes(saved, revised_doc, raw_changes)
     version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
     concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
     expires_at = int(time.time()) + 30 * 60

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import subprocess
 import time
 from decimal import Decimal
@@ -30,6 +31,7 @@ from app.services.load_workspace_draft_document import (
     ground_reparse_changes,
     parse_json_for_compare,
     reconcile_accepted_parse_json,
+    validate_ai_reparse_changes,
 )
 from app.services.load_workspace_draft_mapper import draft_json_to_load_create
 
@@ -338,25 +340,29 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     assert seen["pdf"] == b"%PDF-revised"
     assert seen["parser"]["load_id"] == 9
     assert seen["parser"]["tenant_id"] == 1
-    assert "different PO" in seen["compare"]["system"]
-    assert "PO-100" in seen["compare"]["user_text"]
-    assert "PO-200" in seen["compare"]["user_text"]
+    assert "Ignore fields that exist only in JSON 2" in seen["compare"]["system"]
+    assert "input_file_bytes" not in seen["compare"]
+    assert "You are a TruckERP product parser" not in seen["compare"]["system"]
+    baseline_text, revised_text = seen["compare"]["user_text"].split("JSON 2:\n", 1)
+    baseline = json.loads(baseline_text.split("JSON 1:\n", 1)[1])
+    assert {item["path"] for item in baseline["fields"]} >= {"rate", "broker_load_reference", "stops[0].city"}
+    assert all(item["path"] != "unmapped_note" for item in baseline["fields"])
+    assert "keep" not in baseline_text
+    assert Decimal(json.loads(revised_text)["extracted"]["rate"]) == Decimal("2550")
     assert "old-revised" not in seen["compare"]["user_text"]
     assert seen["compare"]["schema_name"] == "load_reparse_changes"
     by_field = {item["field"]: item for item in proposal["changes"]}
-    assert "rate" in by_field
-    assert "broker_load_reference" in by_field
-    assert "temperature_requirement" in by_field
-    assert "references[0].value" in by_field
-    assert by_field["stops.review.saved.0"]["editable"] is False
-    assert by_field["stops.review.revised.0"]["editable"] is False
-    assert "stops[0].city" not in by_field
+    assert by_field["rate"]["editable"] is False
     assert Decimal(by_field["rate"]["revised_value"]) == Decimal("2550")
     assert by_field["rate"]["current_value"] == "2500"
-    assert by_field["rate"]["explanation"] == "Linehaul increased"
-    assert by_field["broker_load_reference"]["revised_value"] == "PO-200"
-    assert by_field["references[0].value"]["revised_value"] == "NEW"
-    assert by_field["references[0].value"]["editable"] is True
+    assert "9999" not in str(by_field["rate"]["revised_value"])
+    assert by_field["temperature_requirement"]["editable"] is True
+    assert by_field["temperature_requirement"]["revised_value"] == "0"
+    assert by_field["temperature_requirement"]["label"] == "Temperature"
+    assert by_field["stops.review.saved.0"]["editable"] is False
+    assert "stops[0].city" not in by_field
+    assert "broker_load_reference" not in by_field
+    assert "references[0].value" not in by_field
     assert "not_a_field" not in by_field
     assert "unmapped_note" not in by_field
     informational = ground_reparse_changes(
@@ -602,6 +608,13 @@ async def test_production_compare_call_passes_configured_key_and_model(monkeypat
     assert seen["inner"]["api_key"] == "test-key"
     assert seen["inner"]["model"] == "test-model"
     assert seen["inner"]["schema_name"] == "load_reparse_changes"
+    assert seen["inner"].get("input_file_bytes") is None
+    assert "You are a TruckERP product parser" not in seen["inner"]["system"]
+    assert "JSON 1:" in seen["inner"]["user_text"]
+    rate_review = next(item for item in proposal["changes"] if item["field"] == "rate")
+    assert rate_review["editable"] is False
+    assert rate_review["current_value"] == "10"
+    assert Decimal(rate_review["revised_value"]) == Decimal("2550")
     assert proposal["integrity"]
 
 
@@ -824,6 +837,114 @@ def _shipment(broker: str, reference: str, pickup: tuple[str, str], delivery: tu
         },
         "extracted": extracted,
     }
+
+
+def test_ai_comparison_is_authoritative_and_validated() -> None:
+    saved = {
+        "extracted": {
+            "rate": "1800",
+            "customer_rate": "1800",
+            "mode": "FTL",
+            "equipment_type": "Reefer",
+            "temperature_requirement": "34F",
+            "broker_load_reference": "PO# 48211903",
+            "stops": [
+                {"stop_type": "PICKUP", "city": "Chicago", "state_or_province": "IL", "street": "100 Main"},
+                {"stop_type": "DELIVERY", "city": "Dallas", "state_or_province": "TX"},
+            ],
+            "references": [{"kind": "po", "value": "00123"}],
+        }
+    }
+    revised = {
+        "extracted": {
+            "rate": "2000",
+            "customer_rate": "1800",
+            "mode": "Full Truckload",
+            "equipment_type": "Reefer",
+            "temperature_requirement": "34 °F",
+            "broker_load_reference": "48211903",
+            "commodity": "only on the revised PDF",
+            "stops": [
+                {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "street": "100 Main"},
+                {"stop_type": "delivery", "city": "Dallas", "state_or_province": "TX"},
+            ],
+            "references": [{"kind": "po", "value": "00123"}],
+        }
+    }
+    only_rate = validate_ai_reparse_changes(
+        saved,
+        revised,
+        [{"field": "rate", "label": "Linehaul increased", "current_value": "$1,800", "revised_value": "$2,000"}],
+    )
+    assert [item["field"] for item in only_rate] == ["rate"]
+    assert only_rate[0]["editable"] is True
+    assert only_rate[0]["current_value"] == "1800"
+    assert only_rate[0]["revised_value"] == "2000"
+    assert only_rate[0]["explanation"] == "Linehaul increased"
+
+    same_money = copy.deepcopy(revised)
+    same_money["extracted"]["rate"] = "1800"
+    false_changes = validate_ai_reparse_changes(
+        saved,
+        same_money,
+        [
+            {"field": "mode", "label": "Mode", "current_value": "FTL", "revised_value": "Full Truckload"},
+            {"field": "stops[0].stop_type", "label": "Type", "current_value": "PICKUP", "revised_value": "pickup"},
+            {"field": "stops[1].stop_type", "label": "Type", "current_value": "DELIVERY", "revised_value": "delivery"},
+            {"field": "temperature_requirement", "label": "Temp", "current_value": "34F", "revised_value": "34 °F"},
+            {"field": "broker_load_reference", "label": "PO", "current_value": "PO# 48211903", "revised_value": "48211903"},
+            {"field": "commodity", "label": "Commodity", "current_value": None, "revised_value": "only on the revised PDF"},
+            {"field": "miles", "label": "Miles", "current_value": "100", "revised_value": None},
+        ],
+    )
+    assert false_changes == []
+
+    invented = validate_ai_reparse_changes(
+        saved,
+        revised,
+        [{"field": "rate", "label": "Rate", "current_value": "1", "revised_value": "9999"}],
+    )
+    assert invented[0]["editable"] is False
+    assert invented[0]["revised_value"] == "2000"
+    omitted = validate_ai_reparse_changes(saved, revised, [])
+    assert omitted[0]["field"] == "rate" and omitted[0]["editable"] is False
+
+    other_city = copy.deepcopy(revised)
+    other_city["extracted"]["stops"][0]["city"] = "Boston"
+    other_city["extracted"]["rate"] = "1800"
+    same_stop = validate_ai_reparse_changes(
+        saved,
+        other_city,
+        [{"field": "stops[0].city", "label": "Pickup city", "current_value": "Chicago", "revised_value": "Boston"}],
+    )
+    assert same_stop[0]["field"] == "stops[0].city"
+    assert same_stop[0]["editable"] is True
+    assert same_stop[0]["revised_value"] == "Boston"
+    unnamed = copy.deepcopy(saved)
+    unnamed["extracted"]["stops"][0].pop("street")
+    moved = copy.deepcopy(other_city)
+    moved["extracted"]["stops"][0].pop("street")
+    ambiguous = validate_ai_reparse_changes(
+        unnamed,
+        moved,
+        [{"field": "stops[0].city", "label": "Pickup city", "current_value": "Chicago", "revised_value": "Boston"}],
+    )
+    assert ambiguous[0]["field"] == "stops.review.saved.0"
+    assert ambiguous[0]["editable"] is False
+    assert "stops[0].city" not in {item["field"] for item in ambiguous}
+
+    zeros = copy.deepcopy(saved)
+    plain = copy.deepcopy(revised)
+    plain["extracted"]["rate"] = "1800"
+    plain["extracted"]["references"] = [{"kind": "po", "value": "123"}]
+    leading = validate_ai_reparse_changes(
+        zeros,
+        plain,
+        [{"field": "references[0].value", "label": "Reference", "current_value": "00123", "revised_value": "123"}],
+    )
+    assert leading[0]["field"] == "references[0].value"
+    assert leading[0]["editable"] is True
+    assert leading[0]["revised_value"] == "123"
 
 
 def test_reparse_gates_cover_identity_classification_and_field_differences() -> None:
