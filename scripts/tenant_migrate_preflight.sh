@@ -104,24 +104,12 @@ fi
 
 HEAD_IDS="$(printf "%s\n" "$HEADS_OUT" | sed -n 's/^\([A-Za-z0-9_]*\) (head).*/\1/p' | sort)"
 HEAD_COUNT=$(printf "%s\n" "$HEAD_IDS" | grep -c . || true)
-APPROVED_RC01_HEADS="$(printf '%s\n' rc01_rate_con_revision_fmp rc01_rate_con_revision_x5 | sort)"
-APPROVED_S1_HEADS="$(printf '%s\n' s1_load_approved_snapshot_fmp s1_load_approved_snapshot_x5 | sort)"
 APPROVED_EQ01_HEADS="$(printf '%s\n' eq01_equipment_attachments_fmp eq01_equipment_attachments_x5 | sort)"
 APPROVED_LN01_HEADS="$(printf '%s\n' ln01_load_number_periods_fmp ln01_load_number_periods_x5 | sort)"
 APPROVED_POD_HEADS="$(printf '%s\n' i14_load_pod_evidence i14_load_pod_evidence_x5 | sort)"
 APPROVED_FMP_X5_HEADS="$(printf '%s\n' fmp02_fmp_tenant_scope i14_load_pod_evidence_x5 | sort)"
 if [ "${HEAD_COUNT:-0}" -eq 1 ]; then
   echo "  tenant heads: 1"
-elif [ "$HEAD_IDS" = "$APPROVED_RC01_HEADS" ]; then
-  echo "  tenant heads: 2 (approved RC01 rate-confirmation revision split: FMP and x5)"
-  echo "  upgrade head is forbidden. Pin the revision after owner approval:"
-  echo "    FMP line:         rc01_rate_con_revision_fmp"
-  echo "    x5 / POD-x5 line: rc01_rate_con_revision_x5"
-elif [ "$HEAD_IDS" = "$APPROVED_S1_HEADS" ]; then
-  echo "  tenant heads: 2 (approved S1 snapshot split: FMP and x5)"
-  echo "  upgrade head is forbidden. Pin the revision after owner approval:"
-  echo "    FMP line:         s1_load_approved_snapshot_fmp"
-  echo "    x5 / POD-x5 line: s1_load_approved_snapshot_x5"
 elif [ "$HEAD_IDS" = "$APPROVED_EQ01_HEADS" ]; then
   echo "  tenant heads: 2 (approved EQ01 split: FMP and x5)"
   echo "  upgrade head is forbidden. Pin the revision after owner approval:"

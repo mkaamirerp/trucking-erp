@@ -16,11 +16,6 @@ from app.schemas.load import LoadCreate
 from app.schemas.load_workspace_draft import LoadWorkspaceDraftPromote
 from app.services.load_workspace_draft_lifecycle import apply_expiry_if_overdue, raise_not_editable
 from app.services.load_workspace_draft_mapper import DraftJsonMappingError, draft_json_to_load_create
-from app.services.load_approved_commercial_snapshot import (
-    CLAIM_WORKSPACE_REVIEWED,
-    SOURCE_PROMOTION,
-    insert_creation_snapshot_uncommitted,
-)
 from app.services.load_rate_confirmation_duplicate import assert_promote_rate_confirmation_not_duplicate
 from app.schemas.trip_read import TripAssignmentBody
 from app.services.loads import (
@@ -328,16 +323,6 @@ async def promote_workspace_draft(
     hydrated = await get_load(db, tenant_id, int(load.id))
     if hydrated is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Load missing after promotion")
-    await insert_creation_snapshot_uncommitted(
-        db,
-        hydrated,
-        creation_source=SOURCE_PROMOTION,
-        dispatcher_review_claim=CLAIM_WORKSPACE_REVIEWED,
-        created_by_platform_user_id=promoted_by_platform_user_id,
-        evidence=evidence,
-        workspace_draft_id=draft.id,
-        accepted_parse_pdf_sha256=draft.accepted_parse_pdf_sha256 if evidence is not None else None,
-    )
     await _write_load_audit(
         db,
         tenant_id=tenant_id,

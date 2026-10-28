@@ -20,29 +20,14 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
-from app.schemas.load_document_parse import (
-    LoadDocumentParseResponse,
-    RateConfirmationRevisionAcceptResponse,
-    RateConfirmationRevisionCompareResponse,
-    RateConfirmationRevisionListResponse,
-)
+from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
 from app.services import future_movement_plans as fmp_service
 from app.services import loads as loads_service
 from app.services import trips as trips_service
 from app.services import load_custody as custody_service
 from app.schemas.load_pod_evidence import LoadPodEvidenceListResponse, LoadPodEvidenceOut
-from app.services.load_document_parse_orchestrator import (
-    RateConfirmationRevisionCompareError,
-    compare_revised_rate_confirmation,
-    parse_load_workspace_document_orchestrated,
-)
-from app.services.load_rate_confirmation_revision import (
-    RateConfirmationRevisionAcceptError,
-    accept_revised_rate_confirmation,
-    list_rate_confirmation_revisions,
-    read_rate_confirmation_pdf_for_view,
-)
+from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
 from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
 from app.services.load_pod_evidence import (
@@ -188,108 +173,6 @@ async def parse_load_workspace_document(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Duplicate check unavailable; AI parsing was not started.",
         ) from exc
-
-
-@router.post(
-    "/{load_id}/rate-confirmation-revision/compare",
-    response_model=RateConfirmationRevisionCompareResponse,
-)
-async def compare_load_rate_confirmation_revision(
-    load_id: int,
-    file: UploadFile = File(...),
-    tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    """Return verified field changes for a revised rate confirmation. Does not write."""
-    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
-    if not data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
-    if len(data) > _MAX_PARSE_PDF_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
-    if not data.startswith(b"%PDF-"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
-    try:
-        return await compare_revised_rate_confirmation(
-            db,
-            tenant_id=tenant_id,
-            load_id=load_id,
-            pdf_bytes=data,
-            filename=file.filename or "upload.pdf",
-        )
-    except RateConfirmationRevisionCompareError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    except UnsafeLoadPdfError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except DuplicatePrecheckUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Duplicate check unavailable; AI parsing was not started.",
-        ) from exc
-
-
-@router.post(
-    "/{load_id}/rate-confirmation-revision/accept",
-    response_model=RateConfirmationRevisionAcceptResponse,
-)
-async def accept_load_rate_confirmation_revision(
-    load_id: int,
-    file: UploadFile = File(...),
-    accepted_fields: str = Form(...),
-    tenant_id: int = Depends(require_tenant),
-    tenant_slug: str = Depends(require_tenant_slug),
-    user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    """Keep the revised PDF and write only an explicitly accepted rate."""
-    import json
-
-    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
-    if not data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
-    if len(data) > _MAX_PARSE_PDF_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
-    if not data.startswith(b"%PDF-"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
-    try:
-        payload = json.loads(accepted_fields)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="accepted_fields must be JSON") from exc
-    if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="accepted_fields must be a list")
-    try:
-        return await accept_revised_rate_confirmation(
-            db,
-            tenant_id=tenant_id,
-            tenant_slug=tenant_slug,
-            load_id=load_id,
-            pdf_bytes=data,
-            filename=file.filename or "upload.pdf",
-            accepted_fields=payload,
-            accepted_by_platform_user_id=getattr(user, "user_id", None),
-        )
-    except RateConfirmationRevisionAcceptError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    except UnsafeLoadPdfError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except DuplicatePrecheckUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Duplicate check unavailable; AI parsing was not started.",
-        ) from exc
-
-
-@router.get(
-    "/{load_id}/rate-confirmation-revisions",
-    response_model=RateConfirmationRevisionListResponse,
-)
-async def list_load_rate_confirmation_revisions(
-    load_id: int,
-    tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> RateConfirmationRevisionListResponse:
-    return await list_rate_confirmation_revisions(db, tenant_id=tenant_id, load_id=load_id)
 
 
 @router.get("/{load_id}", response_model=LoadResponse)
@@ -508,19 +391,15 @@ async def download_load_pod_file(
 @router.get("/{load_id}/rate-confirmation-pdf")
 async def download_load_rate_confirmation_pdf(
     load_id: int,
-    revision: Optional[int] = Query(default=None),
     tenant_id: int = Depends(require_tenant),
     tenant_slug: str = Depends(require_tenant_slug),
     _user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> Response:
-    fname, body = await read_rate_confirmation_pdf_for_view(
-        db,
-        tenant_id=tenant_id,
-        load_id=load_id,
-        tenant_slug=tenant_slug,
-        revision=revision,
+    row, body = await loads_service.read_load_rate_confirmation_pdf_bytes(
+        db, tenant_id, load_id, tenant_slug=tenant_slug
     )
+    fname = row.filename or "rate-confirmation.pdf"
     return Response(
         content=body,
         media_type="application/pdf",

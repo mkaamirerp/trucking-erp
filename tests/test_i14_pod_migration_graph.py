@@ -20,6 +20,7 @@ from scripts.tenant_revision_plan import (
     POD_X5,
     X5,
     RevisionPlanError,
+    ancestor_revisions,
     assert_target_matches_history,
     fuel_test_migrate_target,
     migration_target_for_request,
@@ -41,9 +42,18 @@ def _heads(script: ScriptDirectory) -> set[str]:
 
 
 def test_approved_heads_are_exactly_the_eq01_pair_on_top_of_ln01(script: ScriptDirectory) -> None:
-    assert _heads(script) == {"rc01_rate_con_revision_fmp", "rc01_rate_con_revision_x5"}
+    assert _heads(script) == {EQ01_FMP, EQ01_X5}
     assert script.get_revision(EQ01_FMP).down_revision == LN01_FMP
     assert script.get_revision(EQ01_X5).down_revision == LN01_X5
+
+
+def test_new_tenant_provisioning_stops_at_pod_x5(script: ScriptDirectory) -> None:
+    from app.core.config import Settings
+
+    assert Settings.model_fields["tenant_alembic_target_rev"].default == POD_X5
+    ancestors = ancestor_revisions(script, POD_X5)
+    assert EQ01_FMP not in ancestors
+    assert EQ01_X5 not in ancestors
 
 
 def test_x5_plan_creates_pod_once_without_dw1(script: ScriptDirectory) -> None:

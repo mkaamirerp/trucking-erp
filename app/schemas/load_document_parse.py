@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -164,48 +163,3 @@ def postgres_safe_load_document_parse_response(
 ) -> LoadDocumentParseResponse:
     payload = strip_nul_bytes_from_json_tree(response.model_dump(mode="json"))
     return LoadDocumentParseResponse.model_validate(payload)
-
-
-class RateConfirmationRevisionChange(BaseModel):
-    """One verified field from a revised rate confirmation. Not a load update."""
-
-    field: str
-    current_value: Any = None
-    original_extracted: Any = None
-    new_value: Any = None
-    kind: str = Field(..., description="changed | info_only")
-    ai_note: Optional[str] = None
-    requires_explicit_accept: bool = False
-
-
-class RateConfirmationRevisionCompareResponse(BaseModel):
-    """Read-only comparison. Nothing in this payload is written to the load."""
-
-    same_load: bool
-    same_load_confirmed: bool = False
-    warning: Optional[str] = None
-    notices: list[str] = Field(default_factory=list)
-    changes: list[RateConfirmationRevisionChange] = Field(default_factory=list)
-
-
-class RateConfirmationRevisionAcceptResponse(BaseModel):
-    """One kept revised rate confirmation. Only the accepted rate is written on the load."""
-
-    revision_number: int
-    applied_fields: list[str]
-    new_rate: str
-    customer_rate_moved: bool
-
-
-class RateConfirmationRevisionListItem(BaseModel):
-    revision_number: int
-    filename: Optional[str] = None
-    accepted_at: datetime
-    accepted_by: Optional[str] = None
-    is_current: bool
-    old_rate: Optional[str] = None
-    new_rate: Optional[str] = None
-
-
-class RateConfirmationRevisionListResponse(BaseModel):
-    items: list[RateConfirmationRevisionListItem] = Field(default_factory=list)

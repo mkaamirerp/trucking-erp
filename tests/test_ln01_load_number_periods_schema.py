@@ -26,8 +26,8 @@ def script() -> ScriptDirectory:
 
 def test_ln01_revisions_remain_separate_parents_of_current_eq01_heads(script: ScriptDirectory) -> None:
     assert set(script.get_heads()) == {
-        "rc01_rate_con_revision_fmp",
-        "rc01_rate_con_revision_x5",
+        "eq01_equipment_attachments_fmp",
+        "eq01_equipment_attachments_x5",
     }
     assert script.get_revision(EQ01_FMP).down_revision == LN01_FMP
     assert script.get_revision(EQ01_X5).down_revision == LN01_X5

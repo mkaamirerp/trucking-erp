@@ -59,13 +59,9 @@ def test_sibling_revision_heads_are_independent_and_branch_specific():
     cfg = Config(str(repo / "alembic_tenant.ini"))
     script = ScriptDirectory.from_config(cfg)
     assert set(script.get_heads()) == {
-        "rc01_rate_con_revision_fmp",
-        "rc01_rate_con_revision_x5",
+        "eq01_equipment_attachments_fmp",
+        "eq01_equipment_attachments_x5",
     }
-    assert script.get_revision("rc01_rate_con_revision_fmp").down_revision == "s1_load_approved_snapshot_fmp"
-    assert script.get_revision("rc01_rate_con_revision_x5").down_revision == "s1_load_approved_snapshot_x5"
-    assert script.get_revision("s1_load_approved_snapshot_fmp").down_revision == "eq01_equipment_attachments_fmp"
-    assert script.get_revision("s1_load_approved_snapshot_x5").down_revision == "eq01_equipment_attachments_x5"
     assert script.get_revision("eq01_equipment_attachments_fmp").down_revision == "ln01_load_number_periods_fmp"
     assert script.get_revision("eq01_equipment_attachments_x5").down_revision == "ln01_load_number_periods_x5"
 
