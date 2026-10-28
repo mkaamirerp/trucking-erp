@@ -1066,6 +1066,118 @@ def test_reparse_comparison_shows_omitted_json_differences() -> None:
     assert "dispatcher_note" not in invented_fields
 
 
+def test_reparse_stop_identity_limits_editable_changes() -> None:
+    city_only = validate_ai_reparse_changes(
+        {"extracted": {"stops": [{"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "postal_code": "60601"}]}},
+        {"extracted": {"stops": [{"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "postal_code": "60606"}]}},
+        [],
+    )
+    postal = next(row for row in city_only if row["field"] == "stops[0].postal_code")
+    assert postal["editable"] is False
+    assert postal["current_value"] == "60601"
+    assert postal["revised_value"] == "60606"
+    assert "not identified confidently" in postal["explanation"]
+
+    generic = validate_ai_reparse_changes(
+        {
+            "extracted": {
+                "stops": [
+                    {
+                        "stop_type": "pickup",
+                        "facility_name": "Warehouse",
+                        "street": "100 Main St",
+                        "city": "Chicago",
+                        "state_or_province": "IL",
+                    }
+                ]
+            }
+        },
+        {
+            "extracted": {
+                "stops": [
+                    {
+                        "stop_type": "pickup",
+                        "facility_name": "Warehouse",
+                        "street": "900 Dock Rd",
+                        "city": "Boston",
+                        "state_or_province": "MA",
+                    }
+                ]
+            }
+        },
+        [],
+    )
+    generic_fields = {row["field"]: row for row in generic}
+    assert generic_fields["stops[0].street"]["editable"] is False
+    assert generic_fields["stops[0].street"]["revised_value"] == "900 Dock Rd"
+    assert generic_fields["stops[0].city"]["editable"] is False
+    assert "stops.review.saved.0" not in generic_fields
+
+    stable = validate_ai_reparse_changes(
+        {
+            "extracted": {
+                "customer_rate": "900",
+                "stops": [
+                    {
+                        "stop_type": "pickup",
+                        "facility_name": "Main Dock",
+                        "street": "100 Main St",
+                        "city": "Chicago",
+                        "state_or_province": "IL",
+                        "postal_code": "60601",
+                        "reference_number": "PU-1",
+                    }
+                ],
+            }
+        },
+        {
+            "extracted": {
+                "customer_rate": "1400",
+                "stops": [
+                    {
+                        "stop_type": "pickup",
+                        "facility_name": "Main Dock",
+                        "street": "100 Main St",
+                        "city": "Chicago",
+                        "state_or_province": "IL",
+                        "postal_code": "60632",
+                        "reference_number": "PU-1",
+                    }
+                ],
+            }
+        },
+        [],
+    )
+    assert stable[0]["field"] == "stops[0].postal_code"
+    assert stable[0]["editable"] is True
+    assert stable[0]["revised_value"] == "60632"
+    assert all(row["field"] != "customer_rate" for row in stable)
+
+    similar = validate_ai_reparse_changes(
+        {
+            "extracted": {
+                "stops": [
+                    {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "postal_code": "60601"},
+                    {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "postal_code": "60602"},
+                ]
+            }
+        },
+        {
+            "extracted": {
+                "stops": [
+                    {"stop_type": "pickup", "city": "Chicago", "state_or_province": "IL", "postal_code": "60609"},
+                ]
+            }
+        },
+        [{"field": "stops[0].postal_code", "label": "ZIP", "current_value": "60601", "revised_value": "60609"}],
+    )
+    assert all(row["editable"] is False for row in similar)
+    assert all(row["field"] != "stops[0].postal_code" for row in similar)
+    assert any(row["field"] == "stops.review.saved.0" for row in similar)
+    assert any(row["field"] == "stops.review.saved.1" for row in similar)
+    assert any(row["field"] == "stops.review.revised.0" for row in similar)
+
+
 def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
     saved = {"extracted": {"rate": "1800", "customer_rate": "1800", "temperature_requirement": "34"}}
     revised = {"extracted": {"rate": "2000", "customer_rate": None, "temperature_requirement": None}}
@@ -1230,7 +1342,7 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
     date_identity = assess_same_load(armstrong, later_pickup)
     assert date_identity["verdict"] == "needs_confirmation"
     date_change = deterministic_reparse_changes(armstrong, later_pickup)
-    assert any(item["field"] == "stops[0].appointment_date" and item["editable"] is True for item in date_change)
+    assert any(item["field"] == "stops[0].appointment_date" and item["editable"] is False for item in date_change)
 
     zeros = _shipment("Armstrong", "00123", ("Greensboro", "NC"), ("Dallas", "TX"), rate="1800")
     zeros["extracted"]["references"] = [{"kind": "po", "value": "00123"}]
@@ -1297,7 +1409,7 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
     time_identity = assess_same_load(armstrong, time_only)
     assert time_identity["verdict"] == "needs_confirmation"
     assert "appointment" in time_identity["summary"].casefold()
-    assert any(item["field"] == "stops[0].appointment_time_text" and item["editable"] is True for item in deterministic_reparse_changes(armstrong, time_only))
+    assert any(item["field"] == "stops[0].appointment_time_text" and item["editable"] is False for item in deterministic_reparse_changes(armstrong, time_only))
     kept = {"extracted": {"references": [{"kind": "po", "value": "00123"}]}}
     preserve_matched_reference_extras(kept, {"extracted": {"references": [{"kind": "po", "value": "00123", "source_label": "kept"}]}})
     assert kept["extracted"]["references"][0]["source_label"] == "kept"

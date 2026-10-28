@@ -553,19 +553,68 @@ def _stop_token(stop: Any, key: str) -> str:
     return _norm_place(_read(stop, key))
 
 
-def _stops_conflict(saved: Any, revised: Any) -> bool:
-    """Disagreeing street, facility, or reference means these are not the same stop.
+_GENERIC_FACILITY_WORDS = {
+    "warehouse",
+    "distribution",
+    "center",
+    "centre",
+    "dc",
+    "dock",
+    "terminal",
+    "yard",
+    "facility",
+    "plant",
+    "location",
+    "shipper",
+    "receiver",
+    "consignee",
+    "customer",
+    "stop",
+    "pickup",
+    "delivery",
+    "origin",
+    "destination",
+    "site",
+    "building",
+    "crossdock",
+}
 
-    A city change does not block a stop already identified by street, facility, or reference.
+
+def _generic_facility(value: Any) -> bool:
+    """A facility label with no distinctive name is not a stop identity."""
+    words = [word for word in _stop_token({"facility_name": value}, "facility_name").split() if word]
+    if not words:
+        return True
+    return not any(word not in _GENERIC_FACILITY_WORDS and not word.isdigit() for word in words)
+
+
+def _stops_conflict(saved: Any, revised: Any) -> bool:
+    """Conflicting street or location evidence blocks a confident match.
+
+    A matching street still allows a city or facility amendment. A generic facility
+    name does not override a different street. City alone is not an identity.
     """
     if _stop_type(saved) != _stop_type(revised):
         return True
+    street_left, street_right = _stop_token(saved, "street"), _stop_token(revised, "street")
+    if street_left and street_right and street_left != street_right:
+        return True
+    if street_left and street_right and street_left == street_right:
+        return False
+    facility_left, facility_right = _stop_token(saved, "facility_name"), _stop_token(revised, "facility_name")
+    if (
+        facility_left
+        and facility_right
+        and facility_left != facility_right
+        and not _generic_facility(facility_left)
+        and not _generic_facility(facility_right)
+    ):
+        return True
+    reference_left, reference_right = _stop_token(saved, "reference_number"), _stop_token(revised, "reference_number")
+    if reference_left and reference_right and reference_left != reference_right:
+        return True
     if _stops_share_specific_id(saved, revised):
         return False
-    for key in ("street", "facility_name", "reference_number"):
-        left, right = _stop_token(saved, key), _stop_token(revised, key)
-        if left and right and left != right:
-            return True
     for key in ("city", "state_or_province"):
         left, right = _stop_token(saved, key), _stop_token(revised, key)
         if left and right and left != right:
@@ -574,11 +623,19 @@ def _stops_conflict(saved: Any, revised: Any) -> bool:
 
 
 def _stops_share_specific_id(saved: Any, revised: Any) -> bool:
-    for key in ("street", "facility_name", "reference_number"):
-        left, right = _stop_token(saved, key), _stop_token(revised, key)
-        if left and right and left == right:
-            return True
-    return False
+    street_left, street_right = _stop_token(saved, "street"), _stop_token(revised, "street")
+    if street_left and street_right and street_left == street_right:
+        return True
+    reference_left, reference_right = _stop_token(saved, "reference_number"), _stop_token(revised, "reference_number")
+    if reference_left and reference_right and reference_left == reference_right:
+        return True
+    facility_left, facility_right = _stop_token(saved, "facility_name"), _stop_token(revised, "facility_name")
+    return bool(
+        facility_left
+        and facility_right
+        and facility_left == facility_right
+        and not _generic_facility(facility_left)
+    )
 
 
 def _stops_share_city(saved: Any, revised: Any) -> bool:
@@ -590,8 +647,9 @@ def _stops_share_city(saved: Any, revised: Any) -> bool:
 
 
 def _pair_stops(saved_stops: list[dict], revised_stops: list[dict]) -> tuple[list[tuple[int, int]], list[int], list[int]]:
-    """Pair a stop only when type plus street, facility, reference, or a unique city identifies it.
+    """Pair a stop by a reliable identifier, or by one unique city when nothing stronger exists.
 
+    A city pair is only a candidate. Field changes require `_stop_pair_is_confident`.
     Stop type alone is not enough. Ambiguous stops stay unpaired.
     """
     pairs: list[tuple[int, int]] = []
@@ -633,6 +691,61 @@ def _pair_stops(saved_stops: list[dict], revised_stops: list[dict]) -> tuple[lis
     return pairs, [index for index in range(len(saved_stops)) if index not in used_saved], [
         index for index in range(len(revised_stops)) if index not in used_revised
     ]
+
+
+def _stop_pair_is_confident(saved: Any, revised: Any) -> bool:
+    """A field Change needs one unique reliable identifier and no conflicting street."""
+    return _stops_share_specific_id(saved, revised) and not _stops_conflict(saved, revised)
+
+
+def _stops_share_weak_signal(saved: Any, revised: Any) -> bool:
+    if _stop_type(saved) != _stop_type(revised):
+        return False
+    if _stops_share_city(saved, revised) or _stops_share_specific_id(saved, revised):
+        return True
+    facility_left, facility_right = _stop_token(saved, "facility_name"), _stop_token(revised, "facility_name")
+    return bool(facility_left and facility_left == facility_right)
+
+
+def _classify_stop_matches(
+    saved_stops: list[dict], revised_stops: list[dict]
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]], list[int], list[int]]:
+    """Split pairs into confident edits, review-only candidates, and unmatched stops."""
+    pairs, unmatched_saved, unmatched_revised = _pair_stops(saved_stops, revised_stops)
+    confident: list[tuple[int, int]] = []
+    review: list[tuple[int, int]] = []
+    for saved_index, revised_index in pairs:
+        if _stop_pair_is_confident(saved_stops[saved_index], revised_stops[revised_index]):
+            confident.append((saved_index, revised_index))
+        else:
+            review.append((saved_index, revised_index))
+    used_saved = {saved_index for saved_index, _revised_index in pairs}
+    used_revised = {revised_index for _saved_index, revised_index in pairs}
+    open_saved = [index for index in unmatched_saved if index not in used_saved]
+    open_revised = [index for index in unmatched_revised if index not in used_revised]
+    for saved_index in list(open_saved):
+        hits = [
+            index
+            for index in open_revised
+            if _stops_share_weak_signal(saved_stops[saved_index], revised_stops[index])
+        ]
+        if len(hits) != 1:
+            continue
+        revised_index = hits[0]
+        others = [
+            index
+            for index in open_saved
+            if index != saved_index and _stops_share_weak_signal(saved_stops[index], revised_stops[revised_index])
+        ]
+        if others:
+            continue
+        review.append((saved_index, revised_index))
+        open_saved.remove(saved_index)
+        open_revised.remove(revised_index)
+    return confident, review, open_saved, open_revised
+
+
+_WEAK_STOP_IDENTITY = "This stop is not identified confidently enough to change a field. Review the PDF before editing it."
 
 
 def _stop_label(stop: dict) -> str:
@@ -679,8 +792,8 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
         )
     saved_stops = _stop_dicts(saved_extracted)
     revised_stops = _stop_dicts(revised_extracted)
-    pairs, unmatched_saved, unmatched_revised = _pair_stops(saved_stops, revised_stops)
-    for saved_index, revised_index in pairs:
+    confident, review_pairs, unmatched_saved, unmatched_revised = _classify_stop_matches(saved_stops, revised_stops)
+    for saved_index, revised_index in [*confident, *review_pairs]:
         for leaf in _STOP_FIELDS:
             field = f"stops[{saved_index}].{leaf}"
             current = saved_stops[saved_index].get(leaf)
@@ -695,7 +808,7 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
                     "label": f"Stop {saved_index + 1} {leaf.replace('_', ' ')}",
                     "current_value": current,
                     "revised_value": updated,
-                    "editable": True,
+                    "editable": (saved_index, revised_index) in confident,
                 }
             )
     for index in unmatched_saved:
@@ -1120,8 +1233,9 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
             rows.append(row)
     saved_stops = _stop_dicts(saved_extracted)
     revised_stops = _stop_dicts(revised_extracted)
-    pairs, unmatched_saved, unmatched_revised = _pair_stops(saved_stops, revised_stops)
-    for saved_index, revised_index in pairs:
+    confident, review_pairs, unmatched_saved, unmatched_revised = _classify_stop_matches(saved_stops, revised_stops)
+    confident_pairs = set(confident)
+    for saved_index, revised_index in [*confident, *review_pairs]:
         saved_stop = saved_stops[saved_index]
         revised_stop = revised_stops[revised_index]
         for leaf in _STOP_FIELDS:
@@ -1133,8 +1247,12 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
                 revised_stop.get(leaf),
                 revised_present=leaf in revised_stop,
             )
-            if row is not None:
-                rows.append(row)
+            if row is None:
+                continue
+            if (saved_index, revised_index) not in confident_pairs:
+                row["editable"] = False
+                row.setdefault("explanation", _WEAK_STOP_IDENTITY)
+            rows.append(row)
     for index in unmatched_saved:
         rows.append(
             {
