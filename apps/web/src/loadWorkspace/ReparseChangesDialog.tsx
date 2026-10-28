@@ -31,7 +31,7 @@ export function ReparseChangesDialog({
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-4 shadow-lg">
+      <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-4 text-gray-900 shadow-lg">
         <div className="mb-3 flex items-start justify-between gap-3">
           <h2 className="text-base font-semibold text-gray-900">
             {changes.length === 0
@@ -88,7 +88,7 @@ export function ReparseChangesDialog({
                     {change.editable === true ? (
                       <button
                         type="button"
-                        className="rounded border border-gray-300 px-2 py-1 text-xs font-medium"
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-900 hover:bg-gray-100"
                         disabled={busy}
                         onClick={() => onChangeField(change)}
                       >
