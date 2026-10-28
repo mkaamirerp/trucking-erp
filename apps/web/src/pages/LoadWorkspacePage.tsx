@@ -1047,8 +1047,7 @@ function LoadWorkspacePage() {
     (load?.status || "").toLowerCase() === "cancelled" || status.toLowerCase() === "cancelled";
 
   const canWorkspaceParsePdf =
-    !loadIsCancelled &&
-    (workspaceMode === "manual" || workspaceMode === "intake" || workspaceMode === "detail");
+    !loadIsCancelled && (workspaceMode === "manual" || workspaceMode === "intake");
 
   const trackParseManualScalar = useCallback((key: ParseScalarFieldKey, value: string) => {
     const before = parseHydrationRef.current.manualOverrideKeys.size;
@@ -2678,14 +2677,16 @@ function LoadWorkspacePage() {
                   if (f) void onReparsePdf(f);
                 }}
               />
-              <button
-                type="button"
-                className={toolBtnSecondary}
-                disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy}
-                onClick={() => reparseInputRef.current?.click()}
-              >
-                {parseBusy ? "Re-parsing…" : "Re-parse PDF"}
-              </button>
+              {reparseDialogOpen ? null : (
+                <button
+                  type="button"
+                  className={toolBtnSecondary}
+                  disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy}
+                  onClick={() => reparseInputRef.current?.click()}
+                >
+                  {parseBusy ? "Reading PDF…" : "Re-parse PDF"}
+                </button>
+              )}
               <button
                 type="button"
                 className={toolBtnPrimary}
