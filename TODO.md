@@ -1,5 +1,28 @@
 # TruckERP TODO
 
+## Load / Rate Confirmation — dispatcher verification acknowledgement (OWNER-LOCKED TODO, 2026-10-28)
+
+**Status:** TODO — exact approval wording and audit requirement recorded; **not implemented, deployed, or verified**. This is a future focused implementation slice, not permission to change the parser, Re-parse comparison logic, or database today.
+
+**Exact owner-approved acknowledgement — preserve verbatim:**
+
+> I confirm that I have reviewed the Rate Confirmation and verified the Load information. I understand that AI-extracted information may contain errors, and I approve the final values being saved.
+
+**Business authority:** AI and parser output are assistance, not verified commercial truth. The authenticated, authorized dispatcher reviews the original/revised Rate Confirmation and approves the final Load values. The software must prevent unapproved AI/parser edits, faithfully save the user's approved values, and retain an accurate audit trail. Dispatcher verification does not remove TruckERP's responsibility for software correctness.
+
+**Implementation acceptance checklist:**
+
+- [ ] Require a deliberate acknowledgement of the **exact statement** when a dispatcher approves the original parsed RC for **Create Load** and when they intentionally accept a revised RC on **Re-parse Save**. Do not require or imply document re-approval for unrelated ordinary Load edits.
+- [ ] Bind the approval to the **server-authenticated user** (never a client-supplied actor), tenant and Load IDs, server timestamp, approval statement/version, original or revised RC identifier, and the successful saved revision.
+- [ ] Record **field-level previous and approved values** for initial dispatcher corrections against AI extraction and later manual/accepted revised-RC changes (including rate, references, and individual stop fields), with durable auditable attribution.
+- [ ] Write the approval and change audit **atomically with the successful Save**; no approval for cancelled, failed, expired or unauthorized actions. Keep prior audit records intact.
+- [ ] Keep Re-parse proposal and field-level **Change** actions non-persistent until the dispatcher deliberately accepts and saves; closing/discarding a popup must never silently approve the PDF or divert an ordinary Save into Re-parse.
+- [ ] Verify RBAC, tenant isolation, concurrency, form/verified-JSON alignment, failed-Save behavior, PDF associations and browser user acknowledgement before marking complete.
+
+**Documentation reference:** [Load Parser README](docs/load_parser/README.md). The existing PDF parser and its original field-extraction contract must remain unchanged by this TODO.
+
+---
+
 ## AGY architecture audit + API runtime safety — implementation handoff (2026-10-17)
 
 **Status:** AUDIT / PLAN SAVED; code changes, migrations, deployment and implementation commits remain **not started** in this documentation update. AGY quota was exhausted before its revised security plan could be executed.
