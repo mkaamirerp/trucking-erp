@@ -38,7 +38,12 @@ export function ReparseChangesDialog({
               ? "No changes found"
               : `Revised rate confirmation — ${changes.length} change${changes.length === 1 ? "" : "s"}`}
           </h2>
-          <button type="button" className="text-sm text-gray-600 underline" onClick={onClose} disabled={busy}>
+          <button
+            type="button"
+            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-100"
+            onClick={onClose}
+            disabled={busy}
+          >
             Close
           </button>
         </div>
@@ -51,7 +56,7 @@ export function ReparseChangesDialog({
           </ul>
         ) : null}
         <p className="mb-3 text-sm text-gray-600">
-          The load form is unchanged until you click Change. You can still edit any field. Nothing is stored until Save.
+          Change updates one field on the form. Close or Cancel puts those fields back. Nothing is stored until Save.
         </p>
         {acknowledgementRequired ? (
           <label className="mb-3 block text-sm text-gray-800">
@@ -105,6 +110,16 @@ export function ReparseChangesDialog({
         ) : (
           <p className="text-sm text-gray-700">The revised PDF matches this load. Save if you still want to keep that PDF.</p>
         )}
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-100"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

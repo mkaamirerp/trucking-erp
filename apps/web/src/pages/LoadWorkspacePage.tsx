@@ -568,6 +568,7 @@ function LoadWorkspacePage() {
   const [revisedPdfPaths, setRevisedPdfPaths] = useState<{ href: string; label: string }[]>([]);
   const [reparseFile, setReparseFile] = useState<File | null>(null);
   const reparseInputRef = useRef<HTMLInputElement | null>(null);
+  const reparseFieldUndoRef = useRef<Map<string, () => void>>(new Map());
   const [parseElapsedSec, setParseElapsedSec] = useState(0);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [duplicateReview, setDuplicateReview] = useState<{
@@ -2035,6 +2036,20 @@ function LoadWorkspacePage() {
     }
   }
 
+  function rememberReparseUndo(field: string, restore: () => void) {
+    if (!reparseFieldUndoRef.current.has(field)) reparseFieldUndoRef.current.set(field, restore);
+  }
+
+  function cancelReparseReview() {
+    for (const restore of reparseFieldUndoRef.current.values()) restore();
+    reparseFieldUndoRef.current.clear();
+    setReparseDialogOpen(false);
+    setReparseProposal(null);
+    setReparseFile(null);
+    setReparseReason("");
+    setToolbarMessage({ text: "Re-parse cancelled. Nothing was changed.", tone: "neutral" });
+  }
+
   function applyReparseChange(change: LoadReparseChange) {
     if (change.editable !== true) return;
     const field = change.field.replace(/^extracted\./, "");
@@ -2064,6 +2079,12 @@ function LoadWorkspacePage() {
       const index = Number(stop[1]);
       const key = stop[2];
       if (!stopKeys.has(key) || !draftStops[index]) return;
+      const previousStopValue = draftStops[index][key as keyof (typeof draftStops)[number]];
+      rememberReparseUndo(change.field, () =>
+        setDraftStops((prev) =>
+          prev.map((row, i) => (i === index ? ({ ...row, [key]: previousStopValue } as typeof row) : row)),
+        ),
+      );
       setDraftStops((prev) =>
         prev.map((row, i) => (i === index ? ({ ...row, [key]: text || null } as typeof row) : row)),
       );
@@ -2071,29 +2092,87 @@ function LoadWorkspacePage() {
       const index = Number(reference[1]);
       const key = reference[2] as "kind" | "value";
       if (!loadReferences[index]) return;
+      const previousReferenceValue = loadReferences[index][key];
+      rememberReparseUndo(change.field, () =>
+        setLoadReferences((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: previousReferenceValue } : row))),
+      );
       setLoadReferences((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: text } : row)));
-    } else if (field === "rate") setRate(text);
-    else if (field === "customer_rate") setCustomerRate(text);
-    else if (field === "broker_load_reference") setBrokerLoadReference(text);
-    else if (field === "temperature_requirement") setTemperatureRequirement(text);
-    else if (field === "mode") setFreightMode(text);
-    else if (field === "equipment_type") setEquipmentType(text);
-    else if (field === "trailer_type") setTrailerType(text);
-    else if (field === "trailer_size") setTrailerSize(text);
-    else if (field === "commodity") setCommodity(text);
-    else if (field === "estimated_weight") setEstimatedWeight(text);
-    else if (field === "miles") setMiles(text);
-    else if (field === "broker_name_snapshot") setBrokerNameSnapshot(text);
-    else if (field === "broker_contact_name_snapshot") setBrokerContactNameSnapshot(text);
-    else if (field === "broker_contact_phone_snapshot") setBrokerContactPhoneSnapshot(text);
-    else if (field === "broker_contact_extension_snapshot") setBrokerContactExtensionSnapshot(text);
-    else if (field === "broker_contact_email_snapshot") setBrokerContactEmailSnapshot(text);
-    else if (field === "pallet_case_count") setPalletCaseCount(text);
+    } else if (field === "rate") {
+      const previous = rate;
+      rememberReparseUndo(change.field, () => setRate(previous));
+      setRate(text);
+    } else if (field === "customer_rate") {
+      const previous = customerRate;
+      rememberReparseUndo(change.field, () => setCustomerRate(previous));
+      setCustomerRate(text);
+    } else if (field === "broker_load_reference") {
+      const previous = brokerLoadReference;
+      rememberReparseUndo(change.field, () => setBrokerLoadReference(previous));
+      setBrokerLoadReference(text);
+    } else if (field === "temperature_requirement") {
+      const previous = temperatureRequirement;
+      rememberReparseUndo(change.field, () => setTemperatureRequirement(previous));
+      setTemperatureRequirement(text);
+    } else if (field === "mode") {
+      const previous = freightMode;
+      rememberReparseUndo(change.field, () => setFreightMode(previous));
+      setFreightMode(text);
+    } else if (field === "equipment_type") {
+      const previous = equipmentType;
+      rememberReparseUndo(change.field, () => setEquipmentType(previous));
+      setEquipmentType(text);
+    } else if (field === "trailer_type") {
+      const previous = trailerType;
+      rememberReparseUndo(change.field, () => setTrailerType(previous));
+      setTrailerType(text);
+    } else if (field === "trailer_size") {
+      const previous = trailerSize;
+      rememberReparseUndo(change.field, () => setTrailerSize(previous));
+      setTrailerSize(text);
+    } else if (field === "commodity") {
+      const previous = commodity;
+      rememberReparseUndo(change.field, () => setCommodity(previous));
+      setCommodity(text);
+    } else if (field === "estimated_weight") {
+      const previous = estimatedWeight;
+      rememberReparseUndo(change.field, () => setEstimatedWeight(previous));
+      setEstimatedWeight(text);
+    } else if (field === "miles") {
+      const previous = miles;
+      rememberReparseUndo(change.field, () => setMiles(previous));
+      setMiles(text);
+    } else if (field === "broker_name_snapshot") {
+      const previous = brokerNameSnapshot;
+      rememberReparseUndo(change.field, () => setBrokerNameSnapshot(previous));
+      setBrokerNameSnapshot(text);
+    } else if (field === "broker_contact_name_snapshot") {
+      const previous = brokerContactNameSnapshot;
+      rememberReparseUndo(change.field, () => setBrokerContactNameSnapshot(previous));
+      setBrokerContactNameSnapshot(text);
+    } else if (field === "broker_contact_phone_snapshot") {
+      const previous = brokerContactPhoneSnapshot;
+      rememberReparseUndo(change.field, () => setBrokerContactPhoneSnapshot(previous));
+      setBrokerContactPhoneSnapshot(text);
+    } else if (field === "broker_contact_extension_snapshot") {
+      const previous = brokerContactExtensionSnapshot;
+      rememberReparseUndo(change.field, () => setBrokerContactExtensionSnapshot(previous));
+      setBrokerContactExtensionSnapshot(text);
+    } else if (field === "broker_contact_email_snapshot") {
+      const previous = brokerContactEmailSnapshot;
+      rememberReparseUndo(change.field, () => setBrokerContactEmailSnapshot(previous));
+      setBrokerContactEmailSnapshot(text);
+    } else if (field === "pallet_case_count") {
+      const previous = palletCaseCount;
+      rememberReparseUndo(change.field, () => setPalletCaseCount(previous));
+      setPalletCaseCount(text);
+    }
     else if (field === "hazmat_flag") {
       const normalized = text.trim().toLowerCase();
-      if (normalized === "true" || normalized === "yes") setHazmat("yes");
-      else if (normalized === "false" || normalized === "no") setHazmat("no");
-      else return;
+      const next = normalized === "true" || normalized === "yes" ? "yes" : normalized === "false" || normalized === "no" ? "no" : null;
+      if (next == null) return;
+      const previous = hazmat;
+      rememberReparseUndo(change.field, () => setHazmat(previous));
+      setHazmat(next);
     } else return;
     setReparseProposal((prev) =>
       prev
@@ -2110,6 +2189,8 @@ function LoadWorkspacePage() {
   async function onReparsePdf(file: File) {
     if (!load || loadIsCancelled) return;
     // A new attempt invalidates the previous PDF proposal, even if parsing fails.
+    for (const restore of reparseFieldUndoRef.current.values()) restore();
+    reparseFieldUndoRef.current.clear();
     setReparseProposal(null);
     setReparseFile(null);
     setReparseReason("");
@@ -2998,18 +3079,7 @@ function LoadWorkspacePage() {
           onAcknowledgementReason={setReparseReason}
           busy={saving || parseBusy}
           onChangeField={applyReparseChange}
-          onClose={() => {
-            // Dismissing the comparison must never attach an unaccepted revised PDF.
-            // Any already-applied form edits remain visible and can be saved normally.
-            setReparseDialogOpen(false);
-            setReparseProposal(null);
-            setReparseFile(null);
-            setReparseReason("");
-            setToolbarMessage({
-              text: "Re-parse dismissed. Any form edits remain unsaved; Save will not attach the revised PDF.",
-              tone: "neutral",
-            });
-          }}
+          onClose={cancelReparseReview}
         />
       ) : null}
       <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">

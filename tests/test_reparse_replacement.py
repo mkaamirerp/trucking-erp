@@ -981,17 +981,23 @@ def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
     assert validate_ai_reparse_changes(saved, no_rate, []) == []
 
 
-def test_reparse_close_discards_pending_pdf_without_losing_form_edits() -> None:
+def test_reparse_close_or_cancel_restores_changed_fields_and_drops_the_pdf() -> None:
     page = (ROOT / "apps/web/src/pages/LoadWorkspacePage.tsx").read_text()
+    cancel = page[page.index("function cancelReparseReview") : page.index("function applyReparseChange")]
+    assert "reparseFieldUndoRef.current.values()" in cancel
+    assert "setReparseProposal(null);" in cancel
+    assert "setReparseFile(null);" in cancel
+    assert "setReparseReason(\"\");" in cancel
+    assert "Nothing was changed." in cancel
+    assert "saveLoadReparse" not in cancel
+    assert "updateLoad" not in cancel
     start = page.index("{reparseDialogOpen && reparseProposal ? (")
     fragment = page[start : page.index("<RateConfirmationPdfPanel", start)]
-    assert "setReparseProposal(null);" in fragment
-    assert "setReparseFile(null);" in fragment
-    assert "setReparseReason(\"\");" in fragment
-    assert "Save will not attach the revised PDF" in fragment
+    assert "onClose={cancelReparseReview}" in fragment
     dialog = (ROOT / "apps/web/src/loadWorkspace/ReparseChangesDialog.tsx").read_text()
-    assert "bg-white p-4 text-gray-900" in dialog
-    assert "font-medium text-gray-900 hover:bg-gray-100" in dialog
+    assert "Close" in dialog
+    assert "Cancel" in dialog
+    assert "puts those fields back" in dialog
 
 
 def test_reparse_proposal_uses_load_update_pilot_permission() -> None:
