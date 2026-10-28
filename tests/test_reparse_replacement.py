@@ -352,7 +352,7 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     assert "old-revised" not in seen["compare"]["user_text"]
     assert seen["compare"]["schema_name"] == "load_reparse_changes"
     by_field = {item["field"]: item for item in proposal["changes"]}
-    assert by_field["rate"]["editable"] is False
+    assert by_field["rate"]["editable"] is True
     assert Decimal(by_field["rate"]["revised_value"]) == Decimal("2550")
     assert by_field["rate"]["current_value"] == "2500"
     assert "9999" not in str(by_field["rate"]["revised_value"])
@@ -612,7 +612,7 @@ async def test_production_compare_call_passes_configured_key_and_model(monkeypat
     assert "You are a TruckERP product parser" not in seen["inner"]["system"]
     assert "JSON 1:" in seen["inner"]["user_text"]
     rate_review = next(item for item in proposal["changes"] if item["field"] == "rate")
-    assert rate_review["editable"] is False
+    assert rate_review["editable"] is True
     assert rate_review["current_value"] == "10"
     assert Decimal(rate_review["revised_value"]) == Decimal("2550")
     assert proposal["integrity"]
@@ -904,10 +904,10 @@ def test_ai_comparison_is_authoritative_and_validated() -> None:
         revised,
         [{"field": "rate", "label": "Rate", "current_value": "1", "revised_value": "9999"}],
     )
-    assert invented[0]["editable"] is False
+    assert invented[0]["editable"] is True
     assert invented[0]["revised_value"] == "2000"
     omitted = validate_ai_reparse_changes(saved, revised, [])
-    assert omitted[0]["field"] == "rate" and omitted[0]["editable"] is False
+    assert omitted[0]["field"] == "rate" and omitted[0]["editable"] is True
 
     other_city = copy.deepcopy(revised)
     other_city["extracted"]["stops"][0]["city"] = "Boston"
@@ -945,6 +945,68 @@ def test_ai_comparison_is_authoritative_and_validated() -> None:
     assert leading[0]["field"] == "references[0].value"
     assert leading[0]["editable"] is True
     assert leading[0]["revised_value"] == "123"
+
+
+def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
+    saved = {"extracted": {"rate": "1800", "customer_rate": "1800", "temperature_requirement": "34"}}
+    revised = {"extracted": {"rate": "2000", "customer_rate": None, "temperature_requirement": None}}
+    proposed = [
+        {"field": "rate", "label": "Rate", "current_value": "1800", "revised_value": "9999"},
+        {"field": "customer_rate", "label": "Customer rate", "current_value": "1800", "revised_value": None},
+        {"field": "temperature_requirement", "label": "Temperature", "current_value": "34", "revised_value": None},
+    ]
+    changes = validate_ai_reparse_changes(saved, revised, proposed)
+    assert len(changes) == 1
+    assert changes[0]["field"] == "rate"
+    assert changes[0]["editable"] is True
+    assert changes[0]["current_value"] == "1800"
+    assert changes[0]["revised_value"] == "2000"
+
+    omitted = validate_ai_reparse_changes(saved, revised, [])
+    assert [(row["field"], row["editable"]) for row in omitted] == [("rate", True)]
+
+    nonnumeric = {"extracted": {"rate": "not parsed"}}
+    unsafe = validate_ai_reparse_changes(
+        saved,
+        nonnumeric,
+        [{"field": "rate", "label": "Rate", "current_value": "1800", "revised_value": "not parsed"}],
+    )
+    assert len(unsafe) == 1 and unsafe[0]["editable"] is False
+    assert unsafe[0]["revised_value"] == "not parsed"
+
+    nonfinite = {"extracted": {"rate": "NaN"}}
+    assert validate_ai_reparse_changes(saved, nonfinite, [])[0]["editable"] is False
+
+    no_rate = {"extracted": {"rate": None}}
+    assert validate_ai_reparse_changes(saved, no_rate, []) == []
+
+
+def test_reparse_close_discards_pending_pdf_without_losing_form_edits() -> None:
+    page = (ROOT / "apps/web/src/pages/LoadWorkspacePage.tsx").read_text()
+    start = page.index("{reparseDialogOpen && reparseProposal ? (")
+    fragment = page[start : page.index("<RateConfirmationPdfPanel", start)]
+    assert "setReparseProposal(null);" in fragment
+    assert "setReparseFile(null);" in fragment
+    assert "setReparseReason(\"\");" in fragment
+    assert "Save will not attach the revised PDF" in fragment
+    dialog = (ROOT / "apps/web/src/loadWorkspace/ReparseChangesDialog.tsx").read_text()
+    assert "bg-white p-4 text-gray-900" in dialog
+    assert "font-medium text-gray-900 hover:bg-gray-100" in dialog
+
+
+def test_reparse_proposal_uses_load_update_pilot_permission() -> None:
+    from app.routers.loads import router
+
+    route = next(
+        item
+        for item in router.routes
+        if getattr(item, "path", "").endswith("/{load_id}/rate-confirmation-reparse")
+        and "POST" in getattr(item, "methods", set())
+    )
+    assert any(
+        getattr(dep.call, "pilot_capability", None) == ("loads.records", "update")
+        for dep in route.dependant.dependencies
+    )
 
 
 def test_reparse_gates_cover_identity_classification_and_field_differences() -> None:
