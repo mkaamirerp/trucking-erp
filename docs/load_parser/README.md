@@ -43,6 +43,10 @@ Current semantic architecture lives in:
 
 A job/queue/background-worker design may change **when and where** the shared parser runs. It must not create a second parser implementation or redefine profile semantics.
 
+## Re-parse — owner rules, locked 2026-10-28
+
+Re-parse reads a PDF again on a load that is already chosen and shows what differs. The locked rules are in [`.cursor/rules/owner-product-rules.mdc`](../../.cursor/rules/owner-product-rules.mdc) under **RE-PARSE (owner rules, locked 2026-10-28)**.
+
 ## Dispatcher verification and approval — OWNER-LOCKED TODO (2026-10-28)
 
 The PDF parser and comparison model **assist** in interpreting RC documents; they do not approve or silently modify dispatcher-verified commercial values. The logged-in, authorized dispatcher reviews the RC and expressly approves the final form before Create Load or intentional revised-RC acceptance. The system must save precisely those values and retain a trustworthy user-attributed approval/change audit. This requirement is **not yet implemented**.

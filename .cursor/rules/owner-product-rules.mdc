@@ -69,3 +69,28 @@ Loads promoted from workspace should retain a **viewable RC PDF** (`load_commerc
 - All suggestions are visible/editable before confirmation; unknown, stale, or conflicting evidence returns blank fields/warnings. Drivers busy/off-duty receive appropriate warnings; established schedule overlap/Trip locks still apply.
 - Selecting equipment for a future Trip does NOT change current physical attachments. Trip remains the sole assignment authority; no Load-level assignment writes.
 - **Checkpoint 1 implemented:** pure backend suggestion policy at `app/services/equipment_assignment_policy.py`; no persistent binding writer/API/UI is implemented. Persistent event/binding schemas, cross-module APIs, and migration paths require a separate STOP report under `AGENTS.md` before coding/deploy.
+
+## RE-PARSE (owner rules, locked 2026-10-28)
+Re-parse = parse a PDF again on a load that is ALREADY chosen. The system never decides
+"which load"; it reads the PDF and shows what differs.
+
+1. First parse is untouched: AI parser reads the PDF, hydrates the form. Do not change it.
+2. Create load saves the load AND one JSON: the parser's JSON with the dispatcher's
+   corrections applied (all extra fields kept). That JSON is the baseline.
+3. Re-parse: PDF text is extracted + normalized locally, then the existing parser reads it. The
+   saved JSON and the new JSON go to the AI, which returns the list of changed fields. Code
+   validates every change against both JSONs. The AI never writes the load.
+4. The form is NEVER changed by re-parse. A popup shows: field | on the load | revised PDF |
+   Change button. Change fills ONE form field. Dispatcher may edit anything, then Save.
+5. Save: writes the form, replaces the saved JSON with the new one, keeps the original PDF and
+   every revised PDF (never delete). Save never stores a second copy of an identical file.
+6. A new PO / load number is a normal change. If the PO changes, it applies to billing and
+   payroll; if not, the old one stays.
+7. Rate on the load = the RC rate. Customer rate is legacy (settlement rate replaces it); hidden.
+8. Gates. HARD STOP (nothing to compare): not a PDF / damaged; not a rate confirmation (fuel
+   invoice, BOL, POD, invoice, driver sheet): say what it is; unreadable scan.
+   WARNING (Close highlighted, Continue small): broker / load# / pickup / delivery disagree, or
+   the file belongs to another load (add "Open that load"). Save after a warning needs a short
+   reason, recorded. Same file again is ALLOWED (plain re-read, usually "no changes").
+9. Verification means: run on a disposable Postgres, paste real output. Mocked tests alone are
+   not proof. Never touch tenant_demo. Never merge to main.
