@@ -2040,6 +2040,10 @@ function LoadWorkspacePage() {
     if (!reparseFieldUndoRef.current.has(field)) reparseFieldUndoRef.current.set(field, restore);
   }
 
+  function dismissReparseReview() {
+    setReparseDialogOpen(false);
+  }
+
   function cancelReparseReview() {
     for (const restore of reparseFieldUndoRef.current.values()) restore();
     reparseFieldUndoRef.current.clear();
@@ -3077,7 +3081,8 @@ function LoadWorkspacePage() {
           onAcknowledgementReason={setReparseReason}
           busy={saving || parseBusy}
           onChangeField={applyReparseChange}
-          onClose={cancelReparseReview}
+          onClose={dismissReparseReview}
+          onCancel={cancelReparseReview}
         />
       ) : null}
       <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">

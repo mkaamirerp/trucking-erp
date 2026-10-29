@@ -16,6 +16,7 @@ type Props = {
   busy: boolean;
   onChangeField: (change: LoadReparseChange) => void;
   onClose: () => void;
+  onCancel: () => void;
 };
 
 export function ReparseChangesDialog({
@@ -28,6 +29,7 @@ export function ReparseChangesDialog({
   busy,
   onChangeField,
   onClose,
+  onCancel,
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
@@ -56,7 +58,7 @@ export function ReparseChangesDialog({
           </ul>
         ) : null}
         <p className="mb-3 text-sm text-gray-600">
-          Change updates one field on the form. Close or Cancel puts those fields back. Nothing is stored until Save.
+          Change updates one field on the form. Close leaves those fields so you can click Save load. Cancel puts them back. Nothing is stored until Save.
         </p>
         {acknowledgementRequired ? (
           <label className="mb-3 block text-sm text-gray-800">
@@ -114,7 +116,7 @@ export function ReparseChangesDialog({
           <button
             type="button"
             className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-900 hover:bg-gray-100"
-            onClick={onClose}
+            onClick={onCancel}
             disabled={busy}
           >
             Cancel
