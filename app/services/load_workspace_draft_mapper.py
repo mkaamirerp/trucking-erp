@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Callable
 
 from pydantic import ValidationError
@@ -58,35 +58,6 @@ def _text(value: Any) -> str:
 
 def _is_empty(value: Any) -> bool:
     return value is None or _text(value) == ""
-
-
-def normalize_load_miles_value(value: Any) -> int | None:
-    """Non-negative whole miles; fractional values round half-up (478.50 → 479)."""
-    if _is_empty(value):
-        return None
-    if isinstance(value, bool):
-        raise ValueError("invalid miles")
-    if isinstance(value, int):
-        if value < 0:
-            raise ValueError("negative miles")
-        return value
-    if isinstance(value, float):
-        if value < 0 or value != value:
-            raise ValueError("invalid miles")
-        dec = Decimal(str(value))
-    elif isinstance(value, Decimal):
-        dec = value
-    else:
-        text = _text(value).replace(",", "")
-        if not text:
-            return None
-        try:
-            dec = Decimal(text)
-        except InvalidOperation as exc:
-            raise ValueError("invalid miles") from exc
-    if dec < 0:
-        raise ValueError("negative miles")
-    return int(dec.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _parse_optional_id(value: Any, field: str) -> int | None:
