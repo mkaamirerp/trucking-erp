@@ -2220,10 +2220,12 @@ function LoadWorkspacePage() {
       return;
     }
     const expectedVersion = load.concurrency_version ?? 1;
-    if (reparseProposal?.acknowledgement_required && reparseReason.trim().length < 3) {
-      setToolbarMessage({ text: "Enter a short reason next to Save load, then click Save load again.", tone: "warning" });
-      return;
-    }
+    const reason = reparseReason.trim();
+    const storeRevisedPdf = Boolean(
+      reparseProposal &&
+        reparseFile &&
+        (!reparseProposal.acknowledgement_required || reason.length >= 3),
+    );
     setSaving(true);
     setToolbarMessage(null);
     setError(null);
@@ -2232,24 +2234,23 @@ function LoadWorkspacePage() {
         ...buildWorkspacePersistPayload(),
         expected_concurrency_version: expectedVersion,
       };
-      const updated =
-        reparseProposal && reparseFile
-          ? await saveLoadReparse(
-              load.id,
-              reparseFile,
-              reparseProposal.revised_parse,
-              payload,
-              reparseProposal.integrity,
-              reparseProposal.expires_at,
-              Boolean(reparseProposal.acknowledgement_required),
-              reparseReason.trim(),
-            )
-          : await updateLoad(load.id, payload);
-      if (reparseProposal && reparseFile) {
-        setReparseProposal(null);
-        setReparseFile(null);
-        setReparseReason("");
-        setReparseDialogOpen(false);
+      const updated = storeRevisedPdf
+        ? await saveLoadReparse(
+            load.id,
+            reparseFile!,
+            reparseProposal!.revised_parse,
+            payload,
+            reparseProposal!.integrity,
+            reparseProposal!.expires_at,
+            Boolean(reparseProposal!.acknowledgement_required),
+            reason,
+          )
+        : await updateLoad(load.id, payload);
+      setReparseProposal(null);
+      setReparseFile(null);
+      setReparseReason("");
+      setReparseDialogOpen(false);
+      if (storeRevisedPdf) {
         setRevisedPdfPaths((prev) => [
           ...prev,
           {
