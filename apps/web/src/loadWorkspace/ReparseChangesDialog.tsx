@@ -59,16 +59,11 @@ export function ReparseChangesDialog({
   const showWarningPanel =
     acknowledgementRequired || reasons.length > 0 || Boolean(summary.trim());
 
-  /** Warning flow: table visible immediately; row actions unlock after Continue anyway. */
-  const [warningContinued, setWarningContinued] = useState(false);
   const [appliedFields, setAppliedFields] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    setWarningContinued(false);
     setAppliedFields(new Set());
   }, [acknowledgementRequired, summary, verdict, diffCount, changes]);
-
-  const valuesUnlocked = !acknowledgementRequired || warningContinued;
 
   const warningLead =
     reasons.find((r) => /check this pdf|needs confirmation|historical|cannot confirm/i.test(r)) ||
@@ -130,12 +125,6 @@ export function ReparseChangesDialog({
                   ))}
                 </ul>
               ) : null}
-              {acknowledgementRequired && !warningContinued ? (
-                <p className="mt-2 text-xs text-amber-100/80">
-                  Review the table below, then choose Continue anyway to enable Use new value on rows you want on
-                  the form.
-                </p>
-              ) : null}
             </div>
           ) : null}
 
@@ -151,14 +140,13 @@ export function ReparseChangesDialog({
               </thead>
               <tbody>
                 {changes.map((change) => {
-                  const canApply = change.editable === true && valuesUnlocked;
                   const applied = appliedFields.has(change.field);
                   return (
                     <tr
                       key={change.field}
                       className={clsx(
                         "border-b border-[var(--trk-border)]/70",
-                        applied && "bg-emerald-950/25",
+                        applied && "border-l-2 border-l-emerald-500/80 bg-emerald-950/35",
                       )}
                     >
                       <td className="py-2.5 pr-2 align-top font-medium text-[var(--trk-text)]">
@@ -204,18 +192,8 @@ export function ReparseChangesDialog({
                           ) : (
                             <button
                               type="button"
-                              className={clsx(
-                                "rounded-md border px-2.5 py-1 text-xs font-semibold",
-                                canApply
-                                  ? "border-[var(--trk-heading)]/40 bg-[var(--trk-bg)] text-[var(--trk-heading)] hover:bg-[var(--trk-surface-2)]"
-                                  : "cursor-not-allowed border-[var(--trk-border)] bg-[var(--trk-bg)]/60 text-[var(--trk-text-muted)] opacity-70",
-                              )}
-                              disabled={busy || !canApply}
-                              title={
-                                !valuesUnlocked
-                                  ? "Choose Continue anyway below before applying values from this PDF."
-                                  : undefined
-                              }
+                              className="rounded-md border border-[var(--trk-heading)]/40 bg-[var(--trk-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--trk-heading)] hover:bg-[var(--trk-surface-2)] disabled:opacity-50"
+                              disabled={busy}
                               onClick={() => {
                                 onApplyField(change);
                                 setAppliedFields((prev) => new Set(prev).add(change.field));
@@ -264,25 +242,14 @@ export function ReparseChangesDialog({
         <div className="shrink-0 border-t border-[var(--trk-border)] bg-[var(--trk-bg)]/50 px-4 py-3">
           {acknowledgementRequired ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
-              {warningContinued ? (
-                <button
-                  type="button"
-                  className="rounded-md border border-[var(--trk-border-strong)] bg-transparent px-3 py-2 text-sm font-medium text-[var(--trk-text)] underline-offset-2 hover:bg-[var(--trk-surface-2)] hover:underline disabled:opacity-50"
-                  disabled={busy}
-                  onClick={onDoneBackToLoad}
-                >
-                  Done, back to the load
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="rounded-md border border-[var(--trk-border-strong)] bg-transparent px-3 py-2 text-sm font-medium text-[var(--trk-text)] underline-offset-2 hover:bg-[var(--trk-surface-2)] hover:underline disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => setWarningContinued(true)}
-                >
-                  Continue anyway
-                </button>
-              )}
+              <button
+                type="button"
+                className="rounded-md border border-[var(--trk-border-strong)] bg-transparent px-3 py-2 text-sm font-medium text-[var(--trk-text)] underline-offset-2 hover:bg-[var(--trk-surface-2)] hover:underline disabled:opacity-50"
+                disabled={busy}
+                onClick={onDoneBackToLoad}
+              >
+                Done, back to the load
+              </button>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {otherLoadId != null && onOpenOtherLoad ? (
                   <Button
