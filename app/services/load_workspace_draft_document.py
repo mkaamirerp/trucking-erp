@@ -80,6 +80,21 @@ _SCALAR_FIELDS = (
     "miles",
 )
 
+# Scalars compared during Re-parse (customer_rate is stored but never suggested).
+_REPARSE_COMPARABLE_SCALARS = tuple(name for name in _SCALAR_FIELDS if name != "customer_rate")
+
+# Load row fields kept in verified JSON for a complete baseline (not PDF-suggested).
+_LOAD_FORM_PERSISTED_KEYS = (
+    "load_number",
+    "status",
+    "driver_id",
+    "truck_id",
+    "trailer_id",
+    "customs_broker_id",
+    "broker_id",
+    "broker_contact_id",
+)
+
 _STOP_FIELDS = (
     "stop_type",
     "facility_name",
@@ -191,9 +206,9 @@ def _json_ready(value: Any) -> Any:
 
 
 def _patch_key(target: dict, key: str, form_value: Any) -> None:
-    current = target.get(key)
+    current = target.get(key, _MISSING)
     ready = _json_ready(form_value)
-    if values_equivalent(current, ready):
+    if current is not _MISSING and values_equivalent(current, ready):
         return
     target[key] = ready
 
@@ -259,6 +274,10 @@ def reconcile_accepted_parse_json(
                     _patch_key(base, key, _read(stop, key))
                 rebuilt.append(base)
             extracted["stops"] = rebuilt
+
+    if only_fields is None:
+        for key in _LOAD_FORM_PERSISTED_KEYS:
+            _patch_key(extracted, key, _read(form, key))
     return strip_nul_bytes_from_json_tree(out)
 
 
@@ -808,10 +827,8 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
         "equipment_type": "Equipment",
         "commodity": "Commodity",
     }
-    for field in _SCALAR_FIELDS:
-        if field == "customer_rate":
-            continue
-        current = saved_extracted.get(field)
+    for field in _REPARSE_COMPARABLE_SCALARS:
+        current = saved_extracted.get(field) if field in saved_extracted else None
         updated = revised_extracted.get(field)
         if field not in saved_extracted and field not in revised_extracted:
             continue
@@ -1139,25 +1156,30 @@ def _revision_order(saved: dict, revised: dict) -> str:
 
 
 def comparison_baseline(saved: dict | None) -> dict:
-    """Compact field paths and values from the latest saved verified JSON."""
+    """Field paths and values from the last saved verified JSON for the comparison model.
+
+    Empty saved values are sent as null. Customer rate is stored on the load but omitted here.
+    """
     document = saved if isinstance(saved, dict) else {}
     extracted = document.get("extracted") if isinstance(document.get("extracted"), dict) else {}
     fields: list[dict] = []
-    for name in _SCALAR_FIELDS:
-        if name == "customer_rate" or name not in extracted or _blank(extracted.get(name)):
-            continue
-        fields.append({"path": name, "value": extracted.get(name)})
+    for name in _REPARSE_COMPARABLE_SCALARS:
+        if name in extracted:
+            fields.append({"path": name, "value": extracted.get(name)})
+        else:
+            fields.append({"path": name, "value": None})
     for index, stop in enumerate(_stop_dicts(extracted)):
         for leaf in _STOP_FIELDS:
-            if leaf not in stop or _blank(stop.get(leaf)):
-                continue
-            fields.append({"path": f"stops[{index}].{leaf}", "value": stop.get(leaf)})
+            fields.append({"path": f"stops[{index}].{leaf}", "value": stop.get(leaf) if leaf in stop else None})
     references = [item for item in (extracted.get("references") or []) if isinstance(item, dict)]
     for index, reference in enumerate(references):
         for leaf in ("kind", "value"):
-            if leaf not in reference or _blank(reference.get(leaf)):
-                continue
-            fields.append({"path": f"references[{index}].{leaf}", "value": reference.get(leaf)})
+            fields.append(
+                {
+                    "path": f"references[{index}].{leaf}",
+                    "value": reference.get(leaf) if leaf in reference else None,
+                }
+            )
     return {"fields": fields}
 
 
@@ -1280,8 +1302,8 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
     saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
     revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
     rows: list[dict] = []
-    for field in _SCALAR_FIELDS:
-        if field == "customer_rate" or field not in saved_extracted:
+    for field in _REPARSE_COMPARABLE_SCALARS:
+        if field not in saved_extracted:
             continue
         row = _supported_difference_row(
             field,
@@ -1299,11 +1321,9 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
         saved_stop = saved_stops[saved_index]
         revised_stop = revised_stops[revised_index]
         for leaf in _STOP_FIELDS:
-            if leaf not in saved_stop:
-                continue
             row = _supported_difference_row(
                 f"stops[{saved_index}].{leaf}",
-                saved_stop.get(leaf),
+                saved_stop.get(leaf) if leaf in saved_stop else None,
                 revised_stop.get(leaf),
                 revised_present=leaf in revised_stop,
             )

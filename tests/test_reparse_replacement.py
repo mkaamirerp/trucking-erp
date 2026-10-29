@@ -1546,11 +1546,11 @@ def test_reparse_close_or_cancel_restores_changed_fields_and_drops_the_pdf() -> 
     assert "updateLoad" not in cancel
     start = page.index("{reparseDialogOpen && reparseProposal ? (")
     fragment = page[start : page.index("<RateConfirmationPdfPanel", start)]
-    assert "onClose={cancelReparseReview}" in fragment
+    assert "onClose={dismissReparseReview}" in fragment
     dialog = (ROOT / "apps/web/src/loadWorkspace/ReparseChangesDialog.tsx").read_text()
     assert "Close" in dialog
     assert "Cancel" in dialog
-    assert "puts those fields back" in dialog
+    assert "Cancel puts the fields back" in dialog
 
 
 def test_reparse_proposal_uses_load_update_pilot_permission() -> None:
@@ -1638,7 +1638,8 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
 
     other_route = _shipment("Armstrong", "PO-100", ("Seattle", "WA"), ("Miami", "FL"), rate="1800")
     blocked_route = assess_same_load(po_saved, other_route)
-    assert blocked_route["verdict"] == "blocked"
+    assert blocked_route["verdict"] == "needs_confirmation"
+    assert "both pickup and delivery locations changed" in blocked_route["summary"]
 
     later_pickup = _shipment(
         "Armstrong",

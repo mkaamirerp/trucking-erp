@@ -1022,7 +1022,7 @@ async def _sync_verified_parse_json(
     tenant_id: int,
     load: Load,
     *,
-    only_fields: set[str],
+    only_fields: set[str] | None,
     replacement: dict | None = None,
     revised_pdf_bytes: bytes | None = None,
     revised_pdf_filename: str | None = None,
@@ -1059,7 +1059,7 @@ async def _sync_verified_parse_json(
                 detail="This load has no saved parser JSON to replace.",
             )
         return None, None
-    if replacement is None and not only_fields:
+    if replacement is None and only_fields is not None and not only_fields:
         return None, None
     await db.refresh(load, attribute_names=["stops"])
     prior = copy.deepcopy(row.accepted_parse_json) if isinstance(row.accepted_parse_json, dict) else {}
@@ -1067,7 +1067,7 @@ async def _sync_verified_parse_json(
     revised_before_align = copy.deepcopy(base)
     if replacement is not None:
         base = align_replacement_to_form(base, load)
-    fields = None if replacement is not None else only_fields
+    fields = None if replacement is not None or only_fields is None else only_fields
     verified = reconcile_accepted_parse_json(base, load, only_fields=fields)
     if replacement is not None:
         preserve_matched_reference_extras(verified, revised_before_align)
@@ -1391,18 +1391,11 @@ async def update_load(
             parse_override_keys,
         )
 
-    verified_fields = {
-        _PAYLOAD_TO_VERIFIED_FIELD[name]
-        for name in payload.model_fields_set
-        if name in _PAYLOAD_TO_VERIFIED_FIELD
-    }
-    if "rate" in verified_fields:
-        verified_fields.add("customer_rate")
     prior_json, evidence_row = await _sync_verified_parse_json(
         db,
         tenant_id,
         out,
-        only_fields=verified_fields,
+        only_fields=None,
         replacement=verified_parse,
         revised_pdf_bytes=revised_pdf_bytes,
         revised_pdf_filename=revised_pdf_filename,
