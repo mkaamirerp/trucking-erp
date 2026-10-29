@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.services.load_document_parse_orchestrator import _REPARSE_TEXT_DIFF_INSTRUCTIONS
@@ -131,8 +133,11 @@ async def test_propose_load_reparse_single_ai_call(monkeypatch: pytest.MonkeyPat
     )
     assert len(calls) == 1
     assert calls[0].get("input_file_bytes") is None
-    assert "Saved verified JSON" in calls[0]["user_text"]
-    assert "New PDF text:" in calls[0]["user_text"]
+    payload = json.loads(calls[0]["user_text"])
+    assert payload["new_pdf_text"]
+    assert payload["saved_json"]["broker_load_reference"] == "3872125-1"
+    assert "field_rules" in payload
+    assert "tenant_identity_exclusion" in payload
     assert _REPARSE_TEXT_DIFF_INSTRUCTIONS in calls[0]["system"]
     assert proposal["changes"] == []
     assert proposal["summary"] == "No changes found."

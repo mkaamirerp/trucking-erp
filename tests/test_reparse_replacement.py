@@ -421,9 +421,11 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     assert seen["diff"]["input_file_bytes"] is None
     assert seen["diff"]["system"] == _REPARSE_TEXT_DIFF_INSTRUCTIONS
     assert "You are a TruckERP product parser" not in seen["diff"]["system"]
-    assert "Saved verified JSON" in seen["diff"]["user_text"]
-    assert "New PDF text:" in seen["diff"]["user_text"]
-    assert pdf_text in seen["diff"]["user_text"]
+    diff_payload = json.loads(seen["diff"]["user_text"])
+    assert diff_payload["saved_json"]["rate"] == "2500"
+    assert pdf_text == diff_payload["new_pdf_text"]
+    assert "rules" in diff_payload["field_rules"]
+    assert "tenant_identity_exclusion" in diff_payload
     assert "old-revised" not in seen["diff"]["user_text"]
     assert seen["diff"]["schema_name"] == "load_reparse_text_diff"
     by_field = {item["field"]: item for item in proposal["changes"]}
@@ -856,8 +858,10 @@ async def test_production_compare_call_passes_configured_key_and_model(monkeypat
     assert seen["inner"]["schema_name"] == "load_reparse_text_diff"
     assert seen["inner"].get("input_file_bytes") is None
     assert "You are a TruckERP product parser" not in seen["inner"]["system"]
-    assert "Saved verified JSON" in seen["inner"]["user_text"]
-    assert "New PDF text:" in seen["inner"]["user_text"]
+    inner_payload = json.loads(seen["inner"]["user_text"])
+    assert inner_payload["new_pdf_text"]
+    assert "field_rules" in inner_payload
+    assert "saved_json" in inner_payload
     rate_review = next(item for item in proposal["changes"] if item["field"] == "rate")
     assert rate_review["editable"] is True
     assert rate_review["current_value"] == "10"
