@@ -83,7 +83,16 @@ def test_cleared_broker_ref_email_and_rate_all_suggest_change() -> None:
             ],
         }
     }
-    rows = {row["field"]: row for row in validate_ai_reparse_changes(saved, revised, [])}
+    rows = {row["field"]: row for row in validate_ai_reparse_changes(
+        saved,
+        "3872125-1 dispatch@broker.com 2000.00 PU-123",
+        [
+            {"field": "broker_load_reference", "current_value": None, "revised_value": "3872125-1"},
+            {"field": "broker_contact_email_snapshot", "current_value": None, "revised_value": "dispatch@broker.com"},
+            {"field": "rate", "current_value": "1800.00", "revised_value": "2000.00"},
+            {"field": "stops[0].reference_number", "current_value": None, "revised_value": "PU-123"},
+        ],
+    )}
     assert rows["broker_load_reference"]["editable"] is True
     assert rows["broker_contact_email_snapshot"]["editable"] is True
     assert rows["rate"]["editable"] is True

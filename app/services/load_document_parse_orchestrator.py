@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -17,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.load_document_parse import LoadDocumentParseResponse
 from app.services.load_document_product_parser import parse_pdf_bytes_to_load_document_response
+
+logger = logging.getLogger(__name__)
 
 
 async def parse_load_workspace_document_orchestrated(
@@ -65,7 +68,7 @@ class LoadReparseError(Exception):
         self.detail = detail
 
 
-_COMPARE_SCHEMA = {
+_REPARSE_TEXT_DIFF_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
@@ -76,29 +79,25 @@ _COMPARE_SCHEMA = {
                 "additionalProperties": False,
                 "properties": {
                     "field": {"type": "string"},
-                    "label": {"type": "string"},
                     "current_value": {},
                     "revised_value": {},
+                    "label": {"type": "string"},
                 },
-                "required": ["field", "label", "current_value", "revised_value"],
+                "required": ["field", "current_value", "revised_value"],
             },
         }
     },
     "required": ["changes"],
 }
 
-_COMPARE_INSTRUCTIONS = (
-    "Compare only the fields present in JSON 1 against the corresponding values in JSON 2. "
-    "Ignore fields that exist only in JSON 2. Return only meaningful changes. "
-    "Equivalent representations, formatting, and capitalization are not changes. "
-    "A missing value in the revised extraction is not automatically a deletion. Do not invent values. "
-    "Unchanged examples: FTL versus Full Truckload; PICKUP versus pickup; DELIVERY versus delivery; "
-    "34F versus 34 °F; PO# 48211903 versus 48211903 when the prefix is only a label. "
-    "Changed examples: $1,800 versus $2,000; Chicago versus Boston when they are the same identifiable stop. "
-    "Preserve significant reference digits, leading zeros, units, stop identities, and genuine business differences. "
-    "field is the JSON 1 path. label is a short explanation. "
-    "current_value is the JSON 1 value. revised_value is the JSON 2 value. "
-    "Do not decide whether the PDF belongs to this load."
+_REPARSE_TEXT_DIFF_INSTRUCTIONS = (
+    "You compare saved verified load JSON against new rate-confirmation PDF text. "
+    "Return ONLY fields whose value in the PDF text differs from the saved JSON. "
+    "Use JSON field paths exactly (e.g. rate, miles, broker_load_reference, stops[0].city). "
+    "current_value must copy the saved JSON value. revised_value must copy the value read from the PDF text. "
+    "Do not propose customer_rate. Do not invent fields. "
+    "Formatting-only differences (FTL vs Full Truckload, pickup vs PICKUP, equivalent money) are NOT changes. "
+    "If nothing meaningful changed, return an empty changes array."
 )
 
 
@@ -233,10 +232,11 @@ async def propose_load_reparse(
     )
     from app.services.load_workspace_draft_document import (
         assess_same_load,
-        comparison_baseline,
+        build_reparse_proposal_document,
         classify_load_pdf_reuse,
+        extract_reparse_pdf_plain_text,
         parse_json_for_compare,
-        reparse_document_block_reason,
+        reparse_text_document_block_reason,
         validate_ai_reparse_changes,
     )
 
@@ -267,25 +267,65 @@ async def propose_load_reparse(
     from app.services.load_document_parse_semantic_llm import LoadDocumentParseProviderError
 
     try:
-        revised = await parse_load_workspace_document_orchestrated(
-            pdf_bytes,
-            filename=filename,
-            tenant_id=tenant_id,
-            db=db,
-            load_id=load_id,
-            openai_chat_json_schema=openai_chat_json_schema,
-        )
-    except LoadDocumentParseProviderError as exc:
-        raise LoadReparseError(503, exc.user_message) from exc
-    if (revised.context or {}).get("semantic_outcome") == "blocked_duplicate_review":
-        raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
-
-    saved = parse_json_for_compare(evidence.accepted_parse_json)
-    revised_document = revised.model_dump(mode="json")
-    revised_doc = parse_json_for_compare(revised_document)
-    block_reason = reparse_document_block_reason(revised_doc)
+        pdf_text = extract_reparse_pdf_plain_text(pdf_bytes)
+    except ValueError as exc:
+        raise LoadReparseError(422, str(exc)) from exc
+    block_reason = reparse_text_document_block_reason(pdf_text)
     if block_reason:
         raise LoadReparseError(422, block_reason)
+
+    saved = parse_json_for_compare(evidence.accepted_parse_json)
+    saved_extracted = saved.get("extracted") if isinstance(saved.get("extracted"), dict) else {}
+    diff_kwargs = {
+        "system": _REPARSE_TEXT_DIFF_INSTRUCTIONS,
+        "user_text": (
+            "Saved verified JSON (extracted):\n"
+            + json.dumps(saved_extracted, default=str, ensure_ascii=False)
+            + "\n\nNew PDF text:\n"
+            + pdf_text
+        ),
+        "schema": _REPARSE_TEXT_DIFF_SCHEMA,
+        "schema_name": "load_reparse_text_diff",
+        "input_file_bytes": None,
+    }
+    ai_started = time.perf_counter()
+    try:
+        if openai_chat_json_schema is not None:
+            compared = await openai_chat_json_schema(**diff_kwargs)
+        else:
+            from app.services.load_document_parse_semantic_llm import (
+                load_parser_semantic_configured,
+                parse_document_semantic_chat_json_schema,
+            )
+
+            if not load_parser_semantic_configured():
+                raise LoadReparseError(503, "The parser model is not configured.")
+            compared = await parse_document_semantic_chat_json_schema(**diff_kwargs)
+    except LoadReparseError:
+        raise
+    except LoadDocumentParseProviderError as exc:
+        raise LoadReparseError(503, exc.user_message) from exc
+    except Exception as exc:
+        raise LoadReparseError(422, "The revised PDF could not be compared.") from exc
+    ai_ms = int((time.perf_counter() - ai_started) * 1000)
+    logger.info(
+        "load_parser_reparse_ai_complete tenant_id=%s load_id=%s ai_calls=1 ai_ms=%s pdf_text_chars=%s",
+        tenant_id,
+        load_id,
+        ai_ms,
+        len(pdf_text),
+    )
+    raw_changes = compared.get("changes") if isinstance(compared, dict) else None
+    if not isinstance(raw_changes, list):
+        raise LoadReparseError(422, "The revised PDF could not be compared.")
+    changes = validate_ai_reparse_changes(saved, pdf_text, raw_changes)
+    revised_document = build_reparse_proposal_document(
+        saved,
+        filename=filename,
+        pdf_text=pdf_text,
+        changes=changes,
+    )
+    revised_doc = parse_json_for_compare(revised_document)
     identity = assess_same_load(
         saved,
         revised_doc,
@@ -310,42 +350,7 @@ async def propose_load_reparse(
             "reasons": [*identity["reasons"], identity["summary"]],
             "acknowledgement_required": True,
         }
-    compare_kwargs = {
-        "system": _COMPARE_INSTRUCTIONS,
-        "user_text": (
-            "JSON 1:\n"
-            + json.dumps(comparison_baseline(saved), default=str)
-            + "\n\nJSON 2:\n"
-            + json.dumps(revised_doc, default=str)
-        ),
-        "schema": _COMPARE_SCHEMA,
-        "schema_name": "load_reparse_changes",
-    }
-    try:
-        if openai_chat_json_schema is not None:
-            compared = await openai_chat_json_schema(**compare_kwargs)
-        else:
-            from app.services.load_document_parse_semantic_llm import (
-                load_parser_semantic_configured,
-                parse_document_semantic_chat_json_schema,
-            )
-
-            if not load_parser_semantic_configured():
-                raise LoadReparseError(503, "The parser model is not configured.")
-            compared = await parse_document_semantic_chat_json_schema(**compare_kwargs)
-    except LoadReparseError:
-        raise
-    except LoadDocumentParseProviderError as exc:
-        raise LoadReparseError(503, exc.user_message) from exc
-    except Exception as exc:
-        raise LoadReparseError(422, "The revised PDF could not be compared.") from exc
-    raw_changes = compared.get("changes") if isinstance(compared, dict) else None
-    if not isinstance(raw_changes, list):
-        raise LoadReparseError(422, "The revised PDF could not be compared.")
-    changes = validate_ai_reparse_changes(saved, revised_doc, raw_changes)
     if historical_pdf:
-        # An older PDF must not overwrite a value already on the load.
-        # An empty load field can still be filled from that PDF.
         locked: list[dict] = []
         for item in changes:
             current = item.get("current_value")
@@ -363,14 +368,18 @@ async def propose_load_reparse(
                 }
             )
         changes = locked
-    version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
-    concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
+    version_value = await db.scalar(
+        select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id)
+    )
+    concurrency_version = (
+        version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
+    )
     expires_at = int(time.time()) + 30 * 60
     return {
         "changes": changes,
         "pdf_reuse_status": reuse_status,
         "store_new_pdf": reuse_status == "new_revision",
-        "revised_parse": revised,
+        "revised_parse": revised_document,
         "integrity": reparse_integrity_token(
             tenant_id=tenant_id,
             load_id=load_id,
@@ -382,8 +391,8 @@ async def propose_load_reparse(
             expires_at=expires_at,
         ),
         "verdict": identity["verdict"],
-        "summary": identity["summary"],
-        "reasons": identity["reasons"],
-        "acknowledgement_required": bool(identity["acknowledgement_required"]),
+        "summary": identity["summary"] if changes else "No changes found.",
+        "reasons": identity["reasons"] if changes else [],
+        "acknowledgement_required": bool(identity["acknowledgement_required"]) if changes else False,
         "expires_at": expires_at,
     }
