@@ -1539,8 +1539,6 @@ def _revised_value_in_pdf_text(field: str, value: Any, pdf_text: str) -> bool:
         return False
     hay = (pdf_text or "").casefold()
     compact_hay = re.sub(r"\s+", "", hay)
-    # PDF money/number text carries thousands commas ("$2,000.00"); the value arrives as "2000.00".
-    numeric_hay = compact_hay.replace(",", "")
     text = str(value).strip()
     if text and text.casefold() in hay:
         return True
@@ -1554,14 +1552,14 @@ def _revised_value_in_pdf_text(field: str, value: Any, pdf_text: str) -> bool:
         }
         for candidate in candidates:
             c = candidate.replace(",", "").casefold()
-            if c and c in numeric_hay:
+            if c and c in compact_hay:
                 return True
     if field.endswith(".value") or field == "broker_load_reference":
         ref = _norm_ref(text)
         if ref and ref in compact_hay:
             return True
     if isinstance(value, int):
-        if str(value) in numeric_hay:
+        if str(value) in compact_hay:
             return True
     return False
 
