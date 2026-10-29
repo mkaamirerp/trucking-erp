@@ -1218,6 +1218,9 @@ def _reparse_field_label(field: str) -> str:
         "rate": "Rate",
         "broker_load_reference": "Broker load number",
         "broker_name_snapshot": "Broker",
+        "broker_contact_name_snapshot": "Contact name",
+        "broker_contact_phone_snapshot": "Contact phone",
+        "broker_contact_email_snapshot": "Contact email",
         "temperature_requirement": "Temperature",
         "equipment_type": "Equipment",
         "commodity": "Commodity",
@@ -1234,8 +1237,20 @@ def _reparse_field_label(field: str) -> str:
 
 def _supported_difference_row(field: str, current: Any, updated: Any, *, revised_present: bool) -> dict | None:
     """One verified difference. A blank revised value is review-only, never a cleared field."""
-    if field == "customer_rate" or _blank(current):
+    if field == "customer_rate":
         return None
+    if _blank(current):
+        # An empty load field is still a suggestion when the revised PDF states a value.
+        if not revised_present or _blank(updated) or _omitted_default(updated):
+            return None
+        return {
+            "field": field,
+            "label": _reparse_field_label(field),
+            "current_value": None,
+            "revised_value": updated,
+            "editable": field_is_editable(field),
+            "explanation": "The load does not have this value. The revised PDF does.",
+        }
     if not revised_present or _blank(updated):
         if _omitted_default(current):
             return None

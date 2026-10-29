@@ -1378,6 +1378,58 @@ def test_reparse_popup_hides_default_omissions_and_duplicate_broker_reference() 
     assert same_po[0]["revised_value"] == "2000"
 
 
+def test_reparse_suggests_a_pdf_value_when_the_load_field_is_empty() -> None:
+    saved = {
+        "extracted": {
+            "broker_contact_email_snapshot": None,
+            "rate": "1000.00",
+            "customer_rate": None,
+            "hazmat_flag": False,
+            "stops": [
+                {
+                    "stop_type": "pickup",
+                    "street": "3620 W 38th St",
+                    "city": None,
+                    "state_or_province": "IL",
+                }
+            ],
+        }
+    }
+    revised = {
+        "extracted": {
+            "broker_contact_email_snapshot": "l.phillip@armstrongtransport.com",
+            "rate": "1000.00",
+            "customer_rate": "1500.00",
+            "hazmat_flag": False,
+            "stops": [
+                {
+                    "stop_type": "pickup",
+                    "street": "3620 W 38th St",
+                    "city": "Chicago",
+                    "state_or_province": "IL",
+                }
+            ],
+        }
+    }
+    rows = {row["field"]: row for row in validate_ai_reparse_changes(saved, revised, [])}
+    assert set(rows) == {"broker_contact_email_snapshot", "stops[0].city"}
+    assert rows["broker_contact_email_snapshot"]["label"] == "Contact email"
+    assert rows["broker_contact_email_snapshot"]["editable"] is True
+    assert rows["broker_contact_email_snapshot"]["current_value"] is None
+    assert rows["broker_contact_email_snapshot"]["revised_value"] == "l.phillip@armstrongtransport.com"
+    assert rows["stops[0].city"]["editable"] is True
+    assert rows["stops[0].city"]["current_value"] is None
+    assert rows["stops[0].city"]["revised_value"] == "Chicago"
+    assert "customer_rate" not in rows
+
+    still_blank = validate_ai_reparse_changes(
+        {"extracted": {"broker_contact_email_snapshot": None, "hazmat_flag": False}},
+        {"extracted": {"broker_contact_email_snapshot": "  ", "hazmat_flag": None}},
+        [],
+    )
+    assert still_blank == []
+
+
 def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
     saved = {"extracted": {"rate": "1800", "customer_rate": "1800", "temperature_requirement": "34"}}
     revised = {"extracted": {"rate": "2000", "customer_rate": None, "temperature_requirement": None}}
