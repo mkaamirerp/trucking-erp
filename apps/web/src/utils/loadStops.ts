@@ -23,14 +23,14 @@ export function lastDropStop(stops: LoadStop[] | null | undefined): LoadStop | u
   return undefined;
 }
 
-/** City, ST; else facility; else — */
+/** City and state only. A facility name is not a city. */
 export function formatStopCityState(stop: LoadStop | undefined): string {
   if (!stop) return "—";
   const city = stop.city?.trim();
   const st = stop.state_or_province?.trim();
   if (city && st) return `${city}, ${st}`;
   if (city) return city;
-  if (stop.facility_name?.trim()) return stop.facility_name.trim();
+  if (st) return st;
   return "—";
 }
 
