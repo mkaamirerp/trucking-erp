@@ -335,13 +335,25 @@ async def propose_load_reparse(
         raise LoadReparseError(422, "The revised PDF could not be compared.")
     changes = validate_ai_reparse_changes(saved, revised_doc, raw_changes)
     if historical_pdf:
-        # A historical copy can inform an operator, not overwrite latest values.
-        changes = [
-            {**item, "editable": False, "explanation": (
-                "Historical PDF: review-only. " + str(item.get("explanation") or "")
-            ).strip()}
-            for item in changes
-        ]
+        # An older PDF must not overwrite a value already on the load.
+        # An empty load field can still be filled from that PDF.
+        locked: list[dict] = []
+        for item in changes:
+            current = item.get("current_value")
+            blank = current is None or (isinstance(current, str) and not current.strip())
+            if blank and item.get("editable") is True:
+                locked.append(item)
+                continue
+            locked.append(
+                {
+                    **item,
+                    "editable": False,
+                    "explanation": (
+                        "Historical PDF: review-only. " + str(item.get("explanation") or "")
+                    ).strip(),
+                }
+            )
+        changes = locked
     version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
     concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
     expires_at = int(time.time()) + 30 * 60

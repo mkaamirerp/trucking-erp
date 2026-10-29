@@ -561,6 +561,65 @@ def test_reparse_routes_keep_existing_load_authorization() -> None:
 
 
 @pytest.mark.asyncio
+async def test_historical_pdf_still_offers_change_for_an_empty_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    pdf = b"%PDF-original"
+    saved = {
+        "_revised_pdfs": [{"sha256": "older", "storage_key": "r1", "filename": "older.pdf"}],
+        "extracted": {
+            "broker_contact_email_snapshot": None,
+            "rate": "1800",
+            "broker_name_snapshot": "Armstrong",
+            "broker_load_reference": "3872125-1",
+            "stops": [
+                {"stop_type": "pickup", "sequence": 0, "city": "Chicago", "state_or_province": "IL", "street": "1 Main"},
+                {"stop_type": "delivery", "sequence": 1, "city": "Reidsville", "state_or_province": "NC", "street": "2 Main"},
+            ],
+        },
+    }
+    evidence = SimpleNamespace(file_sha256=hashlib.sha256(pdf).hexdigest(), accepted_parse_json=saved)
+
+    async def fake_parser(*_args, **_kwargs):
+        extracted = copy.deepcopy(saved["extracted"])
+        extracted["broker_contact_email_snapshot"] = "l.phillips@armstrongtransport.com"
+        return LoadDocumentParseResponse.model_validate(
+            {
+                "document": {"filename": "Armstrong.pdf"},
+                "raw_text": "rate confirmation",
+                "context": {"document_type": "rate_confirmation", "classification_reasoning": "rate confirmation"},
+                "extracted": extracted,
+            }
+        )
+
+    async def fake_compare(**_kwargs):
+        return {"changes": []}
+
+    async def no_other_load(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+    monkeypatch.setattr(
+        "app.services.load_parser_duplicate_precheck.find_exact_pdf_duplicate_candidates",
+        no_other_load,
+    )
+    monkeypatch.setattr(
+        "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
+        fake_parser,
+    )
+    proposal = await propose_load_reparse(
+        _ReadDb(evidence),
+        tenant_id=1,
+        load_id=1008,
+        pdf_bytes=pdf,
+        filename="Armstrong.pdf",
+        openai_chat_json_schema=fake_compare,
+    )
+    email = next(item for item in proposal["changes"] if item["field"] == "broker_contact_email_snapshot")
+    assert email["editable"] is True
+    assert email["revised_value"] == "l.phillips@armstrongtransport.com"
+    assert "Historical PDF: review-only" not in str(email.get("explanation") or "")
+
+
+@pytest.mark.asyncio
 async def test_production_compare_call_passes_configured_key_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
     evidence = SimpleNamespace(
         accepted_parse_json={
