@@ -102,6 +102,10 @@ import { buildParseEngineAttribution } from "@/loadWorkspace/loadParseEngineAttr
 import { hydrateLoadWorkspaceFromParseResponse } from "@/loadWorkspace/loadParseHydration";
 import { ReparseChangesDialog } from "@/loadWorkspace/ReparseChangesDialog";
 import {
+  DuplicateLoadParseGateDialog,
+  type DuplicateLoadParseGateLocationState,
+} from "@/loadWorkspace/DuplicateLoadParseGateDialog";
+import {
   confidenceTierForAppliedLabel,
   parseConfidenceAppliedChipClasses,
   documentReviewTierLabel,
@@ -436,6 +440,7 @@ function LoadWorkspacePage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveSucceeded, setSaveSucceeded] = useState(false);
   const [markReadyBusy, setMarkReadyBusy] = useState(false);
   const [cancelLoadBusy, setCancelLoadBusy] = useState(false);
   const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
@@ -569,6 +574,7 @@ function LoadWorkspacePage() {
   const [reparseFile, setReparseFile] = useState<File | null>(null);
   const reparseInputRef = useRef<HTMLInputElement | null>(null);
   const reparseFieldUndoRef = useRef<Map<string, () => void>>(new Map());
+  const queuedReparseFileRef = useRef<File | null>(null);
   const [parseElapsedSec, setParseElapsedSec] = useState(0);
   const [parseWarnings, setParseWarnings] = useState<string[]>([]);
   const [duplicateReview, setDuplicateReview] = useState<{
@@ -605,10 +611,47 @@ function LoadWorkspacePage() {
   const formDirtyRef = useRef(false);
   /** Stable per create-load attempt so retries do not mint duplicate loads/trips. */
   const createLoadPromotionIdempotencyKeyRef = useRef<string | null>(null);
+  /** Parsed PDF kept in-browser on /loads/new until Save for later or Create load. */
+  const pendingWorkspaceParseRef = useRef<{
+    file: File;
+    res: LoadDocumentParseResponse;
+    summary: ApplyLoadDocumentParseSummary;
+    workspaceAtParseStart: WorkspaceDraftFields;
+    status: string;
+    seed: {
+      loadNumber: string;
+      hazmat: LoadPersistParams["hazmat"];
+      palletCaseCount: string;
+      customsBrokerId: number | null;
+      existingInternalNotes: string;
+      driverId: number | null;
+      truckId: number | null;
+      trailerAssetId: number | null;
+    };
+  } | null>(null);
+  const draftSavedForLaterRef = useRef(false);
+  const workspaceDraftRef = useRef<LoadWorkspaceDraft | null>(null);
+  workspaceDraftRef.current = workspaceDraft;
 
   useEffect(() => {
     loadConcurrencyRef.current = load?.concurrency_version ?? null;
   }, [load?.concurrency_version]);
+
+  useEffect(() => {
+    if (isLocalNewDraft) {
+      draftSavedForLaterRef.current = false;
+      pendingWorkspaceParseRef.current = null;
+    }
+  }, [isLocalNewDraft]);
+
+  useEffect(() => {
+    return () => {
+      const draft = workspaceDraftRef.current;
+      if (!draft?.id || draftSavedForLaterRef.current) return;
+      if (draftHasReadyRateConfirmationPdf(draft)) return;
+      void discardLoadWorkspaceDraft(draft.id, { discard_reason: "operator_abandoned" }).catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     if (!parseBusy) {
@@ -1005,6 +1048,10 @@ function LoadWorkspacePage() {
   }, [formDirty]);
 
   useEffect(() => {
+    if (formDirty) setSaveSucceeded(false);
+  }, [formDirty]);
+
+  useEffect(() => {
     if (workspaceMode === "manual") {
       setBaselineFormSignature(null);
       return;
@@ -1263,6 +1310,64 @@ function LoadWorkspacePage() {
       const parseWallStarted = performance.now();
       try {
         if (workspaceMode === "manual") {
+          const parseRequestMsAfterFetch = () => performance.now() - parseWallStarted;
+          const applySuccessfulParse = async (res: LoadDocumentParseResponse) => {
+            const parseRequestMs = parseRequestMsAfterFetch();
+            const hydration = await hydrateLoadWorkspaceFromParseResponse(
+              res,
+              getParseHydrationCallbacks(),
+              parseHydrationRef.current,
+              workspaceAtParseStart,
+            );
+            parseHydrationRef.current = hydration.parseHydrationState;
+            syncParseProvenanceFromMerged(res, hydration.summary, workspaceAtParseStart, parseSeed);
+            setParseWarnings(hydration.warnings);
+            const engineLine =
+              buildParseEngineAttribution(res.context ?? undefined, {
+                parseRequestMs,
+                totalMs: performance.now() - parseWallStarted,
+              }) ?? hydration.engineAttribution;
+            setLastParseEngineAttribution(engineLine);
+            setToolbarMessage({
+              text: engineLine ? `${hydration.toolbar.text} — ${engineLine}` : hydration.toolbar.text,
+              tone: hydration.toolbar.tone,
+            });
+            setLastParseAppliedLabels(hydration.appliedLabels);
+            setLastParseFieldConfidence(hydration.fieldConfidence);
+            setLastParseConfidenceTier(hydration.parseConfidenceTier);
+            setDraftConflict(null);
+            return hydration;
+          };
+
+          // /loads/new — parse in memory only until Save for later or Create load.
+          if (!draftIdFromRoute) {
+            const res = await parseLoadWorkspaceDocument(file, { continueAnyway });
+            const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
+            if (duplicateCandidates !== null) {
+              setDuplicateReview({ file, candidates: duplicateCandidates });
+              setSoftDuplicateReview(null);
+              setAcknowledgeSoftDuplicate(false);
+              pendingWorkspaceParseRef.current = null;
+              return;
+            }
+            setDuplicateReview(null);
+            const softDup = softRateConfirmationDuplicateFromParse(res);
+            setSoftDuplicateReview(softDup ? { candidates: softDup } : null);
+            setAcknowledgeSoftDuplicate(false);
+            setWorkspaceReferenceText(res.raw_text || "");
+            replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
+            const hydration = await applySuccessfulParse(res);
+            pendingWorkspaceParseRef.current = {
+              file,
+              res,
+              summary: hydration.summary,
+              workspaceAtParseStart,
+              status,
+              seed: parseSeed,
+            };
+            return;
+          }
+
           const { id: manualDraftId, draft: manualDraft } = await ensureServerDraft({
             syncRoute: false,
           });
@@ -1270,7 +1375,6 @@ function LoadWorkspacePage() {
             expectedConcurrencyVersion: manualDraft.concurrency_version,
             continueAnyway,
           });
-          const parseRequestMs = performance.now() - parseWallStarted;
           const res = persisted.parse;
           const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
           if (duplicateCandidates !== null) {
@@ -1286,29 +1390,7 @@ function LoadWorkspacePage() {
           setWorkspaceDraft(persisted.draft);
           setWorkspaceReferenceText(res.raw_text || "");
           replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
-          const hydration = await hydrateLoadWorkspaceFromParseResponse(
-            res,
-            getParseHydrationCallbacks(),
-            parseHydrationRef.current,
-            workspaceAtParseStart,
-          );
-          parseHydrationRef.current = hydration.parseHydrationState;
-          syncParseProvenanceFromMerged(res, hydration.summary, workspaceAtParseStart, parseSeed);
-          setParseWarnings(hydration.warnings);
-          const engineLine =
-            buildParseEngineAttribution(res.context ?? undefined, {
-              parseRequestMs,
-              totalMs: performance.now() - parseWallStarted,
-            }) ?? hydration.engineAttribution;
-          setLastParseEngineAttribution(engineLine);
-          setToolbarMessage({
-            text: engineLine ? `${hydration.toolbar.text} — ${engineLine}` : hydration.toolbar.text,
-            tone: hydration.toolbar.tone,
-          });
-          setLastParseAppliedLabels(hydration.appliedLabels);
-          setLastParseFieldConfidence(hydration.fieldConfidence);
-          setLastParseConfidenceTier(hydration.parseConfidenceTier);
-          setDraftConflict(null);
+          const hydration = await applySuccessfulParse(res);
           const saved = await persistWorkspaceDraftAfterParse({
             draftId: manualDraftId,
             draftVersion: persisted.draft.concurrency_version,
@@ -1325,7 +1407,9 @@ function LoadWorkspacePage() {
             concurrency_version: saved.concurrency_version,
             draft_json: saved.draft_json ?? persisted.draft.draft_json,
           });
-          navigate(OPS.LOAD_DRAFT(manualDraftId), { replace: true });
+          if (draftIdFromRoute !== manualDraftId) {
+            navigate(OPS.LOAD_DRAFT(manualDraftId), { replace: true });
+          }
           return;
         }
 
@@ -1414,7 +1498,7 @@ function LoadWorkspacePage() {
   useOperationalRefresh({
     intervalMs: null,
     enabled: workspaceMode !== "manual" && Number.isFinite(loadIdFromRoute) && !loading,
-    isDirty: formDirty,
+    isDirty: formDirty || reparseDialogOpen || Boolean(reparseProposal),
     onRefresh: () => void refreshLoadFromServer(),
   });
 
@@ -1719,6 +1803,74 @@ function LoadWorkspacePage() {
   const createLoadBlockedByDuplicate =
     duplicateReview !== null || (softDuplicateReview !== null && !acknowledgeSoftDuplicate);
 
+  async function discardEphemeralWorkspaceDraft() {
+    const id = workspaceDraft?.id;
+    if (!id || draftSavedForLaterRef.current) return;
+    if (draftHasReadyRateConfirmationPdf(workspaceDraft)) return;
+    try {
+      await discardLoadWorkspaceDraft(id, { discard_reason: "duplicate_review_dismissed" });
+    } catch {
+      /* best effort — list may still show draft until refresh if discard failed */
+    }
+    setWorkspaceDraft(null);
+    if (draftIdFromRoute === id) {
+      navigate(OPS.LOAD_NEW, { replace: true });
+    }
+  }
+
+  function closeDuplicateLoadGate() {
+    setDuplicateReview(null);
+    pendingWorkspaceParseRef.current = null;
+    void discardEphemeralWorkspaceDraft();
+    setToolbarMessage(null);
+  }
+
+  function startReparseOnExistingLoad(match: DuplicateLoadCandidate, file: File) {
+    setDuplicateReview(null);
+    pendingWorkspaceParseRef.current = null;
+    void discardEphemeralWorkspaceDraft();
+    setToolbarMessage(null);
+    navigate(OPS.LOAD_DETAIL(match.load_id), {
+      state: { reparseRateConfirmationFile: file } satisfies DuplicateLoadParseGateLocationState,
+    });
+  }
+
+  async function flushPendingWorkspaceParseToDraft(
+    draftId: string,
+    draft: LoadWorkspaceDraft,
+    continueAnyway = false,
+  ): Promise<LoadWorkspaceDraft> {
+    const pending = pendingWorkspaceParseRef.current;
+    if (!pending) return draft;
+    const persisted = await parseLoadWorkspaceDraftDocument(draftId, pending.file, {
+      expectedConcurrencyVersion: draft.concurrency_version,
+      continueAnyway,
+    });
+    const duplicateCandidates = duplicateLoadCandidatesFromParse(persisted.parse);
+    if (duplicateCandidates !== null) {
+      setDuplicateReview({ file: pending.file, candidates: duplicateCandidates });
+      throw new Error("LOAD_RATE_CONFIRMATION_DUPLICATE");
+    }
+    const saved = await persistWorkspaceDraftAfterParse({
+      draftId,
+      draftVersion: persisted.draft.concurrency_version,
+      res: pending.res,
+      summary: pending.summary,
+      workspaceAtParseStart: pending.workspaceAtParseStart,
+      status: pending.status,
+      seed: pending.seed,
+      updateDraft: updateLoadWorkspaceDraft,
+      buildDraftJson: buildWorkspaceDraftJson,
+    });
+    pendingWorkspaceParseRef.current = null;
+    setWorkspaceReferenceText(pending.res.raw_text || "");
+    return {
+      ...persisted.draft,
+      concurrency_version: saved.concurrency_version,
+      draft_json: saved.draft_json ?? persisted.draft.draft_json,
+    };
+  }
+
   async function ensureServerDraft(
     options: { syncRoute?: boolean } = {},
   ): Promise<{ id: string; draft: LoadWorkspaceDraft }> {
@@ -1881,11 +2033,23 @@ function LoadWorkspacePage() {
     setDraftConflict(null);
     try {
       const { id, draft } = await ensureServerDraft();
+      let activeDraft = draft;
+      try {
+        activeDraft = await flushPendingWorkspaceParseToDraft(id, draft);
+      } catch (e: unknown) {
+        if (e instanceof Error && e.message === "LOAD_RATE_CONFIRMATION_DUPLICATE") {
+          setToolbarMessage({ text: "This PDF matches an existing load.", tone: "warning" });
+          return;
+        }
+        throw e;
+      }
+      setWorkspaceDraft(activeDraft);
       const updated = await updateLoadWorkspaceDraft(id, {
-        expected_concurrency_version: draft.concurrency_version,
+        expected_concurrency_version: activeDraft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(updated, { restorePdf: true });
+      draftSavedForLaterRef.current = true;
       if (draftIdFromRoute !== id) {
         navigate(OPS.LOAD_DRAFT(id), { replace: true });
       }
@@ -1951,8 +2115,19 @@ function LoadWorkspacePage() {
     setDraftConflict(null);
     try {
       const { id, draft } = await ensureServerDraft({ syncRoute: false });
+      let activeDraft = draft;
+      try {
+        activeDraft = await flushPendingWorkspaceParseToDraft(id, draft, acknowledgeSoftDuplicate);
+      } catch (e: unknown) {
+        if (e instanceof Error && e.message === "LOAD_RATE_CONFIRMATION_DUPLICATE") {
+          setToolbarMessage({ text: "This PDF matches an existing load.", tone: "warning" });
+          return;
+        }
+        throw e;
+      }
+      setWorkspaceDraft(activeDraft);
       const saved = await updateLoadWorkspaceDraft(id, {
-        expected_concurrency_version: draft.concurrency_version,
+        expected_concurrency_version: activeDraft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(saved);
@@ -2103,8 +2278,8 @@ function LoadWorkspacePage() {
       setLoadReferences((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: text } : row)));
     } else if (field === "rate") {
       const previous = rate;
-      rememberReparseUndo(change.field, () => setRate(previous));
-      setRate(text);
+      rememberReparseUndo(change.field, () => setRateTracked(previous));
+      setRateTracked(text);
     } else if (field === "customer_rate") {
       return;
     } else if (field === "broker_load_reference") {
@@ -2141,8 +2316,8 @@ function LoadWorkspacePage() {
       setEstimatedWeight(text);
     } else if (field === "miles") {
       const previous = miles;
-      rememberReparseUndo(change.field, () => setMiles(previous));
-      setMiles(text);
+      rememberReparseUndo(change.field, () => setMilesTracked(previous));
+      setMilesTracked(text);
     } else if (field === "broker_name_snapshot") {
       const previous = brokerNameSnapshot;
       rememberReparseUndo(change.field, () => setBrokerNameSnapshot(previous));
@@ -2212,6 +2387,22 @@ function LoadWorkspacePage() {
     }
   }
 
+  useEffect(() => {
+    const st = location.state as DuplicateLoadParseGateLocationState | null;
+    const file = st?.reparseRateConfirmationFile;
+    if (!file) return;
+    queuedReparseFileRef.current = file;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+    if (workspaceMode !== "detail" || !load || loadIsCancelled) return;
+    const file = queuedReparseFileRef.current;
+    if (!file) return;
+    queuedReparseFileRef.current = null;
+    void onReparsePdf(file);
+  }, [workspaceMode, load, loadIsCancelled, load?.id]);
+
   async function onSave() {
     if (!load || loadIsCancelled) return;
     const stopErr = validateDraftStopsClassifiedForSave(draftStops);
@@ -2226,7 +2417,10 @@ function LoadWorkspacePage() {
         reparseFile &&
         (!reparseProposal.acknowledgement_required || reason.length >= 3),
     );
+    const reparseSavedFormOnly =
+      Boolean(reparseProposal && reparseFile) && !storeRevisedPdf;
     setSaving(true);
+    setSaveSucceeded(false);
     setToolbarMessage(null);
     setError(null);
     try {
@@ -2261,9 +2455,17 @@ function LoadWorkspacePage() {
       }
       setLoad(updated);
       await applyLoadDetailToWorkspace(updated);
-      setToolbarMessage({ text: "Saved.", tone: "success" });
+      setSaveSucceeded(true);
       setServerConflict(null);
+      if (reparseSavedFormOnly) {
+        setToolbarMessage({
+          text:
+            "Load saved from the form and verified JSON was updated. Enter a reason (3+ characters) in the re-parse dialog before saving if you also need to store this PDF revision.",
+          tone: "warning",
+        });
+      }
     } catch (e: unknown) {
+      setSaveSucceeded(false);
       const c = parseLoadVersionConflict(e);
       if (c) {
         setServerConflict({
@@ -2551,60 +2753,13 @@ function LoadWorkspacePage() {
   return (
     <div className="flex min-h-screen flex-col bg-[var(--trk-bg)] text-[var(--trk-text)]">
       {duplicateReview ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Possible duplicate load"
-            className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[var(--trk-border-strong)] bg-[var(--trk-surface)] p-5 text-[var(--trk-text)] shadow-xl"
-          >
-            <h2 className="text-base font-semibold">This load already exists</h2>
-            <p className="mt-2 text-xs text-[var(--trk-text-muted)]">
-              This rate confirmation matches an existing load. Open that load to continue; Create load
-              stays disabled until you use a different file or reference.
-            </p>
-            {duplicateReview.candidates.map((match) => (
-              <div key={match.load_id} className="mt-3 space-y-1 rounded border border-[var(--trk-border)] p-3 text-xs">
-                <div className="font-semibold">
-                  <Link className="underline" to={OPS.LOAD_DETAIL(match.load_id)}>
-                    Load {match.load_number}
-                  </Link>
-                  <span className="ml-2 font-normal">Commercial: {match.load_status}</span>
-                </div>
-                <div>Broker: {match.broker_name || "Not recorded"} · Broker reference: {match.broker_load_reference || "—"}</div>
-                <div>{match.pickup || "Pickup unknown"} → {match.delivery || "Delivery unknown"}</div>
-                <div>
-                  Trip: {match.trip_id == null ? "None" : `#${match.trip_id} (${match.trip_status || "unknown"})`}
-                  {" · "}Driver: {match.driver_id ?? "—"} · Truck: {match.truck_id ?? "—"} · Trailer: {match.trailer_id ?? "—"}
-                </div>
-                <p className="text-[10px] text-[var(--trk-text-muted)]">
-                  Trip information describes a matching Load's assignment, not necessarily today's physical equipment.
-                </p>
-              </div>
-            ))}
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              {duplicateReview.candidates[0] ? (
-                <Link
-                  className={toolBtnSecondary}
-                  to={OPS.LOAD_DETAIL(duplicateReview.candidates[0].load_id)}
-                >
-                  Open load
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                disabled={parseBusy}
-                className={toolBtnSecondary}
-                onClick={() => {
-                  setDuplicateReview(null);
-                  setToolbarMessage({ text: "Duplicate review closed.", tone: "warning" });
-                }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <DuplicateLoadParseGateDialog
+          file={duplicateReview.file}
+          candidates={duplicateReview.candidates}
+          busy={parseBusy}
+          onClose={closeDuplicateLoadGate}
+          onReparseExistingLoad={startReparseOnExistingLoad}
+        />
       ) : null}
       {softDuplicateReview && !duplicateReview ? (
         <div className="border-b border-amber-600/40 bg-amber-950/30 px-4 py-3 text-xs text-[var(--trk-text)]">
@@ -2737,7 +2892,7 @@ function LoadWorkspacePage() {
                   createLoadBlockedByHardGate ||
                   createLoadBlockedByDuplicate
                 }
-                title={createUnderButtonLine ?? undefined}
+                title={duplicateReview ? undefined : createUnderButtonLine ?? undefined}
                 onClick={() => void onPromoteDraft()}
               >
                 {saving ? "Creating…" : "Create load"}
@@ -2760,14 +2915,6 @@ function LoadWorkspacePage() {
                   if (f) void onReparsePdf(f);
                 }}
               />
-              <button
-                type="button"
-                className={toolBtnSecondary}
-                disabled
-                title="Use Re-parse PDF for a revised rate confirmation."
-              >
-                Upload & parse PDF
-              </button>
               {reparseDialogOpen ? null : (
                 <button
                   type="button"
@@ -2775,16 +2922,22 @@ function LoadWorkspacePage() {
                   disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy}
                   onClick={() => reparseInputRef.current?.click()}
                 >
-                  {parseBusy ? "Reading PDF…" : "Re-parse PDF"}
+                  {parseBusy ? "Reading PDF…" : "Re-parse load"}
                 </button>
               )}
               <button
                 type="button"
-                className={toolBtnPrimary}
+                className={clsx(
+                  toolBtnPrimary,
+                  saveSucceeded &&
+                    !saving &&
+                    !formDirty &&
+                    "bg-emerald-700 hover:brightness-100",
+                )}
                 disabled={saving || markReadyBusy || cancelLoadBusy}
                 onClick={() => void onSave()}
               >
-                {saving ? "Saving…" : "Save load"}
+                {saving ? "Saving…" : saveSucceeded && !formDirty ? "Saved" : "Save load"}
               </button>
               {showMarkReadyAction ? (
                 <button
@@ -2810,17 +2963,6 @@ function LoadWorkspacePage() {
               ) : null}
             </>
           )}
-          {reparseProposal?.acknowledgement_required && !reparseDialogOpen ? (
-            <label className="flex min-w-[16rem] flex-col text-[11px] text-[var(--trk-text)]">
-              Reason for saving this PDF
-              <input
-                className="mt-0.5 rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-1 text-sm text-[var(--trk-text)]"
-                value={reparseReason}
-                disabled={saving}
-                onChange={(event) => setReparseReason(event.target.value)}
-              />
-            </label>
-          ) : null}
           {toolbarMessage ? (
             <span
               className={clsx(
@@ -3087,13 +3229,15 @@ function LoadWorkspacePage() {
           changes={reparseProposal.changes}
           summary={reparseProposal.summary}
           reasons={reparseProposal.reasons}
+          verdict={reparseProposal.verdict}
           acknowledgementRequired={Boolean(reparseProposal.acknowledgement_required)}
           acknowledgementReason={reparseReason}
           onAcknowledgementReason={setReparseReason}
           busy={saving || parseBusy}
-          onChangeField={applyReparseChange}
-          onClose={dismissReparseReview}
-          onCancel={cancelReparseReview}
+          onApplyField={applyReparseChange}
+          onCloseWrongFile={cancelReparseReview}
+          onDoneBackToLoad={dismissReparseReview}
+          onCancelReparse={cancelReparseReview}
         />
       ) : null}
       <div className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]">

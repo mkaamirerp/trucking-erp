@@ -252,7 +252,9 @@ async def propose_load_reparse(
     reuse_status = classify_load_pdf_reuse(evidence, pdf_bytes)
     # Re-parse means READ and compare. Identical attachments must not be added
     # again on Save, but their hashes do not forbid checking saved Load fields.
-    historical_pdf = reuse_status in {"existing_prior_revision", "existing_prior_original"}
+    # Only a strictly older revised attachment is review-only. Re-reading the load's
+    # original rate confirmation must still allow correcting saved fields (e.g. linehaul).
+    historical_pdf = reuse_status == "existing_prior_revision"
     try:
         other_loads = await find_exact_pdf_duplicate_candidates(
             db, tenant_id=tenant_id, pdf_bytes=pdf_bytes, exclude_load_id=load_id
@@ -262,14 +264,19 @@ async def propose_load_reparse(
     if other_loads:
         raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
 
-    revised = await parse_load_workspace_document_orchestrated(
-        pdf_bytes,
-        filename=filename,
-        tenant_id=tenant_id,
-        db=db,
-        load_id=load_id,
-        openai_chat_json_schema=openai_chat_json_schema,
-    )
+    from app.services.load_document_parse_semantic_llm import LoadDocumentParseProviderError
+
+    try:
+        revised = await parse_load_workspace_document_orchestrated(
+            pdf_bytes,
+            filename=filename,
+            tenant_id=tenant_id,
+            db=db,
+            load_id=load_id,
+            openai_chat_json_schema=openai_chat_json_schema,
+        )
+    except LoadDocumentParseProviderError as exc:
+        raise LoadReparseError(503, exc.user_message) from exc
     if (revised.context or {}).get("semantic_outcome") == "blocked_duplicate_review":
         raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
 
@@ -328,6 +335,8 @@ async def propose_load_reparse(
             compared = await parse_document_semantic_chat_json_schema(**compare_kwargs)
     except LoadReparseError:
         raise
+    except LoadDocumentParseProviderError as exc:
+        raise LoadReparseError(503, exc.user_message) from exc
     except Exception as exc:
         raise LoadReparseError(422, "The revised PDF could not be compared.") from exc
     raw_changes = compared.get("changes") if isinstance(compared, dict) else None

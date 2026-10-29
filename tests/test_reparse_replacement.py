@@ -620,6 +620,130 @@ async def test_historical_pdf_still_offers_change_for_an_empty_email(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_re_reading_original_rc_allows_linehaul_change_when_revisions_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pdf = b"%PDF-original-on-load"
+    original_sha = hashlib.sha256(pdf).hexdigest()
+    saved = {
+        "_revised_pdfs": [{"sha256": "newer-revision-sha", "storage_key": "r1", "filename": "amended.pdf"}],
+        "extracted": {
+            "rate": "1400",
+            "broker_name_snapshot": "Armstrong",
+            "broker_load_reference": "3872125-1",
+            "stops": [
+                {"stop_type": "pickup", "sequence": 0, "city": "Chicago", "state_or_province": "IL", "street": "1 Main"},
+                {"stop_type": "delivery", "sequence": 1, "city": "Reidsville", "state_or_province": "NC", "street": "2 Main"},
+            ],
+        },
+    }
+    evidence = SimpleNamespace(file_sha256=original_sha, accepted_parse_json=saved)
+
+    async def fake_parser(*_args, **_kwargs):
+        extracted = copy.deepcopy(saved["extracted"])
+        extracted["rate"] = "2000"
+        return LoadDocumentParseResponse.model_validate(
+            {
+                "document": {"filename": "Armstrong.pdf"},
+                "raw_text": "rate confirmation",
+                "context": {"document_type": "rate_confirmation", "classification_reasoning": "rate confirmation"},
+                "extracted": extracted,
+            }
+        )
+
+    async def fake_compare(**_kwargs):
+        return {"changes": []}
+
+    async def no_other_load(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+    monkeypatch.setattr(
+        "app.services.load_parser_duplicate_precheck.find_exact_pdf_duplicate_candidates",
+        no_other_load,
+    )
+    monkeypatch.setattr(
+        "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
+        fake_parser,
+    )
+    proposal = await propose_load_reparse(
+        _ReadDb(evidence),
+        tenant_id=1,
+        load_id=1008,
+        pdf_bytes=pdf,
+        filename="Armstrong.pdf",
+        openai_chat_json_schema=fake_compare,
+    )
+    rate = next(item for item in proposal["changes"] if item["field"] == "rate")
+    assert rate["editable"] is True
+    assert Decimal(str(rate["revised_value"])) == Decimal("2000")
+    assert "Historical PDF: review-only" not in str(rate.get("explanation") or "")
+    assert proposal["pdf_reuse_status"] == "existing_prior_original"
+
+
+@pytest.mark.asyncio
+async def test_older_revised_attachment_locks_non_empty_linehaul(monkeypatch: pytest.MonkeyPatch) -> None:
+    pdf = b"%PDF-older-revision"
+    older_sha = hashlib.sha256(pdf).hexdigest()
+    saved = {
+        "_revised_pdfs": [
+            {"sha256": older_sha, "storage_key": "r-old", "filename": "older.pdf"},
+            {"sha256": "newest-revision", "storage_key": "r-new", "filename": "newest.pdf"},
+        ],
+        "extracted": {
+            "rate": "1400",
+            "broker_name_snapshot": "Armstrong",
+            "broker_load_reference": "3872125-1",
+            "stops": [
+                {"stop_type": "pickup", "sequence": 0, "city": "Chicago", "state_or_province": "IL", "street": "1 Main"},
+                {"stop_type": "delivery", "sequence": 1, "city": "Reidsville", "state_or_province": "NC", "street": "2 Main"},
+            ],
+        },
+    }
+    evidence = SimpleNamespace(file_sha256="original-sha", accepted_parse_json=saved)
+
+    async def fake_parser(*_args, **_kwargs):
+        extracted = copy.deepcopy(saved["extracted"])
+        extracted["rate"] = "2000"
+        return LoadDocumentParseResponse.model_validate(
+            {
+                "document": {"filename": "older.pdf"},
+                "raw_text": "rate confirmation",
+                "context": {"document_type": "rate_confirmation", "classification_reasoning": "rate confirmation"},
+                "extracted": extracted,
+            }
+        )
+
+    async def fake_compare(**_kwargs):
+        return {"changes": []}
+
+    async def no_other_load(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(settings, "jwt_secret", "unit-reparse-secret")
+    monkeypatch.setattr(
+        "app.services.load_parser_duplicate_precheck.find_exact_pdf_duplicate_candidates",
+        no_other_load,
+    )
+    monkeypatch.setattr(
+        "app.services.load_document_parse_orchestrator.parse_load_workspace_document_orchestrated",
+        fake_parser,
+    )
+    proposal = await propose_load_reparse(
+        _ReadDb(evidence),
+        tenant_id=1,
+        load_id=1008,
+        pdf_bytes=pdf,
+        filename="older.pdf",
+        openai_chat_json_schema=fake_compare,
+    )
+    rate = next(item for item in proposal["changes"] if item["field"] == "rate")
+    assert rate["editable"] is False
+    assert "Historical PDF: review-only" in str(rate.get("explanation") or "")
+    assert proposal["pdf_reuse_status"] == "existing_prior_revision"
+
+
+@pytest.mark.asyncio
 async def test_production_compare_call_passes_configured_key_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
     evidence = SimpleNamespace(
         accepted_parse_json={
@@ -1533,6 +1657,14 @@ def test_reparse_money_exception_requires_valid_both_document_amounts() -> None:
     assert missing_rate["rate"]["revised_value"] is None
     assert "not treated as a deletion" in missing_rate["rate"]["explanation"]
 
+    legacy_no_rate_key = {"extracted": {"broker_load_reference": "PO-1", "hazmat_flag": False}}
+    revised_with_rate = {"extracted": {"broker_load_reference": "PO-1", "rate": "2000", "hazmat_flag": False}}
+    legacy_rows = {row["field"]: row for row in validate_ai_reparse_changes(legacy_no_rate_key, revised_with_rate, [])}
+    assert legacy_rows["rate"]["editable"] is True
+    assert legacy_rows["rate"]["current_value"] is None
+    assert legacy_rows["rate"]["revised_value"] == "2000"
+    assert legacy_rows["rate"]["label"] == "Linehaul rate"
+
 
 def test_reparse_close_or_cancel_restores_changed_fields_and_drops_the_pdf() -> None:
     page = (ROOT / "apps/web/src/pages/LoadWorkspacePage.tsx").read_text()
@@ -1546,11 +1678,17 @@ def test_reparse_close_or_cancel_restores_changed_fields_and_drops_the_pdf() -> 
     assert "updateLoad" not in cancel
     start = page.index("{reparseDialogOpen && reparseProposal ? (")
     fragment = page[start : page.index("<RateConfirmationPdfPanel", start)]
-    assert "onClose={dismissReparseReview}" in fragment
+    assert "onDoneBackToLoad={dismissReparseReview}" in fragment
     dialog = (ROOT / "apps/web/src/loadWorkspace/ReparseChangesDialog.tsx").read_text()
-    assert "Close" in dialog
-    assert "Cancel" in dialog
-    assert "Cancel puts the fields back" in dialog
+    assert "Close, wrong file" in dialog
+    assert "Cancel re-parse" in dialog
+    assert "Done, back to the load" in dialog
+    assert "Use this value" in dialog
+    assert "Continue anyway" in dialog
+    assert "Nothing is stored until you click Save load" in dialog
+    assert "reparseDialogOpen || Boolean(reparseProposal)" in page
+    apply = page[page.index("function applyReparseChange") : page.index("async function onReparsePdf")]
+    assert "setRateTracked(text)" in apply
 
 
 def test_reparse_proposal_uses_load_update_pilot_permission() -> None:
@@ -1583,7 +1721,7 @@ def test_reparse_gates_cover_identity_classification_and_field_differences() -> 
     revised["context"].pop("document_date", None)
     identity = assess_same_load(armstrong, revised)
     assert identity["verdict"] == "strong"
-    assert identity["summary"] == "Strong match — Armstrong, Load #3872125-1, pickup and delivery match. Rate changed from $1,800 to $2,000."
+    assert identity["summary"] == "Strong match — Armstrong, Load #3872125-1, pickup and delivery match. Linehaul rate changed from $1,800 to $2,000."
     assert "later" not in identity["summary"].casefold()
     assert "older" not in identity["summary"].casefold()
     equal_dates = copy.deepcopy(revised)

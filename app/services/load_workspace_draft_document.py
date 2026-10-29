@@ -819,7 +819,7 @@ def deterministic_reparse_changes(saved: dict | None, revised: dict | None) -> l
     revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
     changes: list[dict] = []
     labels = {
-        "rate": "Rate",
+        "rate": "Linehaul rate",
         "customer_rate": "Customer rate",
         "broker_load_reference": "Broker load number",
         "broker_name_snapshot": "Broker",
@@ -1216,7 +1216,7 @@ def _valid_money_change(current: Any, updated: Any) -> bool:
 
 def _money_review(field: str, current: Any, updated: Any) -> dict:
     """A verified numeric discrepancy remains actionable even if AI omitted or misstated it."""
-    label = "Rate" if field == "rate" else "Customer rate"
+    label = "Linehaul rate" if field == "rate" else "Customer rate"
     actionable = _valid_money_change(current, updated)
     return {
         "field": field,
@@ -1237,7 +1237,7 @@ _INCOMPLETE_EXTRACTION = "The revised extraction did not include this value. It 
 
 def _reparse_field_label(field: str) -> str:
     labels = {
-        "rate": "Rate",
+        "rate": "Linehaul rate",
         "broker_load_reference": "Broker load number",
         "broker_name_snapshot": "Broker",
         "broker_contact_name_snapshot": "Contact name",
@@ -1303,11 +1303,9 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
     revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
     rows: list[dict] = []
     for field in _REPARSE_COMPARABLE_SCALARS:
-        if field not in saved_extracted:
-            continue
         row = _supported_difference_row(
             field,
-            saved_extracted.get(field),
+            saved_extracted.get(field) if field in saved_extracted else None,
             revised_extracted.get(field),
             revised_present=field in revised_extracted,
         )
@@ -1469,7 +1467,7 @@ def _rate_change_note(saved: dict, revised: dict) -> str:
         return ""
     if reparse_values_equivalent("rate", saved.get("rate"), revised.get("rate")):
         return ""
-    return f"Rate changed from {_money_text(saved.get('rate'))} to {_money_text(revised.get('rate'))}."
+    return f"Linehaul rate changed from {_money_text(saved.get('rate'))} to {_money_text(revised.get('rate'))}."
 
 
 def ground_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:

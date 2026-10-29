@@ -10,6 +10,8 @@ from app.services.load_document_parse_semantic_llm import (
     load_parser_semantic_model,
     load_parser_semantic_provider,
     normalize_load_parser_llm_provider,
+    parse_document_semantic_chat_json_schema,
+    _log_semantic_provider_http_admin_hint,
 )
 
 
@@ -24,22 +26,23 @@ def test_normalize_provider_invalid() -> None:
         normalize_load_parser_llm_provider("azure")
 
 
-def test_default_client_routes_by_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.core.config import settings
+def test_default_client_routes_by_settings() -> None:
+    assert default_load_parser_semantic_client() is parse_document_semantic_chat_json_schema
 
-    monkeypatch.setattr(settings, "load_parser_llm_provider", "openai")
-    from app.document_platform.capabilities.openai.chat_json_schema import (
-        openai_chat_json_schema_content,
+
+def test_admin_log_hint_on_anthropic_credit_error(caplog: pytest.LogCaptureFixture) -> None:
+    body = (
+        '{"type":"error","error":{"type":"invalid_request_error",'
+        '"message":"Your credit balance is too low to access the Anthropic API."}}'
     )
-
-    assert default_load_parser_semantic_client() is openai_chat_json_schema_content
-
-    monkeypatch.setattr(settings, "load_parser_llm_provider", "anthropic")
-    from app.document_platform.capabilities.anthropic.chat_json_schema import (
-        anthropic_chat_json_schema_content,
-    )
-
-    assert default_load_parser_semantic_client() is anthropic_chat_json_schema_content
+    with caplog.at_level("ERROR"):
+        _log_semantic_provider_http_admin_hint(provider="anthropic", body=body)
+    assert any("ADMIN: Anthropic API credits exhausted" in r.message for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        _log_semantic_provider_http_admin_hint(provider="openai", body=body)
+        _log_semantic_provider_http_admin_hint(provider="anthropic", body='{"error":"rate_limit"}')
+    assert not caplog.records
 
 
 def test_model_and_key_follow_provider(monkeypatch: pytest.MonkeyPatch) -> None:

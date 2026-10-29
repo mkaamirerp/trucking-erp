@@ -34,6 +34,7 @@ from app.services.load_document_parse_orchestrator import (
 )
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError
 from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
+from app.services.load_document_parse_semantic_llm import LoadDocumentParseProviderError
 from app.services.load_pod_evidence import (
     PodEvidenceError,
     assert_pod_storage_key_tenant,
@@ -176,6 +177,11 @@ async def parse_load_workspace_document(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Duplicate check unavailable; AI parsing was not started.",
+        ) from exc
+    except LoadDocumentParseProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.user_message,
         ) from exc
 
 

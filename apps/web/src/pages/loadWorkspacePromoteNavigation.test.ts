@@ -11,10 +11,10 @@ describe("load workspace promote navigation (Task 12)", () => {
     expect(pageSource).toContain("ensureServerDraft({ syncRoute: false })");
   });
 
-  it("manual parse defers draft URL until after parse persist", () => {
-    expect(pageSource).toMatch(
-      /ensureServerDraft\(\{\s*syncRoute:\s*false,\s*\}\)[\s\S]*navigate\(OPS\.LOAD_DRAFT\(manualDraftId\)/,
-    );
+  it("manual parse on /loads/new stays in memory until Save for later", () => {
+    expect(pageSource).toContain("pendingWorkspaceParseRef");
+    expect(pageSource).toContain("if (!draftIdFromRoute)");
+    expect(pageSource).toContain("flushPendingWorkspaceParseToDraft");
   });
 
   it("ensureServerDraft reuses in-memory workspace draft id (save after parse on /loads/new)", () => {
