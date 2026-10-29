@@ -22,7 +22,6 @@ from app.schemas.load_document_parse import (
 from app.services.load_document_parse_orchestrator import parse_load_workspace_document_orchestrated
 from app.services.load_parser_pdf_safety import UnsafeLoadPdfError, validate_load_parser_pdf
 from app.services.load_workspace_draft_lifecycle import require_workspace_draft_open_for_mutation
-from app.services.load_workspace_draft_mapper import normalize_load_miles_value
 
 LOAD_WORKSPACE_DRAFT_PDF_MODULE = "load_workspace_draft"
 WORKSPACE_DRAFT_ACCEPTED_PARSE_SCHEMA_VERSION = "load_document_parse_response_v1"
@@ -170,31 +169,12 @@ def _decimal_or_none(value: Any) -> Decimal | None:
     return None
 
 
-def _miles_values_equivalent(left: Any, right: Any) -> bool | None:
-    """None when neither side is mileage-like (caller uses generic rules)."""
-    left_blank = _blank(left)
-    right_blank = _blank(right)
-    if left_blank and right_blank:
-        return True
-    try:
-        left_m = normalize_load_miles_value(left) if not left_blank else None
-        right_m = normalize_load_miles_value(right) if not right_blank else None
-    except ValueError:
-        return None
-    if left_m is None or right_m is None:
-        return False
-    return left_m == right_m
-
-
 def values_equivalent(left: Any, right: Any) -> bool:
     """True when the saved JSON already says what the form says."""
     if left is None and (right is None or right == ""):
         return True
     if right is None and (left is None or left == ""):
         return True
-    miles_eq = _miles_values_equivalent(left, right)
-    if miles_eq is not None:
-        return miles_eq
     left_num = _decimal_or_none(left)
     right_num = _decimal_or_none(right)
     if left_num is not None and right_num is not None:
@@ -384,61 +364,6 @@ def field_is_editable(field: str) -> bool:
     return False
 
 
-def extract_reparse_pdf_plain_text(pdf_bytes: bytes) -> str:
-    """Local text only for re-parse. Never sends PDF bytes to the semantic LLM."""
-    from app.services.load_parser_pdf_acquisition import PDF_SCANNED, acquire_load_parser_pdf_pages
-    from app.services.load_parser_pdf_ocr import ocr_load_parser_pdf_pages
-
-    validate_load_parser_pdf(pdf_bytes)
-    acquisition = acquire_load_parser_pdf_pages(pdf_bytes)
-    page_objs = list(acquisition.get("pages") or [])
-    if acquisition.get("requires_ocr") and acquisition.get("pdf_type") != PDF_SCANNED:
-        raise ValueError(
-            "ocr_required: mixed digital/scanned PDF; OCR fallback applies only to "
-            "image-only PDFs with no usable embedded text — re-parse was not attempted."
-        )
-    if acquisition.get("pdf_type") == PDF_SCANNED:
-        ocr_pages, _warnings = ocr_load_parser_pdf_pages(pdf_bytes)
-        if not ocr_pages:
-            raise ValueError("ocr_failed: image-only PDF could not be OCR'd — re-parse was not attempted.")
-        return "\n".join(str(p.get("text") or "") for p in ocr_pages).strip()
-    usable = [
-        str(p.get("text") or "")
-        for p in page_objs
-        if isinstance(p, dict) and not p.get("requires_ocr")
-    ]
-    return "\n".join(usable).strip()
-
-
-def reparse_text_document_block_reason(pdf_text: str) -> str | None:
-    """Hard stop when local text is not a usable rate confirmation (no second classifier)."""
-    text = (pdf_text or "").strip()
-    if len(text) < 80:
-        return "This PDF could not be read clearly enough to re-parse. No Load information has changed."
-    lowered = text.casefold()
-    if any(token in lowered for token in ("fuel invoice", "bvd invoice", "comdata", "efs llc")):
-        return "This appears to be a fuel invoice, not a carrier rate confirmation. No Load information has changed."
-    if "bill of lading" in lowered and "rate confirmation" not in lowered:
-        return "This appears to be a bill of lading, not a carrier rate confirmation. No Load information has changed."
-    if "driver information" in lowered and "rate confirmation" not in lowered:
-        return "This appears to be a driver information sheet, not a carrier rate confirmation. No Load information has changed."
-    if any(
-        token in lowered
-        for token in (
-            "rate confirmation",
-            "rate con",
-            "load confirmation",
-            "linehaul",
-            "line haul",
-            "broker load",
-        )
-    ):
-        return None
-    if "pickup" in lowered and "delivery" in lowered:
-        return None
-    return "This PDF could not be classified as a carrier rate confirmation. No Load information has changed."
-
-
 def reparse_document_block_reason(revised: dict | None) -> str | None:
     """Block a re-parse when the existing parser did not accept a usable rate confirmation.
 
@@ -616,12 +541,7 @@ def reparse_values_equivalent(field: str, left: Any, right: Any) -> bool:
         return _norm_equipment(left) == _norm_equipment(right)
     if leaf in {"street", "city", "state_or_province", "facility_name", "country"}:
         return _norm_place(left) == _norm_place(right)
-    if field == "miles" or leaf == "miles":
-        miles_eq = _miles_values_equivalent(left, right)
-        if miles_eq is not None:
-            return miles_eq
-        return False
-    if field in {"rate", "customer_rate"} or leaf in {"rate", "customer_rate", "estimated_weight", "pallet_case_count"}:
+    if field in {"rate", "customer_rate"} or leaf in {"rate", "customer_rate", "estimated_weight", "miles", "pallet_case_count"}:
         left_num = _decimal_or_none(left)
         right_num = _decimal_or_none(right)
         if left_num is not None and right_num is not None:
@@ -1337,16 +1257,6 @@ def _reparse_field_label(field: str) -> str:
     return field.replace("_", " ")
 
 
-def _reparse_revised_display_value(field: str, updated: Any) -> Any:
-    if field != "miles" or _blank(updated):
-        return updated
-    try:
-        normalized = normalize_load_miles_value(updated)
-        return normalized if normalized is not None else updated
-    except ValueError:
-        return updated
-
-
 def _supported_difference_row(field: str, current: Any, updated: Any, *, revised_present: bool) -> dict | None:
     """One verified difference. A blank revised value is review-only, never a cleared field."""
     if field == "customer_rate":
@@ -1359,7 +1269,7 @@ def _supported_difference_row(field: str, current: Any, updated: Any, *, revised
             "field": field,
             "label": _reparse_field_label(field),
             "current_value": None,
-            "revised_value": _reparse_revised_display_value(field, updated),
+            "revised_value": updated,
             "editable": field_is_editable(field),
             "explanation": "The load does not have this value. The revised PDF does.",
         }
@@ -1382,7 +1292,7 @@ def _supported_difference_row(field: str, current: Any, updated: Any, *, revised
         "field": field,
         "label": _reparse_field_label(field),
         "current_value": current,
-        "revised_value": _reparse_revised_display_value(field, updated),
+        "revised_value": updated,
         "editable": field_is_editable(field),
     }
 
@@ -1482,144 +1392,56 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
     return rows
 
 
-def _apply_reparse_change_to_extracted(extracted: dict, field: str, value: Any) -> None:
-    indexed = _INDEXED_FIELD.match(field)
-    ready = _json_ready(value)
-    if indexed:
-        name, index_text, child = indexed.group(1), indexed.group(2), indexed.group(3)
-        index = int(index_text)
-        if name == "stops" and child:
-            stops = extracted.setdefault("stops", [])
-            while len(stops) <= index:
-                stops.append({})
-            if not isinstance(stops[index], dict):
-                stops[index] = {}
-            stops[index][child] = ready
-            return
-        if name == "references" and child:
-            refs = extracted.setdefault("references", [])
-            while len(refs) <= index:
-                refs.append({})
-            if not isinstance(refs[index], dict):
-                refs[index] = {}
-            refs[index][child] = ready
-            return
-    extracted[field] = ready
+def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
+    """Show every supported JSON difference. AI wording is kept only when the documents agree.
 
-
-def build_reparse_proposal_document(
-    saved: dict,
-    *,
-    filename: str,
-    pdf_text: str,
-    changes: list[dict],
-) -> dict:
-    """Minimal parse document for integrity tokens and identity checks after text-diff re-parse."""
-    out = copy.deepcopy(saved)
-    extracted = out.get("extracted")
-    if not isinstance(extracted, dict):
-        extracted = {}
-        out["extracted"] = extracted
-    for row in changes:
-        field = str(row.get("field") or "").strip()
-        if field:
-            _apply_reparse_change_to_extracted(extracted, field, row.get("revised_value"))
-    out["raw_text"] = pdf_text[:100_000]
-    ctx = dict(out.get("context") or {})
-    ctx["document_type"] = "rate_confirmation"
-    ctx["reparse_path"] = "text_diff_v1"
-    out["context"] = ctx
-    document = out.get("document") if isinstance(out.get("document"), dict) else {}
-    out["document"] = {**document, "filename": filename}
-    return out
-
-
-def _revised_value_in_pdf_text(field: str, value: Any, pdf_text: str) -> bool:
-    if _blank(value):
-        return False
-    hay = (pdf_text or "").casefold()
-    compact_hay = re.sub(r"\s+", "", hay)
-    text = str(value).strip()
-    if text and text.casefold() in hay:
-        return True
-    dec = _decimal_or_none(value)
-    if dec is not None:
-        candidates = {
-            format(dec, "f"),
-            format(dec, "f").rstrip("0").rstrip("."),
-            f"${format(dec, 'f')}",
-            f"${dec}",
-        }
-        for candidate in candidates:
-            c = candidate.replace(",", "").casefold()
-            if c and c in compact_hay:
-                return True
-    if field.endswith(".value") or field == "broker_load_reference":
-        ref = _norm_ref(text)
-        if ref and ref in compact_hay:
-            return True
-    if isinstance(value, int):
-        if str(value) in compact_hay:
-            return True
-    return False
-
-
-def _reparse_stop_field_editable(saved_extracted: dict, field: str, revised_value: Any) -> bool:
-    if not field_is_editable(field):
-        return False
-    indexed = _INDEXED_FIELD.match(field)
-    if not indexed or indexed.group(1) != "stops" or indexed.group(3) is None:
-        return True
-    saved_stops = _stop_dicts(saved_extracted)
-    saved_index = int(indexed.group(2))
-    child = indexed.group(3)
-    if saved_index >= len(saved_stops):
-        return False
-    revised_stops = copy.deepcopy(saved_stops)
-    revised_stops[saved_index] = {**revised_stops[saved_index], child: revised_value}
-    confident, _review, _open_saved, _open_revised = _classify_stop_matches(saved_stops, revised_stops)
-    return any(saved_index == pair[0] for pair in confident)
-
-
-def validate_ai_reparse_changes(saved: dict | None, pdf_text: str, proposed: list) -> list[dict]:
-    """Keep only AI-proposed rows that match saved JSON and revised text in the PDF.
-
-    The server does not invent popup rows. Customer rate is never proposed.
+    An omitted or invented proposal does not hide a real difference and does not write the load.
+    Customer rate is never proposed. Ambiguous stops stay review-only.
     """
+    rows = _supported_reparse_differences(saved, revised)
+    by_field = {str(row["field"]): row for row in rows}
     saved_extracted = saved.get("extracted") if isinstance(saved, dict) and isinstance(saved.get("extracted"), dict) else {}
-    rows: list[dict] = []
+    revised_extracted = revised.get("extracted") if isinstance(revised, dict) and isinstance(revised.get("extracted"), dict) else {}
+    saved_stops = _stop_dicts(saved_extracted)
+    revised_stops = _stop_dicts(revised_extracted)
+    stop_pair = dict(_pair_stops(saved_stops, revised_stops)[0])
+
+    def document_values(field: str) -> tuple[str, Any, Any]:
+        indexed = _INDEXED_FIELD.match(field)
+        if not indexed:
+            if field not in saved_extracted or field not in revised_extracted:
+                return "missing", None, None
+            return "ok", saved_extracted.get(field), revised_extracted.get(field)
+        name, index, child = indexed.group(1), int(indexed.group(2)), indexed.group(3)
+        if name == "stops":
+            if index >= len(saved_stops) or index not in stop_pair or child is None:
+                return "ambiguous_stop", index, None
+            revised_stop = revised_stops[stop_pair[index]]
+            if child not in saved_stops[index] or child not in revised_stop:
+                return "missing", None, None
+            return "ok", saved_stops[index].get(child), revised_stop.get(child)
+        return "missing", None, None
+
     for item in proposed or []:
         if not isinstance(item, dict):
             continue
         field = _normalize_field_path(str(item.get("field") or ""))
         if not field or field == "customer_rate" or not _comparable_reparse_field(field):
             continue
-        saved_current = _resolve_extracted(saved_extracted, field)
-        if saved_current is _MISSING:
-            saved_current = None
-        ai_current = item.get("current_value")
-        ai_revised = item.get("revised_value")
-        if not reparse_values_equivalent(field, ai_current, saved_current):
+        kind, current, updated = document_values(field)
+        target = by_field.get(field)
+        if kind == "ambiguous_stop":
+            target = by_field.get(f"stops.review.saved.{int(current)}")
+        if target is None or target.get("editable") is not True:
             continue
-        if _blank(ai_revised):
+        if _blank(updated) or not (
+            reparse_values_equivalent(field, item.get("current_value"), current)
+            and reparse_values_equivalent(field, item.get("revised_value"), updated)
+        ):
             continue
-        if reparse_values_equivalent(field, saved_current, ai_revised):
-            continue
-        if not _revised_value_in_pdf_text(field, ai_revised, pdf_text):
-            continue
-        editable = _reparse_stop_field_editable(saved_extracted, field, ai_revised)
-        label = _reparse_field_label(field)
-        note = _comparison_label(item, label)
-        row = {
-            "field": field,
-            "label": label,
-            "current_value": saved_current,
-            "revised_value": ai_revised,
-            "editable": editable,
-        }
+        note = _comparison_label(item, str(target.get("label") or ""))
         if note:
-            row["explanation"] = note
-        rows.append(row)
+            target["explanation"] = note
     return rows
 
 
