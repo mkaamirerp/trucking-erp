@@ -58,7 +58,7 @@ export function ReparseChangesDialog({
           </ul>
         ) : null}
         <p className="mb-3 text-sm text-gray-600">
-          Change updates one field on the form. Close leaves those fields so you can click Save load. Cancel puts them back. Nothing is stored until Save.
+          Change updates one field on the form. Close leaves those fields so you can click Save load. If a reason is required, type it next to Save load. Cancel puts the fields back. Nothing is stored until Save.
         </p>
         {acknowledgementRequired ? (
           <label className="mb-3 block text-sm text-gray-800">

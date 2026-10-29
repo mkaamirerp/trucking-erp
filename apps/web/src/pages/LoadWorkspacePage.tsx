@@ -2221,8 +2221,7 @@ function LoadWorkspacePage() {
     }
     const expectedVersion = load.concurrency_version ?? 1;
     if (reparseProposal?.acknowledgement_required && reparseReason.trim().length < 3) {
-      setToolbarMessage({ text: "Enter a short reason before saving this revised PDF.", tone: "warning" });
-      setReparseDialogOpen(true);
+      setToolbarMessage({ text: "Enter a short reason next to Save load, then click Save load again.", tone: "warning" });
       return;
     }
     setSaving(true);
@@ -2810,6 +2809,17 @@ function LoadWorkspacePage() {
               ) : null}
             </>
           )}
+          {reparseProposal?.acknowledgement_required && !reparseDialogOpen ? (
+            <label className="flex min-w-[16rem] flex-col text-[11px] text-[var(--trk-text)]">
+              Reason for saving this PDF
+              <input
+                className="mt-0.5 rounded border border-[var(--trk-border)] bg-[var(--trk-surface)] px-2 py-1 text-sm text-[var(--trk-text)]"
+                value={reparseReason}
+                disabled={saving}
+                onChange={(event) => setReparseReason(event.target.value)}
+              />
+            </label>
+          ) : null}
           {toolbarMessage ? (
             <span
               className={clsx(
