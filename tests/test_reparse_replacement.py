@@ -420,7 +420,7 @@ def test_popup_change_and_reparse_do_not_hydrate_or_call_save() -> None:
     assert "references\\\\[" in change or 'references\\[' in change
     assert "hazmat_flag" in change
     assert "editable === true" in dialog
-    assert "For review" in dialog
+    assert "Review only" in dialog
     assert "hydrate" not in dialog
     assert "fetch(" not in dialog
     assert "updateLoad" not in dialog
@@ -1683,8 +1683,10 @@ def test_reparse_close_or_cancel_restores_changed_fields_and_drops_the_pdf() -> 
     assert "Close, wrong file" in dialog
     assert "Cancel re-parse" in dialog
     assert "Done, back to the load" in dialog
-    assert "Use this value" in dialog
-    assert "Continue anyway" in dialog
+    assert "Use new value" in dialog
+    assert "Review only" in dialog
+    assert "On the form" in dialog
+    assert "onUndoField" in fragment
     assert "Nothing is stored until you click Save load" in dialog
     assert "reparseDialogOpen || Boolean(reparseProposal)" in page
     apply = page[page.index("function applyReparseChange") : page.index("async function onReparsePdf")]

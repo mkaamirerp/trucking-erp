@@ -2351,16 +2351,13 @@ function LoadWorkspacePage() {
       rememberReparseUndo(change.field, () => setHazmat(previous));
       setHazmat(next);
     } else return;
-    setReparseProposal((prev) =>
-      prev
-        ? {
-            ...prev,
-            changes: prev.changes.map((row) =>
-              row.field === change.field ? { ...row, current_value: change.revised_value } : row,
-            ),
-          }
-        : prev,
-    );
+  }
+
+  function undoReparseField(change: LoadReparseChange) {
+    const restore = reparseFieldUndoRef.current.get(change.field);
+    if (!restore) return;
+    restore();
+    reparseFieldUndoRef.current.delete(change.field);
   }
 
   async function onReparsePdf(file: File) {
@@ -3235,6 +3232,7 @@ function LoadWorkspacePage() {
           onAcknowledgementReason={setReparseReason}
           busy={saving || parseBusy}
           onApplyField={applyReparseChange}
+          onUndoField={undoReparseField}
           onCloseWrongFile={cancelReparseReview}
           onDoneBackToLoad={dismissReparseReview}
           onCancelReparse={cancelReparseReview}

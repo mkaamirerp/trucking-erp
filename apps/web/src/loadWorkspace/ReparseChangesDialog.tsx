@@ -31,6 +31,7 @@ type Props = {
   onOpenOtherLoad?: () => void;
   busy: boolean;
   onApplyField: (change: LoadReparseChange) => void;
+  onUndoField: (change: LoadReparseChange) => void;
   onCloseWrongFile: () => void;
   onDoneBackToLoad: () => void;
   onCancelReparse: () => void;
@@ -48,6 +49,7 @@ export function ReparseChangesDialog({
   onOpenOtherLoad,
   busy,
   onApplyField,
+  onUndoField,
   onCloseWrongFile,
   onDoneBackToLoad,
   onCancelReparse,
@@ -59,10 +61,12 @@ export function ReparseChangesDialog({
 
   /** Warning flow: table visible immediately; row actions unlock after Continue anyway. */
   const [warningContinued, setWarningContinued] = useState(false);
+  const [appliedFields, setAppliedFields] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setWarningContinued(false);
-  }, [acknowledgementRequired, summary, verdict, diffCount]);
+    setAppliedFields(new Set());
+  }, [acknowledgementRequired, summary, verdict, diffCount, changes]);
 
   const valuesUnlocked = !acknowledgementRequired || warningContinued;
 
@@ -128,7 +132,7 @@ export function ReparseChangesDialog({
               ) : null}
               {acknowledgementRequired && !warningContinued ? (
                 <p className="mt-2 text-xs text-amber-100/80">
-                  Review the table below, then choose Continue anyway to enable Use this value on rows you want on
+                  Review the table below, then choose Continue anyway to enable Use new value on rows you want on
                   the form.
                 </p>
               ) : null}
@@ -148,8 +152,15 @@ export function ReparseChangesDialog({
               <tbody>
                 {changes.map((change) => {
                   const canApply = change.editable === true && valuesUnlocked;
+                  const applied = appliedFields.has(change.field);
                   return (
-                    <tr key={change.field} className="border-b border-[var(--trk-border)]/70">
+                    <tr
+                      key={change.field}
+                      className={clsx(
+                        "border-b border-[var(--trk-border)]/70",
+                        applied && "bg-emerald-950/25",
+                      )}
+                    >
                       <td className="py-2.5 pr-2 align-top font-medium text-[var(--trk-text)]">
                         {change.label}
                         {change.explanation ? (
@@ -171,26 +182,50 @@ export function ReparseChangesDialog({
                       </td>
                       <td className="py-2.5 align-top text-right">
                         {change.editable === true ? (
-                          <button
-                            type="button"
-                            className={clsx(
-                              "rounded-md border px-2.5 py-1 text-xs font-semibold",
-                              canApply
-                                ? "border-[var(--trk-heading)]/40 bg-[var(--trk-bg)] text-[var(--trk-heading)] hover:bg-[var(--trk-surface-2)]"
-                                : "cursor-not-allowed border-[var(--trk-border)] bg-[var(--trk-bg)]/60 text-[var(--trk-text-muted)] opacity-70",
-                            )}
-                            disabled={busy || !canApply}
-                            title={
-                              !valuesUnlocked
-                                ? "Choose Continue anyway below before applying values from this PDF."
-                                : undefined
-                            }
-                            onClick={() => onApplyField(change)}
-                          >
-                            Use this value
-                          </button>
+                          applied ? (
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-xs font-semibold text-emerald-300">✓ On the form</span>
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium text-emerald-200/95 underline underline-offset-2 hover:text-emerald-100 disabled:opacity-50"
+                                disabled={busy}
+                                onClick={() => {
+                                  onUndoField(change);
+                                  setAppliedFields((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(change.field);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                Undo
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className={clsx(
+                                "rounded-md border px-2.5 py-1 text-xs font-semibold",
+                                canApply
+                                  ? "border-[var(--trk-heading)]/40 bg-[var(--trk-bg)] text-[var(--trk-heading)] hover:bg-[var(--trk-surface-2)]"
+                                  : "cursor-not-allowed border-[var(--trk-border)] bg-[var(--trk-bg)]/60 text-[var(--trk-text-muted)] opacity-70",
+                              )}
+                              disabled={busy || !canApply}
+                              title={
+                                !valuesUnlocked
+                                  ? "Choose Continue anyway below before applying values from this PDF."
+                                  : undefined
+                              }
+                              onClick={() => {
+                                onApplyField(change);
+                                setAppliedFields((prev) => new Set(prev).add(change.field));
+                              }}
+                            >
+                              Use new value
+                            </button>
+                          )
                         ) : (
-                          <span className="text-xs text-[var(--trk-text-muted)]">For review</span>
+                          <span className="text-xs text-[var(--trk-text-muted)]">Review only</span>
                         )}
                       </td>
                     </tr>
@@ -222,7 +257,7 @@ export function ReparseChangesDialog({
           ) : null}
 
           <p className="mt-3 text-xs text-[var(--trk-text-muted)]">
-            Use this value updates the form only. Nothing is stored until you click Save load on the load page.
+            Use new value updates the form only. Nothing is stored until you click Save load on the load page.
           </p>
         </div>
 
