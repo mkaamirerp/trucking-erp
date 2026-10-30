@@ -7,9 +7,6 @@ single product entrypoint ``parse_pdf_bytes_to_load_document_response``.
 from __future__ import annotations
 
 import hashlib
-import hmac
-import json
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -65,114 +62,6 @@ class LoadReparseError(Exception):
         self.detail = detail
 
 
-_COMPARE_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "changes": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "field": {"type": "string"},
-                    "label": {"type": "string"},
-                    "current_value": {},
-                    "revised_value": {},
-                },
-                "required": ["field", "label", "current_value", "revised_value"],
-            },
-        }
-    },
-    "required": ["changes"],
-}
-
-_COMPARE_INSTRUCTIONS = (
-    "Compare only the fields present in JSON 1 against the corresponding values in JSON 2. "
-    "Ignore fields that exist only in JSON 2. Return only meaningful changes. "
-    "Equivalent representations, formatting, and capitalization are not changes. "
-    "A missing value in the revised extraction is not automatically a deletion. Do not invent values. "
-    "Unchanged examples: FTL versus Full Truckload; PICKUP versus pickup; DELIVERY versus delivery; "
-    "34F versus 34 °F; PO# 48211903 versus 48211903 when the prefix is only a label. "
-    "Changed examples: $1,800 versus $2,000; Chicago versus Boston when they are the same identifiable stop. "
-    "Preserve significant reference digits, leading zeros, units, stop identities, and genuine business differences. "
-    "field is the JSON 1 path. label is a short explanation. "
-    "current_value is the JSON 1 value. revised_value is the JSON 2 value. "
-    "Do not decide whether the PDF belongs to this load."
-)
-
-
-def canonical_reparse_document(document: dict) -> str:
-    """Stable JSON for the Save token. Key order and client reserialization do not matter."""
-    round_tripped = json.loads(json.dumps(document, default=str, ensure_ascii=False))
-    return json.dumps(round_tripped, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def _reparse_signing_key() -> bytes:
-    from app.core.config import settings
-
-    secret = (settings.jwt_secret or "").strip()
-    if not secret:
-        raise LoadReparseError(503, "Re-parse signing is not configured.")
-    return secret.encode()
-
-
-def reparse_integrity_token(
-    *,
-    tenant_id: int,
-    load_id: int,
-    pdf_bytes: bytes,
-    revised_parse: dict,
-    baseline: dict,
-    concurrency_version: int,
-    acknowledgement_required: bool,
-    expires_at: int,
-) -> str:
-    """Bind the proposal to this PDF, the verified baseline, and the load version."""
-    from app.services.load_workspace_draft_document import parse_json_for_compare
-
-    pdf_digest = hashlib.sha256(pdf_bytes).hexdigest()
-    body_digest = hashlib.sha256(canonical_reparse_document(revised_parse).encode()).hexdigest()
-    baseline_digest = hashlib.sha256(canonical_reparse_document(parse_json_for_compare(baseline)).encode()).hexdigest()
-    message = (
-        f"{int(tenant_id)}|{int(load_id)}|{pdf_digest}|{body_digest}|{baseline_digest}|"
-        f"{int(concurrency_version)}|{int(bool(acknowledgement_required))}|{int(expires_at)}"
-    ).encode()
-    return hmac.new(_reparse_signing_key(), message, hashlib.sha256).hexdigest()
-
-
-def verify_reparse_integrity(
-    *,
-    tenant_id: int,
-    load_id: int,
-    pdf_bytes: bytes,
-    revised_parse: dict,
-    token: str,
-    baseline: dict,
-    concurrency_version: int,
-    acknowledgement_required: bool,
-    expires_at: int,
-) -> None:
-    if not isinstance(revised_parse, dict) or not pdf_bytes or not isinstance(token, str) or not token.strip():
-        raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
-    if not isinstance(expires_at, int):
-        raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
-    expected = reparse_integrity_token(
-        tenant_id=tenant_id,
-        load_id=load_id,
-        pdf_bytes=pdf_bytes,
-        revised_parse=revised_parse,
-        baseline=baseline,
-        concurrency_version=concurrency_version,
-        acknowledgement_required=acknowledgement_required,
-        expires_at=expires_at,
-    )
-    if not hmac.compare_digest(expected, token.strip()):
-        raise LoadReparseError(422, "This re-parse does not match the uploaded PDF.")
-    if expires_at < int(time.time()):
-        raise LoadReparseError(422, "This re-parse expired. Upload the PDF again. Nothing was changed.")
-
-
 async def _broker_aliases(db: AsyncSession, tenant_id: int, saved: dict, revised: dict) -> list[str]:
     """Names and aliases already stored for one broker. A lookup failure does not invent a match."""
     try:
@@ -211,34 +100,30 @@ async def _broker_aliases(db: AsyncSession, tenant_id: int, saved: dict, revised
         return []
 
 
-async def propose_load_reparse(
+async def parse_attached_rate_confirmation_reference(
     db: AsyncSession,
     *,
     tenant_id: int,
     load_id: int,
-    pdf_bytes: bytes,
-    filename: str,
+    revision: int,
+    tenant_slug: str,
     openai_chat_json_schema: Callable[..., Awaitable[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    """Read a revised PDF with the existing parser and ask what changed. Writes nothing."""
-    import json
-
+    """Parse one attached revised RC with the first parser only. Writes nothing."""
     from sqlalchemy import select
 
-    from app.models.load import Load
     from app.models.load_commercial_evidence import LoadCommercialEvidence
-    from app.services.load_parser_duplicate_precheck import (
-        DuplicatePrecheckUnavailable,
-        find_exact_pdf_duplicate_candidates,
-    )
+    from app.services.load_parser_duplicate_precheck import DuplicatePrecheckUnavailable
+    from app.services.loads import read_revised_rate_confirmation_pdf_bytes
     from app.services.load_workspace_draft_document import (
-        assess_same_load,
-        comparison_baseline,
+        build_parse_reference_field_rows,
         classify_load_pdf_reuse,
         parse_json_for_compare,
         reparse_document_block_reason,
-        validate_ai_reparse_changes,
     )
+
+    if revision < 1:
+        raise LoadReparseError(422, "Select a revised rate confirmation to parse.")
 
     evidence = await db.scalar(
         select(LoadCommercialEvidence).where(
@@ -248,28 +133,24 @@ async def propose_load_reparse(
         )
     )
     if evidence is None or not isinstance(evidence.accepted_parse_json, dict):
-        raise LoadReparseError(422, "This load has no saved parser JSON to compare against.")
-    reuse_status = classify_load_pdf_reuse(evidence, pdf_bytes)
-    # Re-parse means READ and compare. Identical attachments must not be added
-    # again on Save, but their hashes do not forbid checking saved Load fields.
-    # Only a strictly older revised attachment is review-only. Re-reading the load's
-    # original rate confirmation must still allow correcting saved fields (e.g. linehaul).
-    historical_pdf = reuse_status == "existing_prior_revision"
+        raise LoadReparseError(422, "This load has no rate confirmation evidence to parse.")
+
     try:
-        other_loads = await find_exact_pdf_duplicate_candidates(
-            db, tenant_id=tenant_id, pdf_bytes=pdf_bytes, exclude_load_id=load_id
+        filename, pdf_bytes = await read_revised_rate_confirmation_pdf_bytes(
+            db, tenant_id, load_id, revision=revision, tenant_slug=tenant_slug
         )
-    except DuplicatePrecheckUnavailable as exc:
-        raise LoadReparseError(503, "Duplicate check unavailable; AI parsing was not started.") from exc
-    if other_loads:
-        raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
+    except Exception as exc:
+        raise LoadReparseError(404, "That revised PDF could not be read.") from exc
+
+    reuse_status = classify_load_pdf_reuse(evidence, pdf_bytes)
+    pdf_sha256 = hashlib.sha256(pdf_bytes).hexdigest()
 
     from app.services.load_document_parse_semantic_llm import LoadDocumentParseProviderError
 
     try:
-        revised = await parse_load_workspace_document_orchestrated(
+        parsed = await parse_load_workspace_document_orchestrated(
             pdf_bytes,
-            filename=filename,
+            filename=filename or f"revised-rc-{revision}.pdf",
             tenant_id=tenant_id,
             db=db,
             load_id=load_id,
@@ -277,113 +158,48 @@ async def propose_load_reparse(
         )
     except LoadDocumentParseProviderError as exc:
         raise LoadReparseError(503, exc.user_message) from exc
-    if (revised.context or {}).get("semantic_outcome") == "blocked_duplicate_review":
+
+    if (parsed.context or {}).get("semantic_outcome") == "blocked_duplicate_review":
         raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
 
-    saved = parse_json_for_compare(evidence.accepted_parse_json)
-    revised_document = revised.model_dump(mode="json")
+    revised_document = parsed.model_dump(mode="json")
     revised_doc = parse_json_for_compare(revised_document)
     block_reason = reparse_document_block_reason(revised_doc)
     if block_reason:
         raise LoadReparseError(422, block_reason)
-    identity = assess_same_load(
-        saved,
-        revised_doc,
-        broker_aliases=await _broker_aliases(db, tenant_id, saved, revised_doc),
-    )
-    if identity["verdict"] == "blocked":
-        if reuse_status == "new_revision":
-            raise LoadReparseError(422, identity["summary"])
-        # The SHA-256 is already trusted evidence for THIS Load. The Load may
-        # have manually edited fields; expose disagreements for dispatcher review.
-        identity = {
-            "verdict": "needs_confirmation",
-            "summary": "This PDF is already accepted on this Load, but its shipment fields disagree with saved values. Review manually.",
-            "reasons": [identity["summary"]],
-            "acknowledgement_required": True,
-        }
-    if historical_pdf:
-        identity = {
-            **identity,
-            "verdict": "needs_confirmation",
-            "summary": "Historical PDF version — review differences, but do not apply an older version as an amendment.",
-            "reasons": [*identity["reasons"], identity["summary"]],
-            "acknowledgement_required": True,
-        }
-    compare_kwargs = {
-        "system": _COMPARE_INSTRUCTIONS,
-        "user_text": (
-            "JSON 1:\n"
-            + json.dumps(comparison_baseline(saved), default=str)
-            + "\n\nJSON 2:\n"
-            + json.dumps(revised_doc, default=str)
-        ),
-        "schema": _COMPARE_SCHEMA,
-        "schema_name": "load_reparse_changes",
-    }
-    try:
-        if openai_chat_json_schema is not None:
-            compared = await openai_chat_json_schema(**compare_kwargs)
-        else:
-            from app.services.load_document_parse_semantic_llm import (
-                load_parser_semantic_configured,
-                parse_document_semantic_chat_json_schema,
-            )
 
-            if not load_parser_semantic_configured():
-                raise LoadReparseError(503, "The parser model is not configured.")
-            compared = await parse_document_semantic_chat_json_schema(**compare_kwargs)
+    saved = parse_json_for_compare(evidence.accepted_parse_json)
+    field_rows = build_parse_reference_field_rows(saved, revised_doc)
+    warnings: list[str] = []
+    try:
+        from app.services.load_workspace_draft_document import assess_same_load
+
+        identity = assess_same_load(
+            saved,
+            revised_doc,
+            broker_aliases=await _broker_aliases(db, tenant_id, saved, revised_doc),
+        )
+        if identity.get("verdict") == "blocked":
+            raise LoadReparseError(422, str(identity.get("summary") or "This document does not match this load."))
+        if identity.get("verdict") == "needs_confirmation":
+            summary = str(identity.get("summary") or "").strip()
+            if summary:
+                warnings.append(summary)
+            for reason in identity.get("reasons") or []:
+                text = str(reason or "").strip()
+                if text and text not in warnings:
+                    warnings.append(text)
     except LoadReparseError:
         raise
-    except LoadDocumentParseProviderError as exc:
-        raise LoadReparseError(503, exc.user_message) from exc
-    except Exception as exc:
-        raise LoadReparseError(422, "The revised PDF could not be compared.") from exc
-    raw_changes = compared.get("changes") if isinstance(compared, dict) else None
-    if not isinstance(raw_changes, list):
-        raise LoadReparseError(422, "The revised PDF could not be compared.")
-    changes = validate_ai_reparse_changes(saved, revised_doc, raw_changes)
-    if historical_pdf:
-        # An older PDF must not overwrite a value already on the load.
-        # An empty load field can still be filled from that PDF.
-        locked: list[dict] = []
-        for item in changes:
-            current = item.get("current_value")
-            blank = current is None or (isinstance(current, str) and not current.strip())
-            if blank and item.get("editable") is True:
-                locked.append(item)
-                continue
-            locked.append(
-                {
-                    **item,
-                    "editable": False,
-                    "explanation": (
-                        "Historical PDF: review-only. " + str(item.get("explanation") or "")
-                    ).strip(),
-                }
-            )
-        changes = locked
-    version_value = await db.scalar(select(Load.concurrency_version).where(Load.tenant_id == tenant_id, Load.id == load_id))
-    concurrency_version = version_value if isinstance(version_value, int) else int(getattr(evidence, "concurrency_version", 1) or 1)
-    expires_at = int(time.time()) + 30 * 60
+    except DuplicatePrecheckUnavailable:
+        warnings.append("Shipment identity check was unavailable; review extracted values carefully.")
+
     return {
-        "changes": changes,
+        "revision": int(revision),
+        "filename": filename or f"revised-rc-{revision}.pdf",
+        "pdf_sha256": pdf_sha256,
         "pdf_reuse_status": reuse_status,
-        "store_new_pdf": reuse_status == "new_revision",
-        "revised_parse": revised,
-        "integrity": reparse_integrity_token(
-            tenant_id=tenant_id,
-            load_id=load_id,
-            pdf_bytes=pdf_bytes,
-            revised_parse=revised_document,
-            baseline=saved,
-            concurrency_version=concurrency_version,
-            acknowledgement_required=bool(identity["acknowledgement_required"]),
-            expires_at=expires_at,
-        ),
-        "verdict": identity["verdict"],
-        "summary": identity["summary"],
-        "reasons": identity["reasons"],
-        "acknowledgement_required": bool(identity["acknowledgement_required"]),
-        "expires_at": expires_at,
+        "parse": parsed,
+        "field_rows": field_rows,
+        "warnings": warnings,
     }

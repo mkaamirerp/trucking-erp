@@ -156,17 +156,16 @@ class LoadReparseChange(BaseModel):
     explanation: Optional[str] = None
 
 
-class LoadReparseProposal(BaseModel):
-    """Suggested differences only. Nothing here is written until Save."""
+class LoadParseReferenceResponse(BaseModel):
+    """First-parser output for an attached revised RC. Nothing here is written until Save load."""
 
-    changes: list[LoadReparseChange] = Field(default_factory=list)
-    revised_parse: LoadDocumentParseResponse
-    integrity: str
-    verdict: str
-    summary: str
-    reasons: list[str] = Field(default_factory=list)
-    acknowledgement_required: bool = False
-    expires_at: int
+    revision: int = Field(..., ge=1)
+    filename: str
+    pdf_sha256: str
+    pdf_reuse_status: str
+    parse: LoadDocumentParseResponse
+    field_rows: list[LoadReparseChange] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class LoadRevisedRateConfirmationAttachmentResponse(BaseModel):
