@@ -1764,6 +1764,8 @@ async def upload_applicant_document(
     app, access = await _get_application_and_access_by_token(db, tenant_id, token)
     _require_driver_workflow(app)
     purpose = getattr(access, "purpose", None) or TOKEN_PURPOSE_INVITE
+    if purpose not in (TOKEN_PURPOSE_INVITE, TOKEN_PURPOSE_DOCUMENT_RESUME):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired invite link")
     allowed = app.status == DriverOnboardingStatus.DRAFT.value or (
         app.status in _POST_SUBMIT_DOC_RESUME_STATUSES and purpose == TOKEN_PURPOSE_DOCUMENT_RESUME
     )

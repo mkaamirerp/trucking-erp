@@ -217,6 +217,101 @@ async def _cleanup(session: AsyncSession, application_ids: list[int]) -> None:
     await session.commit()
 
 
+def _stored_files(root) -> set[str]:
+    return {str(path.relative_to(root)) for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
+@pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB URL required")
+async def test_dl_capture_cannot_upload_step4_document(
+    client: AsyncClient,
+    tenant_id: int,
+    tenant_session: AsyncSession,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A phone-capture link cannot upload a step-4 document. Invite and document-resume still can."""
+    import app.core.storage as storage_mod
+
+    slug = _slug()
+    headers = {"host": f"{slug}.truckerp.me"}
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    monkeypatch.setattr(storage_mod.settings, "local_storage_dir", str(storage_root))
+    monkeypatch.setattr(storage_mod.settings, "company_docs_dir", None)
+    monkeypatch.setattr(storage_mod.settings, "storage_provider", "local")
+    monkeypatch.setattr(storage_mod, "_engine", storage_mod.LocalStorageBackend())
+
+    created: list[int] = []
+    try:
+        draft_id, invite = await _add_app(tenant_session, tenant_id=tenant_id)
+        submitted_id, _submitted_invite = await _add_app(
+            tenant_session,
+            tenant_id=tenant_id,
+            status=DriverOnboardingStatus.SUBMITTED.value,
+        )
+        created.extend([draft_id, submitted_id])
+        capture = await _add_token(
+            tenant_session,
+            tenant_id=tenant_id,
+            application_id=draft_id,
+            purpose=onboarding.TOKEN_PURPOSE_DL_CAPTURE,
+        )
+        resume = await _add_token(
+            tenant_session,
+            tenant_id=tenant_id,
+            application_id=submitted_id,
+            purpose=onboarding.TOKEN_PURPOSE_DOCUMENT_RESUME,
+        )
+        before_files = _stored_files(storage_root)
+
+        denied = await client.post(
+            "/api/v1/driver-onboarding/applicant/application/document-upload",
+            params={"token": capture},
+            headers=headers,
+            data={"doc_type": "mvr"},
+            files={"file": ("mvr.pdf", PDF, "application/pdf")},
+        )
+        assert denied.status_code == 404
+        assert denied.json()["detail"] == "Invalid or expired invite link"
+        await tenant_session.rollback()
+        draft = await tenant_session.get(PersonApplication, draft_id)
+        assert draft is not None
+        assert (draft.intake_payload or {}).get("documents") in (None, {})
+        assert _stored_files(storage_root) == before_files
+
+        uploaded = await client.post(
+            "/api/v1/driver-onboarding/applicant/application/document-upload",
+            params={"token": invite},
+            headers=headers,
+            data={"doc_type": "mvr"},
+            files={"file": ("mvr.pdf", PDF, "application/pdf")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        invite_key = uploaded.json()["intake_payload"]["documents"]["mvr"]["storage_key"]
+        assert re.fullmatch(
+            rf"{re.escape(slug)}/applicant_docs/application/{draft_id}/[0-9a-f]{{32}}\.pdf",
+            invite_key,
+        )
+
+        resumed = await client.post(
+            "/api/v1/driver-onboarding/applicant/application/document-upload",
+            params={"token": resume},
+            headers=headers,
+            data={"doc_type": "dot_medical"},
+            files={"file": ("medical.pdf", PDF, "application/pdf")},
+        )
+        assert resumed.status_code == 200, resumed.text
+        resume_key = resumed.json()["intake_payload"]["documents"]["dot_medical"]["storage_key"]
+        assert re.fullmatch(
+            rf"{re.escape(slug)}/applicant_docs/application/{submitted_id}/[0-9a-f]{{32}}\.pdf",
+            resume_key,
+        )
+    finally:
+        await _cleanup(tenant_session, created)
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
 @pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB URL required")
