@@ -552,6 +552,26 @@ async def save_applicant_dl_processed_bytes(
     )
 
 
+def _s3_directory_prefix(
+    backend: S3StorageBackend,
+    directory_prefix: str,
+    module: str,
+    tenant_slug: str,
+) -> str:
+    """Return a list_objects prefix that still ends with ``/``.
+
+    Object-key validation rejects a trailing slash. Validate the ``__purge__``
+    marker key, then strip that marker so the listed prefix is unchanged.
+    """
+    if not directory_prefix.endswith("/"):
+        raise StorageKeyError("invalid storage key")
+    full_marker = backend._full_key(f"{directory_prefix}__purge__", module, tenant_slug)
+    marker = "__purge__"
+    if not full_marker.endswith(marker):
+        raise StorageKeyError("invalid storage key")
+    return full_marker[: -len(marker)]
+
+
 def purge_applicant_dl_application(tenant_slug: str, application_id: int) -> int:
     """Delete all stored applicant DL files for one application (local or S3)."""
     import shutil
@@ -566,7 +586,7 @@ def purge_applicant_dl_application(tenant_slug: str, application_id: int) -> int
         shutil.rmtree(dir_path)
         return count
     if isinstance(backend, S3StorageBackend):
-        full_prefix = backend._full_key(prefix, "applicant_dl", tenant_slug)
+        full_prefix = _s3_directory_prefix(backend, prefix, "applicant_dl", tenant_slug)
         deleted = 0
         token: str | None = None
         while True:
@@ -670,7 +690,7 @@ def purge_fuel_nationwide_stage_files(tenant_slug: str, stage_id: str) -> int:
         shutil.rmtree(dir_path, ignore_errors=True)
         return count
     if isinstance(backend, S3StorageBackend):
-        full_prefix = backend._full_key(prefix, "fuel_nationwide_stage", tenant_slug)
+        full_prefix = _s3_directory_prefix(backend, prefix, "fuel_nationwide_stage", tenant_slug)
         deleted = 0
         token: str | None = None
         while True:
@@ -704,7 +724,7 @@ def purge_fuel_nationwide_import_files(tenant_slug: str, import_id: str) -> int:
         shutil.rmtree(dir_path, ignore_errors=True)
         return count
     if isinstance(backend, S3StorageBackend):
-        full_prefix = backend._full_key(prefix, "fuel_nationwide", tenant_slug)
+        full_prefix = _s3_directory_prefix(backend, prefix, "fuel_nationwide", tenant_slug)
         deleted = 0
         token: str | None = None
         while True:
@@ -759,7 +779,7 @@ def purge_fuel_bvd_stage_files(tenant_slug: str, stage_id: str) -> int:
         shutil.rmtree(dir_path, ignore_errors=True)
         return count
     if isinstance(backend, S3StorageBackend):
-        full_prefix = backend._full_key(prefix, "fuel_bvd_stage", tenant_slug)
+        full_prefix = _s3_directory_prefix(backend, prefix, "fuel_bvd_stage", tenant_slug)
         deleted = 0
         token: str | None = None
         while True:
@@ -794,7 +814,7 @@ def purge_fuel_bvd_import_files(tenant_slug: str, import_id: str) -> int:
         shutil.rmtree(dir_path, ignore_errors=True)
         return count
     if isinstance(backend, S3StorageBackend):
-        full_prefix = backend._full_key(prefix, "fuel_bvd", tenant_slug)
+        full_prefix = _s3_directory_prefix(backend, prefix, "fuel_bvd", tenant_slug)
         deleted = 0
         token: str | None = None
         while True:

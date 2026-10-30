@@ -10,6 +10,7 @@ import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -17,6 +18,7 @@ from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.db_url import to_async_pg_url
+from app.core.storage import S3StorageBackend
 from app.main import app as fastapi_app
 from app.models.application_access_token import ApplicationAccessToken
 from app.models.person_application import PersonApplication
@@ -86,7 +88,9 @@ def test_storage_key_must_match_tenant_and_application() -> None:
         module="applicant_dl",
     )
     assert ok == "pytest/applicant_dl/application/4/abc.jpg"
-    assert bound("old-license.jpg", tenant_slug="pytest", application_id=4, module="applicant_dl") == "old-license.jpg"
+    flat_uuid = "a" * 32 + ".jpg"
+    assert bound(flat_uuid, tenant_slug="pytest", application_id=4, module="applicant_dl") is None
+    assert bound("old-license.jpg", tenant_slug="pytest", application_id=4, module="applicant_dl") is None
     refused = [
         "pytest/applicant_dl/application/5/abc.jpg",
         "acme/applicant_dl/application/4/abc.jpg",
@@ -258,7 +262,7 @@ async def test_applicant_file_exploit_is_blocked_and_owned_downloads_work(
         plant(other_tenant_key, OTHER_TENANT_BYTES)
         plant(own_dl, b"own-front")
         plant(own_enh, b"own-processed")
-        legacy_name = f"legacy-{uuid.uuid4().hex}.jpg"
+        legacy_name = f"{uuid.uuid4().hex}.jpg"
         legacy_path = backend._key_to_path(legacy_name, "applicant_dl", slug)
         legacy_path.parent.mkdir(parents=True, exist_ok=True)
         legacy_path.write_bytes(LEGACY_BYTES)
@@ -360,6 +364,7 @@ async def test_applicant_file_exploit_is_blocked_and_owned_downloads_work(
                     "original_filename": "front.jpg",
                 },
                 "LEGACY": {"storage_key": legacy_name, "file_id": legacy_name},
+                "PLAIN": {"storage_key": "old-license.jpg", "file_id": "old-license.jpg"},
             },
         }
         await tenant_session.commit()
@@ -369,9 +374,26 @@ async def test_applicant_file_exploit_is_blocked_and_owned_downloads_work(
         legacy = await fetch(invite, legacy_name)
         assert legacy.status_code == 200, legacy.text
         assert legacy.content == LEGACY_BYTES
+        plain = await fetch(invite, "old-license.jpg")
+        assert plain.status_code == 404
         missing_legacy = await fetch(invite, other_legacy)
         assert missing_legacy.status_code == 404
         assert b"OTHER-LEGACY" not in missing_legacy.content
+
+        victim = await tenant_session.get(PersonApplication, victim_id)
+        assert victim is not None
+        victim.intake_payload = {
+            "files": {"CDL_FRONT": {"storage_key": legacy_name, "file_id": legacy_name}},
+        }
+        await tenant_session.commit()
+        shared = await fetch(invite, legacy_name)
+        assert shared.status_code == 404
+        assert LEGACY_BYTES not in shared.content
+        victim.intake_payload = {}
+        await tenant_session.commit()
+        restored = await fetch(invite, legacy_name)
+        assert restored.status_code == 200, restored.text
+        assert restored.content == LEGACY_BYTES
 
         # General file endpoint accepts invite and document_resume, and refuses dl_capture.
         resume = await _add_token(
@@ -521,3 +543,108 @@ async def test_applicant_file_exploit_is_blocked_and_owned_downloads_work(
     finally:
         clear_current_user_and_tenant_overrides(fastapi_app)
         await _cleanup(tenant_session, created)
+
+
+class _IdRows:
+    def __init__(self, ids: list[int]) -> None:
+        self._ids = ids
+
+    def all(self) -> list[tuple[int]]:
+        return [(item,) for item in self._ids]
+
+
+class _FakeTenantDb:
+    def __init__(self, ids: list[int]) -> None:
+        self.ids = ids
+        self.calls = 0
+
+    async def execute(self, _stmt, _params=None):
+        self.calls += 1
+        return _IdRows(self.ids)
+
+
+def _s3_backend() -> S3StorageBackend:
+    backend = S3StorageBackend.__new__(S3StorageBackend)
+    backend._prefix = ""
+    backend._bucket = "test-bucket"
+    backend._client = MagicMock()
+    chunks = [b"owned-bytes", b""]
+    body = MagicMock()
+    body.read.side_effect = lambda _size=None: chunks.pop(0) if chunks else b""
+    backend._client.get_object.return_value = {"Body": body}
+    backend._client.head_object.return_value = {}
+    return backend
+
+
+@pytest.mark.asyncio
+async def test_mocked_s3_cannot_read_other_applicant_or_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Applicant A never issues GetObject/HeadObject for B or another tenant, including a legacy key."""
+    import app.core.storage as storage_mod
+
+    backend = _s3_backend()
+    monkeypatch.setattr(storage_mod, "get_storage", lambda: backend)
+    application_id = 4
+    other_id = 9
+    victim = f"pytest/applicant_dl/application/{other_id}/" + ("b" * 32) + ".jpg"
+    foreign = f"acme/applicant_dl/application/{application_id}/" + ("c" * 32) + ".jpg"
+    legacy = "d" * 32 + ".jpg"
+    document_legacy = "e" * 32 + ".pdf"
+    intake = {
+        "files": {
+            "VICTIM": {"storage_key": victim, "file_id": victim},
+            "FOREIGN": {"storage_key": foreign, "file_id": foreign},
+            "LEGACY": {"storage_key": legacy, "file_id": legacy},
+            "PLAIN": {"storage_key": "old-license.jpg", "file_id": "old-license.jpg"},
+        },
+        "documents": {
+            "mvr": {"storage_key": document_legacy, "file_id": document_legacy},
+        },
+    }
+    shared = _FakeTenantDb([application_id, other_id])
+    for file_id in (victim, foreign, legacy, "old-license.jpg"):
+        denied = await onboarding._serve_application_intake_file(
+            intake,
+            file_id,
+            db=shared,
+            tenant_id=1,
+            tenant_slug="pytest",
+            application_id=application_id,
+            include_documents=True,
+        )
+        assert denied is None, file_id
+    backend._client.get_object.assert_not_called()
+    backend._client.head_object.assert_not_called()
+    assert shared.calls == 1
+
+    sole = _FakeTenantDb([application_id])
+    allowed = await onboarding._serve_application_intake_file(
+        intake,
+        legacy,
+        db=sole,
+        tenant_id=1,
+        tenant_slug="pytest",
+        application_id=application_id,
+        include_documents=True,
+    )
+    assert allowed is not None
+    payload = b""
+    async for chunk in allowed.body_iterator:
+        payload += chunk
+    assert payload == b"owned-bytes"
+    expected = f"pytest/applicant_dl/legacy/0/{legacy}"
+    assert backend._client.head_object.call_args.kwargs["Key"] == expected
+    assert backend._client.get_object.call_args.kwargs["Key"] == expected
+    assert "acme/" not in expected
+    assert f"application/{other_id}/" not in expected
+
+    doc = await onboarding._serve_application_intake_file(
+        intake,
+        document_legacy,
+        db=_FakeTenantDb([application_id]),
+        tenant_id=1,
+        tenant_slug="pytest",
+        application_id=application_id,
+        include_documents=True,
+    )
+    assert doc is not None
+    assert backend._client.head_object.call_args.kwargs["Key"] == f"pytest/applicant_docs/legacy/0/{document_legacy}"

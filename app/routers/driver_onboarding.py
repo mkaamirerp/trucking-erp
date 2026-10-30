@@ -15,13 +15,14 @@ import asyncio
 import copy
 import hashlib
 import logging
+import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -1523,9 +1524,11 @@ async def get_dl_capture_file(
     )
     if not _is_driver_workflow_application(app):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    response = _serve_application_intake_file(
+    response = await _serve_application_intake_file(
         app.intake_payload,
         file_id,
+        db=db,
+        tenant_id=tenant_id,
         tenant_slug=tenant_slug,
         application_id=app.id,
         include_documents=False,
@@ -1698,9 +1701,11 @@ async def get_applicant_application_file(
     purpose = getattr(access, "purpose", None) or TOKEN_PURPOSE_INVITE
     if purpose not in (TOKEN_PURPOSE_INVITE, TOKEN_PURPOSE_DOCUMENT_RESUME):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
-    response = _serve_application_intake_file(
+    response = await _serve_application_intake_file(
         app.intake_payload,
         file_id,
+        db=db,
+        tenant_id=tenant_id,
         tenant_slug=tenant_slug,
         application_id=app.id,
         include_documents=True,
@@ -1809,6 +1814,11 @@ def _resolve_applicant_dl_serve_key(meta: dict, file_id: str) -> str | None:
     return str(meta.get("storage_key") or meta.get("file_id") or file_id)
 
 
+# Historical applicant uploads stored ``uuid.uuid4().hex`` plus an extension, with no
+# tenant or application id in the key. A flat name is not owned by that shape alone.
+_LEGACY_APPLICANT_FLAT_KEY = re.compile(r"^[0-9a-f]{32}\.[A-Za-z0-9]{1,8}$")
+
+
 def _storage_key_bound_to_application(
     storage_key: object,
     *,
@@ -1816,11 +1826,11 @@ def _storage_key_bound_to_application(
     application_id: int,
     module: str,
 ) -> str | None:
-    """Return ``storage_key`` when it belongs to this tenant application.
+    """Return a canonical key bound to this tenant application.
 
-    Full keys must be ``{tenant_slug}/{module}/application/{application_id}/{filename}``.
-    A single path segment is a legacy flat filename for that module. Anything else,
-    including another application, another tenant, or a path escape, is refused.
+    The key must be ``{tenant_slug}/{module}/application/{application_id}/{filename}``.
+    A flat filename is not owned by its shape. Another application, another tenant,
+    or a path escape is refused.
     """
     if not isinstance(storage_key, str):
         return None
@@ -1830,11 +1840,87 @@ def _storage_key_bound_to_application(
     parts = key.split("/")
     if any(part in ("", ".", "..") for part in parts):
         return None
-    if len(parts) == 1:
-        return key
+    if len(parts) != 5:
+        return None
     if parts[:4] != [tenant_slug, module, "application", str(application_id)]:
         return None
-    if len(parts) != 5:
+    return key
+
+
+async def _legacy_flat_key_sole_application(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    application_id: int,
+    storage_key: str,
+    section: str,
+) -> bool:
+    """True when this application is the only intake record of a historical flat key.
+
+    The lookup is limited to ``files`` or ``documents`` on this tenant. A shared name,
+    a missing row, or a name that is not a historical UUID filename is not owned.
+    """
+    if section not in ("files", "documents"):
+        return False
+    if _LEGACY_APPLICANT_FLAT_KEY.fullmatch(storage_key) is None:
+        return False
+    result = await db.execute(
+        text(
+            """
+            SELECT DISTINCT pa.id
+            FROM person_applications pa
+            CROSS JOIN LATERAL jsonb_each(
+                CASE
+                    WHEN jsonb_typeof(pa.intake_payload -> :section) = 'object'
+                    THEN pa.intake_payload -> :section
+                    ELSE '{}'::jsonb
+                END
+            ) AS slot(slot_key, meta)
+            WHERE pa.tenant_id = :tenant_id
+              AND (
+                    meta->>'storage_key' = :storage_key
+                 OR meta->>'file_id' = :storage_key
+                 OR meta->>'enh_file_id' = :storage_key
+              )
+            """
+        ),
+        {
+            "section": section,
+            "tenant_id": tenant_id,
+            "storage_key": storage_key,
+        },
+    )
+    return {row[0] for row in result.all()} == {application_id}
+
+
+async def _authorize_intake_storage_key(
+    storage_key: object,
+    *,
+    db: AsyncSession,
+    tenant_id: int,
+    tenant_slug: str,
+    application_id: int,
+    module: str,
+    section: str,
+) -> str | None:
+    structural = _storage_key_bound_to_application(
+        storage_key,
+        tenant_slug=tenant_slug,
+        application_id=application_id,
+        module=module,
+    )
+    if structural is not None:
+        return structural
+    if not isinstance(storage_key, str):
+        return None
+    key = storage_key.strip()
+    if not await _legacy_flat_key_sole_application(
+        db,
+        tenant_id=tenant_id,
+        application_id=application_id,
+        storage_key=key,
+        section=section,
+    ):
         return None
     return key
 
@@ -1846,10 +1932,12 @@ def _download_filename(meta: dict) -> str | None:
     return None
 
 
-def _serve_application_intake_file(
+async def _serve_application_intake_file(
     intake: dict | None,
     file_id: str,
     *,
+    db: AsyncSession,
+    tenant_id: int,
     tenant_slug: str,
     application_id: int,
     include_documents: bool,
@@ -1861,11 +1949,14 @@ def _serve_application_intake_file(
         for meta in files.values():
             if not isinstance(meta, dict):
                 continue
-            owned = _storage_key_bound_to_application(
+            owned = await _authorize_intake_storage_key(
                 _resolve_applicant_dl_serve_key(meta, file_id),
+                db=db,
+                tenant_id=tenant_id,
                 tenant_slug=tenant_slug,
                 application_id=application_id,
                 module="applicant_dl",
+                section="files",
             )
             if owned:
                 return serve_file(owned, "applicant_dl", tenant_slug, _download_filename(meta))
@@ -1876,11 +1967,14 @@ def _serve_application_intake_file(
         for meta in documents.values():
             if not isinstance(meta, dict) or not _file_meta_matches(meta, file_id):
                 continue
-            owned = _storage_key_bound_to_application(
+            owned = await _authorize_intake_storage_key(
                 meta.get("storage_key") or file_id,
+                db=db,
+                tenant_id=tenant_id,
                 tenant_slug=tenant_slug,
                 application_id=application_id,
                 module="applicant_docs",
+                section="documents",
             )
             if owned:
                 return serve_file(owned, "applicant_docs", tenant_slug, _download_filename(meta))
@@ -2339,9 +2433,11 @@ async def get_admin_application_file(
     app = await _get_person_application_admin_or_404(db, tenant_id, application_id)
     if not _is_driver_workflow_application(app):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
-    response = _serve_application_intake_file(
+    response = await _serve_application_intake_file(
         app.intake_payload,
         file_id,
+        db=db,
+        tenant_id=tenant_id,
         tenant_slug=tenant_slug,
         application_id=app.id,
         include_documents=True,

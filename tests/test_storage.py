@@ -17,6 +17,11 @@ from app.core.storage import (
     LocalStorageBackend,
     S3StorageBackend,
     StoredFile,
+    purge_applicant_dl_application,
+    purge_fuel_bvd_import_files,
+    purge_fuel_bvd_stage_files,
+    purge_fuel_nationwide_import_files,
+    purge_fuel_nationwide_stage_files,
     serve_file,
 )
 
@@ -363,3 +368,52 @@ class TestS3KeyAuthorization:
         assert exc.value.status_code == 404
         backend.exists.assert_not_called()
         backend.stream_chunks.assert_not_called()
+
+    def test_object_key_rejects_trailing_slash_and_purge_prefixes_keep_it(self) -> None:
+        backend = self._backend("root")
+        directory = "tenant-a/applicant_dl/application/12/"
+        with pytest.raises(StorageKeyError):
+            backend._full_key(directory, "applicant_dl", "tenant-a")
+        assert (
+            backend._full_key(f"{directory}__purge__", "applicant_dl", "tenant-a")
+            == f"root/{directory}__purge__"
+        )
+
+        import app.core.storage as storage_mod
+
+        listed = self._backend()
+        listed._client.list_objects_v2.return_value = {"Contents": [], "IsTruncated": False}
+        orig = storage_mod._engine
+        storage_mod._engine = listed
+        cases = (
+            (purge_applicant_dl_application, ("tenant-a", 12), "tenant-a/applicant_dl/application/12/"),
+            (
+                purge_fuel_nationwide_stage_files,
+                ("tenant-a", "stage-1"),
+                "tenant-a/fuel_nationwide_stage/stage/stage-1/",
+            ),
+            (
+                purge_fuel_nationwide_import_files,
+                ("tenant-a", "import-1"),
+                "tenant-a/fuel_nationwide/import/import-1/",
+            ),
+            (
+                purge_fuel_bvd_stage_files,
+                ("tenant-a", "stage-1"),
+                "tenant-a/fuel_bvd_stage/stage/stage-1/",
+            ),
+            (
+                purge_fuel_bvd_import_files,
+                ("tenant-a", "import-1"),
+                "tenant-a/fuel_bvd/import/import-1/",
+            ),
+        )
+        try:
+            for fn, args, prefix in cases:
+                listed._client.list_objects_v2.reset_mock()
+                with pytest.raises(StorageKeyError):
+                    listed._full_key(prefix, "unused", "tenant-a")
+                assert fn(*args) == 0
+                assert listed._client.list_objects_v2.call_args.kwargs["Prefix"] == prefix
+        finally:
+            storage_mod._engine = orig
