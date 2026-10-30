@@ -50,7 +50,13 @@ CATALOG = ModuleCatalog(
             "ungated",
             enforcement_approval="owner_required",
         ),
-        _spec("people.drivers", "manage", "operational", "ungated"),
+        _spec(
+            "people.drivers",
+            "manage",
+            "operational",
+            "admin",
+            "Driver create/update, driver phones and legacy license confirm require tenant admin.",
+        ),
         _spec(
             "people.driver_profile",
             "manage",

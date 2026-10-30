@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 import logging
 from typing import Callable, FrozenSet, Iterable, Optional, Set
@@ -19,6 +20,28 @@ from app.services.tenant_auth_constants import tenant_uses_tenant_db_auth
 from app.utils.jwt_auth import get_token_from_request, decode_token, TokenType
 
 logger = logging.getLogger(__name__)
+
+_CAPTURE_TOKEN_PATH_RE = re.compile(r"(/applicant/dl-capture/)[^/?#\s]+")
+_TOKEN_QUERY_RE = re.compile(r"((?:^|[?&])token=)[^&#\s]*", re.IGNORECASE)
+
+
+def redact_tokens_for_log(url: str) -> str:
+    """Remove applicant tokens from a path or path?query before it is logged."""
+    if not url:
+        return url
+    out = _CAPTURE_TOKEN_PATH_RE.sub(r"\1[redacted]", url)
+    return _TOKEN_QUERY_RE.sub(r"\1[redacted]", out)
+
+
+class AccessLogTokenRedactionFilter(logging.Filter):
+    """uvicorn.access records carry (client, method, path?query, http_version, status)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            record.args = args[:2] + (redact_tokens_for_log(args[2]),) + args[3:]
+        return True
+
 
 DEFAULT_ALLOW_PATHS: Set[str] = {
     "/",
@@ -136,7 +159,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
 
         def log(outcome: str, tenant_id: Optional[int] = None, level: str = "info") -> None:
             msg = (
-                f"tenant_context outcome={outcome} method={request.method} path={path} "
+                f"tenant_context outcome={outcome} method={request.method} path={redact_tokens_for_log(path)} "
                 f"tenant_id={tenant_id} request_id={request_id}"
             )
             getattr(logger, level, logger.info)(msg)
@@ -419,7 +442,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 if path.startswith(APPLICANT_ROUTE_PREFIX):
                     logger.info(
                         "tenant_context tenant_resolved membership_skipped_applicant path=%s tenant_id=%s request_id=%s",
-                        path[:80],
+                        redact_tokens_for_log(path)[:80],
                         int(row.id),
                         request.headers.get(REQUEST_ID_HEADER, ""),
                     )

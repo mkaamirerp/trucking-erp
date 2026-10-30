@@ -18,6 +18,7 @@ import {
   mergeIntakeForSave,
 } from "../core/hydrateOnboardingFormFromIntake";
 import { confirmPersonApplicationDlSide } from "../lib/applicantDlConfirm";
+import { applyNoReferrerPolicy } from "../lib/dlCaptureHandoff";
 
 type Step = 0 | 1 | 2 | 3;
 type DlUiState = "IDLE" | "UPLOADING" | "SCANNING" | "SUCCESS" | "FAILED";
@@ -372,6 +373,8 @@ export default function OnboardingApplicantPage() {
       });
     };
   }, []);
+
+  useEffect(() => applyNoReferrerPolicy(), []);
 
   useEffect(() => {
     if (!token) { setLoading(false); setError("No token in URL. Use the link from your invite."); return; }

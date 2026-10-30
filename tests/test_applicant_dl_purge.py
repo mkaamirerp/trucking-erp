@@ -150,3 +150,66 @@ def test_s3_purge_honors_configured_prefix_and_paginates_past_1000() -> None:
     assert len(first_delete) == 1000
     assert len(second_delete) == 1
     assert all(item["Key"].startswith(page_prefix) for item in first_delete + second_delete)
+
+
+def test_purge_applicant_docs_module_local_only_that_application(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _configure_local(monkeypatch, tmp_path)
+    _write_rel(tmp_path, "tenant-a/applicant_docs/application/12/w9.pdf")
+    keep_dl = _write_rel(tmp_path, "tenant-a/applicant_dl/application/12/front.jpg")
+    keep_other_app = _write_rel(tmp_path, "tenant-a/applicant_docs/application/120/w9.pdf")
+    keep_other_tenant = _write_rel(tmp_path, "tenant-b/applicant_docs/application/12/w9.pdf")
+    keep_driver_docs = _write_rel(tmp_path, "tenant-a/driver_docs/document/12/cdl.pdf")
+
+    assert purge_applicant_dl_application("tenant-a", 12, "applicant_docs") == 1
+    assert purge_applicant_dl_application("tenant-a", 12, "applicant_docs") == 0
+    assert not (tmp_path / "tenant-a/applicant_docs/application/12").exists()
+    for kept in (keep_dl, keep_other_app, keep_other_tenant, keep_driver_docs):
+        assert kept.is_file()
+
+
+@pytest.mark.parametrize("module", ["driver_docs", "company_docs", "pay_documents", "applicant_dl/../driver_docs", ""])
+def test_purge_refuses_non_applicant_modules(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, module: str) -> None:
+    _configure_local(monkeypatch, tmp_path)
+    keep = _write_rel(tmp_path, f"tenant-a/{module or 'x'}/application/12/keep.bin")
+    with pytest.raises(storage_mod.StorageKeyError):
+        purge_applicant_dl_application("tenant-a", 12, module)
+    assert keep.is_file()
+
+
+@pytest.mark.parametrize("app_id", [0, -1])
+def test_purge_refuses_non_positive_application_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, app_id: int) -> None:
+    _configure_local(monkeypatch, tmp_path)
+    with pytest.raises(storage_mod.StorageKeyError):
+        purge_applicant_dl_application("tenant-a", app_id, "applicant_docs")
+
+
+@pytest.mark.parametrize("slug", ["../tenant-b", "tenant-a/..", ".."])
+def test_purge_refuses_traversal_tenant_slug(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, slug: str) -> None:
+    _configure_local(monkeypatch, tmp_path)
+    keep = _write_rel(tmp_path, "tenant-b/applicant_docs/application/12/keep.pdf")
+    with pytest.raises(storage_mod.StorageKeyError):
+        purge_applicant_dl_application(slug, 12, "applicant_docs")
+    assert keep.is_file()
+
+
+def test_s3_purge_applicant_docs_prefix() -> None:
+    try:
+        import boto3  # noqa: F401
+    except ImportError:
+        pytest.skip("boto3 not installed")
+
+    storage_mod._engine = None
+    mock_client = MagicMock()
+    listed = [{"Key": "tenant-a/applicant_docs/application/12/w9.pdf"}]
+    mock_client.list_objects_v2.return_value = {"Contents": listed, "IsTruncated": False}
+    with patch("app.core.storage.settings") as mock_settings:
+        mock_settings.storage_provider = "s3"
+        mock_settings.aws_region = "us-east-1"
+        mock_settings.s3_bucket = "test-bucket"
+        mock_settings.s3_prefix = ""
+        with patch("boto3.client", return_value=mock_client):
+            storage_mod._engine = S3StorageBackend()
+            assert purge_applicant_dl_application("tenant-a", 12, "applicant_docs") == 1
+    assert mock_client.list_objects_v2.call_args.kwargs["Prefix"] == "tenant-a/applicant_docs/application/12/"

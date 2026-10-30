@@ -2,6 +2,27 @@ import { API_BASE, fetchWithTenant } from "../api";
 
 const CAPTURE_PATH = "/dl-capture/";
 
+/**
+ * Token-bearing applicant pages (/onboarding?token=, /dl-capture/:token) must not leak the URL
+ * through the Referer header. Returns a cleanup that restores the previous policy.
+ */
+export function applyNoReferrerPolicy(doc: Document = document): () => void {
+  let meta = doc.querySelector<HTMLMetaElement>('meta[name="referrer"]');
+  const created = !meta;
+  const previous = meta?.content ?? null;
+  if (!meta) {
+    meta = doc.createElement("meta");
+    meta.name = "referrer";
+    doc.head.appendChild(meta);
+  }
+  meta.content = "no-referrer";
+  return () => {
+    if (!meta) return;
+    if (created) meta.remove();
+    else if (previous !== null) meta.content = previous;
+  };
+}
+
 export function isRestrictedDlCaptureUrl(value: string): boolean {
   try {
     const url = new URL(value, "https://invalid.example");

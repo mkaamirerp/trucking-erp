@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.dependencies.authz import require_tenant_admin
 from app.deps.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,12 @@ def _find_load_stop(stops, *types: str, reverse: bool = False):
 # `app/policies/people_first_operational_projection.py` and `.cursor/rules/people-first-operational-projections.mdc`).
 # Materialized via onboarding/workflow or explicit POST; not a second master for person truth when person_id is set.
 
-@router.post("", response_model=DriverOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=DriverOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def create_driver(
     payload: DriverCreate,
     tenant_id: int = Depends(require_tenant),
@@ -150,7 +156,7 @@ async def get_driver(
         raise HTTPException(status_code=404, detail="Driver not found")
     return driver
 
-@router.patch("/{driver_id}", response_model=DriverOut)
+@router.patch("/{driver_id}", response_model=DriverOut, dependencies=[Depends(require_tenant_admin)])
 async def update_driver(
     driver_id: int,
     payload: DriverUpdate,

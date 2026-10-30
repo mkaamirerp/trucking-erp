@@ -59,6 +59,8 @@ class CompensationSummary(BaseModel):
     dispatch_fee_enabled: Optional[bool] = None
     dispatch_fee_rate: Optional[str] = None
     dispatch_fee_basis: Optional[str] = None
+    effective_from: Optional[date] = None
+    scheduled_change_effective_from: Optional[date] = None
 
 
 class LinkedPersonApplicationSummary(BaseModel):

@@ -220,7 +220,7 @@ export default function DriverCompensationSetupAdminPanel(props: DriverCompensat
         {form.gross_calc_type === "CPM" && (
           <>
             <Field>
-              <span>CPM loaded ($)</span>
+              <span>CPM loaded ($ per mile, must be more than 0)</span>
               <input
                 disabled={!editable}
                 value={form.cpm_loaded ?? ""}
@@ -230,7 +230,7 @@ export default function DriverCompensationSetupAdminPanel(props: DriverCompensat
               />
             </Field>
             <Field>
-              <span>CPM empty ($) — optional</span>
+              <span>CPM empty ($ per mile) — optional, 0 allowed</span>
               <input
                 disabled={!editable}
                 value={form.cpm_empty ?? ""}
@@ -244,7 +244,7 @@ export default function DriverCompensationSetupAdminPanel(props: DriverCompensat
 
         {form.gross_calc_type === "PERCENT_REVENUE" && (
           <Field>
-            <span>Percent of revenue (0–1, e.g. 0.82)</span>
+            <span>Percent of revenue, as a fraction up to 1 — example: 0.75 means the driver is paid 75%</span>
             <input
               disabled={!editable}
               value={form.percent_rate ?? ""}

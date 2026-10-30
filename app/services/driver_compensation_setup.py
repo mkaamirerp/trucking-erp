@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver import Driver
@@ -16,31 +16,46 @@ from app.models.person_application import PersonApplication
 from app.schemas.driver_compensation_setup import DriverCompensationSetupOut, DriverCompensationSetupWrite
 
 
+COMPENSATION_CONFLICT_DETAILS: dict[str, str] = {
+    "compensation_effective_from_in_past": "Compensation changes cannot start before today; earlier pay periods keep their rates.",
+    "compensation_future_version_exists": "A later compensation change is already scheduled; edit that version's date instead.",
+    "driver_classification_unknown": "Driver classification must be company driver or owner-operator before compensation can be saved.",
+}
+
+
 def _utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def _extension_to_worker_type(employment_relationship_type: str | None) -> WorkerType:
+def worker_type_for_employment_relationship(employment_relationship_type: str | None) -> WorkerType:
     ert = (employment_relationship_type or "").strip().lower()
     if ert == "owner_operator":
         return WorkerType.OWNER_OPERATOR_LEASED_ON
-    return WorkerType.EMPLOYEE_DRIVER
+    if ert == "company_driver":
+        return WorkerType.EMPLOYEE_DRIVER
+    raise ValueError("driver_classification_unknown")
 
 
-def _is_open_profile_row(p: CompensationProfile, today: date) -> bool:
-    if p.effective_to is not None and p.effective_to < today:
+def _profile_covers(p: CompensationProfile, work_date: date) -> bool:
+    """effective_to is the inclusive last day of a version."""
+    if p.effective_from > work_date:
         return False
-    return True
+    return p.effective_to is None or p.effective_to >= work_date
 
 
 async def _get_operational_driver_for_person(
-    db: AsyncSession, *, tenant_id: int, person_id: int
+    db: AsyncSession, *, tenant_id: int, person_id: int, include_provisional: bool = False
 ) -> Driver | None:
-    res = await db.scalars(
-        select(Driver)
-        .where(Driver.tenant_id == tenant_id, Driver.person_id == person_id, Driver.is_active.is_(True))
-        .order_by(Driver.id.asc())
-    )
+    """Active operational driver; ``include_provisional`` also accepts the inactive, non-terminated
+    row created for combined-mode setup before approval (application-scoped callers only)."""
+    stmt = select(Driver).where(Driver.tenant_id == tenant_id, Driver.person_id == person_id)
+    if include_provisional:
+        stmt = stmt.where(Driver.termination_date.is_(None)).order_by(
+            Driver.is_active.desc(), Driver.id.asc()
+        )
+    else:
+        stmt = stmt.where(Driver.is_active.is_(True)).order_by(Driver.id.asc())
+    res = await db.scalars(stmt)
     return res.first()
 
 
@@ -55,22 +70,41 @@ async def _get_driver_extension(
     )
 
 
-async def _select_current_profile_for_payee(
-    db: AsyncSession, *, tenant_id: int, payee_id: int
+async def select_compensation_profile_for_work_date(
+    db: AsyncSession, *, tenant_id: int, payee_id: int, work_date: date
 ) -> CompensationProfile | None:
-    today = _utc_today()
-    res = await db.scalars(
+    """The single compensation version covering ``work_date`` (versions never overlap)."""
+    return await db.scalar(
         select(CompensationProfile)
         .where(
             CompensationProfile.tenant_id == tenant_id,
             CompensationProfile.payee_id == payee_id,
+            CompensationProfile.effective_from <= work_date,
+            or_(CompensationProfile.effective_to.is_(None), CompensationProfile.effective_to >= work_date),
         )
         .order_by(CompensationProfile.effective_from.desc(), CompensationProfile.id.desc())
+        .limit(1)
     )
-    for row in res.all():
-        if _is_open_profile_row(row, today):
-            return row
-    return None
+
+
+async def _select_current_profile_for_payee(
+    db: AsyncSession, *, tenant_id: int, payee_id: int
+) -> CompensationProfile | None:
+    return await select_compensation_profile_for_work_date(
+        db, tenant_id=tenant_id, payee_id=payee_id, work_date=_utc_today()
+    )
+
+
+async def _next_scheduled_effective_from(
+    db: AsyncSession, *, tenant_id: int, payee_id: int
+) -> date | None:
+    return await db.scalar(
+        select(func.min(CompensationProfile.effective_from)).where(
+            CompensationProfile.tenant_id == tenant_id,
+            CompensationProfile.payee_id == payee_id,
+            CompensationProfile.effective_from > _utc_today(),
+        )
+    )
 
 
 async def _apply_driver_compensation_write(
@@ -80,52 +114,80 @@ async def _apply_driver_compensation_write(
     payee: Payee,
     payload: DriverCompensationSetupWrite,
 ) -> None:
-    """Upsert the open `compensation_profiles` row for `payee` from a validated write payload."""
+    """Write an effective-dated compensation version for ``payee``.
+
+    * ``effective_from`` defaults to today; past dates are rejected so history used by earlier
+      pay periods is never rewritten.
+    * Unchanged values on the covering version: no-op.
+    * Version starting on the same date: corrected in place.
+    * Otherwise the covering version is closed the day before and a new version starts.
+    * A version starting after ``effective_from`` already exists: rejected (no overlap, no reorder).
+    """
     gross = GrossCalcType(payload.gross_calc_type.value)
     cpm_empty = payload.cpm_empty
     if gross == GrossCalcType.CPM and cpm_empty is None:
         cpm_empty = payload.cpm_loaded
 
-    prof = await _select_current_profile_for_payee(db, tenant_id=tenant_id, payee_id=payee.id)
     today = _utc_today()
-    wt_snap = payee.worker_type
+    start = payload.effective_from or today
+    if start < today:
+        raise ValueError("compensation_effective_from_in_past")
 
-    if prof is None:
-        prof = CompensationProfile(
+    values: dict[str, Any] = {
+        "worker_type_snapshot": payee.worker_type,
+        "gross_calc_type": gross,
+        "percent_rate": payload.percent_rate,
+        "cpm_loaded": payload.cpm_loaded,
+        "cpm_empty": cpm_empty,
+        "hourly_rate": payload.hourly_rate,
+        "salary_amount": payload.salary_amount,
+        "flat_amount": payload.flat_amount,
+        "dispatch_fee_enabled": payload.dispatch_fee_enabled,
+        "dispatch_fee_rate": payload.dispatch_fee_rate,
+        "dispatch_fee_basis": (payload.dispatch_fee_basis or "GROSS").strip() or "GROSS",
+        "settlement_frequency": payload.settlement_frequency,
+        "participates_in_fuel_discount_program": payload.participates_in_fuel_discount_program,
+    }
+
+    versions = list(
+        (
+            await db.scalars(
+                select(CompensationProfile)
+                .where(
+                    CompensationProfile.tenant_id == tenant_id,
+                    CompensationProfile.payee_id == payee.id,
+                )
+                .order_by(CompensationProfile.effective_from.asc(), CompensationProfile.id.asc())
+                .with_for_update()
+            )
+        ).all()
+    )
+    if any(v.effective_from > start for v in versions):
+        raise ValueError("compensation_future_version_exists")
+    covering = next((v for v in versions if _profile_covers(v, start)), None)
+
+    if covering is not None and all(getattr(covering, k) == v for k, v in values.items()):
+        return
+    if covering is not None and covering.effective_from == start:
+        for k, v in values.items():
+            setattr(covering, k, v)
+        await db.flush()
+        return
+
+    new_effective_to = None
+    if covering is not None:
+        new_effective_to = covering.effective_to
+        covering.effective_to = start - timedelta(days=1)
+        await db.flush()
+    db.add(
+        CompensationProfile(
             tenant_id=tenant_id,
             payee_id=payee.id,
-            effective_from=today,
-            effective_to=None,
-            worker_type_snapshot=wt_snap,
-            gross_calc_type=gross,
-            percent_rate=payload.percent_rate,
-            cpm_loaded=payload.cpm_loaded,
-            cpm_empty=cpm_empty,
-            hourly_rate=payload.hourly_rate,
-            salary_amount=payload.salary_amount,
-            flat_amount=payload.flat_amount,
-            dispatch_fee_enabled=payload.dispatch_fee_enabled,
-            dispatch_fee_rate=payload.dispatch_fee_rate,
-            dispatch_fee_basis=(payload.dispatch_fee_basis or "GROSS").strip() or "GROSS",
-            settlement_frequency=payload.settlement_frequency,
-            participates_in_fuel_discount_program=payload.participates_in_fuel_discount_program,
+            effective_from=start,
+            effective_to=new_effective_to,
+            **values,
         )
-        db.add(prof)
-    else:
-        prof.worker_type_snapshot = wt_snap
-        prof.gross_calc_type = gross
-        prof.percent_rate = payload.percent_rate
-        prof.cpm_loaded = payload.cpm_loaded
-        prof.cpm_empty = cpm_empty
-        prof.hourly_rate = payload.hourly_rate
-        prof.salary_amount = payload.salary_amount
-        prof.flat_amount = payload.flat_amount
-        prof.dispatch_fee_enabled = payload.dispatch_fee_enabled
-        prof.dispatch_fee_rate = payload.dispatch_fee_rate
-        prof.dispatch_fee_basis = (payload.dispatch_fee_basis or "GROSS").strip() or "GROSS"
-        prof.settlement_frequency = payload.settlement_frequency
-        prof.participates_in_fuel_discount_program = payload.participates_in_fuel_discount_program
-
+    )
     await db.flush()
 
 
@@ -134,11 +196,14 @@ async def get_driver_compensation_setup(
     *,
     tenant_id: int,
     person_id: int,
+    include_provisional: bool = False,
 ) -> DriverCompensationSetupOut:
     ext = await _get_driver_extension(db, tenant_id=tenant_id, person_id=person_id)
     employment = ext.employment_relationship_type if ext else None
 
-    op_driver = await _get_operational_driver_for_person(db, tenant_id=tenant_id, person_id=person_id)
+    op_driver = await _get_operational_driver_for_person(
+        db, tenant_id=tenant_id, person_id=person_id, include_provisional=include_provisional
+    )
     if not op_driver or not op_driver.payee_id:
         return DriverCompensationSetupOut(employment_relationship_type=employment)
 
@@ -147,11 +212,13 @@ async def get_driver_compensation_setup(
         return DriverCompensationSetupOut(employment_relationship_type=employment)
 
     prof = await _select_current_profile_for_payee(db, tenant_id=tenant_id, payee_id=payee.id)
+    scheduled = await _next_scheduled_effective_from(db, tenant_id=tenant_id, payee_id=payee.id)
     if not prof:
         return DriverCompensationSetupOut(
             payee_id=payee.id,
             worker_type=payee.worker_type.value,
             employment_relationship_type=employment,
+            scheduled_change_effective_from=scheduled,
         )
 
     return DriverCompensationSetupOut(
@@ -172,6 +239,8 @@ async def get_driver_compensation_setup(
         dispatch_fee_rate=prof.dispatch_fee_rate,
         dispatch_fee_basis=prof.dispatch_fee_basis,
         employment_relationship_type=employment,
+        effective_from=prof.effective_from,
+        scheduled_change_effective_from=scheduled,
     )
 
 
@@ -181,13 +250,16 @@ async def upsert_driver_compensation_setup(
     tenant_id: int,
     person_id: int,
     payload: DriverCompensationSetupWrite,
+    include_provisional: bool = False,
 ) -> DriverCompensationSetupOut:
     ext = await _get_driver_extension(db, tenant_id=tenant_id, person_id=person_id)
     if ext is None:
         raise ValueError("driver_person_extension_required")
-    worker_type = _extension_to_worker_type(ext.employment_relationship_type)
+    worker_type = worker_type_for_employment_relationship(ext.employment_relationship_type)
 
-    op_driver = await _get_operational_driver_for_person(db, tenant_id=tenant_id, person_id=person_id)
+    op_driver = await _get_operational_driver_for_person(
+        db, tenant_id=tenant_id, person_id=person_id, include_provisional=include_provisional
+    )
     if not op_driver:
         raise ValueError("operational_driver_missing")
 
@@ -210,7 +282,9 @@ async def upsert_driver_compensation_setup(
         payee.worker_type = worker_type
 
     await _apply_driver_compensation_write(db, tenant_id=tenant_id, payee=payee, payload=payload)
-    return await get_driver_compensation_setup(db, tenant_id=tenant_id, person_id=person_id)
+    return await get_driver_compensation_setup(
+        db, tenant_id=tenant_id, person_id=person_id, include_provisional=include_provisional
+    )
 
 
 async def apply_people_workspace_compensation_correction(
@@ -237,7 +311,7 @@ async def apply_people_workspace_compensation_correction(
     if not op_driver.payee_id:
         if ext is None:
             raise ValueError("driver_classification_required_for_payee")
-        worker_type = _extension_to_worker_type(ext.employment_relationship_type)
+        worker_type = worker_type_for_employment_relationship(ext.employment_relationship_type)
         display_name = f"{op_driver.first_name} {op_driver.last_name}".strip() or f"Driver {op_driver.id}"
         payee = Payee(
             tenant_id=tenant_id,
@@ -255,7 +329,7 @@ async def apply_people_workspace_compensation_correction(
         if not payee or payee.tenant_id != tenant_id:
             raise ValueError("payee_not_found")
         if ext is not None:
-            payee.worker_type = _extension_to_worker_type(ext.employment_relationship_type)
+            payee.worker_type = worker_type_for_employment_relationship(ext.employment_relationship_type)
 
     await _apply_driver_compensation_write(db, tenant_id=tenant_id, payee=payee, payload=payload)
 
@@ -280,6 +354,8 @@ def compensation_setup_audit_diff(
         "dispatch_fee_enabled",
         "dispatch_fee_rate",
         "dispatch_fee_basis",
+        "effective_from",
+        "scheduled_change_effective_from",
     )
     bd = before.model_dump(mode="json")
     ad = after.model_dump(mode="json")
@@ -294,9 +370,9 @@ def compensation_profile_meets_onboarding_minimum(prof: CompensationProfile) -> 
     """True when gross model has the required primary rate fields populated."""
     g = prof.gross_calc_type
     if g == GrossCalcType.PERCENT_REVENUE:
-        return prof.percent_rate is not None and prof.percent_rate > 0
+        return prof.percent_rate is not None and 0 < prof.percent_rate <= 1
     if g == GrossCalcType.CPM:
-        return prof.cpm_loaded is not None and prof.cpm_loaded >= 0
+        return prof.cpm_loaded is not None and prof.cpm_loaded > 0
     if g == GrossCalcType.HOURLY:
         return prof.hourly_rate is not None and prof.hourly_rate > 0
     if g == GrossCalcType.SALARY:
@@ -320,7 +396,9 @@ async def assert_combined_driver_onboarding_ready(
     if ext is None:
         raise ValueError("onboarding_driver_configuration_incomplete")
 
-    op_driver = await _get_operational_driver_for_person(db, tenant_id=tenant_id, person_id=int(app.person_id))
+    op_driver = await _get_operational_driver_for_person(
+        db, tenant_id=tenant_id, person_id=int(app.person_id), include_provisional=True
+    )
     if not op_driver:
         raise ValueError("onboarding_operational_driver_missing")
 

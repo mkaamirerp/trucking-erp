@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from enum import Enum
 
@@ -42,35 +43,54 @@ class DriverCompensationSetupOut(BaseModel):
         default=None,
         description="From driver_person_extensions when row exists (read-only context for UI).",
     )
+    effective_from: date | None = Field(
+        default=None, description="First day the returned (current) compensation version applies."
+    )
+    scheduled_change_effective_from: date | None = Field(
+        default=None, description="Start date of a saved future compensation version, if any."
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class DriverCompensationSetupWrite(BaseModel):
     gross_calc_type: DriverCompensationGrossModel
-    percent_rate: Decimal | None = None
-    cpm_loaded: Decimal | None = None
-    cpm_empty: Decimal | None = None
-    hourly_rate: Decimal | None = None
-    salary_amount: Decimal | None = None
-    flat_amount: Decimal | None = None
+    # percent_rate is a fraction of revenue: 0.75 means 75%. Values above 1 are rejected, never divided.
+    percent_rate: Decimal | None = Field(default=None, decimal_places=4)
+    cpm_loaded: Decimal | None = Field(default=None, decimal_places=4)
+    cpm_empty: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=4)
+    hourly_rate: Decimal | None = Field(default=None, decimal_places=4)
+    salary_amount: Decimal | None = Field(default=None, decimal_places=2)
+    flat_amount: Decimal | None = Field(default=None, decimal_places=2)
     settlement_frequency: SettlementFrequency = SettlementFrequency.BIWEEKLY
     participates_in_fuel_discount_program: bool = False
     dispatch_fee_enabled: bool = False
-    dispatch_fee_rate: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("1"))
+    dispatch_fee_rate: Decimal = Field(
+        default=Decimal("0"), ge=Decimal("0"), le=Decimal("1"), decimal_places=4
+    )
     dispatch_fee_basis: str = Field(default="GROSS", max_length=32)
+    effective_from: date | None = Field(
+        default=None,
+        description="First work date the new rates apply (default: today). Past dates are rejected.",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def _rates_match_model(self) -> DriverCompensationSetupWrite:
         g = GrossCalcType(self.gross_calc_type.value)
+        if self.percent_rate is not None and not (0 < self.percent_rate <= 1):
+            raise ValueError("percent_rate must be a fraction > 0 and <= 1 (0.75 = 75%)")
+        if self.cpm_loaded is not None and self.cpm_loaded <= 0:
+            raise ValueError("cpm_loaded must be > 0 when provided")
         if g == GrossCalcType.PERCENT_REVENUE:
-            if self.percent_rate is None or self.percent_rate <= 0:
-                raise ValueError("percent_rate is required and must be > 0 for PERCENT_REVENUE")
+            if self.percent_rate is None or self.percent_rate <= 0 or self.percent_rate > 1:
+                raise ValueError(
+                    "percent_rate must be a fraction > 0 and <= 1 for PERCENT_REVENUE (0.75 = 75%)"
+                )
         elif g == GrossCalcType.CPM:
-            if self.cpm_loaded is None or self.cpm_loaded < 0:
-                raise ValueError("cpm_loaded is required and must be >= 0 for CPM")
+            if self.cpm_loaded is None or self.cpm_loaded <= 0:
+                raise ValueError("cpm_loaded is required and must be > 0 for CPM")
         elif g == GrossCalcType.HOURLY:
             if self.hourly_rate is None or self.hourly_rate <= 0:
                 raise ValueError("hourly_rate is required and must be > 0 for HOURLY")

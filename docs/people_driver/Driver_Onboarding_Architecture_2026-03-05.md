@@ -1,3 +1,5 @@
+> **Superseded for implemented behavior** by [`docs/people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md`](../people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md) (2026-10-30). This file is kept as design history.
+
 ok now we are in serious discussion of driver onboarding i am going to paste the respose from cursor then i will paste what I asked otherway aound then we make a plan
 
 What needs to happen (for your plan to work)

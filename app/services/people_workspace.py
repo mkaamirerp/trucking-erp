@@ -478,6 +478,8 @@ async def build_people_detail_out(
         dispatch_fee_enabled=comp_raw.dispatch_fee_enabled,
         dispatch_fee_rate=_dec_str(comp_raw.dispatch_fee_rate),
         dispatch_fee_basis=comp_raw.dispatch_fee_basis,
+        effective_from=comp_raw.effective_from,
+        scheduled_change_effective_from=comp_raw.scheduled_change_effective_from,
     )
 
     latest_app = await db.scalar(
@@ -551,6 +553,8 @@ async def write_people_patch_audit(
 ) -> None:
     """Best-effort tenant audit row; never raises."""
     try:
+        from fastapi.encoders import jsonable_encoder
+
         from app.models.tenant import TenantAuditLog
 
         row = TenantAuditLog(
@@ -559,12 +563,12 @@ async def write_people_patch_audit(
             action=action[:64],
             object_type="person",
             object_id=str(int(person_id)),
-            details_json={"changed_keys": list(changed.keys()), "snapshot": changed},
+            details_json=jsonable_encoder({"changed_keys": list(changed.keys()), "snapshot": changed}),
             ip=(ip or None),
             user_agent=(user_agent[:256] if user_agent else None),
         )
-        db.add(row)
-        await db.flush()
+        async with db.begin_nested():
+            db.add(row)
     except Exception:
         logger.exception("%s audit insert failed; continuing", action)
 

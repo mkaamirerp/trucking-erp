@@ -7,6 +7,7 @@ import { useParams } from "react-router-dom";
 import { normalizeDlUpload } from "../lib/normalizeDlUpload";
 import { API_BASE, fetchWithTenant } from "../api";
 import { nextDlManualRotateCw } from "../lib/applicantDlConfirm";
+import { applyNoReferrerPolicy } from "../lib/dlCaptureHandoff";
 
 type CaptureStep = "FRONT" | "BACK" | "COMPLETE";
 type SideStatus = "MISSING" | "FAILED" | "PROCESSED";
@@ -100,6 +101,8 @@ export default function DlCapturePage() {
       setPhase("INVALID");
     }
   }, [token]);
+
+  useEffect(() => applyNoReferrerPolicy(), []);
 
   useEffect(() => {
     void refresh();

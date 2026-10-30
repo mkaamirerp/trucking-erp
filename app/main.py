@@ -53,7 +53,12 @@ from app.routers.tolls import router as tolls_router
 from app.routers.email_threads import router as email_threads_router
 from app.routers.gmail_pubsub import router as gmail_pubsub_router
 from app.routers.microsoft_graph_webhook import router as microsoft_graph_webhook_router
-from app.middleware.tenant_context import TenantContextMiddleware, tenant_middleware_allow_paths
+from app.middleware.tenant_context import (
+    AccessLogTokenRedactionFilter,
+    TenantContextMiddleware,
+    redact_tokens_for_log,
+    tenant_middleware_allow_paths,
+)
 
 def _guard_environment_from_ssm_secrets() -> None:
     """
@@ -86,6 +91,7 @@ def _startup_banner() -> None:
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+logging.getLogger("uvicorn.access").addFilter(AccessLogTokenRedactionFilter())
 logger = logging.getLogger("trucking_erp")
 
 
@@ -193,7 +199,7 @@ def serve_dashboard():
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.exception("unhandled_exception path=%s method=%s", request.url.path, request.method)
+    logger.exception("unhandled_exception path=%s method=%s", redact_tokens_for_log(request.url.path), request.method)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 

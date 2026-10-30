@@ -1,3 +1,5 @@
+> **Superseded for implemented behavior** by [`docs/people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md`](../people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md) (2026-10-30). This file is kept as design history.
+
 # HR / Payroll / Onboarding Logic Anchor
 
 ## Purpose

@@ -369,9 +369,14 @@ export default function DriverOnboardingAdminListPage() {
                   disabled={!!inviteLink}
                 >
                   {APPLICATION_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t} disabled={t !== "DRIVER"}>
+                      {t === "DRIVER" ? t : `${t} — not available yet`}
+                    </option>
                   ))}
                 </select>
+                <p className="mt-1 text-xs text-[var(--trk-text-muted)]">
+                  Only driver onboarding is available. Other roles are disabled until their workflow is built.
+                </p>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-[var(--trk-text)]">Email</label>

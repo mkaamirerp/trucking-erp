@@ -37,7 +37,7 @@ CATALOG = ModuleCatalog(
         _spec("payroll.periods", "open_close", "admin", "admin"),
         _spec("payroll.periods", "update", "operational", "ungated"),
         _spec("payroll.profiles", "view", "read", "ungated", enforcement_approval="owner_required"),
-        _spec("payroll.profiles", "manage", "operational", "ungated"),
+        _spec("payroll.profiles", "manage", "operational", "admin"),
         _spec("payroll.entries", "view", "read", "ungated", enforcement_approval="owner_required"),
         _spec("payroll.entries", "manage", "operational", "ungated"),
         _spec("payroll.runs", "view", "read", "ungated", enforcement_approval="owner_required"),

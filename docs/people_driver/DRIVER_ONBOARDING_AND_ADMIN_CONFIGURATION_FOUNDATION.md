@@ -1,3 +1,5 @@
+> **Superseded for implemented behavior** by [`docs/people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md`](../people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md) (2026-10-30). This file is kept as design history.
+
 # Driver Onboarding and Admin Configuration Foundation
 
 **Note for Cursor:** This is a design-only foundation document. Do not implement anything from it without an explicit product/engineering decision. **Do not shorten this file into a vague summary**—keep it **decision-oriented and explicit**. Preserve the logic, examples, distinctions, and matrices when editing. This file must reflect that the company has **many kinds of people**, not only drivers, and that **driver configuration is one role-specific extension** of the broader onboarding system—not the base onboarding model.

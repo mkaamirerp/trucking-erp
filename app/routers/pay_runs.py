@@ -17,6 +17,7 @@ from app.deps.entitlements import require_entitlement
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.models.driver import Driver
+from app.models.driver_person_extension import DriverPersonExtension
 from app.models.load import Load
 from app.models.payee import (
     ChargeCategory,
@@ -26,9 +27,10 @@ from app.models.payee import (
     PayRunOverride,
 )
 from app.models.payroll import PayEntry, PayPeriod, PayRun, PayRunItem
-from app.models.enums import SourceType, PayRunStatus, PayoutStatus, WorkerType, PayeeType
+from app.models.enums import SourceType, PayRunStatus, PayoutStatus, PayeeType
 from app.core.storage import download_response
 from app.schemas.pay_documents import PayDocumentSummary
+from app.services.driver_compensation_setup import worker_type_for_employment_relationship
 from app.schemas.pay_runs import (
     LoadSettlementItemOut,
     LoadSettlementResponse,
@@ -263,11 +265,31 @@ async def generate_pay_run(
                         "PAYRUN_DRIVER_NOT_FOUND",
                         status.HTTP_404_NOT_FOUND,
                     )
+                ext = (
+                    await db.scalar(
+                        select(DriverPersonExtension).where(
+                            DriverPersonExtension.tenant_id == tenant_id,
+                            DriverPersonExtension.person_id == driver.person_id,
+                        )
+                    )
+                    if driver.person_id is not None
+                    else None
+                )
+                try:
+                    worker_type = worker_type_for_employment_relationship(
+                        ext.employment_relationship_type if ext else None
+                    )
+                except ValueError:
+                    raise run_error(
+                        f"Driver {driver.id} has no payee and no company-driver/owner-operator classification",
+                        "PAYRUN_PAYEE_CLASSIFICATION_REQUIRED",
+                        status.HTTP_409_CONFLICT,
+                    )
                 display_name = f"{driver.first_name} {driver.last_name}".strip() or f"Driver {driver.id}"
                 payee = Payee(
                     tenant_id=tenant_id,
                     payee_type=PayeeType.DRIVER,
-                    worker_type=WorkerType.EMPLOYEE_DRIVER,
+                    worker_type=worker_type,
                     display_name=display_name,
                     is_active=True,
                 )
@@ -282,15 +304,17 @@ async def generate_pay_run(
             ref_key = (e.reference_code or "").strip()
             # Transitional: numeric ref_key interpreted as Load.id only — see module note above.
             traced_load = loads_by_id.get(int(ref_key)) if ref_key.isdigit() else None
+            # Pay entries store DEDUCTION as a positive amount that reduces net (see period summary).
+            is_deduction = (e.entry_type or "").upper() == "DEDUCTION"
             item = PayRunItem(
                 tenant_id=tenant_id,
                 pay_run_id=run.id,
                 payee_id=payee_id,
-                source_type=SourceType.EARNING.value,
+                source_type=(SourceType.DEDUCTION if is_deduction else SourceType.EARNING).value,
                 description=e.entry_type,
                 quantity=e.quantity,
                 unit_rate=e.rate_amount,
-                amount_signed=amt,
+                amount_signed=-amt if is_deduction else amt,
                 currency=run.base_currency_snapshot,
                 metadata_json=_pay_run_item_metadata(e, traced_load),
             )

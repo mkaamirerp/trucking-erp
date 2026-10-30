@@ -433,6 +433,47 @@ async def get_trip_detail(db: AsyncSession, tenant_id: int, trip_id: int) -> Tri
     )
 
 
+DRIVER_NOT_ASSIGNABLE = "DRIVER_NOT_ASSIGNABLE"
+
+
+async def driver_assignment_block_reason(db: AsyncSession, tenant_id: int, driver: Driver) -> str | None:
+    """Why a driver cannot take a new trip assignment, or None when assignable.
+
+    Assignable: active operational row, no termination on or before today, linked Person (if any)
+    active, and either an APPROVED DRIVER application or no DRIVER application at all
+    (grandfathered roster rows). Pay readiness is not checked here.
+    """
+    from app.models.person import Person
+    from app.models.person_application import PersonApplication
+    from app.schemas.driver_onboarding import DriverOnboardingStatus
+
+    if not driver.is_active:
+        return "Driver is inactive"
+    if driver.termination_date is not None and driver.termination_date <= datetime.now(timezone.utc).date():
+        return "Driver is terminated"
+    if driver.person_id is None:
+        return None
+    person = await db.scalar(
+        select(Person).where(Person.tenant_id == tenant_id, Person.id == driver.person_id)
+    )
+    if person is None or not person.is_active:
+        return "Driver's person record is inactive"
+    statuses = set(
+        (
+            await db.scalars(
+                select(PersonApplication.status).where(
+                    PersonApplication.tenant_id == tenant_id,
+                    PersonApplication.person_id == driver.person_id,
+                    func.upper(func.coalesce(PersonApplication.requested_role_code, "DRIVER")) == "DRIVER",
+                )
+            )
+        ).all()
+    )
+    if statuses and DriverOnboardingStatus.APPROVED.value not in statuses:
+        return "Driver onboarding application is not approved"
+    return None
+
+
 async def _validate_assignment_targets(
     db: AsyncSession,
     tenant_id: int,
@@ -440,11 +481,20 @@ async def _validate_assignment_targets(
     driver_id: int | None,
     truck_id: int | None,
     trailer_id: int | None,
+    current_driver_id: int | None = None,
 ) -> None:
+    """Existence + tenant checks; eligibility only for a newly assigned driver (not current_driver_id)."""
     if driver_id is not None:
         d = await db.get(Driver, driver_id)
         if d is None or d.tenant_id != tenant_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
+        if driver_id != current_driver_id:
+            reason = await driver_assignment_block_reason(db, tenant_id, d)
+            if reason:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"detail": reason, "code": DRIVER_NOT_ASSIGNABLE},
+                )
     if truck_id is not None:
         t = await db.get(Truck, truck_id)
         if t is None or t.tenant_id != tenant_id:
@@ -1194,6 +1244,7 @@ async def update_trip_assignment(
         driver_id=body.driver_id,
         truck_id=body.truck_id,
         trailer_id=body.trailer_id,
+        current_driver_id=trip.driver_id,
     )
 
     before = _assignment_snapshot(trip)

@@ -1,3 +1,5 @@
+> **Superseded for implemented behavior** by [`docs/people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md`](../people_driver/PEOPLE_ONBOARDING_CURRENT_BEHAVIOR.md) (2026-10-30). This file is kept as design history.
+
 # Onboarding Phase 1 — Multi-Role Foundation Lock (Design Report)
 
 **Scope:** This file contains the **Phase 1 clarifications**, then the **five locked matrices** below. It is **design-only**.

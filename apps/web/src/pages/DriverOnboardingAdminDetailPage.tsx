@@ -793,6 +793,7 @@ export default function DriverOnboardingAdminDetailPage() {
   const [reviewBaseline, setReviewBaseline] = useState<PersonApplicationReviewPatchPayload | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
   const [requestDocSelection, setRequestDocSelection] = useState<Record<string, boolean>>({});
   const [requestSubject, setRequestSubject] = useState("");
   const [requestBody, setRequestBody] = useState("");
@@ -1041,11 +1042,12 @@ export default function DriverOnboardingAdminDetailPage() {
   };
 
   const approve = async () => {
-    if (!application) return;
+    if (!application || actionLoading) return;
     setActionLoading(true);
     setActionNotice(null);
     try {
       const next = await approvePersonApplicationForAdmin(application.id);
+      setApproveConfirmOpen(false);
       setApplication(next);
       setApproveReadiness(null);
       setShowReject(false);
@@ -1237,6 +1239,64 @@ export default function DriverOnboardingAdminDetailPage() {
         </div>
       )}
 
+      {approveConfirmOpen && application && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm approval"
+          data-testid="approve-confirm-dialog"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 2900,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+          onClick={() => { if (!actionLoading) setApproveConfirmOpen(false); }}
+        >
+          <div
+            style={{
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              maxWidth: 520,
+              width: "100%",
+              padding: "20px 22px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, letterSpacing: 2, color: C.accent, marginBottom: 12 }}>
+              Approve this application?
+            </div>
+            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 18 }}>
+              Approving makes this person an active driver who can be assigned to trips. No email is sent and the applicant link keeps working. Onboarding is not finished by this step; it stays pending until you mark onboarding complete.
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setApproveConfirmOpen(false)}
+                disabled={actionLoading}
+                style={{ padding: "10px 18px", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="approve-confirm-button"
+                onClick={() => void approve()}
+                disabled={actionLoading}
+                style={{ padding: "10px 18px", borderRadius: 8, border: "none", background: C.green, color: "#000", fontWeight: 700, cursor: actionLoading ? "default" : "pointer" }}
+              >
+                {actionLoading ? "Approving..." : "Approve"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {requestModalOpen && application && (
         <div
           role="dialog"
@@ -1380,7 +1440,7 @@ export default function DriverOnboardingAdminDetailPage() {
               <Btn
                 label="APPROVE"
                 variant="approve"
-                onClick={approve}
+                onClick={() => setApproveConfirmOpen(true)}
                 loading={actionLoading}
                 disabled={approveCombinedBlocked}
                 title={
@@ -1869,7 +1929,7 @@ export default function DriverOnboardingAdminDetailPage() {
                   <Btn
                     label="APPROVE APPLICATION"
                     variant="approve"
-                    onClick={approve}
+                    onClick={() => setApproveConfirmOpen(true)}
                     loading={actionLoading}
                     disabled={approveCombinedBlocked}
                     title={

@@ -237,7 +237,12 @@ async def _profile_overlap_exists(
     return res.scalar_one_or_none() is not None
 
 
-@router.post("/pay-profiles", response_model=PayProfileOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/pay-profiles",
+    response_model=PayProfileOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def create_pay_profile(
     payload: PayProfileCreate,
     tenant_id: int = Depends(require_tenant),
@@ -305,7 +310,9 @@ async def get_pay_profile(
     return await _get_pay_profile_or_404(db, tenant_id, profile_id)
 
 
-@router.patch("/pay-profiles/{profile_id}", response_model=PayProfileOut)
+@router.patch(
+    "/pay-profiles/{profile_id}", response_model=PayProfileOut, dependencies=[Depends(require_tenant_admin)]
+)
 async def update_pay_profile(
     profile_id: int,
     payload: PayProfileUpdate,
@@ -337,7 +344,11 @@ async def update_pay_profile(
     return profile
 
 
-@router.post("/pay-profiles/{profile_id}/deactivate", response_model=PayProfileOut)
+@router.post(
+    "/pay-profiles/{profile_id}/deactivate",
+    response_model=PayProfileOut,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def deactivate_pay_profile(
     profile_id: int,
     tenant_id: int = Depends(require_tenant),

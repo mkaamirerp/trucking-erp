@@ -8,7 +8,33 @@ import {
   applyEmailCaptureLinkResponse,
   EMAIL_FAILED_LINK_READY_MESSAGE,
   DL_CAPTURE_EMAIL_HANDOFF_ENABLED,
+  applyNoReferrerPolicy,
 } from "./dlCaptureHandoff";
+
+describe("applyNoReferrerPolicy", () => {
+  afterEach(() => {
+    document.head.querySelectorAll('meta[name="referrer"]').forEach((m) => m.remove());
+  });
+
+  it("adds no-referrer while mounted and removes it after", () => {
+    const cleanup = applyNoReferrerPolicy();
+    const meta = document.head.querySelector<HTMLMetaElement>('meta[name="referrer"]');
+    expect(meta?.content).toBe("no-referrer");
+    cleanup();
+    expect(document.head.querySelector('meta[name="referrer"]')).toBeNull();
+  });
+
+  it("restores an existing policy", () => {
+    const meta = document.createElement("meta");
+    meta.name = "referrer";
+    meta.content = "strict-origin-when-cross-origin";
+    document.head.appendChild(meta);
+    const cleanup = applyNoReferrerPolicy();
+    expect(meta.content).toBe("no-referrer");
+    cleanup();
+    expect(meta.content).toBe("strict-origin-when-cross-origin");
+  });
+});
 
 describe("handoff helpers", () => {
   it("accepts restricted capture URLs only", () => {

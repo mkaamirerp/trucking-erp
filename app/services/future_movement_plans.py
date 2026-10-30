@@ -404,6 +404,7 @@ async def update_future_movement_plan(
             driver_id=body.driver_id,
             truck_id=body.truck_id,
             trailer_id=body.trailer_id,
+            current_driver_id=plan.driver_id,
         )
 
     if body.lines is not None:

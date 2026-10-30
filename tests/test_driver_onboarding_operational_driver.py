@@ -21,7 +21,12 @@ from app.models.driver import Driver
 from app.models.driver_person_extension import DriverPersonExtension
 from app.models.payee import CompensationProfile, Payee
 from app.models.person import DriverProfile, Person, PersonRole
-from app.constants.person_onboarding import SETUP_STATUS_COMPLETE, SETUP_STATUS_PENDING_DOWNSTREAM
+from app.constants.person_onboarding import (
+    PERSON_SETUP_UI_SEGMENTED,
+    SETUP_STATUS_COMPLETE,
+    SETUP_STATUS_PENDING_DOWNSTREAM,
+)
+from app.routers import driver_onboarding as driver_onboarding_router
 from app.models.person_application import PersonApplication
 from app.schemas.driver_onboarding import DriverOnboardingStatus
 from tests.support.integration_auth import (
@@ -67,6 +72,37 @@ def override_auth_tenant(test_bypass_env):
     install_host_aligned_current_user_and_tenant(app)
     yield
     clear_current_user_and_tenant_overrides(app)
+
+
+@pytest.fixture
+def segmented_mode(monkeypatch):
+    """Direct-approve tests: segmented setup mode has no in-page Driver/Compensation prerequisites."""
+
+    async def _segmented(_platform_db, _tenant_id):
+        return PERSON_SETUP_UI_SEGMENTED
+
+    monkeypatch.setattr(driver_onboarding_router, "get_person_setup_ui_mode", _segmented)
+
+
+async def _fresh_app(session: AsyncSession, app_id: int) -> PersonApplication:
+    return (
+        await session.execute(
+            select(PersonApplication)
+            .where(PersonApplication.id == app_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
+async def _fresh_driver(session: AsyncSession, tenant_id: int, person_id: int) -> Driver | None:
+    return (
+        await session.execute(
+            select(Driver)
+            .where(Driver.tenant_id == tenant_id, Driver.person_id == person_id)
+            .order_by(Driver.id.asc())
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().first()
 
 
 @pytest.fixture
@@ -144,6 +180,15 @@ class TestOperationalDriverOnApproval:
         )
         assert prof is not None
 
+        provisional = await _fresh_driver(tenant_session, demo_tenant_id, int(person.id))
+        assert provisional is not None
+        assert provisional.is_active is False, "pre-approval driver must not be dispatchable"
+        listed_pre = await client.get(
+            "/api/v1/drivers", params={"q": email, "limit": 20}, headers=AUTH_HEADERS
+        )
+        assert listed_pre.status_code == 200
+        assert provisional.id not in {int(x["id"]) for x in listed_pre.json()}
+
         tenant_session.add(
             DriverPersonExtension(
                 tenant_id=demo_tenant_id,
@@ -181,9 +226,7 @@ class TestOperationalDriverOnApproval:
         )
         assert r.status_code == 200, r.text
 
-        fresh = (
-            await tenant_session.execute(select(PersonApplication).where(PersonApplication.id == app_id))
-        ).scalar_one()
+        fresh = await _fresh_app(tenant_session, app_id)
         assert fresh.approved_at is not None
         assert fresh.approved_by_user_id is not None
         assert getattr(fresh, "setup_status", None) == SETUP_STATUS_PENDING_DOWNSTREAM
@@ -193,16 +236,12 @@ class TestOperationalDriverOnApproval:
             headers=AUTH_HEADERS,
         )
         assert r2.status_code == 200, r2.text
-        after_onboard = (
-            await tenant_session.execute(select(PersonApplication).where(PersonApplication.id == app_id))
-        ).scalar_one()
+        after_onboard = await _fresh_app(tenant_session, app_id)
         assert after_onboard.setup_status == SETUP_STATUS_COMPLETE
         assert after_onboard.onboarded_at is not None
         assert after_onboard.onboarded_by_user_id is not None
 
-        drv = await tenant_session.scalar(
-            select(Driver).where(Driver.tenant_id == demo_tenant_id, Driver.person_id == person.id)
-        )
+        drv = await _fresh_driver(tenant_session, demo_tenant_id, int(person.id))
         assert drv is not None
         assert drv.is_active is True
         assert drv.person_id == person.id
@@ -220,18 +259,19 @@ class TestOperationalDriverOnApproval:
         ids = {int(x["id"]) for x in listed.json()}
         assert drv.id in ids
 
-        if drv.payee_id:
+        payee_id = drv.payee_id
+        await tenant_session.execute(delete(Driver).where(Driver.id == drv.id))
+        if payee_id:
             await tenant_session.execute(
-                delete(CompensationProfile).where(CompensationProfile.payee_id == drv.payee_id)
+                delete(CompensationProfile).where(CompensationProfile.payee_id == payee_id)
             )
-            await tenant_session.execute(delete(Payee).where(Payee.id == drv.payee_id))
+            await tenant_session.execute(delete(Payee).where(Payee.id == payee_id))
         await tenant_session.execute(
             delete(DriverPersonExtension).where(
                 DriverPersonExtension.tenant_id == demo_tenant_id,
                 DriverPersonExtension.person_id == person.id,
             )
         )
-        await tenant_session.execute(delete(Driver).where(Driver.id == drv.id))
         await tenant_session.execute(delete(DriverProfile).where(DriverProfile.id == prof.id))
         await tenant_session.execute(delete(PersonRole).where(PersonRole.person_id == person.id, PersonRole.tenant_id == demo_tenant_id))
         await tenant_session.execute(delete(Person).where(Person.id == person.id))
@@ -242,6 +282,7 @@ class TestOperationalDriverOnApproval:
         self,
         client: AsyncClient,
         override_auth_tenant,
+        segmented_mode,
         tenant_session: AsyncSession,
         demo_tenant_id: int,
     ) -> None:
@@ -269,13 +310,28 @@ class TestOperationalDriverOnApproval:
         cnt1 = await tenant_session.scalar(
             select(func.count()).select_from(Driver).where(Driver.tenant_id == demo_tenant_id, Driver.person_id == person_id)
         )
+        first = await _fresh_app(tenant_session, app_id)
+        first_approved_at = first.approved_at
+        assert (await _fresh_driver(tenant_session, demo_tenant_id, person_id)).is_active is True
+
+        # Later operational changes after approval: deactivated driver + People contact edit.
+        drv1 = await _fresh_driver(tenant_session, demo_tenant_id, person_id)
+        drv1.is_active = False
+        person1 = await tenant_session.get(Person, person_id)
+        person1.phone = "+15555550999"
+        await tenant_session.commit()
 
         r2 = await client.post(f"/api/v1/driver-onboarding/applications/{app_id}/approve", headers=AUTH_HEADERS)
         assert r2.status_code == 200, r2.text
+        assert r2.json()["status"] == DriverOnboardingStatus.APPROVED.value
         cnt2 = await tenant_session.scalar(
             select(func.count()).select_from(Driver).where(Driver.tenant_id == demo_tenant_id, Driver.person_id == person_id)
         )
         assert int(cnt1) == 1 and int(cnt2) == 1
+        assert (await _fresh_driver(tenant_session, demo_tenant_id, person_id)).is_active is False
+        await tenant_session.refresh(person1)
+        assert person1.phone == "+15555550999"
+        assert (await _fresh_app(tenant_session, app_id)).approved_at == first_approved_at
 
         drv = await tenant_session.scalar(select(Driver).where(Driver.tenant_id == demo_tenant_id, Driver.person_id == person_id))
         prof = await tenant_session.scalar(select(DriverProfile).where(DriverProfile.person_id == person_id, DriverProfile.tenant_id == demo_tenant_id))
@@ -292,6 +348,7 @@ class TestOperationalDriverOnApproval:
         self,
         client: AsyncClient,
         override_auth_tenant,
+        segmented_mode,
         tenant_session: AsyncSession,
         demo_tenant_id: int,
     ) -> None:
@@ -366,6 +423,7 @@ class TestOperationalDriverOnApproval:
         self,
         client: AsyncClient,
         override_auth_tenant,
+        segmented_mode,
         tenant_session: AsyncSession,
         demo_tenant_id: int,
     ) -> None:
@@ -453,6 +511,7 @@ class TestOperationalDriverOnApproval:
         self,
         client: AsyncClient,
         override_auth_tenant,
+        segmented_mode,
         tenant_session: AsyncSession,
         demo_tenant_id: int,
     ) -> None:
@@ -556,3 +615,139 @@ class TestOperationalDriverOnApproval:
         await tenant_session.execute(delete(Person).where(Person.id == person.id))
         await tenant_session.execute(delete(PersonApplication).where(PersonApplication.id == app_id))
         await tenant_session.commit()
+
+    async def _cleanup_person(self, session: AsyncSession, tenant_id: int, person_id: int, app_id: int) -> None:
+        await session.rollback()
+        await session.execute(delete(Driver).where(Driver.tenant_id == tenant_id, Driver.person_id == person_id))
+        await session.execute(
+            delete(DriverPersonExtension).where(
+                DriverPersonExtension.tenant_id == tenant_id, DriverPersonExtension.person_id == person_id
+            )
+        )
+        await session.execute(delete(DriverProfile).where(DriverProfile.tenant_id == tenant_id, DriverProfile.person_id == person_id))
+        await session.execute(delete(PersonRole).where(PersonRole.tenant_id == tenant_id, PersonRole.person_id == person_id))
+        await session.execute(delete(PersonApplication).where(PersonApplication.id == app_id))
+        await session.execute(delete(Person).where(Person.tenant_id == tenant_id, Person.id == person_id))
+        await session.commit()
+
+    async def _person_with_driver(
+        self, session: AsyncSession, tenant_id: int, suffix: str, **driver_kwargs
+    ) -> tuple[Person, Driver]:
+        person = Person(tenant_id=tenant_id, first_name="Pre", last_name=f"X{suffix}", phone="+15555550555")
+        session.add(person)
+        await session.flush()
+        drv = Driver(
+            tenant_id=tenant_id,
+            person_id=person.id,
+            first_name="Pre",
+            last_name=f"X{suffix}",
+            phone="+15555550555",
+            **driver_kwargs,
+        )
+        session.add(drv)
+        await session.commit()
+        return person, drv
+
+    async def _submitted_app(self, session: AsyncSession, tenant_id: int, suffix: str, person_id: int | None) -> int:
+        row = PersonApplication(
+            tenant_id=tenant_id,
+            source="integration_test",
+            person_id=person_id,
+            status=DriverOnboardingStatus.SUBMITTED.value,
+            requested_role_code="DRIVER",
+            application_type="DRIVER",
+            first_name="App",
+            last_name=f"X{suffix}",
+            phone="+15555550666",
+            intake_payload={"driver_license_number": f"T-{suffix}", "license_region": "TX"},
+        )
+        session.add(row)
+        await session.commit()
+        return int(row.id)
+
+    async def test_terminated_driver_not_reactivated_by_approval(
+        self, client: AsyncClient, override_auth_tenant, segmented_mode, tenant_session: AsyncSession, demo_tenant_id: int
+    ) -> None:
+        suffix = uuid.uuid4().hex[:10]
+        person, drv = await self._person_with_driver(
+            tenant_session, demo_tenant_id, suffix, is_active=False, termination_date=date(2026, 1, 15)
+        )
+        app_id = await self._submitted_app(tenant_session, demo_tenant_id, suffix, int(person.id))
+        try:
+            r = await client.post(f"/api/v1/driver-onboarding/applications/{app_id}/approve", headers=AUTH_HEADERS)
+            assert r.status_code == 409, r.text
+            assert "terminated" in r.text.lower()
+            assert (await _fresh_app(tenant_session, app_id)).status == DriverOnboardingStatus.SUBMITTED.value
+            again = await _fresh_driver(tenant_session, demo_tenant_id, int(person.id))
+            assert again.is_active is False and again.first_name == "Pre"
+        finally:
+            await self._cleanup_person(tenant_session, demo_tenant_id, int(person.id), app_id)
+
+    async def test_review_edit_on_approved_does_not_rematerialize(
+        self, client: AsyncClient, override_auth_tenant, segmented_mode, tenant_session: AsyncSession, demo_tenant_id: int
+    ) -> None:
+        suffix = uuid.uuid4().hex[:10]
+        app_id = await self._submitted_app(tenant_session, demo_tenant_id, suffix, None)
+        r = await client.post(f"/api/v1/driver-onboarding/applications/{app_id}/approve", headers=AUTH_HEADERS)
+        assert r.status_code == 200, r.text
+        person_id = int((await _fresh_app(tenant_session, app_id)).person_id)
+        try:
+            drv = await _fresh_driver(tenant_session, demo_tenant_id, person_id)
+            drv.is_active = False
+            await tenant_session.commit()
+            r2 = await client.patch(
+                f"/api/v1/driver-onboarding/applications/{app_id}/review-fields",
+                headers=AUTH_HEADERS,
+                json={"first_name": "Corrected", "phone": "+15555550777"},
+            )
+            assert r2.status_code == 200, r2.text
+            person = (
+                await tenant_session.execute(
+                    select(Person).where(Person.id == person_id).execution_options(populate_existing=True)
+                )
+            ).scalar_one()
+            assert person.first_name == "App"
+            assert person.phone == "+15555550666"
+            assert (await _fresh_driver(tenant_session, demo_tenant_id, person_id)).is_active is False
+        finally:
+            await self._cleanup_person(tenant_session, demo_tenant_id, person_id, app_id)
+
+    async def test_reject_keeps_provisional_inactive(
+        self, client: AsyncClient, override_auth_tenant, tenant_session: AsyncSession, demo_tenant_id: int
+    ) -> None:
+        suffix = uuid.uuid4().hex[:10]
+        app_id = await self._submitted_app(tenant_session, demo_tenant_id, suffix, None)
+        r_mat = await client.post(
+            f"/api/v1/driver-onboarding/applications/{app_id}/materialize-person-for-combined-setup",
+            headers=AUTH_HEADERS,
+        )
+        assert r_mat.status_code == 200, r_mat.text
+        person_id = int((await _fresh_app(tenant_session, app_id)).person_id)
+        try:
+            r = await client.post(
+                f"/api/v1/driver-onboarding/applications/{app_id}/reject",
+                headers=AUTH_HEADERS,
+                json={"rejection_reason": "integration test"},
+            )
+            assert r.status_code == 200, r.text
+            drv = await _fresh_driver(tenant_session, demo_tenant_id, person_id)
+            assert drv is not None and drv.is_active is False
+        finally:
+            await self._cleanup_person(tenant_session, demo_tenant_id, person_id, app_id)
+
+    async def test_reject_does_not_deactivate_independent_driver(
+        self, client: AsyncClient, override_auth_tenant, tenant_session: AsyncSession, demo_tenant_id: int
+    ) -> None:
+        suffix = uuid.uuid4().hex[:10]
+        person, _drv = await self._person_with_driver(tenant_session, demo_tenant_id, suffix, is_active=True)
+        app_id = await self._submitted_app(tenant_session, demo_tenant_id, suffix, int(person.id))
+        try:
+            r = await client.post(
+                f"/api/v1/driver-onboarding/applications/{app_id}/reject",
+                headers=AUTH_HEADERS,
+                json={"rejection_reason": "integration test"},
+            )
+            assert r.status_code == 200, r.text
+            assert (await _fresh_driver(tenant_session, demo_tenant_id, int(person.id))).is_active is True
+        finally:
+            await self._cleanup_person(tenant_session, demo_tenant_id, int(person.id), app_id)

@@ -120,7 +120,7 @@ async def create_invite_link(
     access = ApplicationAccessToken(
         tenant_id=tenant_id,
         application_id=app.id,
-        token=token,
+        token=None,
         token_hash=token_hash,
         expires_at=expires_at,
         revoked_at=None,
@@ -140,10 +140,11 @@ async def create_invite_link(
         access.revoked_at,
     )
 
-    # Platform: optional bridge for redirect-only (e.g. map token -> slug); applicant auth is tenant DB only
+    # Platform: optional bridge for redirect-only (e.g. map token -> slug); applicant auth is tenant DB only.
+    # Stores the SHA-256 hex digest, never the raw token.
     platform_db.add(
         OnboardingTokenLookup(
-            token=token,
+            token=token_hash,
             tenant_id=tenant_id,
             application_id=app.id,
             expires_at=expires_at,

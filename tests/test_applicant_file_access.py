@@ -640,6 +640,268 @@ async def test_applicant_file_exploit_is_blocked_and_owned_downloads_work(
         await _cleanup(tenant_session, created)
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
+@pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB URL required")
+async def test_general_applicant_routes_require_invite_or_resume_purpose(
+    client: AsyncClient,
+    tenant_id: int,
+    tenant_session: AsyncSession,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dl_capture tokens only work on /applicant/dl-capture/{token}; draft edits need the invite."""
+    import app.core.storage as storage_mod
+
+    slug = _slug()
+    headers = {"host": f"{slug}.truckerp.me"}
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    monkeypatch.setattr(storage_mod.settings, "local_storage_dir", str(storage_root))
+    monkeypatch.setattr(storage_mod.settings, "company_docs_dir", None)
+    monkeypatch.setattr(storage_mod.settings, "storage_provider", "local")
+    monkeypatch.setattr(storage_mod, "_engine", storage_mod.LocalStorageBackend())
+    base = "/api/v1/driver-onboarding/applicant/application"
+    invalid = "Invalid or expired invite link"
+
+    created: list[int] = []
+    other_tenant_app_id: int | None = None
+    try:
+        draft_id, invite = await _add_app(
+            tenant_session,
+            tenant_id=tenant_id,
+            intake={"step": "dl_upload", "first_name": "Keep"},
+        )
+        created.append(draft_id)
+        capture = await _add_token(
+            tenant_session, tenant_id=tenant_id, application_id=draft_id, purpose=onboarding.TOKEN_PURPOSE_DL_CAPTURE
+        )
+        resume = await _add_token(
+            tenant_session,
+            tenant_id=tenant_id,
+            application_id=draft_id,
+            purpose=onboarding.TOKEN_PURPOSE_DOCUMENT_RESUME,
+        )
+
+        async def general_calls(token: str) -> dict[str, object]:
+            p = {"token": token}
+            return {
+                "get": await client.get(base, params=p, headers=headers),
+                "put": await client.put(base, params=p, headers=headers, json={"first_name": "Hijack"}),
+                "intake": await client.post(
+                    f"{base}/intake",
+                    params=p,
+                    headers=headers,
+                    json={"submit": False, "intake_payload": {"first_name": "Hijack"}},
+                ),
+                "reset": await client.post(f"{base}/reset", params=p, headers=headers),
+                "dl_upload": await client.post(
+                    f"{base}/dl-upload",
+                    params=p,
+                    headers=headers,
+                    data={"doc_type": "CDL_FRONT"},
+                    files={"file": ("license.jpg", JPEG, "image/jpeg")},
+                ),
+                "dl_confirm": await client.post(
+                    f"{base}/dl-confirm", params=p, headers=headers, data={"doc_type": "CDL_FRONT"}
+                ),
+                "capture_link": await client.post(f"{base}/dl-capture-link", params=p, headers=headers),
+                "file": await client.get(f"{base}/file", params={**p, "file_id": "x"}, headers=headers),
+                "document_upload": await client.post(
+                    f"{base}/document-upload",
+                    params=p,
+                    headers=headers,
+                    data={"doc_type": "mvr"},
+                    files={"file": ("mvr.pdf", PDF, "application/pdf")},
+                ),
+            }
+
+        for name, resp in (await general_calls(capture)).items():
+            assert resp.status_code == 404, (name, resp.status_code, resp.text)
+            assert resp.json()["detail"] == invalid, name
+        await tenant_session.rollback()
+        draft = await tenant_session.get(PersonApplication, draft_id)
+        assert draft is not None
+        assert (draft.intake_payload or {}).get("first_name") == "Keep"
+        assert "files" not in (draft.intake_payload or {})
+        assert _stored_files(storage_root) == set()
+
+        # Capture routes still accept the capture token.
+        capture_get = await client.get(
+            f"/api/v1/driver-onboarding/applicant/dl-capture/{capture}", headers=headers
+        )
+        assert capture_get.status_code == 200, capture_get.text
+
+        # document_resume may read and use intake, but cannot edit or wipe a draft.
+        resume_get = await client.get(base, params={"token": resume}, headers=headers)
+        assert resume_get.status_code == 200, resume_get.text
+        for path, kwargs in (
+            ("", {"method": "PUT", "json": {"first_name": "Hijack"}}),
+            ("/reset", {"method": "POST"}),
+            ("/dl-confirm", {"method": "POST", "data": {"doc_type": "CDL_FRONT"}}),
+        ):
+            method = kwargs.pop("method")
+            resp = await client.request(method, f"{base}{path}", params={"token": resume}, headers=headers, **kwargs)
+            assert resp.status_code == 404, (path, resp.text)
+            assert resp.json()["detail"] == invalid
+        resume_dl = await client.post(
+            f"{base}/dl-upload",
+            params={"token": resume},
+            headers=headers,
+            data={"doc_type": "CDL_FRONT"},
+            files={"file": ("license.jpg", JPEG, "image/jpeg")},
+        )
+        assert resume_dl.status_code == 404
+        await tenant_session.rollback()
+        draft = await tenant_session.get(PersonApplication, draft_id)
+        assert (draft.intake_payload or {}).get("first_name") == "Keep"
+
+        # The invite keeps working on every general route.
+        ok_get = await client.get(base, params={"token": invite}, headers=headers)
+        assert ok_get.status_code == 200, ok_get.text
+        ok_put = await client.put(base, params={"token": invite}, headers=headers, json={"first_name": "Pat"})
+        assert ok_put.status_code == 200, ok_put.text
+        ok_upload = await client.post(
+            f"{base}/dl-upload",
+            params={"token": invite},
+            headers=headers,
+            data={"doc_type": "CDL_FRONT"},
+            files={"file": ("license.jpg", JPEG, "image/jpeg")},
+        )
+        assert ok_upload.status_code == 200, ok_upload.text
+        ok_reset = await client.post(f"{base}/reset", params={"token": invite}, headers=headers)
+        assert ok_reset.status_code == 200, ok_reset.text
+
+        # Stale, revoked and other-tenant invites fail like an unknown token.
+        stale_id, stale = await _add_app(tenant_session, tenant_id=tenant_id)
+        revoked_id, revoked = await _add_app(tenant_session, tenant_id=tenant_id)
+        created.extend([stale_id, revoked_id])
+        await tenant_session.execute(
+            text("UPDATE application_access_tokens SET expires_at = now() - interval '1 minute' WHERE application_id = :id"),
+            {"id": stale_id},
+        )
+        await tenant_session.execute(
+            text("UPDATE application_access_tokens SET revoked_at = now() WHERE application_id = :id"),
+            {"id": revoked_id},
+        )
+        await tenant_session.commit()
+        other_tenant_app_id, foreign = await _add_app(tenant_session, tenant_id=tenant_id + 900000)
+        unknown = f"invite_{uuid.uuid4().hex}"
+        for token in (stale, revoked, foreign, unknown):
+            for name, resp in (await general_calls(token)).items():
+                assert resp.status_code == 404, (name, resp.text)
+                assert resp.json()["detail"] == invalid, name
+    finally:
+        await _cleanup(tenant_session, created + ([other_tenant_app_id] if other_tenant_app_id else []))
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
+@pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB URL required")
+async def test_new_invite_stores_hash_only_and_legacy_plaintext_still_resolves(
+    client: AsyncClient,
+    tenant_id: int,
+    tenant_session: AsyncSession,
+) -> None:
+    from app.core.database import AsyncSessionLocal
+    from app.models.platform import OnboardingTokenLookup
+
+    headers = {"host": f"{_slug()}.truckerp.me"}
+    created: list[int] = []
+    install_host_aligned_current_user_and_tenant(fastapi_app, role="TENANT_ADMIN")
+    try:
+        resp = await client.post(
+            "/api/v1/admin/onboarding/invite-link",
+            headers=headers,
+            json={"phone": "+15555550100", "application_type": "DRIVER"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        raw = body["token"]
+        created.append(int(body["application_id"]))
+        assert raw in body["link"]
+        clear_current_user_and_tenant_overrides(fastapi_app)
+
+        row = (
+            await tenant_session.execute(
+                text("SELECT token, token_hash, purpose FROM application_access_tokens WHERE application_id = :id"),
+                {"id": body["application_id"]},
+            )
+        ).one()
+        assert row.token is None
+        assert row.token_hash == _token_sha256_hex(raw)
+        assert row.purpose == onboarding.TOKEN_PURPOSE_INVITE
+        async with AsyncSessionLocal() as platform:
+            lookups = (
+                await platform.execute(
+                    text("SELECT token FROM onboarding_token_lookup WHERE tenant_id = :t AND application_id = :a"),
+                    {"t": tenant_id, "a": body["application_id"]},
+                )
+            ).scalars().all()
+            assert lookups == [_token_sha256_hex(raw)]
+            await platform.execute(
+                text("DELETE FROM onboarding_token_lookup WHERE tenant_id = :t AND application_id = :a"),
+                {"t": tenant_id, "a": body["application_id"]},
+            )
+            await platform.commit()
+
+        ok = await client.get(
+            "/api/v1/driver-onboarding/applicant/application", params={"token": raw}, headers=headers
+        )
+        assert ok.status_code == 200, ok.text
+
+        legacy_id, _ = await _add_app(tenant_session, tenant_id=tenant_id)
+        created.append(legacy_id)
+        legacy_raw = f"legacy_{uuid.uuid4().hex}"
+        tenant_session.add(
+            ApplicationAccessToken(
+                tenant_id=tenant_id,
+                application_id=legacy_id,
+                token=legacy_raw,
+                token_hash=None,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=2),
+                revoked_at=None,
+                purpose=onboarding.TOKEN_PURPOSE_INVITE,
+            )
+        )
+        await tenant_session.commit()
+        legacy = await client.get(
+            "/api/v1/driver-onboarding/applicant/application", params={"token": legacy_raw}, headers=headers
+        )
+        assert legacy.status_code == 200, legacy.text
+    finally:
+        clear_current_user_and_tenant_overrides(fastapi_app)
+        await _cleanup(tenant_session, created)
+
+
+def test_log_redaction_removes_applicant_tokens() -> None:
+    import logging
+
+    from app.middleware.tenant_context import AccessLogTokenRedactionFilter, redact_tokens_for_log
+
+    secret = "abcDEF123_-xyz"
+    cases = [
+        f"/api/v1/driver-onboarding/applicant/dl-capture/{secret}",
+        f"/api/v1/driver-onboarding/applicant/dl-capture/{secret}/upload",
+        f"/api/v1/driver-onboarding/applicant/application?token={secret}",
+        f"/api/v1/driver-onboarding/applicant/application/file?file_id=x&token={secret}&y=1",
+        f"/onboarding?token={secret}",
+    ]
+    for url in cases:
+        out = redact_tokens_for_log(url)
+        assert secret not in out, out
+        assert "[redacted]" in out
+    assert redact_tokens_for_log("/api/v1/loads?limit=5") == "/api/v1/loads?limit=5"
+
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
+        ("1.2.3.4:5", "GET", cases[2], "1.1", 200), None,
+    )
+    assert AccessLogTokenRedactionFilter().filter(record) is True
+    assert secret not in record.getMessage()
+    assert "token=[redacted]" in record.getMessage()
+
+
 class _IdRows:
     def __init__(self, ids: list[int]) -> None:
         self._ids = ids
@@ -743,3 +1005,80 @@ async def test_mocked_s3_cannot_read_other_applicant_or_tenant(monkeypatch: pyte
     )
     assert doc is not None
     assert backend._client.head_object.call_args.kwargs["Key"] == f"pytest/applicant_docs/legacy/0/{document_legacy}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(REQUIRES_DB, reason="DATABASE_URL required")
+@pytest.mark.skipif(REQUIRES_TENANT_DB, reason="tenant DB URL required")
+async def test_reset_removes_only_own_applicant_uploads_and_retries_after_partial_failure(
+    client: AsyncClient,
+    tenant_id: int,
+    tenant_session: AsyncSession,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.storage as storage_mod
+
+    slug = _slug()
+    headers = {"host": f"{slug}.truckerp.me"}
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    monkeypatch.setattr(storage_mod.settings, "local_storage_dir", str(storage_root))
+    monkeypatch.setattr(storage_mod.settings, "company_docs_dir", None)
+    monkeypatch.setattr(storage_mod.settings, "storage_provider", "local")
+    monkeypatch.setattr(storage_mod, "_engine", storage_mod.LocalStorageBackend())
+
+    created: list[int] = []
+    try:
+        app_id, invite = await _add_app(tenant_session, tenant_id=tenant_id)
+        other_id, other_invite = await _add_app(tenant_session, tenant_id=tenant_id)
+        created.extend([app_id, other_id])
+
+        async def upload(token: str, doc_type: str) -> str:
+            r = await client.post(
+                "/api/v1/driver-onboarding/applicant/application/document-upload",
+                params={"token": token},
+                headers=headers,
+                data={"doc_type": doc_type},
+                files={"file": (f"{doc_type}.pdf", PDF, "application/pdf")},
+            )
+            assert r.status_code == 200, r.text
+            return r.json()["intake_payload"]["documents"][doc_type]["storage_key"]
+
+        own_key = await upload(invite, "mvr")
+        other_key = await upload(other_invite, "mvr")
+        own_dl = storage_root / f"{slug}/applicant_dl/application/{app_id}/front.jpg"
+        own_dl.parent.mkdir(parents=True)
+        own_dl.write_bytes(b"dl")
+        other_tenant_doc = storage_root / f"other-{slug}/applicant_docs/application/{app_id}/x.pdf"
+        other_tenant_doc.parent.mkdir(parents=True)
+        other_tenant_doc.write_bytes(b"x")
+
+        # Partial failure: applicant_docs purge fails after the DB reset committed.
+        real_purge = storage_mod.purge_applicant_dl_application
+
+        def flaky(tenant_slug, application_id, module="applicant_dl"):
+            if module == "applicant_docs":
+                raise OSError("simulated storage outage")
+            return real_purge(tenant_slug, application_id, module)
+
+        monkeypatch.setattr(storage_mod, "purge_applicant_dl_application", flaky)
+        r1 = await client.post(
+            "/api/v1/driver-onboarding/applicant/application/reset", params={"token": invite}, headers=headers
+        )
+        assert r1.status_code == 200, r1.text
+        assert not (r1.json()["intake_payload"] or {}).get("documents")
+        assert not own_dl.exists()
+        assert (storage_root / own_key).is_file(), "unreferenced file kept until a later reset"
+
+        monkeypatch.setattr(storage_mod, "purge_applicant_dl_application", real_purge)
+        for _ in range(2):  # retry + repeated reset are both safe
+            r = await client.post(
+                "/api/v1/driver-onboarding/applicant/application/reset", params={"token": invite}, headers=headers
+            )
+            assert r.status_code == 200, r.text
+        assert not (storage_root / own_key).exists()
+        assert (storage_root / other_key).is_file()
+        assert other_tenant_doc.is_file()
+    finally:
+        await _cleanup(tenant_session, created)

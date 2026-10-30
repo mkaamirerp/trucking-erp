@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
+from app.dependencies.authz import require_tenant_admin
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -37,7 +38,11 @@ async def driver_license_ocr(
     return DriverLicenseOCRResponse(suggestions={})
 
 
-@router.post("/driver-license/confirm", response_model=DriverLicenseConfirmResponse)
+@router.post(
+    "/driver-license/confirm",
+    response_model=DriverLicenseConfirmResponse,
+    dependencies=[Depends(require_tenant_admin)],
+)
 async def driver_license_confirm(
     payload: DriverLicenseConfirmRequest,
     tenant_id: int = Depends(require_tenant),

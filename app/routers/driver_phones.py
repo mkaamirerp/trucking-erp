@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver_phone import DriverPhone
 from app.schemas.driver_phone import DriverPhoneCreate, DriverPhoneRead
+from app.dependencies.authz import require_tenant_admin
 from app.deps.auth import get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
@@ -37,7 +38,7 @@ async def list_driver_phones(
     return res.scalars().all()
 
 
-@router.post("", response_model=DriverPhoneRead)
+@router.post("", response_model=DriverPhoneRead, dependencies=[Depends(require_tenant_admin)])
 async def create_driver_phone(
     payload: DriverPhoneCreate,
     tenant_id: int = Depends(require_tenant),
@@ -50,7 +51,7 @@ async def create_driver_phone(
     return phone
 
 
-@router.delete("/{phone_id}", response_model=DriverPhoneRead)
+@router.delete("/{phone_id}", response_model=DriverPhoneRead, dependencies=[Depends(require_tenant_admin)])
 async def deactivate_driver_phone(
     phone_id: int,
     tenant_id: int = Depends(require_tenant),
@@ -76,7 +77,9 @@ async def deactivate_driver_phone(
     return phone
 
 
-@router.post("/{phone_id}/reactivate", response_model=DriverPhoneRead)
+@router.post(
+    "/{phone_id}/reactivate", response_model=DriverPhoneRead, dependencies=[Depends(require_tenant_admin)]
+)
 async def reactivate_driver_phone(
     phone_id: int,
     tenant_id: int = Depends(require_tenant),

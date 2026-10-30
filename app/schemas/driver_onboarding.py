@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.core.validators import normalize_phone_number as normalize_phone
+
 
 class DriverOnboardingStatus(str, Enum):
     DRAFT = "DRAFT"

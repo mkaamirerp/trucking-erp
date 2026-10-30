@@ -66,6 +66,7 @@ from app.constants.person_application_workflow import WORKFLOW_LANE_COMPLETE, no
 from app.constants.person_onboarding import PERSON_SETUP_UI_COMBINED, normalize_person_setup_ui_mode
 from app.schemas.driver_compensation_setup import DriverCompensationSetupOut, DriverCompensationSetupWrite
 from app.services.driver_compensation_setup import (
+    COMPENSATION_CONFLICT_DETAILS,
     assert_combined_driver_onboarding_ready,
     get_driver_compensation_setup,
     upsert_driver_compensation_setup,
@@ -123,12 +124,15 @@ async def _maybe_ensure_person_for_combined_admin_setup(
         return
     if app.person_id is not None:
         return
-    await _ensure_person_entities_for_application(db, app)
+    await _ensure_person_entities_for_application(db, app, activate=False)
     await db.flush()
 
 TOKEN_PURPOSE_INVITE = "invite"
 TOKEN_PURPOSE_DOCUMENT_RESUME = "document_resume"
 TOKEN_PURPOSE_DL_CAPTURE = "dl_capture"
+# dl_capture tokens authenticate only /applicant/dl-capture/{token} routes.
+_GENERAL_APPLICANT_TOKEN_PURPOSES = (TOKEN_PURPOSE_INVITE, TOKEN_PURPOSE_DOCUMENT_RESUME)
+_DRAFT_EDIT_TOKEN_PURPOSES = (TOKEN_PURPOSE_INVITE,)
 
 # Capture-link lifetime for purpose=dl_capture (not schema-bound).
 DL_CAPTURE_TOKEN_TTL = timedelta(hours=24)
@@ -357,14 +361,20 @@ async def _upsert_operational_driver_for_person(
     tenant_id: int,
     person: Person,
     driver_profile: DriverProfile,
+    *,
+    activate: bool,
 ) -> Driver:
     """Create or refresh the tenant `drivers` row for dispatch (approved operational roster).
 
     PersonApplication and intake payloads are not the operational roster; this row is the
-    dispatch-facing roster entry materialized when a DRIVER application is approved (idempotent).
+    dispatch-facing roster entry materialized when a DRIVER application is approved.
     Match key: (tenant_id, person_id). If multiple rows exist (legacy duplicates), the lowest ``id``
     is the canonical survivor and is updated in place; all other matching rows are soft-retired
     (``is_active=False``) so only one active operational driver remains per person per tenant.
+
+    ``activate=False`` (combined-mode setup before approval) creates a provisional *inactive* row
+    and never changes ``is_active`` on an existing row. A terminated survivor is refused: rehire is
+    a separate workflow.
     """
     result = await db.scalars(
         select(Driver)
@@ -376,6 +386,11 @@ async def _upsert_operational_driver_for_person(
     )
     rows = list(result.all())
     op_driver = rows[0] if rows else None
+    if op_driver is not None and op_driver.termination_date is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This person's driver record is terminated. Rehire is a separate workflow; approval will not reactivate it.",
+        )
 
     if op_driver is None:
         op_driver = Driver(
@@ -385,7 +400,7 @@ async def _upsert_operational_driver_for_person(
             last_name=person.last_name,
             email=person.email,
             phone=person.phone,
-            is_active=True,
+            is_active=activate,
             license_number=driver_profile.license_number,
             issuing_region=driver_profile.license_region,
             license_expiry_date=driver_profile.license_expiry,
@@ -402,7 +417,8 @@ async def _upsert_operational_driver_for_person(
         op_driver.last_name = person.last_name
         op_driver.email = person.email
         op_driver.phone = person.phone
-        op_driver.is_active = True
+        if activate:
+            op_driver.is_active = True
         if driver_profile.license_number is not None:
             op_driver.license_number = driver_profile.license_number
         if driver_profile.license_region is not None:
@@ -417,12 +433,17 @@ async def _upsert_operational_driver_for_person(
 async def _ensure_person_entities_for_application(
     db: AsyncSession,
     app: PersonApplication,
+    *,
+    activate: bool,
 ) -> Person:
     """Create/update Person, PersonRole(requested_role_code).
 
     DriverProfile and operational ``drivers`` rows are created only when both the **workflow**
     (``application_type``) and the **approval role** (``requested_role_code``) are DRIVER—so
     non-driver invite workflows never materialize driver entities even if columns were inconsistent.
+
+    ``activate=True`` only on SUBMITTED -> APPROVED. Pre-approval setup (``activate=False``) does not
+    reactivate an existing Person and leaves the operational driver row inactive (not dispatchable).
     """
     data = _person_application_canonical_data(app)
     people_fields = _payload_to_people_fields(data)
@@ -451,7 +472,8 @@ async def _ensure_person_entities_for_application(
         await db.flush()
         app.person_id = person.id
 
-    person.is_active = True
+    if activate:
+        person.is_active = True
     for field_name, value in people_fields.items():
         if value is not None:
             setattr(person, field_name, value)
@@ -513,7 +535,9 @@ async def _ensure_person_entities_for_application(
 
         await db.flush()
         # PersonApplication is intake/review state only; `drivers` is the dispatch roster.
-        await _upsert_operational_driver_for_person(db, app.tenant_id, person, driver_profile)
+        await _upsert_operational_driver_for_person(
+            db, app.tenant_id, person, driver_profile, activate=activate
+        )
 
     await db.flush()
     return person
@@ -528,12 +552,13 @@ async def _get_application_and_access_by_token(
     tenant_id: int,
     token: str,
     *,
-    purpose: str | None = None,
+    purpose: str | tuple[str, ...] = _GENERAL_APPLICANT_TOKEN_PURPOSES,
     detail: str = "Invalid or expired invite link",
 ) -> tuple[PersonApplication, ApplicationAccessToken]:
     """Resolve token by SHA-256 hash (preferred) or legacy plaintext `token` column.
 
-    When ``purpose`` is set, only tokens with that purpose authenticate (e.g. dl_capture).
+    Only tokens whose purpose is in ``purpose`` authenticate. A token with another
+    purpose gets the same 404 as an unknown token.
     """
     if not token or not str(token).strip():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
@@ -546,8 +571,8 @@ async def _get_application_and_access_by_token(
         ApplicationAccessToken.revoked_at.is_(None),
         or_(ApplicationAccessToken.token_hash == th, ApplicationAccessToken.token == raw),
     ]
-    if purpose is not None:
-        clauses.append(ApplicationAccessToken.purpose == purpose)
+    purposes = (purpose,) if isinstance(purpose, str) else tuple(purpose)
+    clauses.append(ApplicationAccessToken.purpose.in_(purposes))
     access = await db.scalar(select(ApplicationAccessToken).where(*clauses))
     if not access:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
@@ -558,7 +583,10 @@ async def _get_application_and_access_by_token(
 
 
 async def _get_application_by_token(db: AsyncSession, tenant_id: int, token: str) -> PersonApplication:
-    app, _access = await _get_application_and_access_by_token(db, tenant_id, token)
+    """Draft-editing routes (PUT, reset, DL upload/confirm): main invite link only."""
+    app, _access = await _get_application_and_access_by_token(
+        db, tenant_id, token, purpose=_DRAFT_EDIT_TOKEN_PURPOSES
+    )
     return app
 
 
@@ -1240,10 +1268,6 @@ async def reset_applicant_application(
             detail="Application already submitted",
         )
 
-    from app.core.storage import purge_applicant_dl_application
-
-    purge_applicant_dl_application(tenant_slug, app.id)
-
     preserved_intake = {}
     for key in ("step", "form_country_default", "form_region_default"):
         value = (app.intake_payload or {}).get(key)
@@ -1267,6 +1291,21 @@ async def reset_applicant_application(
 
     await db.commit()
     await db.refresh(app)
+
+    # Files go only after their references are cleared. A failed purge leaves unreferenced files
+    # under this application's own prefixes; the next reset of the still-DRAFT draft removes them.
+    from app.core.storage import purge_applicant_dl_application
+
+    for module in ("applicant_dl", "applicant_docs"):
+        try:
+            purge_applicant_dl_application(tenant_slug, int(app.id), module)
+        except Exception:
+            logger.exception(
+                "applicant_reset_purge_failed tenant_id=%s application_id=%s module=%s",
+                tenant_id,
+                app.id,
+                module,
+            )
     return _person_application_to_out(app)
 
 
@@ -2217,8 +2256,6 @@ async def patch_person_application_review_fields(
     await _maybe_ensure_person_for_combined_admin_setup(db, platform_db, tenant_id, app)
     _apply_person_application_review_patch(app, payload, actor_member_id=current_user.member_id)
     ensure_processing_lane_if_submitted_admin_engaged(app)
-    if app.status == DriverOnboardingStatus.APPROVED.value and app.person_id:
-        await _ensure_person_entities_for_application(db, app)
     await db.commit()
     await db.refresh(app)
     return _person_application_to_out(app, include_review_meta=True)
@@ -2486,7 +2523,7 @@ async def materialize_person_for_combined_setup(
         await db.commit()
         await db.refresh(app)
         return _person_application_to_out(app, include_review_meta=True)
-    await _ensure_person_entities_for_application(db, app)
+    await _ensure_person_entities_for_application(db, app, activate=False)
     ensure_processing_lane_if_submitted_admin_engaged(app)
     await db.commit()
     await db.refresh(app)
@@ -2556,25 +2593,31 @@ async def approve_person_application(
     }:
         raise HTTPException(status_code=409, detail="Application must be SUBMITTED or already APPROVED")
 
-    person = await _ensure_person_entities_for_application(db, app)
+    if app.status == DriverOnboardingStatus.APPROVED.value:
+        # Idempotent: no rematerialization, reactivation, or contact overwrite after approval.
+        await db.rollback()
+        await db.refresh(app)
+        return _person_application_to_out(app, include_review_meta=True)
 
-    if app.status == DriverOnboardingStatus.SUBMITTED.value:
-        now = _utcnow()
-        ui_mode = normalize_person_setup_ui_mode(await get_person_setup_ui_mode(platform_db, tenant_id))
-        if ui_mode == PERSON_SETUP_UI_COMBINED and is_driver_driver_person_application(app):
-            try:
-                await assert_combined_driver_onboarding_ready(db, tenant_id=tenant_id, app=app)
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=_combined_approve_guard_http_detail(str(exc)),
-                ) from exc
-        app.reviewed_at = now
-        app.reviewed_by_user_id = current_user.member_id
-        app.approved_at = now
-        app.approved_by_user_id = current_user.member_id
-        app.setup_status = setup_status_after_approval(ui_mode)
-        set_lane_after_manager_approve(app, person_setup_ui_mode=ui_mode)
+    now = _utcnow()
+    ui_mode = normalize_person_setup_ui_mode(await get_person_setup_ui_mode(platform_db, tenant_id))
+    if ui_mode == PERSON_SETUP_UI_COMBINED and is_driver_driver_person_application(app):
+        try:
+            await assert_combined_driver_onboarding_ready(db, tenant_id=tenant_id, app=app)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_combined_approve_guard_http_detail(str(exc)),
+            ) from exc
+
+    person = await _ensure_person_entities_for_application(db, app, activate=True)
+
+    app.reviewed_at = now
+    app.reviewed_by_user_id = current_user.member_id
+    app.approved_at = now
+    app.approved_by_user_id = current_user.member_id
+    app.setup_status = setup_status_after_approval(ui_mode)
+    set_lane_after_manager_approve(app, person_setup_ui_mode=ui_mode)
 
     app.status = DriverOnboardingStatus.APPROVED.value
     app.person_id = person.id
@@ -2646,7 +2689,9 @@ async def get_application_driver_compensation_setup(
         )
     if not app.person_id:
         raise HTTPException(status_code=409, detail="Application has no linked person")
-    return await get_driver_compensation_setup(db, tenant_id=tenant_id, person_id=int(app.person_id))
+    return await get_driver_compensation_setup(
+        db, tenant_id=tenant_id, person_id=int(app.person_id), include_provisional=True
+    )
 
 
 @router.put(
@@ -2683,9 +2728,15 @@ async def put_application_driver_compensation_setup(
     if not app.person_id:
         raise HTTPException(status_code=409, detail="Application has no linked person")
     try:
-        return await upsert_driver_compensation_setup(
-            db, tenant_id=tenant_id, person_id=int(app.person_id), payload=body
+        out = await upsert_driver_compensation_setup(
+            db,
+            tenant_id=tenant_id,
+            person_id=int(app.person_id),
+            payload=body,
+            include_provisional=True,
         )
+        await db.commit()
+        return out
     except ValueError as exc:
         code = str(exc)
         if code == "operational_driver_missing":
@@ -2700,6 +2751,8 @@ async def put_application_driver_compensation_setup(
                 status_code=400,
                 detail="Save Driver Configuration before compensation setup.",
             ) from exc
+        if code in COMPENSATION_CONFLICT_DETAILS:
+            raise HTTPException(status_code=409, detail=COMPENSATION_CONFLICT_DETAILS[code]) from exc
         raise HTTPException(status_code=400, detail=code) from exc
 
 

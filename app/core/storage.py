@@ -572,21 +572,34 @@ def _s3_directory_prefix(
     return full_marker[: -len(marker)]
 
 
-def purge_applicant_dl_application(tenant_slug: str, application_id: int) -> int:
-    """Delete all stored applicant DL files for one application (local or S3)."""
+_APPLICANT_PURGE_MODULES = frozenset({"applicant_dl", "applicant_docs"})
+
+
+def purge_applicant_dl_application(
+    tenant_slug: str, application_id: int, module: str = "applicant_dl"
+) -> int:
+    """Delete all stored applicant files of ``module`` for one application (local or S3).
+
+    Only the applicant-owned prefixes ``{tenant}/applicant_dl|applicant_docs/application/{id}/``
+    can be purged.
+    """
     import shutil
 
+    if module not in _APPLICANT_PURGE_MODULES:
+        raise StorageKeyError("invalid storage key")
+    if int(application_id) <= 0:
+        raise StorageKeyError("invalid storage key")
     backend = get_storage()
-    prefix = f"{tenant_slug}/applicant_dl/application/{application_id}/"
+    prefix = f"{tenant_slug}/{module}/application/{int(application_id)}/"
     if isinstance(backend, LocalStorageBackend):
-        dir_path = backend._key_to_path(f"{prefix}__purge__", "applicant_dl", tenant_slug).parent
+        dir_path = backend._key_to_path(f"{prefix}__purge__", module, tenant_slug).parent
         if not dir_path.is_dir():
             return 0
         count = sum(1 for p in dir_path.iterdir() if p.is_file())
         shutil.rmtree(dir_path)
         return count
     if isinstance(backend, S3StorageBackend):
-        full_prefix = _s3_directory_prefix(backend, prefix, "applicant_dl", tenant_slug)
+        full_prefix = _s3_directory_prefix(backend, prefix, module, tenant_slug)
         deleted = 0
         token: str | None = None
         while True:
