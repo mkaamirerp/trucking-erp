@@ -55,29 +55,34 @@ Removed:
 
 ---
 
-## Frontend verification (demo.truckerp.me)
+## Frontend verification (demo.truckerp.me) — **PASS** (2026-10-30)
 
-| Test | Result (this session) | Notes |
-|------|------------------------|-------|
-| **A — New Load regression** | **PASS** (Playwright) | Armstrong duplicate gate on demo; annotated — parser still available on existing load |
-| **B–E — Parse / Use / Save / PDF retention** | **NOT COMPLETED** | Playwright **login timeout** (90s) on repeat runs; same failure on `milestone_b1_attach_third_revision.spec.ts` — environment/auth, not B2 UI code |
-| Unit `test_parse_reference_b2.py` | **2 passed** | |
-| Unit `test_revised_rc_attach.py` | **2 passed** | B1 regression |
-| `npm run build` | **PASS** | |
+**Harness:** `tests/e2e/global-setup.ts` — **one login per run** (or reuse `.auth/demo-user.json` if &lt; 1h old). Tests use `storageState`; no per-test login (avoids HTTP **429** lockout).
 
-**Re-run when demo login is stable:**
+**Spec:** `tests/e2e/milestone_b2_frontend_verification.spec.ts` (serial, 4 tests) — **4 passed (~54s)**.
 
-```bash
-cd tests/e2e
-export E2E_LOGIN_EMAIL=… E2E_LOGIN_PASSWORD=…
-npx playwright test milestone_b2_workflow.spec.ts
-```
+| # | Test | Result |
+|---|------|--------|
+| 1 | Parse PDF — extraction panel; **form unchanged** | **PASS** |
+| 2 | **Use extracted rate** only → Save → reload matches | **PASS** |
+| 3 | Parse again → **Close** without Use → form unchanged | **PASS** |
+| 4 | Original + all revised PDFs download (SHA read-back) | **PASS** |
 
-Screenshots (partial): `docs/reports/milestone_b2_screenshots/` (Test A gate when present).
+**Load under test:** demo tenant load **`1011`** (`Oct-26-0338`) — load **1010** no longer exists on `tenant_demo` (empty DB at start of session); `beforeAll` seeded Armstrong create + attached valid **`Armstrong_TEST_rate_2000.pdf`** revised RC.
 
-**Evidence exports:** use `scripts/b1_load_evidence_export.py` before/after Save in Test C (load 1010).
+**Screenshots:** `docs/reports/milestone_b2_screenshots/verify-01` … `verify-06`  
+**Evidence:** `docs/reports/milestone_b2_evidence/active_load_id.txt`, `load_1011_after_b2_frontend_verify.json`, `pdf_download_verification.json`
 
----
+**Note:** B1 test fixture `Armstrong_B1_revision3_test.pdf` (PDF comment append) is **not parser-safe** (`PdfReadError`); parse-reference correctly requires a valid RC PDF. Use archive **`Armstrong_TEST_rate_2000.pdf`** for parse E2E.
+
+### Earlier failures (explained)
+
+| Symptom | Cause |
+|---------|--------|
+| Login timeout | **429** rate limit from repeated per-test logins — fixed by `global-setup` + `storageState` |
+| PDF viewer timeout on 1010 | **`tenant_demo` had zero loads** — 1010 removed/empty DB |
+| Parse-reference **500** | Attached **malformed** revised PDF (B1 byte-append fixture) — use valid PDF |
+| Create-load `waitForURL` | Load **1011** created but UI navigated to **dashboard** before URL assert — fixed by polling API |
 
 ## Deployment verification (playground)
 

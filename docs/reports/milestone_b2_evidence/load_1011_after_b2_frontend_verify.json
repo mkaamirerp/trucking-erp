@@ -1,0 +1,318 @@
+{
+  "label": "after_b2_frontend_verify",
+  "tenant_id": 53,
+  "load_id": 1011,
+  "loads_row": {
+    "id": 1011,
+    "tenant_id": 53,
+    "promotion_origin_workspace_draft_id": "c1145c2d-5312-4082-801f-f70eb8758fad",
+    "concurrency_version": 2,
+    "load_number": "Oct-26-0338",
+    "broker_id": null,
+    "broker_contact_id": null,
+    "customs_broker_id": null,
+    "document_snapshot_confirmed_at": null,
+    "document_snapshot_confirmed_by_user_id": null,
+    "document_snapshot_version": 0,
+    "driver_id": null,
+    "truck_id": null,
+    "trailer_id": null,
+    "active_dispatch_trip_id": null,
+    "active_trip_id": null,
+    "trip_number": null,
+    "broker_name_snapshot": "Armstrong Transport Group",
+    "broker_contact_name_snapshot": "Loflin Phillips",
+    "broker_contact_phone_snapshot": "208-751-8073",
+    "broker_contact_extension_snapshot": null,
+    "broker_contact_email_snapshot": "l.phillips@armstrongtransport.com",
+    "broker_load_reference": "3872125-1",
+    "operational_references": [
+      {
+        "kind": "pickup_number",
+        "value": "NM031640"
+      }
+    ],
+    "broker_match_method": null,
+    "broker_match_confidence_tier": null,
+    "broker_match_explanation": null,
+    "review_required": false,
+    "is_duplicate_of_load_id": null,
+    "mode": "Full TruckLoad",
+    "equipment_type": "V53, 53' Van",
+    "trailer_type": "Van",
+    "trailer_size": "53 ft",
+    "commodity": "Poly Grind",
+    "estimated_weight": 43000,
+    "hazmat_flag": false,
+    "temperature_requirement": null,
+    "pallet_case_count": null,
+    "internal_notes": null,
+    "rate": "2000.00",
+    "customer_rate": "1800.00",
+    "miles": null,
+    "status": "ready",
+    "current_location": null,
+    "last_ping_at": null,
+    "location_source": null,
+    "custody_owner": "unknown",
+    "custody_trip_id": null,
+    "custody_terminal_id": null,
+    "custody_placement": "unknown",
+    "custody_trailer_id": null,
+    "custody_since_at": null,
+    "last_custody_event_id": null,
+    "created_at": "2026-10-30 20:48:58.678643+00:00",
+    "updated_at": "2026-10-30 20:53:23.589852+00:00"
+  },
+  "load_stops": [
+    {
+      "id": 1085,
+      "tenant_id": 53,
+      "load_id": 1011,
+      "stop_type": "PICKUP",
+      "sequence": 0,
+      "facility_name": "NCG-MW RAY DORNHECKER",
+      "street": "3620 W 38th St",
+      "city": "Chicago",
+      "state_or_province": "IL",
+      "postal_code": "60632",
+      "country": null,
+      "reference_number": "NM031640",
+      "appointment_type": null,
+      "appointment_date": "2025-10-28",
+      "appointment_time_text": "06:30-10:00 CST",
+      "notes": null,
+      "commodity_notes": null,
+      "scheduled_at": null,
+      "arrived_at": null,
+      "departed_at": null,
+      "created_at": "2026-10-30 20:48:58.678643+00:00",
+      "updated_at": "2026-10-30 20:48:58.678643+00:00"
+    },
+    {
+      "id": 1086,
+      "tenant_id": 53,
+      "load_id": 1011,
+      "stop_type": "DELIVERY",
+      "sequence": 1,
+      "facility_name": "ICS - NC (REIDSVILLE)",
+      "street": "1704 Barnes St",
+      "city": "Reidsville",
+      "state_or_province": "NC",
+      "postal_code": "27320",
+      "country": null,
+      "reference_number": null,
+      "appointment_type": null,
+      "appointment_date": "2025-10-29",
+      "appointment_time_text": "07:00-12:00",
+      "notes": null,
+      "commodity_notes": null,
+      "scheduled_at": null,
+      "arrived_at": null,
+      "departed_at": null,
+      "created_at": "2026-10-30 20:48:58.678643+00:00",
+      "updated_at": "2026-10-30 20:48:58.678643+00:00"
+    }
+  ],
+  "storage_backend": "local",
+  "evidence": {
+    "id": 34,
+    "tenant_id": 53,
+    "load_id": 1011,
+    "evidence_kind": "rate_confirmation_pdf",
+    "file_sha256": "1c827d7d2bf59ea86c738af56d260cb5372cf1f4b2deb1b47528d6737273f0f4",
+    "storage_key": "demo/load_workspace_draft/workspace_draft/c1145c2d-5312-4082-801f-f70eb8758fad/9ebb982d2e114b5bb99c2aab26c822c3.pdf",
+    "retention_class": "commercial_permanent",
+    "filename": "Armstrong.pdf",
+    "parse_schema_version": "load_document_parse_response_v1",
+    "workspace_draft_id": "c1145c2d-5312-4082-801f-f70eb8758fad",
+    "promoted_by_platform_user_id": "82b0b2cb-a482-4b37-835e-4db1de5af8cd",
+    "promoted_at": "2026-10-30 20:48:58.751093+00:00"
+  },
+  "accepted_parse_json": {
+    "context": {
+      "pdf_type": "digital_text",
+      "llm_model": "claude-haiku-4-5-20251001",
+      "openai_ms": 12571,
+      "page_count": 3,
+      "parse_path": "load_rate_con_v2",
+      "semantic_ms": 12571,
+      "llm_provider": "anthropic",
+      "requires_ocr": false,
+      "document_type": "rate_confirmation",
+      "server_parse_ms": 12746,
+      "reasoning_effort": "medium",
+      "workspace_draft_id": "c1145c2d-5312-4082-801f-f70eb8758fad",
+      "classification_reasoning": "This is a Carrier Rate Confirmation issued by Armstrong Transport Group to 9582479 CANADA INC DBA IK LOGISTICS. The document contains load details, rate information, pickup and delivery stops with appointments, broker agent contact information, and signature blocks. It is classified as a rate_confirmation document type."
+    },
+    "document": {
+      "filename": "Armstrong.pdf"
+    },
+    "raw_text": "Carrier Rate Con\ufb01rmaonLoad #3872125-1\n \n \nFOR LOAD INFORMATION:\nLoflin Phillips\nMC: 1397898 | DOT: 3842541\n \n \n9582479 CANADA INC DBA IK LOGISTICS\nMode: Full TruckLoad\nEquipment: V53, 53' Van\nProduct: Poly Grind\nTemperature:\nPrimary Driver:\nTruck #:\nTrailer #:\nRATE DETAILS\nLine Haul\nTotal:\nSPECIAL INSTRUCTIONS:\nMust have BOL in hand for pick up! BOL dropped in docs tab. Driver must wear pants and closed toed shoes. \n$250 Late Fees** \nFor Assistance Afterhours Contact: 877.873.1815 or afterhours@armstrongtransport.com \nINVOICE INSTRUCTIONS\nWhy wait 30 days to get paid? Armstrong offers\nQuickPay via TriumphPay at just 2.5%. Have your\nfunds within two business days.  \n \nEmail: ap@armstrongtransport.com \nQuickPay: quickpay@armstrongtransport.com \nMail: 1120 S Tryon Street, Suite 500  \nCharlotte, NC 28203  \nAll invoices submitted via email and mail will be paid in net\n30-day terms.  \nAny invoice submitted for QuickPay will be processed in 1-\n2 business days. \nCarriers must have hauled a minimum of 3 loads with\nArmstrong to qualify for Quickpay. \nPlease reference the Armstrong load number (#3872125-\n1) on your invoice.\nAdvances: EFS checks will be charged the larger of $5 or\n4%.\nCheck Payment Status  \n \nOnline: https://www.atgfr8.com/CarrierPortal \nEmail: payments@armstrongtransport.com \n \nGeneral load questions:\n \nCORPORATE INFORMATION\n****For specific information about this load, please contact\n  \n \nArmstrong Transport Group\nMC: 555609\nP: 877-240-1181\ncarriers@armstrongtransport.com\nwww.armstrongtransport.com\nSTOPS\nStop Location Time Items Net WeightPick/Drop #\n10/28/2025Pickup\nNCG-MW\nRAY DORNHECKER\n3620 W 38th St \nChicago, IL, 60632\n800-232-3786\n06:30-10:00\nCST\n2 Items (Poly Grind) 43000.00lbsNM031640\n10/29/2025Dropoff\nICS - NC (REIDSVILLE)\n1704 Barnes St \nReidsville, NC, 27320\n07:00-12:00 2 Items (Poly Grind) 43000.00lbs\nPlease Sign and Email to Loflin Phillips (l.phillips@armstrongtransport.com)\nCarrier Signature  Driver Phone #\n9582479 CANADA INC DBA IK LOGISTICS\nCarrier Name  \nLoflin Phillips\nAgent Name\nAttn: IMRAN KHAN\nPhone: 647-248-4699\nEmail: khanahmad73@hotmail.com\nPage 1 of 2\nRate: $1,800.00 USD\nl.phillip@armstrongtransport.com\n(Loflin Phillips) at (l.phillip@armstrongtransport.com\nand 208-751-8073)****\nUSD $1,800.00\nUSD $1,800.00\nPhone: 208-751-8073\nEmail: l.phillip@armstrongtransport.com\nArmstrong Transport Group, LLC (hereinafter \u201cArmstrong\u201d) is a freight broker, as defined by 49 CFR \u00a7 371.2. Time is of the essence for all loads. Loads must be delivered to the\naddresses referenced above. Loads that do not meet the set date, time, or exclusivity criteria will be subject to applicable fines, unless waived in writing and acknowledged by\nArmstrong. Unless stated otherwise, all loads must be hauled using a dedicated trailer. Per federal law, all drivers must be able to read and write the English Language. Cargo claims\nthat result in a denial of coverage by the carrier\u2019s cargo insurance policy are the exclusive responsibility of the carrier. The carrier's name and DOT/MC numbers must be displayed on\nthe Bill of Lading (\u201cBOL\u201d). ELDs may be required prior to payment to establish the carrier hired by Armstrong moved the load. Failure to provide a BOL and supporting ELDs may result\nin the carrier\u2019s payment being withheld to protect Armstrong and its customer from double payment. Temperatures on the BOL and Rate Confirmation must match; if they do not,\nArmstrong must confirm the proper temperature. UNAUTHORIZED REBROKERING IS PROHIBITED AND WILL CONSTITUTE FORFEITURE OF LINE HAUL TO THE HAULING\nCARRIER. CARRIERS THAT VIOLATE MAP 21, AS DEFINED 49 CFR 371.2, ARE SUBJECT TO FINES, WILL BE REPORTED, AND SHALL BE DEACTIVATED IN ARMSTRONG\u2019S\nSYSTEM.\nIf Carrier has been impacted by identity theft or fraud or experienced a change in ownership, it shall immediately notify Broker in writing at carriers@armstrongtransport.com. Carrier\nshall be liable for cargo loss or damage if there was a failure to report criminal activity to authorities and Armstrong within a reasonable timeframe. Reasonable efforts to report fraud\ninclude filing a report with local law enforcement, contacting the U.S. Department of Transportation at (800) 424-9071 or online at https://www.oig.dot.gov/hotline, filing a complaint with\nthe FMCSA National Consumer Complaint Database (NCCDB) at https://nccdb.fmcsa.dot.gov/, or by contacting Highway and/or Carrier 411 to create awareness.\nPLEASE NOTE: DOUBLE BROKERING IS PROHIBITED AND WILL CONSTITUTE FORFEITURE OF PAYMENT.  \nPage 2 of 2\nHighway Audit Report\nRate Confirmation ID: 5506390\nActivity History\n10/27/2025 14:33 UTC - Terms Accepted\nUser: Imran (khanahmad73@hotmail.com) - IP: 24.114.23.128\n10/27/2025 14:32 UTC - Downloaded\nUser: Imran (khanahmad73@hotmail.com) - IP: 24.114.23.128\n10/27/2025 14:32 UTC - Viewed\nUser: Imran (khanahmad73@hotmail.com) - IP: 24.114.23.128\n10/27/2025 14:13 UTC - Delivered\nUser: API User (highway@armstrongtransport.com) - IP: N/A\nDigital signature audit trail for rate confirmation acceptance.",
+    "warnings": [
+      "Temperature requirement field is blank in source document; no temperature control specified for this Poly Grind load.",
+      "Miles/distance not provided in the rate confirmation.",
+      "Pickup stop reference is labeled 'Pick/Drop #' with value NM031640; preserved as other_stop_reference due to ambiguous label.",
+      "Delivery stop has no explicit reference number provided; reference_number left null.",
+      "Broker agent email l.phillips@armstrongtransport.com matches the established broker domain armstrongtransport.com, confirming broker-side association."
+    ],
+    "extracted": {
+      "mode": "Full TruckLoad",
+      "rate": "2000.00",
+      "miles": null,
+      "stops": [
+        {
+          "city": "Chicago",
+          "notes": null,
+          "street": "3620 W 38th St",
+          "country": null,
+          "sequence": 0,
+          "stop_type": "PICKUP",
+          "postal_code": "60632",
+          "facility_name": "NCG-MW RAY DORNHECKER",
+          "appointment_date": "2025-10-28",
+          "appointment_type": null,
+          "reference_number": "NM031640",
+          "state_or_province": "IL",
+          "appointment_time_text": "06:30-10:00 CST"
+        },
+        {
+          "city": "Reidsville",
+          "notes": null,
+          "street": "1704 Barnes St",
+          "country": null,
+          "sequence": 1,
+          "stop_type": "DELIVERY",
+          "postal_code": "27320",
+          "facility_name": "ICS - NC (REIDSVILLE)",
+          "appointment_date": "2025-10-29",
+          "appointment_type": null,
+          "reference_number": null,
+          "state_or_province": "NC",
+          "appointment_time_text": "07:00-12:00"
+        }
+      ],
+      "status": "ready",
+      "truck_id": null,
+      "broker_id": null,
+      "commodity": "Poly Grind",
+      "driver_id": null,
+      "references": [
+        {
+          "kind": "pickup_number",
+          "label": null,
+          "value": "NM031640",
+          "confidence": null,
+          "primary_candidate": null
+        }
+      ],
+      "trailer_id": null,
+      "hazmat_flag": false,
+      "load_number": "Oct-26-0338",
+      "trailer_size": "53 ft",
+      "trailer_type": "Van",
+      "customer_rate": "1800.00",
+      "equipment_type": "V53, 53' Van",
+      "estimated_weight": 43000,
+      "broker_contact_id": null,
+      "customs_broker_id": null,
+      "pallet_case_count": null,
+      "customs_broker_name": null,
+      "broker_name_snapshot": "Armstrong Transport Group",
+      "broker_load_reference": "3872125-1",
+      "broker_phone_snapshot": "877-240-1181",
+      "temperature_requirement": null,
+      "broker_mc_number_snapshot": "555609",
+      "broker_dot_number_snapshot": null,
+      "broker_contact_name_snapshot": "Loflin Phillips",
+      "broker_contact_email_snapshot": "l.phillips@armstrongtransport.com",
+      "broker_contact_phone_snapshot": "208-751-8073",
+      "broker_contact_extension_snapshot": null
+    },
+    "_revised_pdfs": [
+      {
+        "sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+        "filename": "Armstrong_B1_revision3_test.pdf",
+        "storage_key": "demo/load_workspace_drafts/load_revised_rc/1011/63d59b524ed34b9fb3e3857eefd73093.pdf",
+        "uploaded_at": "2026-10-30T20:51:08.799690+00:00"
+      },
+      {
+        "sha256": "73552d5ef08ecce371b03015f1afd50c3e076b9331c2246fa4138d16dcc6ca6e",
+        "filename": "Armstrong_TEST_rate_2000.pdf",
+        "storage_key": "demo/load_workspace_drafts/load_revised_rc/1011/377ed0b036f54eff98981778c335464c.pdf",
+        "uploaded_at": "2026-10-30T20:52:07.802079+00:00"
+      }
+    ],
+    "field_confidence": {
+      "rate": "high",
+      "miles": "null - not provided in document",
+      "commodity": "high",
+      "freight_mode": "high",
+      "estimated_weight": "high",
+      "broker_agent.name": "high",
+      "broker_agent.email": "high",
+      "broker_company.name": "high",
+      "equipment.description": "high",
+      "stops[0].facility_name": "high",
+      "stops[1].facility_name": "high",
+      "temperature_requirement": "null - no temperature specified",
+      "broker_company.mc_number": "high",
+      "equipment.trailer_length": "high",
+      "broker_agent.direct_phone": "high",
+      "broker_company.dot_number": "null - not provided",
+      "broker_company.main_phone": "high",
+      "principal_load_identifier": "high",
+      "stops[0].appointment_date": "high",
+      "stops[1].appointment_date": "high",
+      "equipment.trailer_body_type": "high",
+      "stops[0].appointment_time_text": "high",
+      "stops[1].appointment_time_text": "high"
+    }
+  },
+  "revised_pdf_records": [
+    {
+      "sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+      "filename": "Armstrong_B1_revision3_test.pdf",
+      "storage_key": "demo/load_workspace_drafts/load_revised_rc/1011/63d59b524ed34b9fb3e3857eefd73093.pdf",
+      "uploaded_at": "2026-10-30T20:51:08.799690+00:00"
+    },
+    {
+      "sha256": "73552d5ef08ecce371b03015f1afd50c3e076b9331c2246fa4138d16dcc6ca6e",
+      "filename": "Armstrong_TEST_rate_2000.pdf",
+      "storage_key": "demo/load_workspace_drafts/load_revised_rc/1011/377ed0b036f54eff98981778c335464c.pdf",
+      "uploaded_at": "2026-10-30T20:52:07.802079+00:00"
+    }
+  ],
+  "original_pdf": {
+    "file_sha256_db": "1c827d7d2bf59ea86c738af56d260cb5372cf1f4b2deb1b47528d6737273f0f4",
+    "downloaded_sha256": "1c827d7d2bf59ea86c738af56d260cb5372cf1f4b2deb1b47528d6737273f0f4",
+    "byte_size": 255544,
+    "storage_key": "demo/load_workspace_draft/workspace_draft/c1145c2d-5312-4082-801f-f70eb8758fad/9ebb982d2e114b5bb99c2aab26c822c3.pdf"
+  },
+  "revised_downloads": [
+    {
+      "revision": 1,
+      "filename": "Armstrong_B1_revision3_test.pdf",
+      "pointer": {
+        "sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+        "filename": "Armstrong_B1_revision3_test.pdf",
+        "storage_key": "demo/load_workspace_drafts/load_revised_rc/1011/63d59b524ed34b9fb3e3857eefd73093.pdf",
+        "uploaded_at": "2026-10-30T20:51:08.799690+00:00"
+      },
+      "downloaded_sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+      "byte_size": 260478
+    },
+    {
+      "revision": 2,
+      "filename": "Armstrong_TEST_rate_2000.pdf",
+      "pointer": {
+        "sha256": "73552d5ef08ecce371b03015f1afd50c3e076b9331c2246fa4138d16dcc6ca6e",
+        "filename": "Armstrong_TEST_rate_2000.pdf",
+        "storage_key": "demo/load_workspace_drafts/load_revised_rc/1011/377ed0b036f54eff98981778c335464c.pdf",
+        "uploaded_at": "2026-10-30T20:52:07.802079+00:00"
+      },
+      "downloaded_sha256": "73552d5ef08ecce371b03015f1afd50c3e076b9331c2246fa4138d16dcc6ca6e",
+      "byte_size": 260404
+    }
+  ]
+}
