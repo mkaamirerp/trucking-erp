@@ -1,0 +1,37 @@
+{
+  "load_id": 1010,
+  "test_fixture": "docs/reports/milestone_b1_evidence/Armstrong_B1_revision3_test.pdf",
+  "fixture_sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+  "playwright_spec": "tests/e2e/milestone_b1_attach_third_revision.spec.ts",
+  "playwright_result": "1 passed (10.6s) on 2026-10-30",
+  "first_attach_response": {
+    "load_id": 1010,
+    "pdf_reuse_status": "new_revision",
+    "stored_new": true,
+    "revised_count": 3,
+    "revision_index": 3,
+    "sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+    "filename": "Armstrong_B1_revision3_test.pdf",
+    "storage_key": "demo/load_workspace_drafts/load_revised_rc/1010/8717a1130b6b4a37886a2f6c94cba52e.pdf",
+    "uploaded_at": "2026-10-30T07:03:27.335219+00:00",
+    "storage_backend": "local",
+    "message": "Revised rate confirmation attached.",
+    "evidence_source": "Playwright test assertions + load_1010_after_third_revision.json pointer"
+  },
+  "duplicate_attach_response": {
+    "load_id": 1010,
+    "pdf_reuse_status": "existing_latest_revision",
+    "stored_new": false,
+    "revised_count": 3,
+    "revision_index": null,
+    "sha256": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0",
+    "filename": "Armstrong_B1_revision3_test.pdf",
+    "storage_key": null,
+    "uploaded_at": null,
+    "storage_backend": "local",
+    "message": "This PDF is already accepted on this load.",
+    "evidence_source": "Playwright milestone_b1_attach_third_revision.spec.ts (duplicate step in same run)"
+  },
+  "billing_commercial_download_route": "GET /api/v1/loads/1010/rate-confirmation-pdf?revision=3",
+  "billing_download_sha256_verified": "d9d6436a3d96a61da2d6d8f7222a40da0c79b6e604f307c7b461b92c1d3e51c0"
+}

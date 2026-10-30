@@ -44,6 +44,7 @@ import {
   markLoadReady,
   parseLoadVersionConflict,
   parseLoadWorkspaceDocument,
+  attachRevisedRateConfirmation,
   reparseLoadRateConfirmation,
   saveLoadReparse,
   updateLoad,
@@ -573,6 +574,9 @@ function LoadWorkspacePage() {
   const [revisedPdfPaths, setRevisedPdfPaths] = useState<{ href: string; label: string }[]>([]);
   const [reparseFile, setReparseFile] = useState<File | null>(null);
   const reparseInputRef = useRef<HTMLInputElement | null>(null);
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachRevisionEpoch, setAttachRevisionEpoch] = useState(0);
   const reparseFieldUndoRef = useRef<Map<string, () => void>>(new Map());
   const queuedReparseFileRef = useRef<File | null>(null);
   const [parseElapsedSec, setParseElapsedSec] = useState(0);
@@ -710,14 +714,14 @@ function LoadWorkspacePage() {
       setRevisedPdfPaths(
         Array.from({ length: result.revisedCount }, (_, index) => ({
           href: loadRevisedRateConfirmationPdfDownloadPath(loadIdFromRoute, index + 1),
-          label: `Revised PDF ${index + 1}`,
+          label: `Revised RC ${index + 1}`,
         })),
       );
     });
     return () => {
       cancelled = true;
     };
-  }, [workspaceMode, loadIdFromRoute, replaceWorkspacePdfPreviewUrl]);
+  }, [workspaceMode, loadIdFromRoute, replaceWorkspacePdfPreviewUrl, attachRevisionEpoch]);
 
   const restoreDraftPdfArtifacts = useCallback(
     async (draft: LoadWorkspaceDraft) => {
@@ -2360,6 +2364,36 @@ function LoadWorkspacePage() {
     reparseFieldUndoRef.current.delete(change.field);
   }
 
+  async function onAttachRevisedPdf(file: File) {
+    if (!load || loadIsCancelled) return;
+    setAttachBusy(true);
+    setToolbarMessage(null);
+    try {
+      const result = await attachRevisedRateConfirmation(load.id, file);
+      setAttachRevisionEpoch((n) => n + 1);
+      const pdf = await fetchLoadRateConfirmationPdfObjectUrl(load.id);
+      setRevisedPdfPaths(
+        Array.from({ length: pdf.revisedCount }, (_, index) => ({
+          href: loadRevisedRateConfirmationPdfDownloadPath(load.id, index + 1),
+          label: `Revised RC ${index + 1}`,
+        })),
+      );
+      setToolbarMessage({
+        text: result.stored_new
+          ? `${result.message} (revision ${result.revision_index ?? result.revised_count})`
+          : result.message,
+        tone: result.stored_new ? "success" : "neutral",
+      });
+    } catch (e: unknown) {
+      setToolbarMessage({
+        text: formatApiErrorMessage(e, "Could not attach that PDF"),
+        tone: "error",
+      });
+    } finally {
+      setAttachBusy(false);
+    }
+  }
+
   async function onReparsePdf(file: File) {
     if (!load || loadIsCancelled) return;
     // A new attempt invalidates the previous PDF proposal, even if parsing fails.
@@ -2901,6 +2935,18 @@ function LoadWorkspacePage() {
           ) : workspaceMode === "manual" || loadIsCancelled ? null : (
             <>
               <input
+                ref={attachInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                aria-hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void onAttachRevisedPdf(f);
+                }}
+              />
+              <input
                 ref={reparseInputRef}
                 type="file"
                 accept="application/pdf,.pdf"
@@ -2912,11 +2958,19 @@ function LoadWorkspacePage() {
                   if (f) void onReparsePdf(f);
                 }}
               />
+              <button
+                type="button"
+                className={toolBtnSecondary}
+                disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy || attachBusy}
+                onClick={() => attachInputRef.current?.click()}
+              >
+                {attachBusy ? "Attaching…" : "Attach revised PDF"}
+              </button>
               {reparseDialogOpen ? null : (
                 <button
                   type="button"
                   className={toolBtnSecondary}
-                  disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy}
+                  disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy || attachBusy}
                   onClick={() => reparseInputRef.current?.click()}
                 >
                   {parseBusy ? "Reading PDF…" : "Re-parse load"}

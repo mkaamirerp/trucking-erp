@@ -1881,6 +1881,31 @@ export type LoadReparseProposal = {
   expires_at: number;
 };
 
+/** Attach a revised rate confirmation PDF without changing load business fields (Milestone B1). */
+export type LoadRevisedAttachmentResult = {
+  load_id: number;
+  pdf_reuse_status: string;
+  stored_new: boolean;
+  revised_count: number;
+  revision_index: number | null;
+  sha256: string;
+  filename: string;
+  storage_key: string | null;
+  uploaded_at: string | null;
+  storage_backend: string;
+  message: string;
+};
+
+export async function attachRevisedRateConfirmation(loadId: number, file: File) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetchWithTenant(
+    `${API_BASE}/loads/${loadId}/rate-confirmation-revised-attachment`,
+    { method: "POST", body: fd },
+  );
+  return handle<LoadRevisedAttachmentResult>(res);
+}
+
 /** Suggest differences for a revised PDF. Does not change the load. */
 export async function reparseLoadRateConfirmation(loadId: number, file: File) {
   const fd = new FormData();

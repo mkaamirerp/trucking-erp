@@ -1096,6 +1096,160 @@ async def _sync_verified_parse_json(
     return prior, row
 
 
+async def attach_revised_rate_confirmation_pdf(
+    db: AsyncSession,
+    tenant_id: int,
+    load_id: int,
+    *,
+    pdf_bytes: bytes,
+    filename: str,
+    tenant_slug: str,
+    actor_user_id: int | None = None,
+    request_id: str | None = None,
+    correlation_id: str | None = None,
+    source: str = "ui",
+) -> dict[str, object]:
+    """Store a new revised RC PDF on the load. Does not mutate load columns or parsed business fields."""
+    import copy
+    import hashlib
+    from datetime import datetime, timezone
+
+    from app.core.config import settings
+    from app.core.storage import get_storage
+    from app.services.load_parser_duplicate_precheck import (
+        DuplicatePrecheckUnavailable,
+        find_exact_pdf_duplicate_candidates,
+    )
+    from app.services.load_workspace_draft_document import (
+        append_revised_pdf,
+        classify_load_pdf_reuse,
+        revised_pdf_records,
+    )
+    from app.services.load_workspace_draft_storage import STORAGE_MODULE
+
+    load = await get_load(db, tenant_id, load_id)
+    if not load:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Load not found")
+    _reject_commercial_mutation_if_cancelled(load)
+
+    row = await db.scalar(
+        select(LoadCommercialEvidence).where(
+            LoadCommercialEvidence.tenant_id == tenant_id,
+            LoadCommercialEvidence.load_id == load_id,
+            LoadCommercialEvidence.evidence_kind == "rate_confirmation_pdf",
+        )
+    )
+    if row is None or not isinstance(row.accepted_parse_json, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This load has no rate confirmation evidence to attach a revision to.",
+        )
+
+    digest = hashlib.sha256(pdf_bytes).hexdigest()
+    reuse_status = classify_load_pdf_reuse(row, pdf_bytes)
+    storage_backend = (settings.storage_provider or "local").lower()
+    prior_records = revised_pdf_records(row.accepted_parse_json)
+
+    if reuse_status != "new_revision":
+        message = "This PDF is already accepted on this load."
+        if reuse_status == "existing_prior_revision":
+            message = "This PDF is a previously accepted revision; no new attachment was stored."
+        return {
+            "load_id": load_id,
+            "pdf_reuse_status": reuse_status,
+            "stored_new": False,
+            "revised_count": len(prior_records),
+            "revision_index": None,
+            "sha256": digest,
+            "filename": filename or "revised-rate-confirmation.pdf",
+            "storage_key": None,
+            "uploaded_at": None,
+            "storage_backend": storage_backend,
+            "message": message,
+        }
+
+    try:
+        other_loads = await find_exact_pdf_duplicate_candidates(
+            db, tenant_id=tenant_id, pdf_bytes=pdf_bytes, exclude_load_id=load_id
+        )
+    except DuplicatePrecheckUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Duplicate check unavailable; attachment was not stored.",
+        ) from exc
+    if other_loads:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This PDF matches a different load. Nothing was stored.",
+        )
+
+    prior_json = copy.deepcopy(row.accepted_parse_json)
+    stored = await get_storage().save_bytes(
+        tenant_slug,
+        STORAGE_MODULE,
+        "load_revised_rc",
+        str(load_id),
+        pdf_bytes,
+        filename_hint=filename or "revised-rate-confirmation.pdf",
+        content_type="application/pdf",
+    )
+    uploaded_at = datetime.now(timezone.utc).isoformat()
+    verified = copy.deepcopy(prior_json)
+    append_revised_pdf(
+        verified,
+        prior_json,
+        {
+            "storage_key": stored.storage_key,
+            "sha256": stored.sha256,
+            "filename": stored.original_filename or filename,
+            "uploaded_at": uploaded_at,
+        },
+    )
+    row.accepted_parse_json = verified
+    revision_index = len(revised_pdf_records(verified))
+
+    await _write_load_audit(
+        db,
+        tenant_id=tenant_id,
+        load=load,
+        action="load_revised_rc_attached",
+        actor_user_id=actor_user_id,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        source=source,
+        changed_fields=None,
+        context_json={
+            "pdf_sha256": stored.sha256,
+            "revision_index": revision_index,
+            "storage_key": stored.storage_key,
+            "filename": stored.original_filename or filename,
+        },
+        reason_note=None,
+        best_effort=False,
+    )
+
+    try:
+        await db.commit()
+    except Exception:
+        row.accepted_parse_json = prior_json
+        await db.rollback()
+        raise
+
+    return {
+        "load_id": load_id,
+        "pdf_reuse_status": reuse_status,
+        "stored_new": True,
+        "revised_count": revision_index,
+        "revision_index": revision_index,
+        "sha256": stored.sha256,
+        "filename": stored.original_filename or filename,
+        "storage_key": stored.storage_key,
+        "uploaded_at": uploaded_at,
+        "storage_backend": storage_backend,
+        "message": "Revised rate confirmation attached.",
+    }
+
+
 async def update_load(
     db: AsyncSession,
     tenant_id: int,

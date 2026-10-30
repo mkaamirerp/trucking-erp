@@ -20,7 +20,11 @@ from app.schemas.load import (
     LoadResponse,
     LoadUpdate,
 )
-from app.schemas.load_document_parse import LoadDocumentParseResponse, LoadReparseProposal
+from app.schemas.load_document_parse import (
+    LoadDocumentParseResponse,
+    LoadReparseProposal,
+    LoadRevisedRateConfirmationAttachmentResponse,
+)
 from app.schemas.custody import LoadCustodyEventListResponse, LoadCustodySnapshotResponse
 from app.services import future_movement_plans as fmp_service
 from app.services import loads as loads_service
@@ -192,6 +196,37 @@ def _read_reparse_pdf(data: bytes) -> None:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="PDF too large")
     if not data.startswith(b"%PDF-"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expected a PDF file")
+
+
+@router.post(
+    "/{load_id}/rate-confirmation-revised-attachment",
+    response_model=LoadRevisedRateConfirmationAttachmentResponse,
+)
+async def attach_revised_rate_confirmation(
+    load_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    tenant_id: int = Depends(require_tenant),
+    tenant_slug: str = Depends(require_tenant_slug),
+    user=Depends(require_pilot_capability("loads.records", "update")),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Attach a revised rate confirmation PDF. Does not change load business fields."""
+    data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
+    _read_reparse_pdf(data)
+    actor_user_id, _ = _load_audit_actor(user)
+    result = await loads_service.attach_revised_rate_confirmation_pdf(
+        db,
+        tenant_id,
+        load_id,
+        pdf_bytes=data,
+        filename=file.filename or "revised-rate-confirmation.pdf",
+        tenant_slug=tenant_slug,
+        actor_user_id=actor_user_id,
+        request_id=getattr(request.state, "request_id", None),
+        source="ui",
+    )
+    return LoadRevisedRateConfirmationAttachmentResponse.model_validate(result)
 
 
 @router.post("/{load_id}/rate-confirmation-reparse", response_model=LoadReparseProposal)

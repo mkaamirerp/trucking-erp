@@ -146,6 +146,16 @@ def _rows() -> tuple[RouteBinding, ...]:
             _bind("POST", f"{_API}/loads/{{load_id}}/confirm-document-snapshot", "loads", "loads.documents", "confirm", "write", None),
             _bind(
                 "POST",
+                f"{_API}/loads/{{load_id}}/rate-confirmation-revised-attachment",
+                "loads",
+                "loads.records",
+                "update",
+                "write",
+                None,
+                "Attach revised rate confirmation PDF without changing load fields.",
+            ),
+            _bind(
+                "POST",
                 f"{_API}/loads/{{load_id}}/rate-confirmation-reparse",
                 "loads",
                 "loads.documents",

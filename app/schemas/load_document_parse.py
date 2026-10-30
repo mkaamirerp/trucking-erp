@@ -169,6 +169,22 @@ class LoadReparseProposal(BaseModel):
     expires_at: int
 
 
+class LoadRevisedRateConfirmationAttachmentResponse(BaseModel):
+    """Attach a revised rate confirmation PDF without changing load business fields."""
+
+    load_id: int
+    pdf_reuse_status: str
+    stored_new: bool
+    revised_count: int
+    revision_index: int | None = None
+    sha256: str
+    filename: str
+    storage_key: str | None = None
+    uploaded_at: str | None = None
+    storage_backend: str
+    message: str
+
+
 def strip_nul_bytes_from_json_tree(value: Any) -> Any:
     """PostgreSQL jsonb/text rejects U+0000; PDF text and model output may include NUL."""
     if isinstance(value, str):
