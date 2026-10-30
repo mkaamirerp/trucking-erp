@@ -162,10 +162,19 @@ def _public_request_base_url(request: Request) -> str:
 
 
 
+# Upload handlers write these. Applicant JSON must not create or replace them.
+_SERVER_OWNED_INTAKE_KEYS = frozenset({"files", "documents"})
+
+
 def _merge_applicant_intake_payload(existing: dict | None, incoming: dict) -> dict:
-    """Merge saved intake with incoming keys; skip blank strings so empty form fields do not erase PDF417 data."""
+    """Merge saved intake with incoming keys; skip blank strings so empty form fields do not erase PDF417 data.
+
+    ``files`` and ``documents`` stay as already stored. Applicant intake cannot point them at another file.
+    """
     base = dict(existing or {})
     for key, value in (incoming or {}).items():
+        if key in _SERVER_OWNED_INTAKE_KEYS:
+            continue
         if isinstance(value, str) and value.strip() == "":
             continue
         base[key] = value
@@ -1512,13 +1521,18 @@ async def get_dl_capture_file(
         purpose=TOKEN_PURPOSE_DL_CAPTURE,
         detail=_DL_CAPTURE_INVALID,
     )
-    _require_driver_workflow(app)
-    files = (app.intake_payload or {}).get("files") or {}
-    for _side, meta in files.items():
-        storage_key = _resolve_applicant_dl_serve_key(meta, file_id)
-        if storage_key:
-            return serve_file(storage_key, "applicant_dl", tenant_slug, meta.get("original_filename"))
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if not _is_driver_workflow_application(app):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    response = _serve_application_intake_file(
+        app.intake_payload,
+        file_id,
+        tenant_slug=tenant_slug,
+        application_id=app.id,
+        include_documents=False,
+    )
+    if response is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return response
 
 
 async def _issue_dl_capture_link_for_application(
@@ -1678,22 +1692,22 @@ async def get_applicant_application_file(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Serve an uploaded applicant file (DL image or step-4 document) by token and file_id."""
-    app = await _get_application_by_token(db, tenant_id, token)
-    _require_driver_workflow(app)
-    intake = app.intake_payload or {}
-    # DL files (front/back)
-    files = intake.get("files") or {}
-    for _side, meta in files.items():
-        storage_key = _resolve_applicant_dl_serve_key(meta, file_id)
-        if storage_key:
-            return serve_file(storage_key, "applicant_dl", tenant_slug, meta.get("original_filename"))
-    # Step-4 documents
-    documents = intake.get("documents") or {}
-    for _doc_type, meta in documents.items():
-        if _file_meta_matches(meta, file_id):
-            storage_key = meta.get("storage_key") or file_id
-            return serve_file(storage_key, "applicant_docs", tenant_slug, meta.get("original_filename"))
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    app, access = await _get_application_and_access_by_token(db, tenant_id, token)
+    if not _is_driver_workflow_application(app):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    purpose = getattr(access, "purpose", None) or TOKEN_PURPOSE_INVITE
+    if purpose not in (TOKEN_PURPOSE_INVITE, TOKEN_PURPOSE_DOCUMENT_RESUME):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    response = _serve_application_intake_file(
+        app.intake_payload,
+        file_id,
+        tenant_slug=tenant_slug,
+        application_id=app.id,
+        include_documents=True,
+    )
+    if response is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    return response
 
 
 _ALLOWED_DOC_TYPES = frozenset({
@@ -1793,6 +1807,84 @@ def _resolve_applicant_dl_serve_key(meta: dict, file_id: str) -> str | None:
     if meta.get("dl_preprocess_status") == "PROCESSED" and meta.get("enh_file_id"):
         return str(meta["enh_file_id"])
     return str(meta.get("storage_key") or meta.get("file_id") or file_id)
+
+
+def _storage_key_bound_to_application(
+    storage_key: object,
+    *,
+    tenant_slug: str,
+    application_id: int,
+    module: str,
+) -> str | None:
+    """Return ``storage_key`` when it belongs to this tenant application.
+
+    Full keys must be ``{tenant_slug}/{module}/application/{application_id}/{filename}``.
+    A single path segment is a legacy flat filename for that module. Anything else,
+    including another application, another tenant, or a path escape, is refused.
+    """
+    if not isinstance(storage_key, str):
+        return None
+    key = storage_key.strip()
+    if not key or "\x00" in key or "\\" in key or ":" in key or key.startswith("/"):
+        return None
+    parts = key.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None
+    if len(parts) == 1:
+        return key
+    if parts[:4] != [tenant_slug, module, "application", str(application_id)]:
+        return None
+    if len(parts) != 5:
+        return None
+    return key
+
+
+def _download_filename(meta: dict) -> str | None:
+    filename = meta.get("original_filename")
+    if isinstance(filename, str) and filename.strip():
+        return filename
+    return None
+
+
+def _serve_application_intake_file(
+    intake: dict | None,
+    file_id: str,
+    *,
+    tenant_slug: str,
+    application_id: int,
+    include_documents: bool,
+):
+    """Serve one intake file only when the key is recorded here and bound to this application."""
+    data = intake or {}
+    files = data.get("files") or {}
+    if isinstance(files, dict):
+        for meta in files.values():
+            if not isinstance(meta, dict):
+                continue
+            owned = _storage_key_bound_to_application(
+                _resolve_applicant_dl_serve_key(meta, file_id),
+                tenant_slug=tenant_slug,
+                application_id=application_id,
+                module="applicant_dl",
+            )
+            if owned:
+                return serve_file(owned, "applicant_dl", tenant_slug, _download_filename(meta))
+    if not include_documents:
+        return None
+    documents = data.get("documents") or {}
+    if isinstance(documents, dict):
+        for meta in documents.values():
+            if not isinstance(meta, dict) or not _file_meta_matches(meta, file_id):
+                continue
+            owned = _storage_key_bound_to_application(
+                meta.get("storage_key") or file_id,
+                tenant_slug=tenant_slug,
+                application_id=application_id,
+                module="applicant_docs",
+            )
+            if owned:
+                return serve_file(owned, "applicant_docs", tenant_slug, _download_filename(meta))
+    return None
 
 
 @router.get("/applications", response_model=list[PersonApplicationListItem])
@@ -2245,21 +2337,18 @@ async def get_admin_application_file(
     if not is_tenant_admin(current_user.role):
         raise HTTPException(status_code=403, detail="Admin role required")
     app = await _get_person_application_admin_or_404(db, tenant_id, application_id)
-    _require_driver_workflow(app)
-    intake = app.intake_payload or {}
-    # DL files (front/back)
-    files = intake.get("files") or {}
-    for _side, meta in files.items():
-        storage_key = _resolve_applicant_dl_serve_key(meta, file_id)
-        if storage_key:
-            return serve_file(storage_key, "applicant_dl", tenant_slug, meta.get("original_filename"))
-    # Step-4 documents
-    documents = intake.get("documents") or {}
-    for _doc_type, meta in documents.items():
-        if _file_meta_matches(meta, file_id):
-            storage_key = meta.get("storage_key") or file_id
-            return serve_file(storage_key, "applicant_docs", tenant_slug, meta.get("original_filename"))
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    if not _is_driver_workflow_application(app):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    response = _serve_application_intake_file(
+        app.intake_payload,
+        file_id,
+        tenant_slug=tenant_slug,
+        application_id=app.id,
+        include_documents=True,
+    )
+    if response is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found for this application")
+    return response
 
 
 @router.post(

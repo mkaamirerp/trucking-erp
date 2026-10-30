@@ -39,6 +39,36 @@ class StoredFile:
     sha256: str
 
 
+class StorageKeyError(ValueError):
+    """Storage key is absolute, traverses, or otherwise escapes its allowed root."""
+
+
+def _assert_safe_storage_key(storage_key: str) -> None:
+    """Reject absolute paths, null bytes, and parent-directory segments.
+
+    Legitimate keys are a legacy flat filename or a relative tenant path. ``..``
+    as a path segment is never a storage key.
+    """
+    if not isinstance(storage_key, str) or storage_key == "" or "\x00" in storage_key or "\\" in storage_key:
+        raise StorageKeyError("invalid storage key")
+    if storage_key.startswith("/"):
+        raise StorageKeyError("invalid storage key")
+    if len(storage_key) >= 2 and storage_key[1] == ":":
+        raise StorageKeyError("invalid storage key")
+    parts = storage_key.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise StorageKeyError("invalid storage key")
+
+
+def _path_inside(root: Path, candidate: Path) -> Path:
+    """Resolve ``candidate`` and require it to stay inside ``root`` (symlink-safe)."""
+    root_resolved = root.resolve()
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root_resolved):
+        raise StorageKeyError("invalid storage key")
+    return resolved
+
+
 def _safe_filename(name: str | None) -> str:
     if not name:
         return "upload"
@@ -158,11 +188,20 @@ class LocalStorageBackend(StorageBackend):
         return Path(base).resolve()
 
     def _key_to_path(self, storage_key: str, module: str | None, tenant_slug: str | None) -> Path:
+        """Map a storage key to a path inside the storage root, or a legacy module dir.
+
+        Keys that contain ``/`` stay under the storage root (tenant/module/... layout),
+        including company documents saved with that layout. A flat key (no ``/``) is a
+        legacy filename and stays inside the module directory. ``company_docs`` may use
+        an external directory from settings; that directory is the root for flat keys only.
+        """
+        _assert_safe_storage_key(storage_key)
         if "/" in storage_key:
-            return self._storage_root() / storage_key
+            root = self._storage_root()
+            return _path_inside(root, root / storage_key)
         mod = module or "driver_docs"
         base = self._module_dir(mod)
-        return base / storage_key
+        return _path_inside(base, base / storage_key)
 
     async def save_upload(
         self,
@@ -253,7 +292,10 @@ class LocalStorageBackend(StorageBackend):
         module: str | None = None,
         tenant_slug: str | None = None,
     ) -> bool:
-        path = self._key_to_path(storage_key, module, tenant_slug)
+        try:
+            path = self._key_to_path(storage_key, module, tenant_slug)
+        except StorageKeyError:
+            return False
         return path.is_file()
 
     def delete(
@@ -262,7 +304,10 @@ class LocalStorageBackend(StorageBackend):
         module: str | None = None,
         tenant_slug: str | None = None,
     ) -> None:
-        path = self._key_to_path(storage_key, module, tenant_slug)
+        try:
+            path = self._key_to_path(storage_key, module, tenant_slug)
+        except StorageKeyError:
+            return
         if path.is_file():
             path.unlink()
 
@@ -283,6 +328,7 @@ class S3StorageBackend(StorageBackend):
         self._prefix = (settings.s3_prefix or "").rstrip("/")
 
     def _full_key(self, storage_key: str, module: str | None, tenant_slug: str | None) -> str:
+        _assert_safe_storage_key(storage_key)
         if "/" in storage_key:
             k = storage_key
         else:
@@ -392,7 +438,10 @@ class S3StorageBackend(StorageBackend):
         module: str | None = None,
         tenant_slug: str | None = None,
     ) -> bool:
-        full_key = self._full_key(storage_key, module, tenant_slug)
+        try:
+            full_key = self._full_key(storage_key, module, tenant_slug)
+        except StorageKeyError:
+            return False
         try:
             self._client.head_object(Bucket=self._bucket, Key=full_key)
             return True
@@ -405,7 +454,10 @@ class S3StorageBackend(StorageBackend):
         module: str | None = None,
         tenant_slug: str | None = None,
     ) -> None:
-        full_key = self._full_key(storage_key, module, tenant_slug)
+        try:
+            full_key = self._full_key(storage_key, module, tenant_slug)
+        except StorageKeyError:
+            return
         try:
             self._client.delete_object(Bucket=self._bucket, Key=full_key)
         except Exception:
@@ -787,12 +839,23 @@ def serve_file(
     backend = get_storage()
     ct = content_type or _content_type_from_suffix(storage_key)
     fname = filename or Path(storage_key).name or "file"
+    try:
+        _assert_safe_storage_key(storage_key)
+    except StorageKeyError:
+        raise HTTPException(status_code=404, detail="File not found")
     if isinstance(backend, LocalStorageBackend):
-        path = backend._key_to_path(storage_key, module, tenant_slug)
+        try:
+            path = backend._key_to_path(storage_key, module, tenant_slug)
+        except StorageKeyError:
+            raise HTTPException(status_code=404, detail="File not found")
         if not path.is_file():
             raise HTTPException(status_code=404, detail="File not found")
         return FileResponse(path, media_type=ct, filename=fname, content_disposition_type="inline")
-    if not backend.exists(storage_key, module, tenant_slug):
+    try:
+        found = backend.exists(storage_key, module, tenant_slug)
+    except StorageKeyError:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not found:
         raise HTTPException(status_code=404, detail="File not found")
     headers = {"Content-Disposition": f'inline; filename="{fname}"'}
     return StreamingResponse(
@@ -935,8 +998,15 @@ def download_response(
     fname = filename or Path(storage_key).name or "document.pdf"
     if disposition not in ("attachment", "inline"):
         disposition = "attachment"
+    try:
+        _assert_safe_storage_key(storage_key)
+    except StorageKeyError:
+        raise HTTPException(status_code=404, detail="Document file not found")
     if isinstance(backend, LocalStorageBackend):
-        path = backend._key_to_path(storage_key, module, tenant_slug)
+        try:
+            path = backend._key_to_path(storage_key, module, tenant_slug)
+        except StorageKeyError:
+            raise HTTPException(status_code=404, detail="Document file not found")
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Document file not found")
         return FileResponse(
@@ -945,7 +1015,11 @@ def download_response(
             filename=fname,
             content_disposition_type=disposition,
         )
-    if not backend.exists(storage_key, module, tenant_slug):
+    try:
+        found = backend.exists(storage_key, module, tenant_slug)
+    except StorageKeyError:
+        raise HTTPException(status_code=404, detail="Document file not found")
+    if not found:
         raise HTTPException(status_code=404, detail="Document file not found")
     headers = {"Content-Disposition": f'{disposition}; filename="{fname}"'}
     return StreamingResponse(

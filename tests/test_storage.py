@@ -8,12 +8,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import UploadFile
 
+from fastapi import HTTPException
+
 from app.core.storage import (
+    StorageKeyError,
     build_storage_key,
     get_storage,
     LocalStorageBackend,
     S3StorageBackend,
     StoredFile,
+    serve_file,
 )
 
 
@@ -191,3 +195,171 @@ class TestGetStorage:
                     assert isinstance(backend, S3StorageBackend)
         finally:
             storage_mod._engine = orig_engine
+
+
+def _local_backend(tmp_path: Path, *, company_docs_dir: str | None = None) -> LocalStorageBackend:
+    patcher = patch("app.core.storage.settings")
+    mock_settings = patcher.start()
+    mock_settings.local_storage_dir = str(tmp_path / "storage")
+    mock_settings.company_docs_dir = company_docs_dir
+    mock_settings.storage_provider = "local"
+    backend = LocalStorageBackend()
+    backend._test_patcher = patcher  # type: ignore[attr-defined]
+    return backend
+
+
+def _stop_backend(backend: LocalStorageBackend) -> None:
+    patcher = getattr(backend, "_test_patcher", None)
+    if patcher is not None:
+        patcher.stop()
+
+
+class TestLocalPathTraversal:
+    """Local reads stay inside the storage root or the external company-docs directory."""
+
+    def test_traversal_and_absolute_paths_do_not_escape(self, tmp_path: Path) -> None:
+        storage = tmp_path / "storage"
+        storage.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"TOP-SECRET")
+        owned = storage / "pytest" / "applicant_dl" / "application" / "7" / "ok.jpg"
+        owned.parent.mkdir(parents=True)
+        owned.write_bytes(b"owned-bytes")
+        backend = _local_backend(tmp_path)
+        try:
+            assert backend.read_bytes(
+                "pytest/applicant_dl/application/7/ok.jpg", "applicant_dl", "pytest"
+            ) == b"owned-bytes"
+            for bad in (
+                "../secret.txt",
+                "pytest/../../secret.txt",
+                "pytest/applicant_dl/application/7/../../../../secret.txt",
+                str(secret),
+                "/etc/passwd",
+                "..",
+                "pytest/../secret.txt",
+            ):
+                with pytest.raises(StorageKeyError):
+                    backend.read_bytes(bad, "applicant_dl", "pytest")
+                assert backend.exists(bad, "applicant_dl", "pytest") is False
+            assert secret.read_bytes() == b"TOP-SECRET"
+        finally:
+            _stop_backend(backend)
+
+    def test_symlink_outside_root_is_refused(self, tmp_path: Path) -> None:
+        storage = tmp_path / "storage"
+        outside = tmp_path / "outside.txt"
+        outside.write_bytes(b"LINKED-SECRET")
+        link_dir = storage / "pytest" / "applicant_dl" / "application" / "7"
+        link_dir.mkdir(parents=True)
+        link = link_dir / "link.jpg"
+        link.symlink_to(outside)
+        backend = _local_backend(tmp_path)
+        try:
+            with pytest.raises(StorageKeyError):
+                backend.read_bytes(
+                    "pytest/applicant_dl/application/7/link.jpg", "applicant_dl", "pytest"
+                )
+            assert outside.read_bytes() == b"LINKED-SECRET"
+        finally:
+            _stop_backend(backend)
+
+    def test_legacy_flat_filename_and_external_company_docs(self, tmp_path: Path) -> None:
+        storage = tmp_path / "storage"
+        external = tmp_path / "external_company_docs"
+        external.mkdir()
+        (external / "legacy-w9.pdf").write_bytes(b"w9-bytes")
+        backend = _local_backend(tmp_path, company_docs_dir=str(external))
+        try:
+            assert backend.read_bytes("legacy-w9.pdf", module="company_docs", tenant_slug="pytest") == b"w9-bytes"
+            legacy_dl = storage / "driver_docs" / "applicant_dl" / "old-license.jpg"
+            legacy_dl.parent.mkdir(parents=True)
+            legacy_dl.write_bytes(b"legacy-dl")
+            assert backend.read_bytes("old-license.jpg", module="applicant_dl", tenant_slug="pytest") == b"legacy-dl"
+            full = storage / "pytest" / "company_docs" / "company" / "3" / "uuid.pdf"
+            full.parent.mkdir(parents=True)
+            full.write_bytes(b"full-company")
+            assert (
+                backend.read_bytes(
+                    "pytest/company_docs/company/3/uuid.pdf", module="company_docs", tenant_slug="pytest"
+                )
+                == b"full-company"
+            )
+            secret = tmp_path / "secret.txt"
+            secret.write_bytes(b"NO")
+            with pytest.raises(StorageKeyError):
+                backend.read_bytes("../secret.txt", module="company_docs", tenant_slug="pytest")
+            with pytest.raises(StorageKeyError):
+                backend.read_bytes(str(secret), module="company_docs", tenant_slug="pytest")
+        finally:
+            _stop_backend(backend)
+
+    def test_serve_file_traversal_is_404(self, tmp_path: Path) -> None:
+        import app.core.storage as storage_mod
+
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"TOP-SECRET")
+        backend = _local_backend(tmp_path)
+        orig = storage_mod._engine
+        storage_mod._engine = backend
+        try:
+            with pytest.raises(HTTPException) as exc:
+                serve_file("../secret.txt", "applicant_dl", "pytest")
+            assert exc.value.status_code == 404
+            with pytest.raises(HTTPException) as exc_abs:
+                serve_file(str(secret), "driver_docs", "pytest")
+            assert exc_abs.value.status_code == 404
+        finally:
+            storage_mod._engine = orig
+            _stop_backend(backend)
+
+
+class TestS3KeyAuthorization:
+    """S3 keeps tenant/UUID keys. Traversal never becomes a GetObject."""
+
+    def _backend(self, prefix: str = "") -> S3StorageBackend:
+        backend = S3StorageBackend.__new__(S3StorageBackend)
+        backend._prefix = prefix
+        backend._bucket = "test-bucket"
+        backend._client = MagicMock()
+        return backend
+
+    def test_full_key_preserves_tenant_layout_and_legacy_prefix(self) -> None:
+        backend = self._backend()
+        owned = "pytest/applicant_dl/application/12/aabbccddeeff00112233445566778899.jpg"
+        assert backend._full_key(owned, "applicant_dl", "pytest") == owned
+        assert backend._full_key("old.pdf", "applicant_docs", "pytest") == "pytest/applicant_docs/legacy/0/old.pdf"
+        prefixed = self._backend("root")
+        assert prefixed._full_key(owned, "applicant_dl", "pytest") == f"root/{owned}"
+
+    def test_traversal_does_not_call_s3(self) -> None:
+        backend = self._backend()
+        for bad in ("../secret.txt", "/etc/passwd", "pytest/../../other/secret.txt", ".."):
+            with pytest.raises(StorageKeyError):
+                backend.read_bytes(bad, "applicant_dl", "pytest")
+            assert backend.exists(bad, "applicant_dl", "pytest") is False
+        backend._client.get_object.assert_not_called()
+        backend._client.head_object.assert_not_called()
+
+    def test_serve_file_streams_safe_key_and_404s_traversal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import app.core.storage as storage_mod
+
+        backend = MagicMock()
+        backend.exists.return_value = True
+        backend.stream_chunks.return_value = iter([b"owned-bytes"])
+        monkeypatch.setattr(storage_mod, "get_storage", lambda: backend)
+        response = serve_file(
+            "pytest/applicant_docs/application/4/abc.pdf",
+            "applicant_docs",
+            "pytest",
+        )
+        assert response.status_code == 200
+        backend.exists.assert_called_once()
+        backend.stream_chunks.assert_called_once()
+        backend.exists.reset_mock()
+        backend.stream_chunks.reset_mock()
+        with pytest.raises(HTTPException) as exc:
+            serve_file("../../etc/passwd", "applicant_docs", "pytest")
+        assert exc.value.status_code == 404
+        backend.exists.assert_not_called()
+        backend.stream_chunks.assert_not_called()
