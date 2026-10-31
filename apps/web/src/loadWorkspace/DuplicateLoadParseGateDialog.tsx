@@ -1,6 +1,6 @@
 import type { DuplicateLoadCandidate } from "@/api";
 import { OPS } from "@/routes";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 export type DuplicateLoadParseGateLocationState = {
   reparseRateConfirmationFile?: File;
@@ -27,6 +27,7 @@ export function DuplicateLoadParseGateDialog({
   onClose,
   onReparseExistingLoad,
 }: Props) {
+  const navigate = useNavigate();
   const primary = candidates[0];
   if (!primary) {
     return null;
@@ -85,9 +86,12 @@ export function DuplicateLoadParseGateDialog({
             type="button"
             disabled={busy}
             className="inline-flex items-center justify-center rounded-md bg-[var(--trk-heading)] px-3 py-2 text-sm font-semibold text-[var(--trk-bg)] hover:brightness-110 disabled:opacity-50"
-            onClick={() => onReparseExistingLoad(primary, file)}
+            onClick={() => {
+              onClose();
+              navigate(OPS.LOAD_DETAIL(primary.load_id));
+            }}
           >
-            Re-parse this load
+            Open that load
           </button>
         </div>
       </div>

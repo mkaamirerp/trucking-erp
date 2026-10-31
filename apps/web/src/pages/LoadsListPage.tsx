@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import OperatorLoadStatusChip from "@/components/OperatorLoadStatusChip";
 import {
   devPlaygroundResetLoadsAndTrips,
@@ -37,6 +37,10 @@ const LOAD_LIST_DEFAULT_STATUSES = [
 
 export default function LoadsListPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const loadReturnState = { returnTo: location.pathname + location.search };
+  const openLoadDetail = (loadId: number) =>
+    navigate(OPS.LOAD_DETAIL(loadId), { state: loadReturnState });
   const { me } = useMe();
   const demoSlug =
     getTenantSlugFromHost() === "demo" ||
@@ -317,7 +321,7 @@ export default function LoadsListPage() {
                       row.kind === "workspace_draft" && row.workspaceDraftId
                         ? navigate(OPS.LOAD_DRAFT(row.workspaceDraftId))
                         : row.loadId != null
-                          ? navigate(OPS.LOAD_DETAIL(row.loadId))
+                          ? openLoadDetail(row.loadId)
                           : undefined
                     }
                   >
@@ -371,7 +375,7 @@ export default function LoadsListPage() {
                     <tr
                       key={row.key}
                       className="cursor-pointer border-b border-[var(--trk-border)] hover:bg-[var(--trk-surface)]"
-                      onClick={() => (row.loadId != null ? navigate(OPS.LOAD_DETAIL(row.loadId)) : undefined)}
+                      onClick={() => (row.loadId != null ? openLoadDetail(row.loadId) : undefined)}
                     >
                       <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text)]">{row.loadNumber}</td>
                       <td className="whitespace-nowrap px-2 py-1.5 text-xs text-[var(--trk-text-muted)]">{row.tripNumber}</td>

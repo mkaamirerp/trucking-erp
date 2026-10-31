@@ -399,6 +399,13 @@ function formatApiErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Re-parse parked by Amir; code kept for later */
+const REPARSE_UI_ENABLED = false;
+
+type LoadWorkspaceLocationState = DuplicateLoadParseGateLocationState & {
+  returnTo?: string;
+};
+
 function LoadWorkspacePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -2331,6 +2338,7 @@ function LoadWorkspacePage() {
   }
 
   useEffect(() => {
+    if (!REPARSE_UI_ENABLED) return;
     const st = location.state as DuplicateLoadParseGateLocationState | null;
     const file = st?.reparseRateConfirmationFile;
     if (!file) return;
@@ -2339,6 +2347,7 @@ function LoadWorkspacePage() {
   }, [location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
+    if (!REPARSE_UI_ENABLED) return;
     if (workspaceMode !== "detail" || !load || loadIsCancelled) return;
     const file = queuedReparseFileRef.current;
     if (!file) return;
@@ -2407,6 +2416,8 @@ function LoadWorkspacePage() {
           tone: "warning",
         });
       }
+      const returnTo = (location.state as LoadWorkspaceLocationState | null)?.returnTo;
+      navigate(returnTo?.trim() ? returnTo : OPS.LOADS, { replace: true });
     } catch (e: unknown) {
       setSaveSucceeded(false);
       const c = parseLoadVersionConflict(e);
@@ -2883,9 +2894,9 @@ function LoadWorkspacePage() {
                 disabled={saving || markReadyBusy || cancelLoadBusy || parseBusy || attachBusy}
                 onClick={() => attachInputRef.current?.click()}
               >
-                {attachBusy ? "Attaching…" : "Attach revised PDF"}
+                {attachBusy ? "Attaching…" : "Upload Revised RC"}
               </button>
-              {reparseDialogOpen ? null : (
+              {REPARSE_UI_ENABLED && !reparseDialogOpen ? (
                 <button
                   type="button"
                   className={toolBtnSecondary}
@@ -2894,7 +2905,7 @@ function LoadWorkspacePage() {
                 >
                   {parseBusy ? "Reading PDF…" : "Re-parse load"}
                 </button>
-              )}
+              ) : null}
               <button
                 type="button"
                 className={clsx(
@@ -3194,7 +3205,7 @@ function LoadWorkspacePage() {
       </div>
       ) : null}
 
-      {reparseDialogOpen && reparseProposal ? (
+      {REPARSE_UI_ENABLED && reparseDialogOpen && reparseProposal ? (
         <ReparseChangesDialog
           changes={reparseProposal.changes}
           summary={reparseProposal.summary}

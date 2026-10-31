@@ -2,7 +2,7 @@
  * Trip workspace: planned container, member loads, cancellation, and equipment assignment (Slice 14A+).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   addLoadToTrip,
   cancelTrip,
@@ -207,6 +207,8 @@ export default function TripWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const tripId = Number(id);
   const navigate = useNavigate();
+  const location = useLocation();
+  const loadLinkState = { returnTo: location.pathname + location.search };
   const [trip, setTrip] = useState<TripDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -868,6 +870,7 @@ export default function TripWorkspacePage() {
                       <div className="min-w-0">
                         <Link
                           to={OPS.LOAD_DETAIL(m.load_id)}
+                          state={loadLinkState}
                           className="font-medium text-[var(--trk-heading)] hover:underline"
                         >
                           {m.load_number}
@@ -912,6 +915,7 @@ export default function TripWorkspacePage() {
                         <div className="min-w-0">
                           <Link
                             to={OPS.LOAD_DETAIL(m.load_id)}
+                            state={loadLinkState}
                             className="text-sm font-medium text-[var(--trk-text-muted)] hover:text-[var(--trk-heading)] hover:underline"
                           >
                             {m.load_number || `Load #${m.load_id}`}

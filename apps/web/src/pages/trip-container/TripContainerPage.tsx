@@ -3,7 +3,7 @@
  * Trip APIs only; no dispatch board; no drawer.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { clsx } from "clsx";
 import {
   addLoadToTrip,
@@ -470,6 +470,8 @@ function ExpandedLoadSummary({
   membershipStatus: string;
   onStopsChanged: () => Promise<void>;
 }) {
+  const location = useLocation();
+  const loadLinkState = { returnTo: location.pathname + location.search };
   const stops = sortedStops(load.stops);
   const docSnap = load.document_snapshot_confirmed_at
     ? `Snapshot confirmed ${new Date(load.document_snapshot_confirmed_at).toLocaleString()}`
@@ -536,6 +538,7 @@ function ExpandedLoadSummary({
       <LoadFutureOpsBar />
       <Link
         to={OPS.LOAD_DETAIL(load.id)}
+        state={loadLinkState}
         className="inline-block rounded border border-[var(--trk-heading)]/40 px-2 py-0.5 text-[10px] font-semibold text-[var(--trk-heading)]"
       >
         Open full Load Workspace
@@ -1375,6 +1378,8 @@ function LoadStackBlock({
   btn: string;
   btnDanger: string;
 }) {
+  const location = useLocation();
+  const loadLinkState = { returnTo: location.pathname + location.search };
   const broker = m.broker_name_snapshot ?? load?.broker_name_snapshot ?? load?.broker?.name ?? "—";
   const ref = m.broker_load_reference ?? load?.broker_load_reference ?? "—";
   const rateLine = `${formatMoney(m.rate ?? load?.rate)}${m.customer_rate != null || load?.customer_rate != null ? ` · cust ${formatMoney(m.customer_rate ?? load?.customer_rate)}` : ""}`;
@@ -1452,7 +1457,7 @@ function LoadStackBlock({
           </span>
         </div>
         <div className="flex flex-wrap gap-1 pt-1" onClick={(e) => e.stopPropagation()}>
-          <Link to={OPS.LOAD_DETAIL(m.load_id)} className={btn} onClick={(e) => e.stopPropagation()}>
+          <Link to={OPS.LOAD_DETAIL(m.load_id)} state={loadLinkState} className={btn} onClick={(e) => e.stopPropagation()}>
             Open in Load Workspace ↗
           </Link>
           {memOpen ? (
