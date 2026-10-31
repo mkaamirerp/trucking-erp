@@ -607,6 +607,7 @@ async def create_load(
     payload: LoadCreate,
     *,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
     request_id: str | None = None,
     source: str = "api",
 ) -> Load:
@@ -622,6 +623,7 @@ async def create_load(
         load=out,
         action="load_created",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=request_id,
         correlation_id=corr,
         source=source,
@@ -629,13 +631,18 @@ async def create_load(
         context_json={"load_number": out.load_number},
         best_effort=False,
     )
-    if stop_create_diff is not None:
+    if stop_create_diff is not None and (
+        stop_create_diff.get("added")
+        or stop_create_diff.get("removed")
+        or stop_create_diff.get("updated")
+    ):
         await _write_load_audit(
             db,
             tenant_id=tenant_id,
             load=out,
             action="load_stops_changed",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1105,6 +1112,7 @@ async def attach_revised_rate_confirmation_pdf(
     filename: str,
     tenant_slug: str,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
     request_id: str | None = None,
     correlation_id: str | None = None,
     source: str = "ui",
@@ -1214,6 +1222,7 @@ async def attach_revised_rate_confirmation_pdf(
         load=load,
         action="load_revised_rc_attached",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=request_id,
         correlation_id=correlation_id,
         source=source,
@@ -1257,6 +1266,7 @@ async def update_load(
     payload: LoadUpdate,
     *,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
     request_id: str | None = None,
     correlation_id: str | None = None,
     source: str = "ui",
@@ -1454,6 +1464,7 @@ async def update_load(
             load=out,
             action="load_updated",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1461,13 +1472,18 @@ async def update_load(
             best_effort=False,
         )
 
-    if stop_audit_diff is not None:
+    if stop_audit_diff is not None and (
+        stop_audit_diff.get("added")
+        or stop_audit_diff.get("removed")
+        or stop_audit_diff.get("updated")
+    ):
         await _write_load_audit(
             db,
             tenant_id=tenant_id,
             load=out,
             action="load_stops_changed",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1487,6 +1503,7 @@ async def update_load(
             load=out,
             action="load_status_changed",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1500,6 +1517,7 @@ async def update_load(
                 load=out,
                 action="load_dispatched",
                 actor_user_id=actor_user_id,
+                actor_label=actor_label,
                 request_id=request_id,
                 correlation_id=corr,
                 source=source,
@@ -1514,6 +1532,7 @@ async def update_load(
             load=out,
             action="load_assigned",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1528,6 +1547,7 @@ async def update_load(
             load=out,
             action="customs_broker_changed",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1566,6 +1586,7 @@ async def update_load(
             load=out,
             action="load_reparse_pdf_accepted",
             actor_user_id=actor_user_id,
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=corr,
             source=source,
@@ -1837,6 +1858,7 @@ async def mark_load_ready(
     *,
     expected_concurrency_version: int,
     actor_user_id: int | None = None,
+    actor_label: str | None = None,
     request_id: str | None = None,
     source: str = "api",
 ) -> Load:
@@ -1899,6 +1921,7 @@ async def mark_load_ready(
         load=refreshed,
         action="load_marked_ready",
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=request_id,
         correlation_id=request_id,
         source=source,
@@ -1920,6 +1943,8 @@ async def add_load_note(
     body: str,
     author_user_id: str | None = None,
     *,
+    actor_user_id: int | None = None,
+    actor_label: str | None = None,
     request_id: str | None = None,
     correlation_id: str | None = None,
     source: str = "ui",
@@ -1936,7 +1961,10 @@ async def add_load_note(
         tenant_id=tenant_id,
         load=load,
         action="note_added",
-        actor_user_id=int(author_user_id) if author_user_id is not None and str(author_user_id).isdigit() else None,
+        actor_user_id=actor_user_id
+        if actor_user_id is not None
+        else (int(author_user_id) if author_user_id is not None and str(author_user_id).isdigit() else None),
+        actor_label=actor_label,
         request_id=request_id,
         correlation_id=correlation_id or request_id,
         source=source,
@@ -1968,6 +1996,8 @@ async def confirm_load_customs_document_snapshot(
     expected_concurrency_version: int,
     request_id: str | None = None,
     source: str = "ui",
+    actor_user_id: int | None = None,
+    actor_label: str | None = None,
 ) -> Load:
     load = await get_load(db, tenant_id, load_id)
     if not load:
@@ -2051,7 +2081,10 @@ async def confirm_load_customs_document_snapshot(
             tenant_id=tenant_id,
             load=out,
             action="document_snapshot_confirmed",
-            actor_user_id=int(confirming_user_id) if confirming_user_id and str(confirming_user_id).isdigit() else None,
+            actor_user_id=actor_user_id
+            if actor_user_id is not None
+            else (int(confirming_user_id) if confirming_user_id and str(confirming_user_id).isdigit() else None),
+            actor_label=actor_label,
             request_id=request_id,
             correlation_id=request_id,
             source=source,

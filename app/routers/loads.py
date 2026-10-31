@@ -68,12 +68,13 @@ async def create_load(
     user=Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    actor_user_id, _ = _load_audit_actor(user)
+    actor_user_id, actor_label = _load_audit_actor(user)
     load = await loads_service.create_load(
         db,
         tenant_id,
         payload,
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -201,7 +202,7 @@ async def attach_revised_rate_confirmation(
     """Attach a revised rate confirmation PDF. Does not change load business fields."""
     data = await file.read(_MAX_PARSE_PDF_BYTES + 1)
     _read_reparse_pdf(data)
-    actor_user_id, _ = _load_audit_actor(user)
+    actor_user_id, actor_label = _load_audit_actor(user)
     result = await loads_service.attach_revised_rate_confirmation_pdf(
         db,
         tenant_id,
@@ -210,6 +211,7 @@ async def attach_revised_rate_confirmation(
         filename=file.filename or "revised-rate-confirmation.pdf",
         tenant_slug=tenant_slug,
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -283,13 +285,14 @@ async def save_load_reparse(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid") from exc
     if not isinstance(revised, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Re-parse save body is not valid")
-    actor_user_id, _ = _load_audit_actor(user)
+    actor_user_id, actor_label = _load_audit_actor(user)
     load = await loads_service.update_load(
         db,
         tenant_id,
         load_id,
         update_body,
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
         verified_parse=revised,
@@ -337,13 +340,14 @@ async def update_load(
     user=Depends(require_pilot_capability("loads.records", "update")),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    actor_user_id, _ = _load_audit_actor(user)
+    actor_user_id, actor_label = _load_audit_actor(user)
     load = await loads_service.update_load(
         db,
         tenant_id,
         load_id,
         payload,
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -359,6 +363,7 @@ async def confirm_document_snapshot(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label = _load_audit_actor(user)
     load = await loads_service.confirm_load_customs_document_snapshot(
         db,
         tenant_id,
@@ -367,6 +372,8 @@ async def confirm_document_snapshot(
         expected_concurrency_version=body.expected_concurrency_version,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
     )
     return LoadResponse.model_validate(load)
 
@@ -380,13 +387,14 @@ async def mark_load_ready(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    actor_user_id, _ = _load_audit_actor(user)
+    actor_user_id, actor_label = _load_audit_actor(user)
     load = await loads_service.mark_load_ready(
         db,
         tenant_id,
         load_id,
         expected_concurrency_version=body.expected_concurrency_version,
         actor_user_id=actor_user_id,
+        actor_label=actor_label,
         request_id=getattr(request.state, "request_id", None),
         source="ui",
     )
@@ -569,6 +577,7 @@ async def add_load_note(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_tenant_db),
 ):
+    actor_user_id, actor_label = _load_audit_actor(user)
     note = await loads_service.add_load_note(
         db,
         tenant_id,
@@ -577,6 +586,8 @@ async def add_load_note(
         author_user_id=getattr(user, "user_id", None),
         request_id=getattr(request.state, "request_id", None),
         source="ui",
+        actor_user_id=actor_user_id,
+        actor_label=actor_label,
     )
     return LoadNoteOut.model_validate(note)
 

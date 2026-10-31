@@ -44,6 +44,25 @@ export function formatLoadAuditActor(
   return "System";
 }
 
+export function formatLoadStopsAuditSummary(changedFields: Record<string, unknown>): string {
+  const raw = changedFields.stops;
+  if (!raw || typeof raw !== "object") {
+    return "Stops changed";
+  }
+  const diff = raw as { added?: unknown[]; removed?: unknown[]; updated?: unknown[] };
+  const parts: string[] = [];
+  const updated = Array.isArray(diff.updated) ? diff.updated.length : 0;
+  const added = Array.isArray(diff.added) ? diff.added.length : 0;
+  const removed = Array.isArray(diff.removed) ? diff.removed.length : 0;
+  if (updated > 0) parts.push(`${updated} updated`);
+  if (added > 0) parts.push(`${added} added`);
+  if (removed > 0) parts.push(`${removed} removed`);
+  if (parts.length === 0) {
+    return "Stops changed";
+  }
+  return `Stops: ${parts.join(", ")}`;
+}
+
 export function formatAuditValue(v: unknown): string {
   if (v === null) return "null";
   if (v === undefined) return "—";

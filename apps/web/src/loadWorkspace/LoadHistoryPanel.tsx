@@ -3,6 +3,7 @@ import { listAuditEventsByEntity, type AuditEventRow } from "@/api";
 import {
   formatAuditValue,
   formatLoadAuditActor,
+  formatLoadStopsAuditSummary,
   groupLoadAuditRowsByDay,
   loadAuditActionLabel,
 } from "@/loadWorkspace/loadAuditLabels";
@@ -120,6 +121,11 @@ export default function LoadHistoryPanel({ loadId, open, onClose }: Props) {
                           {formatLoadAuditActor(r)}
                         </p>
                         {r.changed_fields && Object.keys(r.changed_fields).length > 0 ? (
+                          r.action === "load_stops_changed" ? (
+                            <p className="mt-2 text-[11px] text-[var(--trk-text-muted)]">
+                              {formatLoadStopsAuditSummary(r.changed_fields)}
+                            </p>
+                          ) : (
                           <ul className="mt-2 space-y-1 text-[11px]">
                             {Object.entries(r.changed_fields).map(([k, v]) => (
                               <li key={k}>
@@ -140,6 +146,7 @@ export default function LoadHistoryPanel({ loadId, open, onClose }: Props) {
                               </li>
                             ))}
                           </ul>
+                          )
                         ) : null}
                       </li>
                     ))}
