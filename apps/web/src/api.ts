@@ -84,6 +84,33 @@ export type LoadWorkspaceDraftVersionConflictDetail = {
   server_version: number | null;
 };
 
+export const REPARSE_MATCHES_OTHER_LOAD = "REPARSE_MATCHES_OTHER_LOAD" as const;
+
+export function parseReparseOtherLoadMatch(
+  err: unknown,
+): { message: string; candidates: DuplicateLoadCandidate[] } | null {
+  if (!(err instanceof Error) || !err.message) return null;
+  try {
+    const outer = JSON.parse(err.message) as { detail?: unknown };
+    const d = outer.detail;
+    if (d && typeof d === "object" && !Array.isArray(d)) {
+      const rec = d as Record<string, unknown>;
+      if (rec.code === REPARSE_MATCHES_OTHER_LOAD) {
+        const message =
+          typeof rec.message === "string"
+            ? rec.message
+            : "This PDF matches a different load. Nothing was changed.";
+        const candidates = rec.candidates;
+        if (!Array.isArray(candidates)) return null;
+        return { message, candidates: candidates as DuplicateLoadCandidate[] };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export function parseLoadWorkspaceDraftVersionConflict(
   err: unknown,
 ): LoadWorkspaceDraftVersionConflictDetail | null {

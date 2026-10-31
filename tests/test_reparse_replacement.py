@@ -407,6 +407,112 @@ async def test_reparse_uses_existing_parser_and_writes_nothing(monkeypatch: pyte
     assert evidence.accepted_parse_json == before
 
 
+@pytest.mark.asyncio
+async def test_propose_reparse_pre_ai_other_load_raises_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = SimpleNamespace(
+        accepted_parse_json={"extracted": {"rate": "100", "stops": []}},
+        file_sha256=hashlib.sha256(b"%PDF-same").hexdigest(),
+    )
+    db = _ReadDb(evidence)
+    candidates = [
+        {
+            "match_type": "exact_pdf_sha256",
+            "load_id": 42,
+            "load_number": "90042",
+            "broker_name": "Broker",
+            "broker_load_reference": "REF-42",
+            "load_status": "ready",
+            "pickup": "Toronto, ON",
+            "delivery": "Montreal, QC",
+            "trip_id": None,
+            "trip_status": None,
+            "driver_id": 7,
+            "truck_id": None,
+            "trailer_id": None,
+        }
+    ]
+
+    async def other_load(*_args, **_kwargs):
+        return candidates
+
+    monkeypatch.setattr(
+        "app.services.load_parser_duplicate_precheck.find_exact_pdf_duplicate_candidates",
+        other_load,
+    )
+
+    with pytest.raises(LoadReparseError) as raised:
+        await propose_load_reparse(
+            db,
+            tenant_id=1,
+            load_id=9,
+            pdf_bytes=b"%PDF-same",
+            filename="same.pdf",
+        )
+    assert raised.value.status_code == 409
+    assert raised.value.candidates == candidates
+
+
+@pytest.mark.asyncio
+async def test_reparse_route_409_body_includes_other_load_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import BytesIO
+
+    from starlette.datastructures import UploadFile
+
+    from app.routers.loads import reparse_load_rate_confirmation
+
+    candidates = [
+        {
+            "match_type": "exact_pdf_sha256",
+            "load_id": 42,
+            "load_number": "90042",
+            "broker_name": "Broker",
+            "broker_load_reference": "REF-42",
+            "load_status": "ready",
+            "pickup": "Toronto, ON",
+            "delivery": "Montreal, QC",
+            "trip_id": None,
+            "trip_status": None,
+            "driver_id": 7,
+            "truck_id": None,
+            "trailer_id": None,
+        }
+    ]
+
+    async def fake_propose(*_args, **_kwargs):
+        raise LoadReparseError(
+            409,
+            "This PDF matches a different load. Nothing was changed.",
+            candidates=candidates,
+        )
+
+    monkeypatch.setattr("app.routers.loads.propose_load_reparse", fake_propose)
+
+    upload = UploadFile(filename="same.pdf", file=BytesIO(b"%PDF-1.4"))
+
+    class _Db:
+        pass
+
+    with pytest.raises(HTTPException) as raised:
+        await reparse_load_rate_confirmation(
+            load_id=9,
+            file=upload,
+            tenant_id=1,
+            _user=object(),
+            db=_Db(),
+        )
+    assert raised.value.status_code == 409
+    detail = raised.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "REPARSE_MATCHES_OTHER_LOAD"
+    assert detail["candidates"][0]["pickup"] == "Toronto, ON"
+    assert detail["candidates"][0]["delivery"] == "Montreal, QC"
+    assert detail["candidates"][0]["driver_id"] == 7
+
+
 def test_popup_change_and_reparse_do_not_hydrate_or_call_save() -> None:
     page = (ROOT / "apps/web/src/pages/LoadWorkspacePage.tsx").read_text()
     reparse = page[page.index("async function onReparsePdf") : page.index("async function onSave")]

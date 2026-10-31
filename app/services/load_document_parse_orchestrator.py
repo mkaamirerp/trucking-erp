@@ -61,10 +61,17 @@ async def parse_load_workspace_document_orchestrated(
 
 
 class LoadReparseError(Exception):
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        *,
+        candidates: list[dict] | None = None,
+    ) -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        self.candidates = candidates
 
 
 _COMPARE_SCHEMA = {
@@ -264,7 +271,11 @@ async def propose_load_reparse(
     except DuplicatePrecheckUnavailable as exc:
         raise LoadReparseError(503, "Duplicate check unavailable; AI parsing was not started.") from exc
     if other_loads:
-        raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
+        raise LoadReparseError(
+            409,
+            "This PDF matches a different load. Nothing was changed.",
+            candidates=other_loads,
+        )
 
     from app.services.load_document_parse_semantic_llm import LoadDocumentParseProviderError
 
@@ -281,7 +292,11 @@ async def propose_load_reparse(
     except LoadDocumentParseProviderError as exc:
         raise LoadReparseError(503, exc.user_message) from exc
     if (revised.context or {}).get("semantic_outcome") == "blocked_duplicate_review":
-        raise LoadReparseError(409, "This PDF matches a different load. Nothing was changed.")
+        raise LoadReparseError(
+            409,
+            "This PDF matches a different load. Nothing was changed.",
+            candidates=(revised.context or {}).get("duplicate_candidates") or [],
+        )
 
     saved = parse_json_for_compare(evidence.accepted_parse_json)
     revised_document = revised.model_dump(mode="json")

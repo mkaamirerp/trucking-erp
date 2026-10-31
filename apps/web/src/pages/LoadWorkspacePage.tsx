@@ -43,6 +43,7 @@ import {
   cancelLoad,
   markLoadReady,
   parseLoadVersionConflict,
+  parseReparseOtherLoadMatch,
   parseLoadWorkspaceDocument,
   attachRevisedRateConfirmation,
   reparseLoadRateConfirmation,
@@ -106,6 +107,7 @@ import {
   DuplicateLoadParseGateDialog,
   type DuplicateLoadParseGateLocationState,
 } from "@/loadWorkspace/DuplicateLoadParseGateDialog";
+import { ReparseOtherLoadMatchDialog } from "@/loadWorkspace/ReparseOtherLoadMatchDialog";
 import {
   confidenceTierForAppliedLabel,
   parseConfidenceAppliedChipClasses,
@@ -571,6 +573,10 @@ function LoadWorkspacePage() {
   const [reparseProposal, setReparseProposal] = useState<LoadReparseProposal | null>(null);
   const [reparseReason, setReparseReason] = useState("");
   const [reparseDialogOpen, setReparseDialogOpen] = useState(false);
+  const [reparseOtherLoadMatch, setReparseOtherLoadMatch] = useState<{
+    message: string;
+    candidates: DuplicateLoadCandidate[];
+  } | null>(null);
   const [revisedPdfPaths, setRevisedPdfPaths] = useState<{ href: string; label: string }[]>([]);
   const [reparseFile, setReparseFile] = useState<File | null>(null);
   const reparseInputRef = useRef<HTMLInputElement | null>(null);
@@ -2313,6 +2319,11 @@ function LoadWorkspacePage() {
       setReparseReason("");
       setReparseDialogOpen(true);
     } catch (e: unknown) {
+      const otherLoad = parseReparseOtherLoadMatch(e);
+      if (otherLoad) {
+        setReparseOtherLoadMatch(otherLoad);
+        return;
+      }
       setToolbarMessage({ text: formatApiErrorMessage(e, "Could not re-parse that PDF"), tone: "error" });
     } finally {
       setParseBusy(false);
@@ -2691,6 +2702,13 @@ function LoadWorkspacePage() {
           busy={parseBusy}
           onClose={closeDuplicateLoadGate}
           onReparseExistingLoad={startReparseOnExistingLoad}
+        />
+      ) : null}
+      {reparseOtherLoadMatch ? (
+        <ReparseOtherLoadMatchDialog
+          candidates={reparseOtherLoadMatch.candidates}
+          drivers={drivers}
+          onClose={() => setReparseOtherLoadMatch(null)}
         />
       ) : null}
       {softDuplicateReview && !duplicateReview ? (

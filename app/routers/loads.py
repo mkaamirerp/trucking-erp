@@ -249,6 +249,15 @@ async def reparse_load_rate_confirmation(
             filename=file.filename or "upload.pdf",
         )
     except LoadReparseError as exc:
+        if exc.candidates is not None:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={
+                    "code": "REPARSE_MATCHES_OTHER_LOAD",
+                    "message": exc.detail,
+                    "candidates": exc.candidates,
+                },
+            ) from exc
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     except UnsafeLoadPdfError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
