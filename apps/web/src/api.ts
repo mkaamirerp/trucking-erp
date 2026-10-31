@@ -1870,14 +1870,15 @@ export type LoadReparseChange = {
   explanation?: string;
 };
 
-export type LoadParseReferenceResponse = {
-  revision: number;
-  filename: string;
-  pdf_sha256: string;
-  pdf_reuse_status: string;
-  parse: LoadDocumentParseResponse;
-  field_rows: LoadReparseChange[];
-  warnings: string[];
+export type LoadReparseProposal = {
+  changes: LoadReparseChange[];
+  revised_parse: LoadDocumentParseResponse;
+  integrity: string;
+  verdict: "strong" | "needs_confirmation" | "blocked" | string;
+  summary: string;
+  reasons?: string[];
+  acknowledgement_required?: boolean;
+  expires_at: number;
 };
 
 /** Attach a revised rate confirmation PDF without changing load business fields (Milestone B1). */
@@ -1905,17 +1906,44 @@ export async function attachRevisedRateConfirmation(loadId: number, file: File) 
   return handle<LoadRevisedAttachmentResult>(res);
 }
 
-/** Parse an attached revised RC (first parser only). Does not change the load. */
-export async function parseLoadRateConfirmationReference(loadId: number, revision: number) {
+/** Suggest differences for a revised PDF. Does not change the load. */
+export async function reparseLoadRateConfirmation(loadId: number, file: File) {
   const fd = new FormData();
-  fd.append("revision", String(revision));
-  const res = await fetchWithTenant(
-    `${API_BASE}/loads/${loadId}/rate-confirmation-parse-reference`,
-    { method: "POST", body: fd },
-  );
-  return handle<LoadParseReferenceResponse>(res);
+  fd.append("file", file);
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/rate-confirmation-reparse`, {
+    method: "POST",
+    body: fd,
+  });
+  return handle<LoadReparseProposal>(res);
 }
 
+/** Save the form, replace the verified JSON, and store the revised PDF beside the original. */
+export async function saveLoadReparse(
+  loadId: number,
+  file: File,
+  revisedParse: LoadDocumentParseResponse,
+  payload: LoadUpdatePayload,
+  integrity: string,
+  expiresAt: number,
+  acknowledgementRequired: boolean,
+  acknowledgementReason: string,
+) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("payload", JSON.stringify(payload));
+  fd.append("revised_parse", JSON.stringify(revisedParse));
+  fd.append("integrity", integrity);
+  fd.append("expires_at", String(expiresAt));
+  fd.append("acknowledgement_required", acknowledgementRequired ? "true" : "false");
+  fd.append("acknowledgement_reason", acknowledgementReason);
+  const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/rate-confirmation-reparse/save`, {
+    method: "POST",
+    body: fd,
+  });
+  return handle<Load>(res);
+}
+
+/** POST /loads/{id}/mark-ready — draft → ready; requires expected_concurrency_version from last read/save. */
 export async function markLoadReady(loadId: number, expectedConcurrencyVersion: number) {
   const res = await fetchWithTenant(`${API_BASE}/loads/${loadId}/mark-ready`, {
     method: "POST",

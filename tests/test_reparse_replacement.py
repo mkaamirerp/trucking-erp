@@ -12,12 +12,20 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
-pytestmark = pytest.mark.skip(
-    reason="Milestone B2 retired AI JSON compare and reparse save; see tests/test_parse_reference_b2.py.",
+from app.authz.routes import binding_for
+from app.schemas.load import LoadStopCreate
+from app.schemas.load_document_parse import LoadDocumentParseResponse
+from app.services import loads as loads_service
+from app.core.config import settings
+from app.schemas.load import LoadUpdate
+from app.services.load_document_parse_orchestrator import (
+    LoadReparseError,
+    propose_load_reparse,
+    reparse_integrity_token,
+    verify_reparse_integrity,
 )
-
-from app.services.load_document_parse_orchestrator import LoadReparseError
 from app.services.load_workspace_draft_document import (
     extracted_fields_in_draft,
     ground_reparse_changes,

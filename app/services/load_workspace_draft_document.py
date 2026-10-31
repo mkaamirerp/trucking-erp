@@ -1392,11 +1392,6 @@ def _supported_reparse_differences(saved: dict | None, revised: dict | None) -> 
     return rows
 
 
-def build_parse_reference_field_rows(saved: dict | None, revised: dict | None) -> list[dict]:
-    """Deterministic diff rows for Parse PDF review (no AI compare)."""
-    return _supported_reparse_differences(saved, revised)
-
-
 def validate_ai_reparse_changes(saved: dict | None, revised: dict | None, proposed: list) -> list[dict]:
     """Show every supported JSON difference. AI wording is kept only when the documents agree.
 
