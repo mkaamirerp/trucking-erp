@@ -91,8 +91,12 @@ async def parse_pdf_bytes_to_load_document_response(
     continue_anyway: bool = False,
     exclude_load_id: int | None = None,
     incoming_broker_id: int | None = None,
+    attach_pdf: bool = True,
 ) -> LoadDocumentParseResponse:
-    """Parse a rate-confirmation PDF into ``LoadDocumentParseResponse`` (New Load hydration)."""
+    """Parse a rate-confirmation PDF into ``LoadDocumentParseResponse`` (New Load hydration).
+
+    ``attach_pdf=False`` (re-parse) sends the AI the extracted page text only, never the PDF file.
+    """
     _ = forensic_enabled, continue_anyway
     fn = (filename or "upload.pdf")[:512]
     parse_started = time.perf_counter()
@@ -177,7 +181,7 @@ async def parse_pdf_bytes_to_load_document_response(
         content_type="application/pdf",
         size_bytes=len(pdf_bytes),
         acquisition_method=str(acquisition.get("pdf_type") or "digital_text"),
-        include_page_text_in_ai_handoff=False,
+        include_page_text_in_ai_handoff=not attach_pdf,
         page_count=page_count,
     )
 
@@ -206,11 +210,11 @@ async def parse_pdf_bytes_to_load_document_response(
     ai_payload = await client(
         api_key=api_key,
         model=model,
-        system=build_v2_openai_system_prompt(pdf_bytes_attached=True),
-        user_text=build_v2_openai_user_message(handoff, pdf_bytes_attached=True),
+        system=build_v2_openai_system_prompt(pdf_bytes_attached=attach_pdf),
+        user_text=build_v2_openai_user_message(handoff, pdf_bytes_attached=attach_pdf),
         schema=ParseDocumentSemanticModelOutput.model_json_schema(),
         schema_name=_SCHEMA_NAME,
-        input_file_bytes=pdf_bytes,
+        input_file_bytes=pdf_bytes if attach_pdf else None,
         input_filename=fn,
         reasoning_effort=reasoning_effort,
     )

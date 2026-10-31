@@ -42,6 +42,8 @@ REPLACEMENT_PATHS = {
     "app/routers/loads.py",
     "app/schemas/load_document_parse.py",
     "app/services/load_document_parse_orchestrator.py",
+    # attach_pdf on re-parse (authorized): app/services/load_document_parse_rate_con.py
+    "app/services/load_document_parse_rate_con.py",
     "app/services/load_workspace_draft_document.py",
     "app/services/load_workspace_draft_promotion.py",
     "app/services/loads.py",
@@ -1972,5 +1974,5 @@ def test_diff_does_not_touch_email_intake_or_the_original_parser() -> None:
     unexpected = sorted(set(names) - REPLACEMENT_PATHS)
     assert unexpected == []
     assert not any("email_intake" in name or name.startswith("app/services/email_") for name in names)
-    assert "app/services/load_document_parse_rate_con.py" not in names
+    # load_document_parse_rate_con.py: attach_pdf for re-parse (no PDF to AI) is an authorized change.
     assert "app/services/load_document_product_parser.py" not in names

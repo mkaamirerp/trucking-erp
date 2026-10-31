@@ -30,6 +30,7 @@ async def parse_load_workspace_document_orchestrated(
     db: AsyncSession | None = None,
     continue_anyway: bool = False,
     incoming_broker_id: int | None = None,
+    attach_pdf: bool = True,
 ) -> LoadDocumentParseResponse:
     """Parse a PDF for a new load form. Does not write a load."""
     _ = email_thread_id, load_id
@@ -47,6 +48,7 @@ async def parse_load_workspace_document_orchestrated(
         continue_anyway=continue_anyway,
         exclude_load_id=load_id,
         incoming_broker_id=incoming_broker_id,
+        attach_pdf=attach_pdf,
     )
     ctx = dict(out.context or {})
     if email_thread_id is not None:
@@ -274,6 +276,7 @@ async def propose_load_reparse(
             db=db,
             load_id=load_id,
             openai_chat_json_schema=openai_chat_json_schema,
+            attach_pdf=False,
         )
     except LoadDocumentParseProviderError as exc:
         raise LoadReparseError(503, exc.user_message) from exc
