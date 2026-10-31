@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps.auth import get_current_user
+from app.authz.enforce import require_pilot_capability
+from app.deps.auth import CurrentUser, get_current_user
 from app.deps.tenant import require_tenant
 from app.deps.tenant_db import get_tenant_db
 from app.models.tenant import AuditEvent
@@ -12,13 +13,25 @@ from app.schemas.audit_events import AuditEventOut
 
 router = APIRouter(prefix="/audit-events", tags=["audit-events"])
 
+_require_load_records_view = require_pilot_capability("loads.records", "view")
+
+
+async def _require_entity_audit_access(
+    entity_type: str,
+    user: CurrentUser = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant),
+) -> CurrentUser:
+    if (entity_type or "").strip().lower() == "load":
+        return await _require_load_records_view(user=user, tenant_id=tenant_id)
+    return user
+
 
 @router.get("/by-entity", response_model=list[AuditEventOut])
 async def list_audit_events_by_entity(
     entity_type: str,
     entity_id: str,
     tenant_id: int = Depends(require_tenant),
-    _user=Depends(get_current_user),
+    _user: CurrentUser = Depends(_require_entity_audit_access),
     db: AsyncSession = Depends(get_tenant_db),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -56,4 +69,3 @@ async def list_audit_events_by_entity(
         )
         for r in rows
     ]
-

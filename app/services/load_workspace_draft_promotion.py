@@ -138,7 +138,8 @@ async def _create_planned_trip_for_promoted_load(
     driver_id: int,
     truck_id: int | None,
     trailer_id: int | None,
-    promoted_by_platform_user_id: str | None,
+    audit_actor_user_id: int | None,
+    audit_actor_label: str | None,
 ) -> int:
     trip_detail = await create_planned_trip(
         db,
@@ -154,8 +155,8 @@ async def _create_planned_trip_for_promoted_load(
         tenant_id,
         trip_id,
         TripAssignmentBody(driver_id=driver_id, truck_id=truck_id, trailer_id=trailer_id),
-        actor_user_id=None,
-        actor_label=promoted_by_platform_user_id,
+        actor_user_id=audit_actor_user_id,
+        actor_label=audit_actor_label,
     )
     return trip_id
 
@@ -254,6 +255,8 @@ async def promote_workspace_draft(
     payload: LoadWorkspaceDraftPromote,
     *,
     promoted_by_platform_user_id: str | None,
+    audit_actor_user_id: int | None = None,
+    audit_actor_label: str | None = None,
 ) -> PromotionResult:
     draft = await db.scalar(
         select(LoadWorkspaceDraft)
@@ -343,7 +346,7 @@ async def promote_workspace_draft(
         tenant_id=tenant_id,
         load=hydrated,
         action="load_created",
-        actor_user_id=None,
+        actor_user_id=audit_actor_user_id,
         request_id=None,
         correlation_id=None,
         source="ui",
@@ -353,6 +356,7 @@ async def promote_workspace_draft(
             "workspace_draft_id": str(draft.id),
             "promotion_idempotency_key": payload.promotion_idempotency_key,
         },
+        actor_label=audit_actor_label,
         best_effort=False,
     )
 
@@ -366,7 +370,8 @@ async def promote_workspace_draft(
             driver_id=driver_id,
             truck_id=truck_id,
             trailer_id=trailer_id,
-            promoted_by_platform_user_id=promoted_by_platform_user_id,
+            audit_actor_user_id=audit_actor_user_id,
+            audit_actor_label=audit_actor_label,
         )
 
     await db.commit()

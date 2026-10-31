@@ -185,6 +185,16 @@ def _rows() -> tuple[RouteBinding, ...]:
             _bind("GET", f"{_API}/loads/{{load_id}}/notes", "loads", "loads.notes", "view", "read", None),
             _bind("POST", f"{_API}/loads/{{load_id}}/notes", "loads", "loads.notes", "create", "write", None),
             _bind(
+                "GET",
+                f"{_API}/audit-events/by-entity",
+                "loads",
+                "loads.records",
+                "view",
+                "read",
+                None,
+                "Load history reads audit_events; handler enforces view when entity_type=load.",
+            ),
+            _bind(
                 "DELETE",
                 f"{_API}/loads/{{load_id}}",
                 "loads",

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.authz.enforce import require_pilot_capability
 from app.core.storage import download_response
 from app.deps.auth import CurrentUser, get_current_user
+from app.deps.load_audit_actor import load_audit_actor
 from app.deps.tenant import require_tenant, require_tenant_slug
 from app.deps.tenant_db import get_tenant_db
 from app.schemas.load_workspace_draft import (
@@ -191,12 +192,15 @@ async def promote_load_workspace_draft(
     user: CurrentUser = Depends(require_pilot_capability("loads.records", "create")),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> LoadWorkspaceDraftPromoteOut:
+    actor_user_id, actor_label = load_audit_actor(user)
     result = await promote_workspace_draft(
         db,
         tenant_id,
         draft_id,
         payload,
         promoted_by_platform_user_id=_platform_user_id(user),
+        audit_actor_user_id=actor_user_id,
+        audit_actor_label=actor_label,
     )
     return LoadWorkspaceDraftPromoteOut(
         draft=LoadWorkspaceDraftOut.model_validate(result.draft),

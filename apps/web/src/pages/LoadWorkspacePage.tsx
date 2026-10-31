@@ -108,6 +108,11 @@ import {
   type DuplicateLoadParseGateLocationState,
 } from "@/loadWorkspace/DuplicateLoadParseGateDialog";
 import { ReparseOtherLoadMatchDialog } from "@/loadWorkspace/ReparseOtherLoadMatchDialog";
+import LoadHistoryPanel from "@/loadWorkspace/LoadHistoryPanel";
+import {
+  formatAuditValue,
+  loadAuditActionLabel,
+} from "@/loadWorkspace/loadAuditLabels";
 import {
   confidenceTierForAppliedLabel,
   parseConfidenceAppliedChipClasses,
@@ -456,6 +461,7 @@ function LoadWorkspacePage() {
   const [createPlannedTripBusy, setCreatePlannedTripBusy] = useState(false);
   const [createPlannedTripError, setCreatePlannedTripError] = useState<string | null>(null);
   const [followUpDispatchOpen, setFollowUpDispatchOpen] = useState(false);
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const commercialGateResolverRef = useRef<((outcome: WorkspaceCommercialGateOutcome) => void) | null>(
     null,
   );
@@ -2896,6 +2902,17 @@ function LoadWorkspacePage() {
               >
                 {attachBusy ? "Attaching…" : "Upload Revised RC"}
               </button>
+              {load?.id ? (
+                <button
+                  type="button"
+                  className={toolBtnSecondary}
+                  data-testid="load-workspace-history"
+                  disabled={saving || markReadyBusy || cancelLoadBusy}
+                  onClick={() => setHistoryPanelOpen(true)}
+                >
+                  History
+                </button>
+              ) : null}
               {REPARSE_UI_ENABLED && !reparseDialogOpen ? (
                 <button
                   type="button"
@@ -3521,43 +3538,13 @@ function LoadWorkspacePage() {
           ) : null}
         </main>
       </div>
+      <LoadHistoryPanel
+        loadId={load?.id ?? null}
+        open={historyPanelOpen}
+        onClose={() => setHistoryPanelOpen(false)}
+      />
     </div>
   );
-}
-
-function formatAuditValue(v: unknown): string {
-  if (v === null) return "null";
-  if (v === undefined) return "—";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
-
-function loadAuditActionLabel(action: string): string {
-  switch (action) {
-    case "load_created":
-      return "Load created";
-    case "load_updated":
-      return "Load updated";
-    case "load_status_changed":
-      return "Status changed";
-    case "load_assigned":
-      return "Driver assignment changed";
-    case "load_dispatched":
-      return "Load dispatched";
-    case "document_snapshot_confirmed":
-      return "Document snapshot confirmed";
-    case "customs_broker_changed":
-      return "Customs broker changed";
-    case "note_added":
-      return "Note added";
-    default:
-      return action;
-  }
 }
 
 function LoadAuditTimeline({ loadId }: { loadId: number | null }) {

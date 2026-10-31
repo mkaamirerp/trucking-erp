@@ -132,7 +132,6 @@ _ACCOUNTED_UNMAPPED_OTHER = frozenset((
     ('GET', '/api/v1/admin/email-config/microsoft/callback'),
     ('GET', '/api/v1/admin/email-config/microsoft/oauth-status'),
     ('GET', '/api/v1/admin/email-config/primary'),
-    ('GET', '/api/v1/audit-events/by-entity'),
     ('GET', '/api/v1/brokers'),
     ('GET', '/api/v1/brokers/resolve-identity'),
     ('GET', '/api/v1/brokers/{broker_id}'),
