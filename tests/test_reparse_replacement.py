@@ -1784,7 +1784,7 @@ def test_reparse_close_or_cancel_restores_changed_fields_and_drops_the_pdf() -> 
     assert "Nothing was changed." in cancel
     assert "saveLoadReparse" not in cancel
     assert "updateLoad" not in cancel
-    start = page.index("{reparseDialogOpen && reparseProposal ? (")
+    start = page.index("{REPARSE_UI_ENABLED && reparseDialogOpen && reparseProposal ? (")
     fragment = page[start : page.index("<RateConfirmationPdfPanel", start)]
     assert "onDoneBackToLoad={dismissReparseReview}" in fragment
     dialog = (ROOT / "apps/web/src/loadWorkspace/ReparseChangesDialog.tsx").read_text()
