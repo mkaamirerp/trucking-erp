@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Broker } from "@/api";
-import { initialManualCreateStops, type WorkspaceDraftFields } from "./loadWorkspaceShared";
+import {
+  initialManualCreateStops,
+  initialWorkspaceFieldsManual,
+  type WorkspaceDraftFields,
+} from "./loadWorkspaceShared";
 import { createEmptyParseHydrationState } from "./loadParseHydrationState";
 import {
   BROKER_LOAD_NUMBER_PO_LABEL,
@@ -51,6 +55,20 @@ function baseFields(overrides: Partial<WorkspaceDraftFields> = {}): WorkspaceDra
     ...overrides,
   };
 }
+
+describe("listManualCreateHardMissing", () => {
+  it("empty manual form lists pickup/delivery city and state labels", () => {
+    const missing = listManualCreateHardMissing(initialWorkspaceFieldsManual());
+    expect(missing).toEqual(
+      expect.arrayContaining([
+        "Pickup city",
+        "Pickup state or province",
+        "Delivery city",
+        "Delivery state or province",
+      ]),
+    );
+  });
+});
 
 describe("evaluateCreateLoadGate", () => {
   it("manual hard-blocks without pickup city", () => {

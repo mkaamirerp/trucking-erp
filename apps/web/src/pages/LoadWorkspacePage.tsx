@@ -1946,6 +1946,13 @@ function LoadWorkspacePage() {
 
   async function onSaveDraft() {
     if (!isDraftEditable) return;
+    if (createLoadBlockedByHardGate) {
+      setToolbarMessage({
+        text: createUnderButtonLine ?? "Complete required fields before saving this load.",
+        tone: "warning",
+      });
+      return;
+    }
     setSaving(true);
     setToolbarMessage(null);
     setDraftConflict(null);
