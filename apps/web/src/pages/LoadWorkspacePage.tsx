@@ -615,24 +615,6 @@ function LoadWorkspacePage() {
   const formDirtyRef = useRef(false);
   /** Stable per create-load attempt so retries do not mint duplicate loads/trips. */
   const createLoadPromotionIdempotencyKeyRef = useRef<string | null>(null);
-  /** Parsed PDF kept in-browser on /loads/new until Save for later or Create load. */
-  const pendingWorkspaceParseRef = useRef<{
-    file: File;
-    res: LoadDocumentParseResponse;
-    summary: ApplyLoadDocumentParseSummary;
-    workspaceAtParseStart: WorkspaceDraftFields;
-    status: string;
-    seed: {
-      loadNumber: string;
-      hazmat: LoadPersistParams["hazmat"];
-      palletCaseCount: string;
-      customsBrokerId: number | null;
-      existingInternalNotes: string;
-      driverId: number | null;
-      truckId: number | null;
-      trailerAssetId: number | null;
-    };
-  } | null>(null);
   const draftSavedForLaterRef = useRef(false);
   const workspaceDraftRef = useRef<LoadWorkspaceDraft | null>(null);
   workspaceDraftRef.current = workspaceDraft;
@@ -644,7 +626,6 @@ function LoadWorkspacePage() {
   useEffect(() => {
     if (isLocalNewDraft) {
       draftSavedForLaterRef.current = false;
-      pendingWorkspaceParseRef.current = null;
     }
   }, [isLocalNewDraft]);
 
@@ -1343,35 +1324,6 @@ function LoadWorkspacePage() {
             return hydration;
           };
 
-          // /loads/new — parse in memory only until Save for later or Create load.
-          if (!draftIdFromRoute) {
-            const res = await parseLoadWorkspaceDocument(file, { continueAnyway });
-            const duplicateCandidates = duplicateLoadCandidatesFromParse(res);
-            if (duplicateCandidates !== null) {
-              setDuplicateReview({ file, candidates: duplicateCandidates });
-              setSoftDuplicateReview(null);
-              setAcknowledgeSoftDuplicate(false);
-              pendingWorkspaceParseRef.current = null;
-              return;
-            }
-            setDuplicateReview(null);
-            const softDup = softRateConfirmationDuplicateFromParse(res);
-            setSoftDuplicateReview(softDup ? { candidates: softDup } : null);
-            setAcknowledgeSoftDuplicate(false);
-            setWorkspaceReferenceText(res.raw_text || "");
-            replaceWorkspacePdfPreviewUrl(URL.createObjectURL(file));
-            const hydration = await applySuccessfulParse(res);
-            pendingWorkspaceParseRef.current = {
-              file,
-              res,
-              summary: hydration.summary,
-              workspaceAtParseStart,
-              status,
-              seed: parseSeed,
-            };
-            return;
-          }
-
           const { id: manualDraftId, draft: manualDraft } = await ensureServerDraft({
             syncRoute: false,
           });
@@ -1824,55 +1776,17 @@ function LoadWorkspacePage() {
 
   function closeDuplicateLoadGate() {
     setDuplicateReview(null);
-    pendingWorkspaceParseRef.current = null;
     void discardEphemeralWorkspaceDraft();
     setToolbarMessage(null);
   }
 
   function startReparseOnExistingLoad(match: DuplicateLoadCandidate, file: File) {
     setDuplicateReview(null);
-    pendingWorkspaceParseRef.current = null;
     void discardEphemeralWorkspaceDraft();
     setToolbarMessage(null);
     navigate(OPS.LOAD_DETAIL(match.load_id), {
       state: { reparseRateConfirmationFile: file } satisfies DuplicateLoadParseGateLocationState,
     });
-  }
-
-  async function flushPendingWorkspaceParseToDraft(
-    draftId: string,
-    draft: LoadWorkspaceDraft,
-    continueAnyway = false,
-  ): Promise<LoadWorkspaceDraft> {
-    const pending = pendingWorkspaceParseRef.current;
-    if (!pending) return draft;
-    const persisted = await parseLoadWorkspaceDraftDocument(draftId, pending.file, {
-      expectedConcurrencyVersion: draft.concurrency_version,
-      continueAnyway,
-    });
-    const duplicateCandidates = duplicateLoadCandidatesFromParse(persisted.parse);
-    if (duplicateCandidates !== null) {
-      setDuplicateReview({ file: pending.file, candidates: duplicateCandidates });
-      throw new Error("LOAD_RATE_CONFIRMATION_DUPLICATE");
-    }
-    const saved = await persistWorkspaceDraftAfterParse({
-      draftId,
-      draftVersion: persisted.draft.concurrency_version,
-      res: pending.res,
-      summary: pending.summary,
-      workspaceAtParseStart: pending.workspaceAtParseStart,
-      status: pending.status,
-      seed: pending.seed,
-      updateDraft: updateLoadWorkspaceDraft,
-      buildDraftJson: buildWorkspaceDraftJson,
-    });
-    pendingWorkspaceParseRef.current = null;
-    setWorkspaceReferenceText(pending.res.raw_text || "");
-    return {
-      ...persisted.draft,
-      concurrency_version: saved.concurrency_version,
-      draft_json: saved.draft_json ?? persisted.draft.draft_json,
-    };
   }
 
   async function ensureServerDraft(
@@ -2037,19 +1951,9 @@ function LoadWorkspacePage() {
     setDraftConflict(null);
     try {
       const { id, draft } = await ensureServerDraft();
-      let activeDraft = draft;
-      try {
-        activeDraft = await flushPendingWorkspaceParseToDraft(id, draft);
-      } catch (e: unknown) {
-        if (e instanceof Error && e.message === "LOAD_RATE_CONFIRMATION_DUPLICATE") {
-          setToolbarMessage({ text: "This PDF matches an existing load.", tone: "warning" });
-          return;
-        }
-        throw e;
-      }
-      setWorkspaceDraft(activeDraft);
+      setWorkspaceDraft(draft);
       const updated = await updateLoadWorkspaceDraft(id, {
-        expected_concurrency_version: activeDraft.concurrency_version,
+        expected_concurrency_version: draft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(updated, { restorePdf: true });
@@ -2119,19 +2023,9 @@ function LoadWorkspacePage() {
     setDraftConflict(null);
     try {
       const { id, draft } = await ensureServerDraft({ syncRoute: false });
-      let activeDraft = draft;
-      try {
-        activeDraft = await flushPendingWorkspaceParseToDraft(id, draft, acknowledgeSoftDuplicate);
-      } catch (e: unknown) {
-        if (e instanceof Error && e.message === "LOAD_RATE_CONFIRMATION_DUPLICATE") {
-          setToolbarMessage({ text: "This PDF matches an existing load.", tone: "warning" });
-          return;
-        }
-        throw e;
-      }
-      setWorkspaceDraft(activeDraft);
+      setWorkspaceDraft(draft);
       const saved = await updateLoadWorkspaceDraft(id, {
-        expected_concurrency_version: activeDraft.concurrency_version,
+        expected_concurrency_version: draft.concurrency_version,
         draft_json: buildWorkspaceDraftJson({ ...workspacePersistParams(), status }),
       });
       applyWorkspaceDraft(saved);

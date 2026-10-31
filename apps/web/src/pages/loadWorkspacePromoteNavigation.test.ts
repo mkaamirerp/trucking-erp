@@ -11,14 +11,14 @@ describe("load workspace promote navigation (Task 12)", () => {
     expect(pageSource).toContain("ensureServerDraft({ syncRoute: false })");
   });
 
-  it("manual parse on /loads/new stays in memory until Save for later", () => {
-    expect(pageSource).toContain("pendingWorkspaceParseRef");
-    expect(pageSource).toContain("if (!draftIdFromRoute)");
-    expect(pageSource).toContain("flushPendingWorkspaceParseToDraft");
+  it("manual parse persists PDF on draft at upload (single AI parse before create load)", () => {
+    expect(pageSource).toContain("parseLoadWorkspaceDraftDocument(manualDraftId, file");
+    expect(pageSource).not.toContain("flushPendingWorkspaceParseToDraft");
+    expect(pageSource).not.toContain("pendingWorkspaceParseRef");
   });
 
   it("ensureServerDraft reuses in-memory workspace draft id (save after parse on /loads/new)", () => {
-    expect(pageSource).toContain("workspaceDraft?.status === \"draft\" && workspaceDraft.id");
+    expect(pageSource).toContain('workspaceDraft?.status === "draft" && workspaceDraft.id');
   });
 
   it("navigates to dispatch home after promote with validated load id", () => {
